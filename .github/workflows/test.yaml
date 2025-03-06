@@ -1,4 +1,6 @@
 name: Test
+permissions:
+   contents: read
 on: [push]
 env:
   CARGO_TERM_COLOR: always

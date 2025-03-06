@@ -1,4 +1,7 @@
 name: Required checks pass
+permissions:
+  actions: read
+  checks: read
 on:
     pull_request:
     push:
