@@ -1,0 +1,97 @@
+name: Test
+permissions:
+   contents: read
+on: [push]
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.78.0
+
+jobs:
+  test:
+    name: "cargo test --workspace #${{ matrix.platform }} ${{ matrix.rust_version }}"
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      matrix:
+        platform: [windows-latest, ubuntu-latest, macos-13]
+        rust_version: [""]
+        include:
+          - platform: "ubuntu-latest"
+            rust_version: "${RUST_VERSION}"
+      fail-fast: false
+    steps:
+      - name: Free Disk Space (Ubuntu only)
+        if: runner.os == 'Linux' && matrix.platform == 'ubuntu-latest'
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: true
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: ./.github/actions/cache
+        with:
+          rust_version: ${{ matrix.rust_version }}
+      - name: Install Rust ${{ matrix.rust_version }}
+        if: matrix.rust_version != ''
+        run: rustup install ${{ matrix.rust_version }} && rustup default ${{ matrix.rust_version }}
+      - id: rust-version
+        # On Windows run happens in a PowerShell, so start bash explicitly
+        run: bash -c 'echo "version=$(rustc --version)" >> $GITHUB_OUTPUT'
+      - name: Install Protoc Binary
+        shell: bash
+        run: chmod +x ./scripts/install-protoc.sh && ./scripts/install-protoc.sh $HOME
+      - name: Install cargo nextest
+        uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # v2.49.15,
+        with:
+          tool: nextest@0.9.81
+      - name: "Remove nextest CI report"
+        shell: bash
+        run: rm -rf target/nextest/ci/junit.xml
+      - name: "[${{ steps.rust-version.outputs.version}}] cargo build --workspace  --verbose"
+        shell: bash
+        run: cargo build --workspace  --verbose
+      - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci"
+        shell: bash
+        # Run doc tests with cargo test and run tests with nextest and generate junit.xml
+        run: cargo test --workspace  --doc --verbose && cargo nextest run --workspace  --profile ci'
+        env:
+          RUST_BACKTRACE: 1=
+      - name: Report Test Results
+        if: success() || failure()
+        uses: mikepenz/action-junit-report@db71d41eb79864e25ab0337e395c352e84523afe # v4.3.1
+        with:
+          report_paths: "target/nextest/ci/junit.xml"
+          check_name: "[${{ matrix.platform }}:${{ matrix.rust_version }}] test report"
+          include_passed: true
+
+  cross-centos7:
+    name: build and test using cross - on centos7
+    runs-on: ubuntu-latest
+    concurrency:
+      group: ci-${{ github.ref }}-cross-centos7
+      cancel-in-progress: true
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: false
+          swap-storage: true
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: ./.github/actions/cache
+        with:
+          rust_version: cross-centos7
+      - run: cargo install cross || true
+      - run: cross build --workspace --target x86_64-unknown-linux-gnu 
+      - run: cross test --workspace --target x86_64-unknown-linux-gnu
