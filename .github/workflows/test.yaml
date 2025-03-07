@@ -42,9 +42,6 @@ jobs:
       - id: rust-version
         # On Windows run happens in a PowerShell, so start bash explicitly
         run: bash -c 'echo "version=$(rustc --version)" >> $GITHUB_OUTPUT'
-      - name: Install Protoc Binary
-        shell: bash
-        run: chmod +x ./scripts/install-protoc.sh && ./scripts/install-protoc.sh $HOME
       - name: Install cargo nextest
         uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # v2.49.15,
         with:
@@ -58,9 +55,9 @@ jobs:
       - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci"
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
-        run: cargo test --workspace  --doc --verbose && cargo nextest run --workspace  --profile ci'
+        run: cargo test --workspace  --doc --verbose && cargo nextest run --workspace  --profile ci
         env:
-          RUST_BACKTRACE: 1=
+          RUST_BACKTRACE: 1
       - name: Report Test Results
         if: success() || failure()
         uses: mikepenz/action-junit-report@db71d41eb79864e25ab0337e395c352e84523afe # v4.3.1
