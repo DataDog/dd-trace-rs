@@ -12,6 +12,10 @@ rust-version = "1.78.0"
 edition = "2021"
 version = "0.0.1"
 license = "Apache-2.0"
+license-file = "LICENSE"
+repository = "https://github.com/DataDog/dd-trace-rs"
+readme = "README.md"
+description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
 
 [profile.dev]
 debug = 2 # full debug info
