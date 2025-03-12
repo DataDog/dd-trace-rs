@@ -1,0 +1,13 @@
+opentelemetry-datadog-sdk
+datadog-opentelemetry
+datadog-otel
+otel-datadog
+dd-trace-opentelemetry
+datadog-sampler
+datadog-sampling
+datadog-library-configuration
+datadog-configuration
+datadog-agent
+datadog-iast
+datadog-data-stream-monitoring
+datadog-trace-obfuscation

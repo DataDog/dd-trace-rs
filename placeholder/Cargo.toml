@@ -1,0 +1,14 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "placeholder"
+rust-version.workspace = true
+edition.workspace = true
+version = "0.0.0"
+license.workspace = true
+license-file.workspace = true
+repository = "https://github.com/DataDog/libdatadog"
+description.workspace = true
+
+[dependencies]

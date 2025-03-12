@@ -4,4 +4,8 @@ version = 3
 
 [[package]]
 name = "dd-trace"
-version = "0.0.1"
+version = "0.0.0"
+
+[[package]]
+name = "placeholder"
+version = "0.0.0"
