@@ -1,0 +1,21 @@
+[package]
+name = "dd-trace-propagation"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
+lazy_static = { version = "1.5", default-features = false }
+thiserror = { version = "1.0", default-features = false}
+tracing = { version = "0.1", default-features = false }
+regex = { version = "1.10", default-features = false, features = ["unicode-case"] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
