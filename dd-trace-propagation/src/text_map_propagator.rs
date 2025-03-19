@@ -114,8 +114,6 @@ impl DatadogHeaderPropagator {
                 "decoding_error".to_string(),
             );
         }
-
-        // todo: appsec standalone
     }
 
     fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {

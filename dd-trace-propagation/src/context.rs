@@ -3,12 +3,20 @@
 
 use std::collections::HashMap;
 
-use datadog_trace_protobuf::pb::SpanLink;
-
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Sampling {
     pub priority: Option<i8>,
     pub mechanism: Option<u8>,
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct SpanLink {
+    pub trace_id: u64,
+    pub trace_id_high: Option<u64>,
+    pub span_id: u64,
+    pub attributes: Option<HashMap<String, String>>,
+    pub tracestate: Option<String>,
+    pub flags: Option<u32>,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
