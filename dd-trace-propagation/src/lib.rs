@@ -1,14 +1,11 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::context::{SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
-use text_map_propagator::{
-    BAGGAGE_PREFIX, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
-    TRACESTATE_KEY,
-};
+use text_map_propagator::{BAGGAGE_PREFIX, DATADOG_LAST_PARENT_ID_KEY, TRACESTATE_KEY};
 use trace_propagation_style::TracePropagationStyle;
 
 pub mod carrier;
@@ -122,38 +119,7 @@ impl DatadogCompositePropagator {
                 && context.trace_id != 0
                 && context.trace_id != primary_context.trace_id
             {
-                let flags = context
-                    .sampling
-                    .and_then(|sampling| sampling.priority)
-                    .map(|priority| u32::from(priority > 0));
-
-                let tracestate: Option<String> = match style {
-                    TracePropagationStyle::TraceContext => {
-                        context.tags.get(TRACESTATE_KEY).cloned()
-                    }
-                    _ => None,
-                };
-
-                let attributes = Some(HashMap::from([
-                    ("reason".to_string(), "terminated_context".to_string()),
-                    ("context_headers".to_string(), style.to_string()),
-                ]));
-
-                let trace_id_high_str = context
-                    .tags
-                    .get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-                    .cloned()
-                    .unwrap_or_default();
-                let trace_id_high = u64::from_str_radix(&trace_id_high_str, 16).ok();
-
-                links.push(SpanLink {
-                    trace_id: context.trace_id,
-                    trace_id_high,
-                    span_id: context.span_id,
-                    flags,
-                    tracestate,
-                    attributes,
-                });
+                links.push(SpanLink::terminated_context(context, style));
             } else if style == TracePropagationStyle::TraceContext {
                 if let Some(tracestate) = context.tags.get(TRACESTATE_KEY) {
                     primary_context
@@ -212,7 +178,7 @@ impl DatadogCompositePropagator {
 
 #[cfg(test)]
 pub mod tests {
-    use std::vec;
+    use std::{collections::HashMap, vec};
 
     use lazy_static::lazy_static;
 
@@ -453,7 +419,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext]),
             VALID_TRACECONTEXT_HEADERS_BASIC.clone(),
             SpanContext {
-                trace_id: 7_277_407_061_855_694_839,
+                trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(2),
@@ -462,7 +428,6 @@ pub mod tests {
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("tracestate".to_string(), "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string()),
-                    ("_dd.p.tid".to_string(), "9291375655657946024".to_string()),
                     ("traceparent".to_string(), "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string()),
                     ("_dd.parent_id".to_string(), "00f067aa0ba902b7".to_string()),
                 ]),
@@ -473,7 +438,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext]),
             VALID_TRACECONTEXT_HEADERS_RUM_NO_SAMPLING_DECISION.clone(),
             SpanContext {
-                trace_id: 7_277_407_061_855_694_839,
+                trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(0),
@@ -481,7 +446,6 @@ pub mod tests {
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.tid".to_string(), "9291375655657946024".to_string()),
                     ("tracestate".to_string(), "dd=o:rum".to_string()),
                     ("traceparent".to_string(), "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string()),
                 ]),
@@ -510,7 +474,7 @@ pub mod tests {
                 links: vec![
                     SpanLink {
                         trace_id: 7_277_407_061_855_694_839,
-                        trace_id_high: None,
+                        trace_id_high: Some(9291375655657946024),
                         span_id: 67_667_974_448_284_343,
                         flags: Some(1),
                         tracestate: Some("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string()),
@@ -539,7 +503,7 @@ pub mod tests {
                 links: vec![
                     SpanLink {
                         trace_id: 7_277_407_061_855_694_839,
-                        trace_id_high: None,
+                        trace_id_high: Some(9291375655657946024),
                         span_id: 67_667_974_448_284_343,
                         flags: Some(1),
                         tracestate: Some("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string()),
@@ -638,7 +602,7 @@ pub mod tests {
                 links: vec![
                     SpanLink {
                         trace_id: 7_277_407_061_855_694_839,
-                        trace_id_high: None,
+                        trace_id_high: Some(9291375655657946024),
                         span_id: 67_667_974_448_284_343,
                         flags: Some(0),
                         tracestate: Some("dd=o:rum".to_string()),
@@ -694,7 +658,6 @@ pub mod tests {
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-4".to_string()),
-                    ("_dd.p.tid".to_string(), "0".to_string()),
                     ("_dd.p.usr.id".to_string(), "baz64".to_string()),
                     ("traceparent".to_string(), "00-000000000000000064fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string()),
                     ("tracestate".to_string(), "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string()),
@@ -718,7 +681,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext, TracePropagationStyle::Datadog]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 7_277_407_061_855_694_839,
+                trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(2),
@@ -727,7 +690,6 @@ pub mod tests {
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-4".to_string()),
-                    ("_dd.p.tid".to_string(), "9291375655657946024".to_string()),
                     ("_dd.p.usr.id".to_string(), "baz64".to_string()),
                     ("traceparent".to_string(), "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string()),
                     ("tracestate".to_string(), "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string()),
@@ -747,7 +709,7 @@ pub mod tests {
                 ],
             }
         ),
-        // todo: fix this test
+
         all_headers_all_styles_datadog_primary_only_datadog_t_id_diff: (
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
             ALL_VALID_HEADERS.clone(),
@@ -765,9 +727,7 @@ pub mod tests {
                 links: vec![
                     SpanLink {
                         trace_id: 7_277_407_061_855_694_839,
-                        // this should be `9291375655657946024` not `0`, but we don't have this data
-                        // with the current definition of `SpanContext`
-                        trace_id_high: None,
+                        trace_id_high: Some(9291375655657946024),
                         span_id: 67_667_974_448_284_343,
                         flags: Some(1),
                         tracestate: Some("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string()),
