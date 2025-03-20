@@ -5,13 +5,9 @@ use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use tracing::{debug, error, warn};
 
 use crate::{
-    carrier::{Extractor, Injector},
-    context::{Sampling, SpanContext},
-    error::Error,
-    Propagator,
+    carrier::{Extractor, Injector}, common::error::Error, context::{Sampling, SpanContext}, debug, error, warn, Propagator
 };
 
 // Datadog Keys
