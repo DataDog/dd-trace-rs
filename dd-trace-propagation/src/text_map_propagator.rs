@@ -469,7 +469,7 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert_eq!(context.trace_id, 31_700_729_690_6698_644_522_194);
+        assert_eq!(context.trace_id, 317_007_296_906_698_644_522_194);
         assert_eq!(context.span_id, 5678);
         assert_eq!(context.sampling.unwrap().priority, Some(1));
         assert_eq!(context.origin, Some("synthetics".to_string()));

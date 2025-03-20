@@ -71,10 +71,10 @@ pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
 
 pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128 {
     if let Some(combined_trace_id) = higher_bits_hex
-        .and_then(|higher|  u64::from_str_radix(&higher, 16).ok())
-        .and_then(|higher| {
+        .and_then(|higher|  u64::from_str_radix(higher, 16).ok())
+        .map(|higher| {
             let higher = higher as u128;
-            Some((higher << 64) + (trace_id as u128))
+            (higher << 64) + (trace_id as u128)
         })
     {
         combined_trace_id
