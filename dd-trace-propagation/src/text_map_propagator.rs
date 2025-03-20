@@ -81,7 +81,10 @@ impl DatadogHeaderPropagator {
         let origin = Self::extract_origin(carrier);
         let tags = Self::extract_tags(carrier);
 
-        let trace_id = combine_trace_id(lower_trace_id, tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY));
+        let trace_id = combine_trace_id(
+            lower_trace_id,
+            tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY),
+        );
 
         Some(SpanContext {
             trace_id,
