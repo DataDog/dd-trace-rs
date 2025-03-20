@@ -5,6 +5,7 @@
 /// <https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry/src/propagation/mod.rs>
 use std::collections::HashMap;
 
+#[cfg(feature = "serde_config")]
 use serde_json::Value;
 
 /// Injector provides an interface for a carrier to be used
@@ -41,6 +42,7 @@ impl<S: std::hash::BuildHasher> Extractor for HashMap<String, String, S> {
     }
 }
 
+#[cfg(feature = "serde_config")]
 impl Injector for Value {
     /// Set a key and value in the `Value`.
     fn set(&mut self, key: &str, value: String) {
@@ -50,6 +52,7 @@ impl Injector for Value {
     }
 }
 
+#[cfg(feature = "serde_config")]
 impl Extractor for Value {
     /// Get a value for a key from the `Value`.
     fn get(&self, key: &str) -> Option<&str> {
@@ -98,6 +101,7 @@ mod test {
         assert!(got.contains(&"headername2"));
     }
 
+    #[cfg(feature = "serde_config")]
     #[test]
     fn serde_value_get() {
         let mut carrier = Value::Object(serde_json::Map::new());
@@ -110,6 +114,7 @@ mod test {
         );
     }
 
+    #[cfg(feature = "serde_config")]
     #[test]
     fn serde_value_keys() {
         let mut carrier = Value::Object(serde_json::Map::new());

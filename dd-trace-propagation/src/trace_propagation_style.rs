@@ -3,6 +3,7 @@
 
 use std::{fmt::Display, str::FromStr};
 
+#[cfg(feature = "serde_config")]
 use serde::{Deserialize, Deserializer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,7 @@ impl Display for TracePropagationStyle {
     }
 }
 
+#[cfg(feature = "serde_config")]
 #[allow(clippy::module_name_repetitions)]
 pub fn deserialize_trace_propagation_style<'de, D>(
     deserializer: D,
