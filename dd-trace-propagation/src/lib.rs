@@ -12,9 +12,9 @@ use text_map_propagator::{
 use trace_propagation_style::TracePropagationStyle;
 
 pub mod carrier;
+mod common;
 mod config;
 mod context;
-pub mod error;
 pub mod text_map_propagator;
 mod trace_propagation_style;
 
