@@ -38,7 +38,7 @@ impl SpanLink {
             ("context_headers".to_string(), style.to_string()),
         ]));
 
-        let (trace_id_high, trace_id) = Self::split_trace_id(context.trace_id);
+        let (trace_id_high, trace_id) = split_trace_id(context.trace_id);
 
         SpanLink {
             trace_id,
@@ -49,18 +49,7 @@ impl SpanLink {
             flags,
         }
     }
-
-    #[allow(clippy::cast_possible_truncation)]
-    pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
-        let trace_id_lower_order_bits = trace_id as u64;
-
-        let higher = (trace_id >> 64) as u64;
-        let trace_id_higher_order_bits = if higher > 0 { Some(higher) } else { None };
-
-        (trace_id_higher_order_bits, trace_id_lower_order_bits)
-    }
 }
-
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct SpanContext {
     pub trace_id: u128,
@@ -69,4 +58,45 @@ pub struct SpanContext {
     pub origin: Option<String>,
     pub tags: HashMap<String, String>,
     pub links: Vec<SpanLink>,
+}
+
+pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
+    let trace_id_lower_order_bits = trace_id as u64;
+
+    let higher = (trace_id >> 64) as u64;
+    let trace_id_higher_order_bits = if higher > 0 { Some(higher) } else { None };
+
+    (trace_id_higher_order_bits, trace_id_lower_order_bits)
+}
+
+pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128 {
+    if let Some(combined_trace_id) = higher_bits_hex
+        .and_then(|higher|  u64::from_str_radix(&higher, 16).ok())
+        .and_then(|higher| {
+            let higher = higher as u128;
+            Some((higher << 64) + (trace_id as u128))
+        })
+    {
+        combined_trace_id
+    } else {
+        trace_id as u128
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::context::{combine_trace_id, split_trace_id};
+
+    #[test]
+    fn test_combine () {
+        let trace_id = u128::MAX;
+
+        let (higher, lower) = split_trace_id(trace_id);
+        
+        let higher_hex = format!("{:016x}", higher.unwrap());
+
+        let combined = combine_trace_id(lower, Some(&higher_hex));
+
+        assert_eq!(trace_id, combined)
+    }
 }

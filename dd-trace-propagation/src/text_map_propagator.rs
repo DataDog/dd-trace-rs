@@ -9,7 +9,7 @@ use regex::Regex;
 use crate::{
     carrier::{Extractor, Injector},
     common::error::Error,
-    context::{Sampling, SpanContext},
+    context::{combine_trace_id, Sampling, SpanContext},
     debug, error, warn, Propagator,
 };
 
@@ -62,7 +62,7 @@ impl Propagator for DatadogHeaderPropagator {
 
 impl DatadogHeaderPropagator {
     fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
-        let trace_id = match Self::extract_trace_id(carrier) {
+        let lower_trace_id = match Self::extract_trace_id(carrier) {
             Ok(trace_id) => trace_id,
             Err(e) => {
                 debug!("{e}");
@@ -79,8 +79,9 @@ impl DatadogHeaderPropagator {
             }
         };
         let origin = Self::extract_origin(carrier);
-        let mut tags = Self::extract_tags(carrier);
-        Self::validate_sampling_decision(&mut tags);
+        let tags = Self::extract_tags(carrier);
+
+        let trace_id = combine_trace_id(lower_trace_id, tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY));
 
         Some(SpanContext {
             trace_id,
@@ -95,27 +96,7 @@ impl DatadogHeaderPropagator {
         })
     }
 
-    fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
-        let should_remove =
-            tags.get(DATADOG_SAMPLING_DECISION_KEY)
-                .is_some_and(|sampling_decision| {
-                    let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
-                    if is_invalid {
-                        warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
-                    }
-                    is_invalid
-                });
-
-        if should_remove {
-            tags.remove(DATADOG_SAMPLING_DECISION_KEY);
-            tags.insert(
-                DATADOG_PROPAGATION_ERROR_KEY.to_string(),
-                "decoding_error".to_string(),
-            );
-        }
-    }
-
-    fn extract_trace_id(carrier: &dyn Extractor) -> Result<u128, Error> {
+    fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
         let trace_id = carrier
             .get(DATADOG_TRACE_ID_KEY)
             .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
@@ -125,7 +106,7 @@ impl DatadogHeaderPropagator {
         }
 
         trace_id
-            .parse::<u128>()
+            .parse::<u64>()
             .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
     }
 
@@ -150,13 +131,13 @@ impl DatadogHeaderPropagator {
     }
 
     pub fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
-        let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
         let mut tags: HashMap<String, String> = HashMap::new();
 
         // todo:
         // - trace propagation disabled
         // - trace propagation max lenght
 
+        let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
         let pairs = carrier_tags.split(',');
         for pair in pairs {
             if let Some((k, v)) = pair.split_once('=') {
@@ -187,7 +168,29 @@ impl DatadogHeaderPropagator {
             tags.insert(DATADOG_SAMPLING_DECISION_KEY.to_string(), "-3".to_string());
         }
 
+        Self::validate_sampling_decision(&mut tags);
+
         tags
+    }
+
+    fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
+        let should_remove =
+            tags.get(DATADOG_SAMPLING_DECISION_KEY)
+                .is_some_and(|sampling_decision| {
+                    let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
+                    if is_invalid {
+                        warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
+                    }
+                    is_invalid
+                });
+
+        if should_remove {
+            tags.remove(DATADOG_SAMPLING_DECISION_KEY);
+            tags.insert(
+                DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+                "decoding_error".to_string(),
+            );
+        }
     }
 
     fn higher_order_bits_valid(trace_id_higher_order_bits: &str) -> bool {
@@ -443,6 +446,8 @@ impl TraceContextPropagator {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
+    use crate::context::split_trace_id;
+
     use super::*;
 
     #[test]
@@ -464,13 +469,46 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.trace_id, 31_700_729_690_6698_644_522_194);
         assert_eq!(context.span_id, 5678);
         assert_eq!(context.sampling.unwrap().priority, Some(1));
         assert_eq!(context.origin, Some("synthetics".to_string()));
         println!("{:?}", context.tags);
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "4321");
+        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+
+        let (higher, lower) = split_trace_id(context.trace_id);
+        assert_eq!(higher, u64::from_str_radix("4321", 16).ok());
+        assert_eq!(lower, 1234);
+    }
+
+    #[test]
+    fn test_extract_datadog_propagator_64_simple() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.test=value,any=tag".to_string(),
+            ),
+        ]);
+
+        let propagator = DatadogHeaderPropagator;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(context.sampling.unwrap().priority, Some(1));
+        assert_eq!(context.origin, Some("synthetics".to_string()));
+        println!("{:?}", context.tags);
+        assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
+        assert_eq!(context.tags.get("_dd.p.tid"), None);
         assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
     }
 
