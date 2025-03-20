@@ -7,7 +7,10 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::{
-    carrier::{Extractor, Injector}, common::error::Error, context::{Sampling, SpanContext}, debug, error, warn, Propagator
+    carrier::{Extractor, Injector},
+    common::error::Error,
+    context::{Sampling, SpanContext},
+    debug, error, warn, Propagator,
 };
 
 // Datadog Keys
