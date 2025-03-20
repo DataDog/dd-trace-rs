@@ -115,7 +115,7 @@ impl DatadogHeaderPropagator {
         }
     }
 
-    fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
+    fn extract_trace_id(carrier: &dyn Extractor) -> Result<u128, Error> {
         let trace_id = carrier
             .get(DATADOG_TRACE_ID_KEY)
             .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
@@ -125,7 +125,7 @@ impl DatadogHeaderPropagator {
         }
 
         trace_id
-            .parse::<u64>()
+            .parse::<u128>()
             .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
     }
 
@@ -257,15 +257,8 @@ impl TraceContextPropagator {
                     debug!("No `dd` value found in tracestate");
                 }
 
-                let (trace_id_higher_order_bits, trace_id_lower_order_bits) =
-                    Self::split_trace_id(traceparent.trace_id);
-                tags.insert(
-                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                    trace_id_higher_order_bits.to_string(),
-                );
-
                 Some(SpanContext {
-                    trace_id: trace_id_lower_order_bits,
+                    trace_id: traceparent.trace_id,
                     span_id: traceparent.span_id,
                     sampling: Some(Sampling {
                         priority: Some(sampling_priority),
@@ -425,14 +418,6 @@ impl TraceContextPropagator {
             .map_err(|_| Error::extract("Failed to decode trace_id", "traceparent"))
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    fn split_trace_id(trace_id: u128) -> (u64, u64) {
-        let trace_id_lower_order_bits = trace_id as u64;
-        let trace_id_higher_order_bits = (trace_id >> 64) as u64;
-
-        (trace_id_higher_order_bits, trace_id_lower_order_bits)
-    }
-
     fn extract_span_id(span_id: &str) -> Result<u64, Error> {
         if INVALID_SEGMENT_REGEX.is_match(span_id) {
             return Err(Error::extract(
@@ -507,7 +492,10 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert_eq!(context.trace_id, 7_277_407_061_855_694_839);
+        assert_eq!(
+            context.trace_id,
+            171_395_628_812_617_415_352_188_477_958_425_669_623
+        );
         assert_eq!(context.span_id, 67_667_974_448_284_343);
         assert_eq!(context.sampling.unwrap().priority, Some(2));
         assert_eq!(context.origin, Some("rum".to_string()));
@@ -518,10 +506,6 @@ mod test {
         assert_eq!(
             context.tags.get("tracestate").unwrap(),
             "dd=p:00f067aa0ba902b7;s:2;o:rum"
-        );
-        assert_eq!(
-            context.tags.get("_dd.p.tid").unwrap(),
-            "9291375655657946024"
         );
         assert_eq!(
             context.tags.get("_dd.parent_id").unwrap(),
