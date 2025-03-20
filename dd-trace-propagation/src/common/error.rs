@@ -26,6 +26,7 @@ impl Error {
 
     /// Error when injecting a value into a carrier
     #[allow(clippy::must_use_candidate)]
+    #[allow(dead_code)]
     pub fn inject(message: &'static str, propagator_name: &'static str) -> Self {
         Self {
             message,

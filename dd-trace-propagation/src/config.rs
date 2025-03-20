@@ -4,9 +4,10 @@
 use crate::trace_propagation_style::TracePropagationStyle;
 
 #[cfg(feature = "serde_config")]
-use serde::Deserialize;
-#[cfg(feature = "serde_config")]
 use crate::trace_propagation_style::deserialize_trace_propagation_style;
+
+#[cfg(feature = "serde_config")]
+use serde::Deserialize;
 
 #[cfg(not(feature = "serde_config"))]
 #[derive(Debug, PartialEq, Clone)]
