@@ -71,7 +71,7 @@ pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
 
 pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128 {
     if let Some(combined_trace_id) = higher_bits_hex
-        .and_then(|higher|  u64::from_str_radix(higher, 16).ok())
+        .and_then(|higher| u64::from_str_radix(higher, 16).ok())
         .map(|higher| {
             let higher = higher as u128;
             (higher << 64) + (trace_id as u128)
@@ -88,11 +88,11 @@ mod test {
     use crate::context::{combine_trace_id, split_trace_id};
 
     #[test]
-    fn test_combine () {
+    fn test_combine() {
         let trace_id = u128::MAX;
 
         let (higher, lower) = split_trace_id(trace_id);
-        
+
         let higher_hex = format!("{:016x}", higher.unwrap());
 
         let combined = combine_trace_id(lower, Some(&higher_hex));
