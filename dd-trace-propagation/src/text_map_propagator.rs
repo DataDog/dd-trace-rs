@@ -9,7 +9,9 @@ use regex::Regex;
 use crate::{
     carrier::{Extractor, Injector},
     context::{combine_trace_id, Sampling, SpanContext},
-    dd_debug, dd_error, error::Error, dd_warn, Propagator,
+    dd_debug, dd_error, dd_warn,
+    error::Error,
+    Propagator,
 };
 
 // Datadog Keys
@@ -153,7 +155,7 @@ impl DatadogHeaderPropagator {
         // Handle 128bit trace ID
         if !tags.is_empty() {
             if let Some(trace_id_higher_order_bits) =
-                carrier.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+                tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
             {
                 if !Self::higher_order_bits_valid(trace_id_higher_order_bits) {
                     dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
@@ -461,7 +463,7 @@ mod test {
             ("x-datadog-origin".to_string(), "synthetics".to_string()),
             (
                 "x-datadog-tags".to_string(),
-                "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
+                "_dd.p.test=value,_dd.p.tid=0000000000004321,any=tag".to_string(),
             ),
         ]);
 
@@ -477,12 +479,40 @@ mod test {
         assert_eq!(context.origin, Some("synthetics".to_string()));
         println!("{:?}", context.tags);
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
-        assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "4321");
+        assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "0000000000004321");
         assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
 
         let (higher, lower) = split_trace_id(context.trace_id);
-        assert_eq!(higher, u64::from_str_radix("4321", 16).ok());
+        assert_eq!(higher, u64::from_str_radix("0000000000004321", 16).ok());
         assert_eq!(lower, 1234);
+    }
+
+    #[test]
+    fn test_extract_datadog_propagator_with_malformed_traceid() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
+            ),
+        ]);
+
+        let propagator = DatadogHeaderPropagator;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(context.sampling.unwrap().priority, Some(1));
+        assert_eq!(context.origin, Some("synthetics".to_string()));
+        println!("{:?}", context.tags);
+        assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
+        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
     }
 
     #[test]
