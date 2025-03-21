@@ -2,39 +2,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[macro_export]
-macro_rules! debug {
+macro_rules! dd_debug {
     // debug!("a {} event", "log")
     ($($arg:tt)+) => {
-      $crate::log!("DEBUG", $($arg)*)
+      $crate::dd_log!("DEBUG", $($arg)*)
     };
 }
 
 #[macro_export]
-macro_rules! info {
+macro_rules! dd_info {
   // info!("a {} event", "log")
   ($($arg:tt)+) => {
-    $crate::log!("INFO", $($arg)*)
+    $crate::dd_log!("INFO", $($arg)*)
   };
 }
 
 #[macro_export]
-macro_rules! warn {
+macro_rules! dd_warn {
   // warn!("a {} event", "log")
   ($($arg:tt)+) => {
-    $crate::log!("WARN", $($arg)*)
+    $crate::dd_log!("WARN", $($arg)*)
   };
 }
 
 #[macro_export]
-macro_rules! error {
+macro_rules! dd_error {
   // error!("a {} event", "log")
   ($($arg:tt)+) => {
-    $crate::log!("ERROR", $($arg)*)
+    $crate::dd_log!("ERROR", $($arg)*)
   };
 }
 
 #[macro_export]
-macro_rules! log {
+macro_rules! dd_log {
     ($lvl:expr, $($arg:tt)+) => {
       if $lvl == "ERROR" {
         eprintln!("\x1b[93mERROR\x1b[0m {}:{} - {}", file!(), line!(), format!($($arg)*));
