@@ -8,10 +8,11 @@ use carrier::{Extractor, Injector};
 use text_map_propagator::{BAGGAGE_PREFIX, DATADOG_LAST_PARENT_ID_KEY, TRACESTATE_KEY};
 use trace_propagation_style::TracePropagationStyle;
 
-pub mod carrier;
-mod common;
+mod carrier;
 mod config;
 mod context;
+mod error;
+mod log;
 pub mod text_map_propagator;
 mod trace_propagation_style;
 

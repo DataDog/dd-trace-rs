@@ -8,9 +8,8 @@ use regex::Regex;
 
 use crate::{
     carrier::{Extractor, Injector},
-    common::error::Error,
     context::{combine_trace_id, Sampling, SpanContext},
-    debug, error, warn, Propagator,
+    dd_debug, dd_error, error::Error, dd_warn, Propagator,
 };
 
 // Datadog Keys
@@ -65,7 +64,7 @@ impl DatadogHeaderPropagator {
         let lower_trace_id = match Self::extract_trace_id(carrier) {
             Ok(trace_id) => trace_id,
             Err(e) => {
-                debug!("{e}");
+                dd_debug!("{e}");
                 return None;
             }
         };
@@ -74,7 +73,7 @@ impl DatadogHeaderPropagator {
         let sampling_priority = match Self::extract_sampling_priority(carrier) {
             Ok(sampling_priority) => sampling_priority,
             Err(e) => {
-                debug!("{e}");
+                dd_debug!("{e}");
                 return None;
             }
         };
@@ -157,7 +156,7 @@ impl DatadogHeaderPropagator {
                 carrier.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
             {
                 if !Self::higher_order_bits_valid(trace_id_higher_order_bits) {
-                    warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
+                    dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
                     tags.insert(
                         DATADOG_PROPAGATION_ERROR_KEY.to_string(),
                         format!("malformed tid {trace_id_higher_order_bits}"),
@@ -182,7 +181,7 @@ impl DatadogHeaderPropagator {
                 .is_some_and(|sampling_decision| {
                     let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
                     if is_invalid {
-                        warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
+                        dd_warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
                     }
                     is_invalid
                 });
@@ -260,7 +259,7 @@ impl TraceContextPropagator {
                         );
                     }
                 } else {
-                    debug!("No `dd` value found in tracestate");
+                    dd_debug!("No `dd` value found in tracestate");
                 }
 
                 Some(SpanContext {
@@ -276,7 +275,7 @@ impl TraceContextPropagator {
                 })
             }
             Err(e) => {
-                error!("Failed to extract traceparent: {e}");
+                dd_error!("Failed to extract traceparent: {e}");
                 None
             }
         }
@@ -290,7 +289,7 @@ impl TraceContextPropagator {
         let ts = ts_v.clone().collect::<Vec<&str>>().join(",");
 
         if INVALID_ASCII_CHARACTERS_REGEX.is_match(&ts) {
-            debug!("Received invalid tracestate header {tracestate}");
+            dd_debug!("Received invalid tracestate header {tracestate}");
             return None;
         }
 
@@ -405,7 +404,7 @@ impl TraceContextPropagator {
                 }
             }
             _ => {
-                warn!("Unsupported traceparent version {version}, still atempenting to parse");
+                dd_warn!("Unsupported traceparent version {version}, still atempenting to parse");
             }
         }
 
