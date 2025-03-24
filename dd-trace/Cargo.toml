@@ -7,9 +7,10 @@ rust-version.workspace = true
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-license-file.workspace = true
 repository.workspace = true
 readme.workspace = true
 description.workspace = true
 
 [dependencies]
+uuid = {version = "1.11.0", features = ["v4"] }
+anyhow = "1.0.97"
