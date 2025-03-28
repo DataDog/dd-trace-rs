@@ -6,6 +6,8 @@ use std::{fmt::Display, str::FromStr};
 #[cfg(feature = "serde_config")]
 use serde::{Deserialize, Deserializer};
 
+use crate::{carrier::Extractor, context::SpanContext, datadog, tracecontext};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
     Datadog,
@@ -13,6 +15,16 @@ pub enum TracePropagationStyle {
     B3,
     TraceContext,
     None,
+}
+
+impl TracePropagationStyle {
+    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        match self {
+            Self::Datadog => datadog::extract(carrier),
+            Self::TraceContext => tracecontext::extract(carrier),
+            _ => todo!(),
+        }
+    }
 }
 
 impl FromStr for TracePropagationStyle {

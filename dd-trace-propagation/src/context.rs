@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::{text_map_propagator::TRACESTATE_KEY, trace_propagation_style::TracePropagationStyle};
+use crate::{trace_propagation_style::TracePropagationStyle, tracecontext::TRACESTATE_KEY};
 
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Sampling {
