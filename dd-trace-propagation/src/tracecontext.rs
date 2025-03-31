@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use crate::{
     carrier::Extractor,
     context::{Sampling, SpanContext},
-    datadog::{DATADOG_LAST_PARENT_ID_KEY, INVALID_SEGMENT_REGEX},
+    datadog::{DATADOG_LAST_PARENT_ID_KEY, DATADOG_SAMPLING_DECISION_KEY, INVALID_SEGMENT_REGEX},
     dd_debug, dd_error, dd_warn,
     error::Error,
 };
@@ -58,6 +58,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                     sampling_priority = define_sampling_priority(
                         traceparent.sampling_priority,
                         tracestate.sampling_priority,
+                        &mut tags,
                     );
                 }
             } else {
@@ -151,6 +152,7 @@ fn decode_tag_value(value: &str) -> String {
 fn define_sampling_priority(
     traceparent_sampling_priority: i8,
     tracestate_sampling_priority: Option<i8>,
+    tags: &mut HashMap<String, String>,
 ) -> i8 {
     if let Some(ts_sp) = tracestate_sampling_priority {
         if (traceparent_sampling_priority == 1 && ts_sp > 0)
@@ -158,6 +160,12 @@ fn define_sampling_priority(
         {
             return ts_sp;
         }
+    }
+
+    if traceparent_sampling_priority == 1 {
+        tags.insert(DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string());
+    } else if traceparent_sampling_priority == 0 {
+        tags.remove(DATADOG_SAMPLING_DECISION_KEY);
     }
 
     traceparent_sampling_priority

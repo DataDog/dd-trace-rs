@@ -22,7 +22,7 @@ const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
 const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
 pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
-const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
+pub const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
 lazy_static! {
     pub static ref INVALID_SEGMENT_REGEX: Regex =
@@ -103,7 +103,7 @@ fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
     Some(origin.to_string())
 }
 
-pub fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
+fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
     let mut tags: HashMap<String, String> = HashMap::new();
 
     // todo:
