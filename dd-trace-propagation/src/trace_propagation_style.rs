@@ -6,7 +6,11 @@ use std::{fmt::Display, str::FromStr};
 #[cfg(feature = "serde_config")]
 use serde::{Deserialize, Deserializer};
 
-use crate::{carrier::Extractor, context::SpanContext, datadog, tracecontext};
+use crate::{
+    carrier::{Extractor, Injector},
+    context::SpanContext,
+    datadog, tracecontext,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -20,6 +24,14 @@ impl TracePropagationStyle {
         match self {
             Self::Datadog => datadog::extract(carrier),
             Self::TraceContext => tracecontext::extract(carrier),
+            _ => todo!(),
+        }
+    }
+
+    pub fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
+        match self {
+            Self::Datadog => datadog::inject(context, carrier),
+            Self::TraceContext => tracecontext::inject(context, carrier),
             _ => todo!(),
         }
     }
@@ -53,17 +65,28 @@ impl Display for TracePropagationStyle {
 #[allow(clippy::module_name_repetitions)]
 pub fn deserialize_trace_propagation_style<'de, D>(
     deserializer: D,
-) -> Result<Vec<TracePropagationStyle>, D::Error>
+) -> Result<Option<Vec<TracePropagationStyle>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let s: String = String::deserialize(deserializer)?;
 
-    s.split(',')
-        .map(|style| {
-            TracePropagationStyle::from_str(style.trim()).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to deserialize propagation style: {e}"))
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        let styles = s
+            .split(',')
+            .filter_map(|style| {
+                TracePropagationStyle::from_str(style.trim())
+                    .map_err(|e| {
+                        <serde_json::Error as serde::de::Error>::custom(format!(
+                            "Failed to deserialize propagation style: {e}"
+                        ))
+                    })
+                    .ok()
             })
-        })
-        .collect()
+            .collect();
+
+        Ok(Some(styles))
+    }
 }

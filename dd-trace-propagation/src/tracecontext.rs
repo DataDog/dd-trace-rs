@@ -3,12 +3,15 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
-    carrier::Extractor,
-    context::{Sampling, SpanContext},
-    datadog::{DATADOG_LAST_PARENT_ID_KEY, DATADOG_SAMPLING_DECISION_KEY, INVALID_SEGMENT_REGEX},
+    carrier::{Extractor, Injector},
+    context::{
+        encode_tag_value, Sampling, SamplingMechanism, SamplingPriority, SpanContext, Traceparent,
+        Tracestate, DATADOG_PROPAGATION_TAG_PREFIX, DATADOG_SAMPLING_DECISION_KEY,
+    },
+    datadog::{DATADOG_LAST_PARENT_ID_KEY, INVALID_SEGMENT_REGEX},
     error::Error,
 };
 
@@ -18,24 +21,134 @@ use dd_trace::{dd_debug, dd_error, dd_warn};
 const TRACEPARENT_KEY: &str = "traceparent";
 pub const TRACESTATE_KEY: &str = "tracestate";
 
+const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
+const TRACESTATE_VALUES_SEPARATOR: &str = ",";
+const TRACESTATE_DD_PAIR_SEPARATOR: &str = ";";
+const TRACESTATE_SAMPLING_PRIORITY_KEY: &str = "s";
+const TRACESTATE_ORIGIN_KEY: &str = "o";
+const TRACESTATE_LAST_PARENT_KEY: &str = "p";
+const TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX: &str = "t.";
+const INVALID_CHAR_REPLACEMENT: &str = "_";
+
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
         Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
             .expect("failed creating regex");
-    static ref INVALID_ASCII_CHARACTERS_REGEX: Regex =
-        Regex::new(r"[^\x20-\x7E]+").expect("failed creating regex");
+
+    // Origin value in tracestate replaces '~', ',' and ';' with '_"
+    static ref TRACESTATE_ORIGIN_FILTER_REGEX: Regex =
+        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
+
+    static ref TRACESTATE_TAG_KEY_FILTER_REGEX: Regex =
+        Regex::new(r"[^\x21-\x2b\x2d-\x3c\x3e-\x7e]").expect("failed creating regex");
+
+    static ref TRACESTATE_TAG_VALUE_FILTER_REGEX: Regex =
+        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
 }
 
-struct Traceparent {
-    sampling_priority: i8,
-    trace_id: u128,
-    span_id: u64,
+pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
+    if context.trace_id != 0 && context.span_id != 0 {
+        inject_traceparent(context, carrier);
+        inject_tracestate(context, carrier);
+    }
 }
 
-struct Tracestate {
-    sampling_priority: Option<i8>,
-    origin: Option<String>,
-    lower_order_trace_id: Option<String>,
+fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
+    // TODO: if higher trace_id 64bits are 0, we should verify _dd.p.tid is unset
+    // if not 0, verify that `_dd.p.tid` is either unset or set to the encoded value of
+    // the higher-order 64 bits
+    let trace_id = format!("{:032x}", context.trace_id);
+    let parent_id = format!("{:016x}", context.span_id);
+
+    let flags = context
+        .sampling
+        .and_then(|sampling| sampling.priority)
+        .map(|priority| if priority.is_keep() { "01" } else { "00" })
+        .unwrap_or("00");
+
+    let traceparent = format!("00-{trace_id}-{parent_id}-{flags}");
+
+    carrier.set(TRACEPARENT_KEY, traceparent);
+}
+
+fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
+    let mut tracestate_parts = vec![];
+
+    // TODO: is that UserKeep(2) correct as default value?
+    let priority = context
+        .sampling
+        .and_then(|sampling| sampling.priority)
+        .unwrap_or(SamplingPriority::UserKeep);
+
+    tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{}", priority));
+
+    if let Some(origin) = context.origin.as_ref().map(|origin| {
+        encode_tag_value(
+            TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT),
+        )
+    }) {
+        tracestate_parts.push(format!("{TRACESTATE_ORIGIN_KEY}:{origin}"));
+    };
+
+    let last_parent_id = if context.is_remote {
+        match context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
+            Some(id) => id.to_string(),
+            None => format!("{:016x}", context.span_id), // TODO: is this correct?
+        }
+    } else {
+        format!("{:016x}", context.span_id)
+    };
+
+    tracestate_parts.push(format!("{TRACESTATE_LAST_PARENT_KEY}:{last_parent_id}"));
+
+    let tags = context
+        .tags
+        .keys()
+        .filter(|key| key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
+        .map(|key| {
+            let t_key = format!(
+                "{TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX}{}",
+                TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT)
+            );
+
+            let value = encode_tag_value(
+                TRACESTATE_TAG_VALUE_FILTER_REGEX
+                    .replace_all(&context.tags[key], INVALID_CHAR_REPLACEMENT),
+            );
+
+            format!("{t_key}:{value}")
+        })
+        .collect::<Vec<String>>()
+        .join(TRACESTATE_DD_PAIR_SEPARATOR);
+
+    tracestate_parts.push(tags);
+
+    let dd = tracestate_parts
+        .into_iter()
+        .reduce(|dd, part| {
+            if dd.len() + part.len() + 1 < TRACESTATE_DD_KEY_MAX_LENGTH {
+                format!("{dd}{TRACESTATE_DD_PAIR_SEPARATOR}{part}")
+            } else {
+                dd
+            }
+        })
+        .unwrap_or_default();
+
+    let parts = vec![format!("dd={dd}")];
+
+    let additional_parts = context
+        .tracestate
+        .as_ref()
+        .map(|tracestate| tracestate.additional_values.clone())
+        .unwrap_or_default();
+
+    // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
+    let all_parts = match additional_parts {
+        Some(additional) => [parts, additional.into_iter().take(31).collect()].concat(),
+        None => parts,
+    };
+
+    carrier.set(TRACESTATE_KEY, all_parts.join(TRACESTATE_VALUES_SEPARATOR));
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
@@ -48,23 +161,43 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
-            if let Some(ts) = carrier.get(TRACESTATE_KEY) {
-                if let Some(tracestate) = extract_tracestate(ts, &mut tags) {
-                    if let Some(lpid) = tracestate.lower_order_trace_id {
-                        tags.insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), lpid);
+
+            let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
+                if let Ok(tracestate) = Tracestate::from_str(ts) {
+                    tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
+
+                    // Convert from `t.` to `_dd.p.`
+                    if let Some(propagation_tags) = &tracestate.propagation_tags {
+                        for (k, v) in propagation_tags {
+                            if let Some(stripped) =
+                                k.strip_prefix(TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX)
+                            {
+                                let nk = format!("{DATADOG_PROPAGATION_TAG_PREFIX}{stripped}");
+                                tags.insert(nk, v.to_string());
+                            }
+                        }
                     }
 
-                    origin = tracestate.origin;
+                    if let Some(ref lpid) = tracestate.lower_order_trace_id {
+                        tags.insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), lpid.clone());
+                    }
+
+                    origin.clone_from(&tracestate.origin);
 
                     sampling_priority = define_sampling_priority(
                         traceparent.sampling_priority,
-                        tracestate.sampling_priority,
+                        tracestate.sampling.unwrap_or_default().priority,
                         &mut tags,
                     );
+
+                    Some(tracestate)
+                } else {
+                    dd_debug!("No `dd` value found in tracestate");
+                    None
                 }
             } else {
-                dd_debug!("No `dd` value found in tracestate");
-            }
+                None
+            };
 
             Some(SpanContext {
                 trace_id: traceparent.trace_id,
@@ -76,6 +209,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 origin,
                 tags,
                 links: Vec::new(),
+                is_remote: true,
+                tracestate,
             })
         }
         Err(e) => {
@@ -85,89 +220,27 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     }
 }
 
-fn extract_tracestate(tracestate: &str, tags: &mut HashMap<String, String>) -> Option<Tracestate> {
-    let ts_v = tracestate.split(',').map(str::trim);
-    let ts = ts_v.clone().collect::<Vec<&str>>().join(",");
-
-    if INVALID_ASCII_CHARACTERS_REGEX.is_match(&ts) {
-        dd_debug!("Received invalid tracestate header {tracestate}");
-        return None;
-    }
-
-    tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
-
-    let mut dd: Option<HashMap<String, String>> = None;
-    for v in ts_v.clone() {
-        if let Some(stripped) = v.strip_prefix("dd=") {
-            dd = Some(
-                stripped
-                    .split(';')
-                    .filter_map(|item| {
-                        let mut parts = item.splitn(2, ':');
-                        Some((parts.next()?.to_string(), parts.next()?.to_string()))
-                    })
-                    .collect(),
-            );
-        }
-    }
-
-    if let Some(dd) = dd {
-        let mut tracestate = Tracestate {
-            sampling_priority: None,
-            origin: None,
-            lower_order_trace_id: None,
-        };
-
-        if let Some(ts_sp) = dd.get("s") {
-            if let Ok(p_sp) = ts_sp.parse::<i8>() {
-                tracestate.sampling_priority = Some(p_sp);
-            }
-        }
-
-        if let Some(o) = dd.get("o") {
-            tracestate.origin = Some(decode_tag_value(o));
-        }
-
-        if let Some(lo_tid) = dd.get("p") {
-            tracestate.lower_order_trace_id = Some(lo_tid.to_string());
-        }
-
-        // Convert from `t.` to `_dd.p.`
-        for (k, v) in &dd {
-            if let Some(stripped) = k.strip_prefix("t.") {
-                let nk = format!("_dd.p.{stripped}");
-                tags.insert(nk, decode_tag_value(v));
-            }
-        }
-
-        return Some(tracestate);
-    }
-
-    None
-}
-
-fn decode_tag_value(value: &str) -> String {
-    value.replace('~', "=")
-}
-
 fn define_sampling_priority(
-    traceparent_sampling_priority: i8,
-    tracestate_sampling_priority: Option<i8>,
+    traceparent_sampling_priority: SamplingPriority,
+    tracestate_sampling_priority: Option<SamplingPriority>,
     tags: &mut HashMap<String, String>,
-) -> i8 {
+) -> SamplingPriority {
     if let Some(ts_sp) = tracestate_sampling_priority {
-        if (traceparent_sampling_priority == 1 && ts_sp > 0)
-            || (traceparent_sampling_priority == 0 && ts_sp < 0)
+        if (traceparent_sampling_priority == SamplingPriority::AutoKeep && ts_sp.is_keep())
+            || (traceparent_sampling_priority == SamplingPriority::AutoReject && !ts_sp.is_keep())
         {
             return ts_sp;
         }
     }
 
-    if traceparent_sampling_priority == 1 {
-        tags.insert(DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string());
-    } else if traceparent_sampling_priority == 0 {
-        tags.remove(DATADOG_SAMPLING_DECISION_KEY);
-    }
+    match traceparent_sampling_priority {
+        SamplingPriority::AutoKeep => tags.insert(
+            DATADOG_SAMPLING_DECISION_KEY.to_string(),
+            SamplingMechanism::Default.to_string(),
+        ),
+        SamplingPriority::AutoReject => tags.remove(DATADOG_SAMPLING_DECISION_KEY),
+        _ => None,
+    };
 
     traceparent_sampling_priority
 }
@@ -186,10 +259,11 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     extract_version(version, tail)?;
 
     let trace_id = extract_trace_id(trace_id)?;
+
     let span_id = extract_span_id(span_id)?;
 
     let trace_flags = extract_trace_flags(flags)?;
-    let sampling_priority = i8::from(trace_flags & 0x1 != 0);
+    let sampling_priority = SamplingPriority::from_flag(trace_flags as i8);
 
     Ok(Traceparent {
         sampling_priority,
@@ -258,7 +332,10 @@ fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::trace_propagation_style::TracePropagationStyle;
+    use crate::{
+        context::{SamplingMechanism, SamplingPriority},
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     use super::*;
 
@@ -286,7 +363,10 @@ mod test {
             171_395_628_812_617_415_352_188_477_958_425_669_623
         );
         assert_eq!(context.span_id, 67_667_974_448_284_343);
-        assert_eq!(context.sampling.unwrap().priority, Some(2));
+        assert_eq!(
+            context.sampling.unwrap().priority,
+            Some(SamplingPriority::UserKeep)
+        );
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(
             context.tags.get("traceparent").unwrap(),
@@ -388,5 +468,103 @@ mod test {
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
+
+    #[test]
+    fn test_inject_traceparent() {
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Some(Sampling {
+                priority: Some(SamplingPriority::UserKeep),
+                mechanism: Some(SamplingMechanism::Manual),
+            }),
+            origin: Some("foo,bar=".to_string()),
+            tags: HashMap::from([(
+                "_dd.p.foo bar,baz=".to_string(),
+                "abc~!@#$%^&*()_+`-=".to_string(),
+            )]),
+            links: vec![],
+            is_remote: false,
+            tracestate: Tracestate::from_str("other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4").ok(),
+        };
+
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+
+        assert_eq!(
+            carrier[TRACEPARENT_KEY],
+            "00-1111aaaa2222bbbb3333cccc4444dddd-5555eeee6666ffff-01"
+        );
+
+        assert_eq!(
+            carrier[TRACESTATE_KEY],
+            "dd=s:2;o:foo_bar~;p:5555eeee6666ffff;t.foo_bar_baz_:abc_!@#$%^&*()_+`-~,other=bleh,atel=test"
+        );
+    }
+
+    #[test]
+    fn test_inject_traceparent_with_256_max_length() {
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Some(Sampling {
+                priority: Some(SamplingPriority::UserKeep),
+                mechanism: Some(SamplingMechanism::Manual),
+            }),
+            origin: Some("abc".repeat(200)),
+            tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
+            links: vec![],
+            is_remote: false,
+            tracestate: None,
+        };
+
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+
+        assert_eq!(
+            carrier[TRACEPARENT_KEY],
+            "00-1111aaaa2222bbbb3333cccc4444dddd-5555eeee6666ffff-01"
+        );
+
+        assert_eq!(
+            carrier[TRACESTATE_KEY],
+            "dd=s:2;p:5555eeee6666ffff;t.foo:abc"
+        );
+    }
+
+    #[test]
+    fn test_inject_traceparent_with_up_to_32_vendor_parts() {
+        let mut tracestate = vec![];
+        for index in 0..35 {
+            tracestate.push(format!("state{index}=value-{index}"));
+        }
+
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Some(Sampling {
+                priority: Some(SamplingPriority::UserKeep),
+                mechanism: Some(SamplingMechanism::Manual),
+            }),
+            origin: Some("rum".to_string()),
+            tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
+            links: vec![],
+            is_remote: false,
+            tracestate: Tracestate::from_str(&tracestate.join(",")).ok(),
+        };
+
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+
+        assert_eq!(
+            carrier[TRACEPARENT_KEY],
+            "00-1111aaaa2222bbbb3333cccc4444dddd-5555eeee6666ffff-01"
+        );
+
+        assert!(carrier[TRACESTATE_KEY]
+            .starts_with("dd=s:2;o:rum;p:5555eeee6666ffff;t.foo:abc,state0=value-0"));
+
+        assert!(carrier[TRACESTATE_KEY].ends_with("state30=value-30"));
     }
 }
