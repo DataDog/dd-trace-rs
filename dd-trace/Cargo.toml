@@ -14,3 +14,6 @@ description.workspace = true
 [dependencies]
 uuid = {version = "1.11.0", features = ["v4"] }
 anyhow = "1.0.97"
+
+[features]
+test-utils = []

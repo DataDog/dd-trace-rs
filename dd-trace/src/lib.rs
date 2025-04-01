@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod configuration;
+pub mod constants;
 pub use configuration::Config;
 
 mod error;
