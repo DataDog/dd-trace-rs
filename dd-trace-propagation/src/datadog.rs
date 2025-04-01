@@ -128,7 +128,7 @@ fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
                 dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
                 tags.insert(
                     DATADOG_PROPAGATION_ERROR_KEY.to_string(),
-                    format!("malformed tid {trace_id_higher_order_bits}"),
+                    format!("malformed_tid {trace_id_higher_order_bits}"),
                 );
                 tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
             }
