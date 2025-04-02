@@ -300,4 +300,92 @@ mod test {
             "00f067aa0ba902b7"
         );
     }
+
+    #[test]
+    fn test_extract_traceparent_dm_default() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;o:rum".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.tags["_dd.p.dm"], "-0");
+    }
+
+    #[test]
+    fn test_extract_traceparent_dm_default_with_tracestate_s_0() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;s:0;o:rum".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.tags["_dd.p.dm"], "-0");
+    }
+
+    #[test]
+    fn test_extract_traceparent_drop_dm_with_tracestate_s_not_present() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;o:rum".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
+
+    #[test]
+    fn test_extract_traceparent_drop_dm_with_tracestate_s_1() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;s:1;o:rum".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
 }
