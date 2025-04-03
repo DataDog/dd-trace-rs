@@ -17,7 +17,6 @@ pub struct Config {
     pub trace_propagation_style: Vec<TracePropagationStyle>,
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
-    pub trace_propagation_http_baggage_enabled: bool,
 }
 
 impl Default for Config {
@@ -30,7 +29,6 @@ impl Default for Config {
             ],
             trace_propagation_style_extract: vec![],
             trace_propagation_extract_first: false,
-            trace_propagation_http_baggage_enabled: false,
         }
     }
 }
@@ -46,5 +44,4 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
-    pub trace_propagation_http_baggage_enabled: bool,
 }

@@ -18,8 +18,6 @@ mod log;
 mod trace_propagation_style;
 mod tracecontext;
 
-pub const BAGGAGE_PREFIX: &str = "ot-baggage-";
-
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
     fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
@@ -27,6 +25,8 @@ pub trait Propagator {
 
 pub struct DatadogCompositePropagator {
     propagators: Vec<TracePropagationStyle>,
+
+    #[allow(dead_code)]
     config: Arc<config::Config>,
 }
 
@@ -38,10 +38,7 @@ impl Propagator for DatadogCompositePropagator {
             return None;
         }
 
-        let mut context = Self::resolve_contexts(contexts, carrier);
-        if self.config.trace_propagation_http_baggage_enabled {
-            Self::attach_baggage(&mut context, carrier);
-        }
+        let context = Self::resolve_contexts(contexts, carrier);
 
         Some(context)
     }
@@ -141,19 +138,6 @@ impl DatadogCompositePropagator {
         primary_context.links = links;
 
         primary_context
-    }
-
-    fn attach_baggage(context: &mut SpanContext, carrier: &dyn Extractor) {
-        let keys = carrier.keys();
-
-        for key in keys {
-            if let Some(stripped) = key.strip_prefix(BAGGAGE_PREFIX) {
-                context.tags.insert(
-                    stripped.to_string(),
-                    carrier.get(key).unwrap_or_default().to_string(),
-                );
-            }
-        }
     }
 }
 
@@ -814,20 +798,5 @@ pub mod tests {
         let contexts = propagator.extract_available_contexts(&carrier);
 
         assert_eq!(contexts.len(), 0);
-    }
-
-    #[test]
-    fn test_attach_baggage() {
-        let mut context = SpanContext::default();
-        let carrier = HashMap::from([
-            ("x-datadog-trace-id".to_string(), "123".to_string()),
-            ("x-datadog-parent-id".to_string(), "5678".to_string()),
-            ("ot-baggage-key1".to_string(), "value1".to_string()),
-        ]);
-
-        DatadogCompositePropagator::attach_baggage(&mut context, &carrier);
-
-        assert_eq!(context.tags.len(), 1);
-        assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
     }
 }
