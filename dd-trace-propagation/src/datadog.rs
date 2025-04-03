@@ -24,6 +24,9 @@ const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
 pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
 pub const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
+// TODO: get max_length from config: DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH
+pub const DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH: usize = 512;
+
 lazy_static! {
     pub static ref INVALID_SEGMENT_REGEX: Regex =
         Regex::new(r"^0+$").expect("failed creating regex");
@@ -49,7 +52,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
         }
     };
     let origin = extract_origin(carrier);
-    let tags = extract_tags(carrier);
+    let tags = extract_tags(carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
 
     let trace_id = combine_trace_id(
         lower_trace_id,
@@ -103,14 +106,26 @@ fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
     Some(origin.to_string())
 }
 
-fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
+fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, String> {
     let mut tags: HashMap<String, String> = HashMap::new();
 
-    // todo:
-    // - trace propagation disabled
-    // - trace propagation max lenght
-
     let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
+
+    if carrier_tags.len() > max_length {
+        let error_message = if max_length == 0 {
+            "disabled"
+        } else {
+            "extract_max_size"
+        };
+
+        tags.insert(
+            DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+            error_message.to_string(),
+        );
+
+        return tags;
+    }
+
     let pairs = carrier_tags.split(',');
     for pair in pairs {
         if let Some((k, v)) = pair.split_once('=') {
@@ -272,5 +287,35 @@ mod test {
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.tid"), None);
         assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+    }
+
+    #[test]
+    fn test_extract_datadog_propagator_very_long_tags() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.test=value,any=tag".repeat(200).to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::Datadog;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(context.sampling.unwrap().priority, Some(1));
+        assert_eq!(context.origin, Some("synthetics".to_string()));
+
+        assert_eq!(
+            context.tags.get("_dd.propagation_error").unwrap(),
+            "extract_max_size"
+        );
     }
 }
