@@ -713,8 +713,6 @@ pub mod tests {
             trace_propagation_style_extract: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-                TracePropagationStyle::B3,
-                TracePropagationStyle::B3Multi,
             ],
             ..Default::default()
         };

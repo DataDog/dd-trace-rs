@@ -11,8 +11,6 @@ use crate::{carrier::Extractor, context::SpanContext, datadog, tracecontext};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
     Datadog,
-    B3Multi,
-    B3,
     TraceContext,
     None,
 }
@@ -33,8 +31,6 @@ impl FromStr for TracePropagationStyle {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "datadog" => Ok(TracePropagationStyle::Datadog),
-            "b3multi" => Ok(TracePropagationStyle::B3Multi),
-            "b3" => Ok(TracePropagationStyle::B3),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: {s}")),
@@ -46,8 +42,6 @@ impl Display for TracePropagationStyle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let style = match self {
             TracePropagationStyle::Datadog => "datadog",
-            TracePropagationStyle::B3Multi => "b3multi",
-            TracePropagationStyle::B3 => "b3",
             TracePropagationStyle::TraceContext => "tracecontext",
             TracePropagationStyle::None => "none",
         };
