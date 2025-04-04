@@ -14,17 +14,16 @@ pub use span_exporter::DatadogExporter;
 ///
 /// # Usage
 /// ```rust
-/// use opentelemetry_sdk::trace::TracerProviderBuilder;
 /// use dd_trace::Config;
+/// use opentelemetry_sdk::trace::TracerProviderBuilder;
 ///
 /// // This picks up env var configuration and other datadog configuration sources
 /// let datadog_config = Config::default();
 ///
 /// datadog_opentelemetry::init_datadog(
 ///     datadog_config,
-///     TracerProviderBuilder::default()
-///      // Pass any opentelemetry specific configuration here
-///      // .with_max_attributes_per_span(max_attributes)
+///     TracerProviderBuilder::default(), // Pass any opentelemetry specific configuration here
+///                                       // .with_max_attributes_per_span(max_attributes)
 /// )
 /// ```
 pub fn init_datadog(
@@ -32,7 +31,7 @@ pub fn init_datadog(
     // TODO(paullgdc): Should we take a builder or create it ourselves?
     // because some customer might want to set max_<things>_per_span using
     // the builder APIs
-    // Or maybe we need a builder API called DatadogDistribution that takes 
+    // Or maybe we need a builder API called DatadogDistribution that takes
     // all parameters and has an install method?
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
