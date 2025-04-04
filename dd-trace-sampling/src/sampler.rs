@@ -189,18 +189,18 @@ mod tests {
 
     #[test]
     fn test_rate_sampler_should_sample() {
-        println!("Starting test_rate_sampler_should_sample");
+
 
         // Sample Rate 0.0: Should always drop
         let sampler_zero = RateSampler::new(0.0);
-        println!("Created sampler_zero with rate 0.0");
+
         for i in 0..1u64 { // Just test one ID to keep output readable
             // Create a trace ID with some bytes where the lower 64 bits are set to i
             let mut bytes = [0u8; 16];
             let i_bytes = i.to_le_bytes();
             bytes[8..16].copy_from_slice(&i_bytes);
             let trace_id = TraceId::from_bytes(bytes);
-            println!("Testing trace ID with value {} in sampler_zero", i);
+
             
             let result = sampler_zero.should_sample(
                 None,
@@ -210,20 +210,20 @@ mod tests {
                 &[],
                 &[],
             );
-            println!("sampler_zero result for ID {}: {:?}", i, result.decision);
+
             assert_eq!(result.decision, SamplingDecision::Drop, "sampler_zero should drop all IDs");
         }
 
         // Sample Rate 1.0: Should always sample
         let sampler_one = RateSampler::new(1.0);
-        println!("Created sampler_one with rate 1.0");
+
         for i in 0..1u64 { // Just test one ID to keep output readable 
             // Create a trace ID with some bytes where the lower 64 bits are set to i
             let mut bytes = [0u8; 16];
             let i_bytes = i.to_le_bytes();
             bytes[8..16].copy_from_slice(&i_bytes);
             let trace_id = TraceId::from_bytes(bytes);
-            println!("Testing trace ID with value {} in sampler_one", i);
+
             
             let result = sampler_one.should_sample(
                 None,
@@ -233,21 +233,21 @@ mod tests {
                 &[],
                 &[],
             );
-            println!("sampler_one result for ID {}: {:?}", i, result.decision);
+
             assert_eq!(result.decision, SamplingDecision::RecordAndSample, "sampler_one should sample all IDs");
         }
         
-        println!("Starting 0.5 rate sampler tests");
+
         // Sample Rate 0.5: Create deterministic test cases
         let sampler_half = RateSampler::new(0.5);
         let threshold = sampler_half.sampling_id_threshold;
-        println!("Created sampler_half with rate 0.5, threshold: {}", threshold);
+
         
         // Test case for a trace ID that should be sampled (hashed value < threshold)
         // We'll use a trace ID of all zeros which hashes to 0 (guaranteed below threshold)
         let bytes_sample = [0u8; 16];
         let trace_id_sample = TraceId::from_bytes(bytes_sample);
-        println!("Created sample trace ID (all zeros)");
+
         
         // Test case for a trace ID that should be dropped (hashed value > threshold)
         // We'll use a specific trace ID that we know will hash above the threshold
@@ -255,7 +255,7 @@ mod tests {
         // This value is carefully chosen to hash to a value above the threshold
         bytes_drop[8] = 0x80; // Set high bit to ensure it hashes above threshold
         let mut trace_id_drop = TraceId::from_bytes(bytes_drop);
-        println!("Created drop trace ID (with byte 0x80)");
+
         
         // Verify these trace IDs hash as expected
         let sample_bytes = trace_id_sample.to_bytes();
@@ -278,7 +278,7 @@ mod tests {
         
         // If our chosen value doesn't hash correctly, let's find one that does
         if drop_hash <= threshold {
-            println!("Searching for a value that hashes above threshold...");
+
             for i in 1..1000u64 {
                 let mut test_bytes = [0u8; 16];
                 let i_bytes = i.to_le_bytes();
@@ -298,12 +298,12 @@ mod tests {
                     trace_id_drop = TraceId::from_bytes(bytes_drop);
                     // Update hash value for assertions
                     drop_hash = test_hash;
-                    println!("Found value {} that hashes to {} > {}", i, drop_hash, threshold);
+
                     break;
                 }
                 
                 if i == 999 {
-                    println!("Failed to find a value that hashes above threshold!");
+
                 }
             }
         }
@@ -312,7 +312,7 @@ mod tests {
         assert!(drop_hash > threshold, "Drop hash should be > threshold");
         
         // Test the sampling decisions
-        println!("Testing sample trace ID with sampler_half");
+
         let result_sample = sampler_half.should_sample(
             None,
             trace_id_sample,
@@ -321,11 +321,11 @@ mod tests {
             &[],
             &[],
         );
-        println!("Result for sample trace ID: {:?}", result_sample.decision);
+
         assert_eq!(result_sample.decision, SamplingDecision::RecordAndSample, 
                   "Sample ID should be sampled");
         
-        println!("Testing drop trace ID with sampler_half");
+
         let result_drop = sampler_half.should_sample(
             None,
             trace_id_drop,
@@ -334,7 +334,7 @@ mod tests {
             &[],
             &[],
         );
-        println!("Result for drop trace ID: {:?}", result_drop.decision);
+
         assert_eq!(result_drop.decision, SamplingDecision::Drop, 
                   "Drop ID should be dropped");
     }
@@ -357,8 +357,8 @@ mod tests {
         bytes[15] = 1; // This sets the least significant byte to 1
         let trace_id = TraceId::from_bytes(bytes);
         
-        println!("Original bytes: {:?}", bytes);
-        println!("Trace ID bytes: {:?}", trace_id.to_bytes());
+
+
         
         // Extract using our method from should_sample
         let extracted_bytes = trace_id.to_bytes();
@@ -367,7 +367,7 @@ mod tests {
             extracted_bytes[12], extracted_bytes[13], extracted_bytes[14], extracted_bytes[15]
         ]);
         
-        println!("Extracted u64: {}", extracted_u64);
+
         assert_eq!(extracted_u64, 1, "Expected to extract the value 1");
         
         // Create a sampler with sample rate 1.0 (should always sample)
@@ -381,7 +381,7 @@ mod tests {
             &[]
         );
         
-        println!("Sampling decision: {:?}", result.decision);
+
         assert_eq!(result.decision, SamplingDecision::RecordAndSample);
     }
 
@@ -390,7 +390,7 @@ mod tests {
         // Create a sampler with 0.5 rate
         let sampler_half = RateSampler::new(0.5);
         let threshold = sampler_half.sampling_id_threshold;
-        println!("Threshold for 0.5 rate: {}", threshold);
+
         
         // Test with a trace ID that should be sampled (e.g., hashed value < threshold)
         // We'll create one with all zeros which will hash to zero (below any threshold > 0)
@@ -405,9 +405,9 @@ mod tests {
         ]);
         let hashed_id = extracted_u64.wrapping_mul(KNUTH_FACTOR);
         
-        println!("Trace ID extracted value: {}", extracted_u64);
-        println!("Hashed value: {}", hashed_id);
-        println!("Should be sampled: {}", hashed_id <= threshold);
+
+
+
         
         // Test sampling
         let result = sampler_half.should_sample(
@@ -419,7 +419,7 @@ mod tests {
             &[]
         );
         
-        println!("Actual sampling decision: {:?}", result.decision);
+
         
         // This should always pass - a zero trace ID will hash to zero, which is below the threshold
         assert_eq!(result.decision, SamplingDecision::RecordAndSample);
