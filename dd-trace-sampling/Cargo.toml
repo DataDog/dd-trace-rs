@@ -1,0 +1,19 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "dd-trace-sampling"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+
+[dependencies]
+opentelemetry = { version = "0.28.0", features = ["trace"] }
+opentelemetry_sdk = { version = "0.28.0", features = ["trace"] }
+
+[dev-dependencies]
+# Add any testing dependencies here if needed
