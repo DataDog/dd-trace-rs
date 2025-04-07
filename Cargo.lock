@@ -32,6 +32,7 @@ dependencies = [
 name = "dd-trace-propagation"
 version = "0.0.1"
 dependencies = [
+ "dd-trace",
  "lazy_static",
  "regex",
  "serde",
