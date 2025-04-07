@@ -15,7 +15,7 @@ use opentelemetry_sdk::trace::SpanData;
 use tinybytes::BytesString;
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_span_data_to_trace_chunks(
+pub fn otel_span_data_to_dd_trace_chunks(
     cfg: &dd_trace::Config,
     span_data: Vec<SpanData>,
 ) -> Vec<Vec<DdSpan>> {
@@ -24,8 +24,8 @@ pub fn otel_span_data_to_trace_chunks(
     span_data
         .into_iter()
         .map(|s| (s.span_context.trace_id(), otel_span_to_dd_span(cfg, s)))
-        .fold(HashMap::new(), |mut acc, (trace_id, span)| {
-            acc.entry(trace_id).or_insert(Vec::new()).push(span);
+        .fold(HashMap::<_, Vec<_>>::new(), |mut acc, (trace_id, span)| {
+            acc.entry(trace_id).or_default().push(span);
             acc
         })
         .into_values()
@@ -189,7 +189,7 @@ fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
     );
     meta.insert(
         BytesString::from(SPAN_KIND_TAG),
-        BytesString::from(otel_span_kind_to_meta_span_kind(otel_span.span_kind)),
+        otel_span_kind_to_meta_span_kind(otel_span.span_kind),
     );
     otel_sampling_decision_to_metrics(&otel_span.span_context, &mut metrics);
     // TODO(paullgdc):

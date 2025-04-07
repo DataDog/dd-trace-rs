@@ -71,10 +71,15 @@ impl DatadogExporter {
         span_data: Vec<SpanData>,
     ) -> Result<oneshot::Receiver<OTelSdkResult>, OTelSdkError> {
         let (responder, rx) = oneshot::channel();
-        if let Err(_) = self.trace_exporter.tx.send(TraceExporterMessage::SendSpan {
-            span_data,
-            responder,
-        }) {
+        if self
+            .trace_exporter
+            .tx
+            .send(TraceExporterMessage::SendSpan {
+                span_data,
+                responder,
+            })
+            .is_err()
+        {
             // Tracer exporter thread is dead
             self.join()?;
             return Err(OTelSdkError::InternalFailure(
@@ -98,10 +103,7 @@ impl DatadogExporter {
                 OTelSdkError::InternalFailure("Trace exporter thread panicked".to_string())
             })?
             .map_err(|e| {
-                OTelSdkError::InternalFailure(format!(
-                    "Trace exporter exited with error: {}",
-                    e
-                ))
+                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {}", e))
             })
     }
 }
@@ -121,7 +123,7 @@ impl opentelemetry_sdk::trace::SpanExporter for DatadogExporter {
         Box::pin(async {
             match rx.await {
                 Ok(res) => res,
-                Err(e) => Err(OTelSdkError::InternalFailure(e.to_string()).into()),
+                Err(e) => Err(OTelSdkError::InternalFailure(e.to_string())),
             }
         })
     }
@@ -132,7 +134,6 @@ impl opentelemetry_sdk::trace::SpanExporter for DatadogExporter {
             .send(TraceExporterMessage::Shutdown)
             .map_err(|_| {
                 OTelSdkError::InternalFailure("trace exporter has already shutdown".to_string())
-                    .into()
             })?;
         self.join()
     }
@@ -197,7 +198,10 @@ impl TraceExporterTask {
                     span_data,
                     responder,
                 } => {
-                    if let Err(_) = responder.send(self.export_otel_span_data(span_data)) {
+                    if responder
+                        .send(self.export_otel_span_data(span_data))
+                        .is_err()
+                    {
                         // The receiver has been dropped, we could panic or ignore here
                         // No strong opinion...
                         continue;
@@ -214,13 +218,13 @@ impl TraceExporterTask {
 
     fn export_otel_span_data(&self, span_data: Vec<SpanData>) -> OTelSdkResult {
         let trace_chunks: Vec<Vec<datadog_trace_utils::span::Span<tinybytes::BytesString>>> =
-            crate::span_conversion::otel_span_data_to_trace_chunks(&self.cfg, span_data);
+            crate::span_conversion::otel_span_data_to_dd_trace_chunks(&self.cfg, span_data);
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
             Ok(_rate_reponse) => {
                 // TODO: propagate rate response to the sampler configuration
                 Ok(())
             }
-            Err(e) => Err(OTelSdkError::InternalFailure(e.to_string()).into()),
+            Err(e) => Err(OTelSdkError::InternalFailure(e.to_string())),
         }
     }
 }
