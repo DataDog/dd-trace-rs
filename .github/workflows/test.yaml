@@ -52,10 +52,16 @@ jobs:
       - name: "[${{ steps.rust-version.outputs.version}}] cargo build --workspace  --verbose --locked"
         shell: bash
         run: cargo build --workspace  --verbose --locked
+      - name: "[${{ steps.rust-version.outputs.version}}] test agent integration tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo nextest run --workspace  --profile ci --locked -E 'test(datadog_test_agent::)'
+        env:
+          RUST_BACKTRACE: 1
       - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci --locked"
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
-        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked
+        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(datadog_test_agent::)'
         env:
           RUST_BACKTRACE: 1
       - name: Report Test Results
@@ -91,4 +97,4 @@ jobs:
           rust_version: cross-centos7
       - run: cargo install cross || true
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
-      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu
+      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "datadog_test_agent::"

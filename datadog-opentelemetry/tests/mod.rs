@@ -3,14 +3,9 @@
 
 use std::time::Duration;
 
-use datadog_opentelemetry::DatadogExporter;
-use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
-
-use opentelemetry::{TraceFlags, TraceId};
-use opentelemetry_sdk::trace::SpanExporter;
-
+#[allow(dead_code)]
 fn test_span_data(
-    trace_flags: TraceFlags,
+    trace_flags: opentelemetry::TraceFlags,
     trace_id: opentelemetry::TraceId,
 ) -> Vec<opentelemetry_sdk::trace::SpanData> {
     // unix epoch + 30 years puts us in the 2000s :wink:
@@ -39,32 +34,42 @@ fn test_span_data(
         .collect()
 }
 
-#[tokio::test]
-#[cfg_attr(miri, ignore)]
-async fn test_received_traces() {
-    const SESSION_NAME: &str = "test_received_traces";
+#[cfg(not(windows))]
+mod datadog_test_agent {
+    use datadog_opentelemetry::DatadogExporter;
+    use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
+    use opentelemetry::{TraceFlags, TraceId};
+    use opentelemetry_sdk::trace::SpanExporter;
 
-    let relative_snapshot_path = "datadog-opentelemetry/tests/snapshots/";
-    let test_agent =
-        DatadogTestAgent::new_create_snapshot(Some(relative_snapshot_path), None).await;
-    let url = test_agent.get_base_uri().await;
-    test_agent.start_session(SESSION_NAME, None).await;
+    use crate::test_span_data;
 
-    let mut config = dd_trace::Config::builder();
-    config.set_trace_agent_url(url.to_string().into());
-    let mut exporter = DatadogExporter::new(config.build()).unwrap();
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn test_received_traces() {
+        const SESSION_NAME: &str = "test_received_traces";
 
-    let mut span_data = test_span_data(
-        TraceFlags::SAMPLED,
-        TraceId::from_bytes(u128::to_be_bytes(1234)),
-    );
-    span_data.extend(test_span_data(
-        TraceFlags::NOT_SAMPLED,
-        TraceId::from_bytes([2; 16]),
-    ));
+        let relative_snapshot_path = "datadog-opentelemetry/tests/snapshots/";
+        let test_agent =
+            DatadogTestAgent::new_create_snapshot(Some(relative_snapshot_path), None).await;
+        let url = test_agent.get_base_uri().await;
+        test_agent.start_session(SESSION_NAME, None).await;
 
-    exporter.export(span_data).await.unwrap();
-    exporter.shutdown().unwrap();
+        let mut config = dd_trace::Config::builder();
+        config.set_trace_agent_url(url.to_string().into());
+        let mut exporter = DatadogExporter::new(config.build()).unwrap();
 
-    test_agent.assert_snapshot(SESSION_NAME).await;
+        let mut span_data = test_span_data(
+            TraceFlags::SAMPLED,
+            TraceId::from_bytes(u128::to_be_bytes(1234)),
+        );
+        span_data.extend(test_span_data(
+            TraceFlags::NOT_SAMPLED,
+            TraceId::from_bytes([2; 16]),
+        ));
+
+        exporter.export(span_data).await.unwrap();
+        exporter.shutdown().unwrap();
+
+        test_agent.assert_snapshot(SESSION_NAME).await;
+    }
 }
