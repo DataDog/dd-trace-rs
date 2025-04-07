@@ -99,7 +99,7 @@ impl DatadogExporter {
             })?
             .map_err(|e| {
                 OTelSdkError::InternalFailure(format!(
-                    "Trace exporter failed during shutdown: {}",
+                    "Trace exporter exited with error: {}",
                     e
                 ))
             })
@@ -163,7 +163,6 @@ impl TraceExporterTask {
             let trace_exporter = match builder.build() {
                 Ok(exporter) => exporter,
                 Err(e) => {
-                    // TODO(paulgdc): fix error logging
                     return Err(e);
                 }
             };
