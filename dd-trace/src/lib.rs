@@ -7,7 +7,6 @@ pub use configuration::Config;
 mod error;
 pub use error::{Error, Result};
 
-pub mod sampler;
 pub mod log;
 
 #[cfg(test)]
