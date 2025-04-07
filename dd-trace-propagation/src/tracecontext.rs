@@ -9,9 +9,10 @@ use crate::{
     carrier::Extractor,
     context::{Sampling, SpanContext},
     datadog::{DATADOG_LAST_PARENT_ID_KEY, DATADOG_SAMPLING_DECISION_KEY, INVALID_SEGMENT_REGEX},
-    dd_debug, dd_error, dd_warn,
     error::Error,
 };
+
+use dd_trace::{dd_debug, dd_error, dd_warn};
 
 // Traceparent Keys
 const TRACEPARENT_KEY: &str = "traceparent";

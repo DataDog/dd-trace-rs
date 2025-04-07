@@ -14,7 +14,6 @@ mod config;
 mod context;
 mod datadog;
 mod error;
-mod log;
 mod trace_propagation_style;
 mod tracecontext;
 

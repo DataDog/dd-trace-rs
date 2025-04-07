@@ -12,6 +12,7 @@ description.workspace = true
 crate-type = ["lib"]
 
 [dependencies]
+dd-trace = { path = "../dd-trace" }
 lazy_static = { version = "1.5", default-features = false }
 thiserror = { version = "1.0", default-features = false}
 regex = { version = "1.10", default-features = false, features = ["unicode-case"] }
