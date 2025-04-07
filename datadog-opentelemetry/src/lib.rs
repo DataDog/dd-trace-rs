@@ -24,7 +24,7 @@ pub use span_exporter::DatadogExporter;
 ///     datadog_config,
 ///     TracerProviderBuilder::default(), // Pass any opentelemetry specific configuration here
 ///                                       // .with_max_attributes_per_span(max_attributes)
-/// )
+/// );
 /// ```
 pub fn init_datadog(
     cfg: dd_trace::Config,
