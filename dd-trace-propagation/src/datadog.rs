@@ -9,9 +9,10 @@ use regex::Regex;
 use crate::{
     carrier::Extractor,
     context::{combine_trace_id, Sampling, SpanContext},
-    dd_debug, dd_warn,
     error::Error,
 };
+
+use dd_trace::{dd_debug, dd_warn};
 
 // Datadog Keys
 const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
