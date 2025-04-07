@@ -8,7 +8,7 @@ use datadog_trace_utils::span::{
 };
 use dd_trace::constants::{HIGHER_ORDER_TRACE_ID_BITS_TAG, SAMPLING_PRIORITY_TAG, SPAN_KIND_TAG};
 use opentelemetry::{
-    trace::{SpanContext, SpanKind},
+    trace::{Link, SpanContext, SpanKind},
     KeyValue,
 };
 use opentelemetry_sdk::trace::SpanData;
@@ -136,22 +136,35 @@ fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
     let span_links = otel_span
         .links
         .into_iter()
-        .map(|l| {
-            let (trace_id, trace_id_high) = otel_trace_id_to_dd_id(l.span_context.trace_id());
-            let span_id = otel_span_id_to_dd_id(l.span_context.span_id());
-            let tracestate = BytesString::from(l.span_context.trace_state().header());
-            let flags = l.span_context.trace_flags().to_u8() as u64;
-            // TODO(paullgdc): attributes conversion
-            let attributes = HashMap::new();
-            DdSpanLink {
-                trace_id,
-                trace_id_high,
-                span_id,
-                attributes,
-                tracestate,
-                flags,
-            }
-        })
+        .map(
+            |Link {
+                 span_context,
+                 attributes: otel_attributes,
+                 ..
+             }| {
+                let (trace_id, trace_id_high) = otel_trace_id_to_dd_id(span_context.trace_id());
+                let span_id = otel_span_id_to_dd_id(span_context.span_id());
+                let tracestate = BytesString::from(span_context.trace_state().header());
+                let flags = span_context.trace_flags().to_u8() as u64;
+                // TODO(paullgdc): attributes conversion
+                let attributes = otel_attributes
+                    .into_iter()
+                    .map(|KeyValue { key, value, .. }| {
+                        let key = BytesString::from(key.to_string());
+                        let value = BytesString::from(value.to_string());
+                        (key, value)
+                    })
+                    .collect();
+                DdSpanLink {
+                    trace_id,
+                    trace_id_high,
+                    span_id,
+                    attributes,
+                    tracestate,
+                    flags,
+                }
+            },
+        )
         .collect();
     let span_events = otel_span
         .events

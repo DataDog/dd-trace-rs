@@ -68,11 +68,11 @@ impl DatadogExporter {
 
     fn export_sync(
         &mut self,
-        _batch: Vec<SpanData>,
+        span_data: Vec<SpanData>,
     ) -> Result<oneshot::Receiver<OTelSdkResult>, OTelSdkError> {
         let (responder, rx) = oneshot::channel();
         if let Err(_) = self.trace_exporter.tx.send(TraceExporterMessage::SendSpan {
-            span_data: _batch,
+            span_data,
             responder,
         }) {
             // Tracer exporter thread is dead
