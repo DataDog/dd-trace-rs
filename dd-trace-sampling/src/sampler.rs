@@ -6,14 +6,10 @@ use opentelemetry::Context;
 use opentelemetry_sdk::trace::ShouldSample;
 use std::fmt;
 
-// Knuth's multiplicative hashing factor
 const KNUTH_FACTOR: u64 = 1_111_111_111_111_111_111;
-// Maximum value for u64, used for sampling calculation
 const MAX_UINT_64BITS: u64 = u64::MAX;
 
-/// Sampler based on a rate.
-/// Keeps (100 * `sample_rate`)% of the traces randomly. Its main purpose is to reduce
-/// the instrumentation footprint.
+/// Keeps (100 * `sample_rate`)% of the traces randomly.
 #[derive(Clone)]
 pub struct RateSampler {
     sample_rate: f64,
@@ -29,17 +25,19 @@ impl fmt::Debug for RateSampler {
 }
 
 impl RateSampler {
-    /// Creates a new `RateSampler`.
+    // Helper method to calculate the threshold from a rate
+    fn calculate_threshold(rate: f64) -> u64 {
+        if rate >= 1.0 {
+            MAX_UINT_64BITS
+        } else {
+            (rate * (MAX_UINT_64BITS as f64)) as u64
+        }
+    }
+
     /// `sample_rate` is clamped between 0.0 and 1.0 inclusive.
     pub fn new(sample_rate: f64) -> Self {
         let clamped_rate = sample_rate.clamp(0.0, 1.0);
-        // Calculate the threshold using wrapping multiplication for u64.
-        // Equivalent to (sample_rate * MAX_UINT_64BITS) but avoids f64 intermediate if rate is 1.0
-        let sampling_id_threshold = if clamped_rate >= 1.0 {
-            MAX_UINT_64BITS
-        } else {
-            (clamped_rate * (MAX_UINT_64BITS as f64)) as u64
-        };
+        let sampling_id_threshold = Self::calculate_threshold(clamped_rate);
 
         RateSampler {
             sample_rate: clamped_rate,
@@ -52,12 +50,7 @@ impl RateSampler {
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         let clamped_rate = sample_rate.clamp(0.0, 1.0);
         self.sample_rate = clamped_rate;
-        // Calculate the threshold using wrapping multiplication for u64.
-        self.sampling_id_threshold = if clamped_rate >= 1.0 {
-            MAX_UINT_64BITS
-        } else {
-            (clamped_rate * (MAX_UINT_64BITS as f64)) as u64
-        };
+        self.sampling_id_threshold = Self::calculate_threshold(clamped_rate);
     }
 }
 
