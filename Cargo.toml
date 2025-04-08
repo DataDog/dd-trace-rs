@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [workspace]
-members = ["dd-trace", "dd-trace-propagation"]
+members = ["dd-trace", "dd-trace-propagation", "dd-trace-sampling"]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
 resolver = "2"
@@ -15,6 +15,10 @@ license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
 description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
+
+[workspace.dependencies]
+opentelemetry = "0.28.0"
+opentelemetry_sdk = "0.28.0"
 
 [profile.dev]
 debug = 2 # full debug info
