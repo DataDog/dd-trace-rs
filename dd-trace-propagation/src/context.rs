@@ -5,9 +5,9 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, vec};
 
-use dd_trace::dd_debug;
+use dd_trace::{configuration::TracePropagationStyle, dd_debug};
 
-use crate::{trace_propagation_style::TracePropagationStyle, tracecontext::TRACESTATE_KEY};
+use crate::tracecontext::TRACESTATE_KEY;
 
 lazy_static! {
     static ref INVALID_ASCII_CHARACTERS_REGEX: Regex =
@@ -85,12 +85,10 @@ impl SamplingPriority {
         *self == Self::AutoKeep || *self == Self::UserKeep
     }
 
-    pub fn from_flag(flag: i8) -> Self {
-        match flag {
-            -1 => Self::UserReject,
+    pub fn from_flags(flags: u8) -> Self {
+        match flags {
             0 => Self::AutoReject,
             1 => Self::AutoKeep,
-            2 => Self::UserKeep,
             _ => Self::default(),
         }
     }

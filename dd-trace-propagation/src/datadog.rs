@@ -37,6 +37,14 @@ lazy_static! {
         Regex::new(r"^-([0-9])$").expect("failed creating regex");
     static ref TAG_KEY_REGEX: Regex = Regex::new(r"^_dd\.p\.[\x21-\x2b\x2d-\x7e]+$").expect("failed creating regex"); // ASCII minus spaces and commas
     static ref TAG_VALUE_REGEX: Regex = Regex::new(r"^[\x20-\x2b\x2d-\x7e]*$").expect("failed creating regex"); // ASCII minus commas
+
+    static ref DATADOG_HEADER_KEYS: [String; 5] = [
+        DATADOG_TRACE_ID_KEY.to_owned(),
+        DATADOG_ORIGIN_KEY.to_owned(),
+        DATADOG_PARENT_ID_KEY.to_owned(),
+        DATADOG_SAMPLING_PRIORITY_KEY.to_owned(),
+        DATADOG_TAGS_KEY.to_owned()
+    ];
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -305,10 +313,16 @@ fn higher_order_bits_valid(trace_id_higher_order_bits: &str) -> bool {
     true
 }
 
+pub fn keys() -> &'static [String] {
+    DATADOG_HEADER_KEYS.as_slice()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::{context::split_trace_id, trace_propagation_style::TracePropagationStyle};
+    use dd_trace::configuration::TracePropagationStyle;
+
+    use crate::{context::split_trace_id, Propagator};
 
     use super::*;
 

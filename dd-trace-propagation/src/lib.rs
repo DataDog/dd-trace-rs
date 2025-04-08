@@ -5,29 +5,32 @@ use std::sync::Arc;
 
 use crate::context::{SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
+use config::PropagationConfig;
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
-use trace_propagation_style::TracePropagationStyle;
+use dd_trace::configuration::TracePropagationStyle;
 use tracecontext::TRACESTATE_KEY;
 
-mod carrier;
-mod config;
-mod context;
+pub mod carrier;
+pub mod config;
+pub mod context;
 mod datadog;
 mod error;
-mod trace_propagation_style;
-mod tracecontext;
+pub mod trace_propagation_style;
+pub mod tracecontext;
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
     fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector);
+    fn keys(&self) -> &[String];
 }
 
+#[derive(Debug)]
 pub struct DatadogCompositePropagator {
+    #[allow(dead_code)]
+    config: Arc<PropagationConfig>,
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
-
-    #[allow(dead_code)]
-    config: Arc<config::Config>,
+    keys: Vec<String>,
 }
 
 #[allow(clippy::never_loop)]
@@ -48,13 +51,17 @@ impl Propagator for DatadogCompositePropagator {
             .iter()
             .for_each(|propagator| propagator.inject(context, carrier));
     }
+
+    fn keys(&self) -> &[String] {
+        &self.keys
+    }
 }
 
 impl DatadogCompositePropagator {
     #[must_use]
-    pub fn new(config: Arc<config::Config>) -> Self {
+    pub fn new(config: Arc<PropagationConfig>) -> Self {
         let mut num_propagators = config.get_extractors().len();
-        if config.trace_propagation_extract_first {
+        if config.extract_first {
             num_propagators = 1;
         };
 
@@ -62,26 +69,29 @@ impl DatadogCompositePropagator {
             .get_extractors()
             .iter()
             .take(num_propagators)
-            .filter_map(|style| match style {
-                TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
-                TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
-                _ => None,
-            })
+            .filter(|style| **style != TracePropagationStyle::None)
+            .copied()
             .collect();
 
         let injectors: Vec<TracePropagationStyle> = config
             .get_injectors()
             .iter()
-            .filter_map(|style| match style {
-                TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
-                TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
-                _ => None,
-            })
+            .filter(|style| **style != TracePropagationStyle::None)
+            .copied()
             .collect();
+
+        let keys = extractors.iter().fold(Vec::new(), |mut keys, extractor| {
+            extractor
+                .keys()
+                .iter()
+                .for_each(|key| keys.push(key.clone()));
+            keys
+        });
 
         Self {
             extractors,
             injectors,
+            keys,
             config,
         }
     }
@@ -304,9 +314,9 @@ pub mod tests {
                 #[test]
                 fn $name() {
                     let (styles, carrier, expected) = $value;
-                    let mut config = config::Config::default();
-                    config.trace_propagation_style_extract = Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]);
-                    config.trace_propagation_style_extract.clone_from(&styles);
+                    let mut config = config::PropagationConfig::default();
+                    config.style_extract = Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]);
+                    config.style_extract.clone_from(&styles);
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
@@ -778,8 +788,8 @@ pub mod tests {
 
     #[test]
     fn test_new_filter_propagators() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
             ]),
@@ -793,8 +803,8 @@ pub mod tests {
 
     #[test]
     fn test_new_no_propagators() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![TracePropagationStyle::None]),
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![TracePropagationStyle::None]),
             ..Default::default()
         };
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
@@ -804,8 +814,8 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
             ]),
@@ -845,8 +855,8 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts_no_contexts() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![TracePropagationStyle::Datadog]),
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![TracePropagationStyle::Datadog]),
             ..Default::default()
         };
 
@@ -898,9 +908,9 @@ pub mod tests {
                 #[test]
                 fn $name() {
                     let (styles, context, expected) = $value;
-                    let mut config = config::Config::default();
+                    let mut config = config::PropagationConfig::default();
 
-                    config.trace_propagation_style_inject.clone_from(&styles);
+                    config.style_inject.clone_from(&styles);
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
@@ -1118,5 +1128,64 @@ pub mod tests {
             },
             HashMap::<String,String>::new()
         ),
+    }
+
+    #[test]
+    fn test_default_keys() {
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ]),
+            ..Default::default()
+        };
+
+        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+
+        assert_eq!(
+            vec![
+                "x-datadog-trace-id",
+                "x-datadog-origin",
+                "x-datadog-parent-id",
+                "x-datadog-sampling-priority",
+                "x-datadog-tags",
+                "traceparent",
+                "tracestate"
+            ],
+            propagator.keys()
+        )
+    }
+
+    #[test]
+    fn test_tracecontext_keys() {
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![TracePropagationStyle::TraceContext]),
+            ..Default::default()
+        };
+
+        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+
+        assert_eq!(vec!["traceparent", "tracestate"], propagator.keys())
+    }
+
+    #[test]
+    fn test_datadog_keys() {
+        let config = config::PropagationConfig {
+            style_extract: Some(vec![TracePropagationStyle::Datadog]),
+            ..Default::default()
+        };
+
+        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+
+        assert_eq!(
+            vec![
+                "x-datadog-trace-id",
+                "x-datadog-origin",
+                "x-datadog-parent-id",
+                "x-datadog-sampling-priority",
+                "x-datadog-tags",
+            ],
+            propagator.keys()
+        )
     }
 }

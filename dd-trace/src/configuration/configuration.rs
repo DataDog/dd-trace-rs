@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{borrow::Cow, ops::Deref, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
@@ -30,6 +30,54 @@ impl FromStr for LogLevel {
         } else {
             Err("log level should be one of DEBUG, WARN, ERROR")
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TracePropagationStyle {
+    Datadog,
+    TraceContext,
+    None,
+}
+
+impl TracePropagationStyle {
+    fn parse_source(
+        source: CompositeConfigSourceResult<String>,
+    ) -> Option<Vec<TracePropagationStyle>> {
+        match source.value {
+            Some(config_key) => Some(
+                config_key
+                    .value
+                    .split(',')
+                    .filter_map(|value| TracePropagationStyle::from_str(value).ok())
+                    .collect(),
+            ),
+            None => None,
+        }
+    }
+}
+
+impl FromStr for TracePropagationStyle {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "datadog" => Ok(TracePropagationStyle::Datadog),
+            "tracecontext" => Ok(TracePropagationStyle::TraceContext),
+            "none" => Ok(TracePropagationStyle::None),
+            _ => Err(format!("Unknown trace propagation style: {s}")),
+        }
+    }
+}
+
+impl Display for TracePropagationStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let style = match self {
+            TracePropagationStyle::Datadog => "datadog",
+            TracePropagationStyle::TraceContext => "tracecontext",
+            TracePropagationStyle::None => "none",
+        };
+        write!(f, "{style}")
     }
 }
 
@@ -90,6 +138,12 @@ pub struct Config {
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
+
+    // Trace propagation configuration
+    trace_propagation_style: Option<Vec<TracePropagationStyle>>,
+    trace_propagation_style_extract: Option<Vec<TracePropagationStyle>>,
+    trace_propagation_style_inject: Option<Vec<TracePropagationStyle>>,
+    trace_propagation_extract_first: bool,
 }
 
 impl Config {
@@ -140,6 +194,19 @@ impl Config {
                 .or(default.trace_sample_rate),
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
+            trace_propagation_style: TracePropagationStyle::parse_source(
+                sources.get("DD_TRACE_PROPAGATION_STYLE"),
+            ),
+            trace_propagation_style_extract: TracePropagationStyle::parse_source(
+                sources.get("DD_TRACE_PROPAGATION_STYLE_EXTRACT"),
+            ),
+            trace_propagation_style_inject: TracePropagationStyle::parse_source(
+                sources.get("DD_TRACE_PROPAGATION_STYLE_INJECT"),
+            ),
+            trace_propagation_extract_first: to_val(
+                sources.get_parse("DD_TRACE_PROPAGATION_EXTRACT_FIRST"),
+            )
+            .unwrap_or(default.trace_propagation_extract_first),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
         }
@@ -219,6 +286,22 @@ impl Config {
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
     }
+
+    pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style.as_deref()
+    }
+
+    pub fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style_extract.as_deref()
+    }
+
+    pub fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style_inject.as_deref()
+    }
+
+    pub fn trace_propagation_extract_first(&self) -> bool {
+        self.trace_propagation_extract_first
+    }
 }
 
 impl Default for Config {
@@ -241,6 +324,11 @@ impl Default for Config {
             language_version: "TODO: Get from env",
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: false,
+
+            trace_propagation_style: None,
+            trace_propagation_style_extract: None,
+            trace_propagation_style_inject: None,
+            trace_propagation_extract_first: false,
         }
     }
 }
@@ -292,6 +380,27 @@ impl ConfigBuilder {
 
     pub fn set_trace_sample_rate(&mut self, sample_rate: f64) -> &mut Self {
         self.config.trace_sample_rate = Some(sample_rate);
+        self
+    }
+
+    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &Self {
+        self.config.trace_propagation_style = Some(styles);
+        self
+    }
+
+    pub fn set_trace_propagation_style_extract(
+        &mut self,
+        styles: Vec<TracePropagationStyle>,
+    ) -> &Self {
+        self.config.trace_propagation_style_extract = Some(styles);
+        self
+    }
+
+    pub fn set_trace_propagation_style_inject(
+        &mut self,
+        styles: Vec<TracePropagationStyle>,
+    ) -> &Self {
+        self.config.trace_propagation_style_inject = Some(styles);
         self
     }
 

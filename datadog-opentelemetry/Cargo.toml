@@ -11,6 +11,7 @@ description.workspace = true
 [dependencies]
 # Workspace dependencies
 dd-trace = { path = "../dd-trace" }
+dd-trace-propagation = { path = "../dd-trace-propagation" }
 
 # External dependencies
 futures = { workspace = true }
