@@ -6,3 +6,4 @@ mod configuration;
 mod sources;
 
 pub use configuration::Config;
+pub use configuration::TracePropagationStyle;

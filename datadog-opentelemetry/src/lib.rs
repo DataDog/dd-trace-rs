@@ -4,11 +4,16 @@
 mod ddtrace_transform;
 mod span_exporter;
 mod span_processor;
+mod text_map_propagator;
 mod trace_id;
 mod transform;
 
+use std::sync::Arc;
+
+use dd_trace_propagation::config::PropagationConfig;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use span_processor::DatadogSpanProcessor;
+use text_map_propagator::DatadogPropagator;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -37,10 +42,8 @@ pub fn init_datadog(
     // all parameters and has an install method?
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
-    // TODO: Setup datadog specific textmap propagator
-    opentelemetry::global::set_text_map_propagator(
-        opentelemetry_sdk::propagation::TraceContextPropagator::new(),
-    );
+    let propagator = DatadogPropagator::new(Arc::new(PropagationConfig::from(&config)));
+    opentelemetry::global::set_text_map_propagator(propagator);
 
     let tracer_provider = tracer_provider_builder
         .with_span_processor(DatadogSpanProcessor::new(config))

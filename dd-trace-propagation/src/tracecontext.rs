@@ -18,7 +18,7 @@ use crate::{
 use dd_trace::{dd_debug, dd_error, dd_warn};
 
 // Traceparent Keys
-const TRACEPARENT_KEY: &str = "traceparent";
+pub const TRACEPARENT_KEY: &str = "traceparent";
 pub const TRACESTATE_KEY: &str = "tracestate";
 
 const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
@@ -32,7 +32,7 @@ const INVALID_CHAR_REPLACEMENT: &str = "_";
 
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
-        Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
+        Regex::new(r"^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
             .expect("failed creating regex");
 
     // Origin value in tracestate replaces '~', ',' and ';' with '_"
@@ -44,6 +44,8 @@ lazy_static! {
 
     static ref TRACESTATE_TAG_VALUE_FILTER_REGEX: Regex =
         Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
+
+    static ref TRACECONTEXT_HEADER_KEYS: [String; 2] = [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()];
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -256,14 +258,14 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     let flags = &captures[4];
     let tail = captures.get(5).map_or("", |m| m.as_str());
 
-    extract_version(version, tail)?;
-
     let trace_id = extract_trace_id(trace_id)?;
 
     let span_id = extract_span_id(span_id)?;
-
     let trace_flags = extract_trace_flags(flags)?;
-    let sampling_priority = SamplingPriority::from_flag(trace_flags as i8);
+
+    extract_version(version, tail, trace_flags)?;
+
+    let sampling_priority = SamplingPriority::from_flags(trace_flags & 0x1);
 
     Ok(Traceparent {
         sampling_priority,
@@ -272,7 +274,7 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     })
 }
 
-fn extract_version(version: &str, tail: &str) -> Result<(), Error> {
+fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Error> {
     match version {
         "ff" => {
             return Err(Error::extract(
@@ -281,9 +283,15 @@ fn extract_version(version: &str, tail: &str) -> Result<(), Error> {
             ))
         }
         "00" => {
-            if !tail.is_empty() {
+            if !tail.is_empty() && tail != "-" {
                 return Err(Error::extract(
                     "Traceparent with version `00` should contain only 4 values delimited by `-`",
+                    "traceparent",
+                ));
+            }
+            if trace_flags > 2 {
+                return Err(Error::extract(
+                    "invalid trace flags for version 00",
                     "traceparent",
                 ));
             }
@@ -329,12 +337,18 @@ fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
         .map_err(|_| Error::extract("Failed to decode trace_flags", "traceparent"))
 }
 
+pub fn keys() -> &'static [String] {
+    TRACECONTEXT_HEADER_KEYS.as_slice()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
+    use dd_trace::configuration::TracePropagationStyle;
+
     use crate::{
         context::{SamplingMechanism, SamplingPriority},
-        trace_propagation_style::TracePropagationStyle,
+        Propagator,
     };
 
     use super::*;
