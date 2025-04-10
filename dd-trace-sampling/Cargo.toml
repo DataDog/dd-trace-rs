@@ -14,6 +14,8 @@ description.workspace = true
 [dependencies]
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
+lru = "0.10.1"
+regex = "1.10.3"
 
 [dev-dependencies]
 # Add any testing dependencies here if needed
