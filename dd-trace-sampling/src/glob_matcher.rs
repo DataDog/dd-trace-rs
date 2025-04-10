@@ -9,12 +9,10 @@ use std::sync::Mutex;
 /// A backtracking implementation of the glob matching algorithm.
 ///
 /// The glob pattern language supports `*` as a multiple character wildcard (including empty string)
-/// and `?` as a single character wildcard. The match is case insensitive.
+/// and `?` as a single character wildcard (not including empty string). The match is case insensitive.
 ///
 /// This implementation includes an LRU cache for faster repeated matching.
 pub struct GlobMatcher {
-    /// The original glob pattern
-    pattern: String,
     /// Lowercased pattern for case-insensitive matching
     pattern_lower: String,
     /// LRU cache of previously matched strings to their results
@@ -24,7 +22,6 @@ pub struct GlobMatcher {
 impl fmt::Debug for GlobMatcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GlobMatcher")
-            .field("pattern", &self.pattern)
             .field("pattern_lower", &self.pattern_lower)
             .field("cache_size", &self.cache.lock().unwrap().len())
             .finish()
@@ -37,15 +34,14 @@ impl GlobMatcher {
         // Use a cache of size 256 
         let cache_size = NonZeroUsize::new(256).unwrap();
         GlobMatcher {
-            pattern: pattern.to_string(),
             pattern_lower: pattern.to_lowercase(),
             cache: Mutex::new(LruCache::new(cache_size)),
         }
     }
 
-    /// Returns the original pattern
-    pub fn pattern(&self) -> &str {
-        &self.pattern
+    /// Returns the pattern (lowercase version)
+    pub fn pattern(&self) -> String {
+        self.pattern_lower.clone()
     }
     
     /// Checks if the given subject matches the glob pattern
@@ -61,7 +57,7 @@ impl GlobMatcher {
             }
         }
         
-        // Following Python's backtracking algorithm
+        // Backtracking algorithm
         let pattern = self.pattern_lower.as_bytes();
         let subject = subject_lower.as_bytes();
         
@@ -122,7 +118,10 @@ impl Clone for GlobMatcher {
     fn clone(&self) -> Self {
         // Create a new matcher with the same pattern
         // This doesn't clone the cache since each instance maintains its own cache
-        GlobMatcher::new(&self.pattern)
+        GlobMatcher {
+            pattern_lower: self.pattern_lower.clone(),
+            cache: Mutex::new(LruCache::new(NonZeroUsize::new(256).unwrap())),
+        }
     }
 }
 
