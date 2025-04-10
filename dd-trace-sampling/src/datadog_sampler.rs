@@ -4,13 +4,11 @@
 // This file will contain the DatadogSampler implementation
 // Actual implementation will be added later
 
-use opentelemetry::trace::{SpanId, TraceId, TraceState};
-use opentelemetry::{Context, Key, KeyValue, Value};
+use opentelemetry::trace::TraceId;
+use opentelemetry::{Context, KeyValue, Value};
 use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextExt};
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
@@ -60,29 +58,29 @@ impl SamplingRule {
         provenance: Option<String>,
     ) -> Self {
         // Create glob matchers for the patterns
-        let name_matcher = name.as_ref().map(|n| {
+        let name_matcher = name.as_ref().and_then(|n| {
             if n != NO_RULE {
                 Some(GlobMatcher::new(n))
             } else {
                 None
             }
-        }).flatten();
+        });
         
-        let service_matcher = service.as_ref().map(|s| {
+        let service_matcher = service.as_ref().and_then(|s| {
             if s != NO_RULE {
                 Some(GlobMatcher::new(s))
             } else {
                 None
             }
-        }).flatten();
+        });
         
-        let resource_matcher = resource.as_ref().map(|r| {
+        let resource_matcher = resource.as_ref().and_then(|r| {
             if r != NO_RULE {
                 Some(GlobMatcher::new(r))
             } else {
                 None
             }
-        }).flatten();
+        });
         
         // Create matchers for tag values
         let tag_map = tags.clone().unwrap_or_default();

@@ -34,8 +34,8 @@ impl fmt::Debug for GlobMatcher {
 impl GlobMatcher {
     /// Creates a new GlobMatcher with the given pattern
     pub fn new(pattern: &str) -> Self {
-        // Use a reasonably sized LRU cache
-        let cache_size = NonZeroUsize::new(100).unwrap();
+        // Use a cache of size 256 
+        let cache_size = NonZeroUsize::new(256).unwrap();
         GlobMatcher {
             pattern: pattern.to_string(),
             pattern_lower: pattern.to_lowercase(),
@@ -182,11 +182,11 @@ mod tests {
         let matcher = GlobMatcher::new("c*t?r*");
         
         // First match should populate cache
-        assert!(matcher.matches("controller"));
+        assert!(matcher.matches("contoroller"));
         
         // Check the cache
         let cache = matcher.cache.lock().unwrap();
-        assert!(cache.contains(&"controller".to_string()));
+        assert!(cache.contains(&"contoroller".to_string()));
         drop(cache);
         
         // Add another entry to cache
@@ -194,7 +194,7 @@ mod tests {
         
         // Verify both are in cache
         let cache = matcher.cache.lock().unwrap();
-        assert!(cache.contains(&"controller".to_string()));
+        assert!(cache.contains(&"contoroller".to_string()));
         assert!(cache.contains(&"car".to_string()));
     }
 }
