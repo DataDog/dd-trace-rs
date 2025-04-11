@@ -19,6 +19,10 @@ regex = { version = "1.10", default-features = false, features = ["unicode-case"
 serde = { version = "1.0", default-features = false, optional = true, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, optional = true, features = ["alloc"] }
 
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+assert_unordered = "0.3"
+
 [features]
 default = []
 serde_config = ["serde", "serde_json"]

@@ -2,7 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [workspace]
-members = ["datadog-opentelemetry", "dd-trace", "dd-trace-propagation"]
+members = [
+    "datadog-opentelemetry",
+    "dd-trace",
+    "dd-trace-propagation",
+    "dd-trace-sampling",
+]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
 resolver = "2"
@@ -15,15 +20,6 @@ license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
 description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
-
-[profile.dev]
-debug = 2 # full debug info
-
-[profile.bench]
-codegen-units = 1
-debug = false
-incremental = false
-opt-level = 3
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
@@ -39,3 +35,12 @@ opentelemetry = { version = "0.28.0", features = [
     "trace",
 ], default-features = false }
 tokio = { version = "1.44.1" }
+
+[profile.dev]
+debug = 2 # full debug info
+
+[profile.bench]
+codegen-units = 1
+debug = false
+incremental = false
+opt-level = 3

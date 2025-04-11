@@ -19,11 +19,12 @@ mod tracecontext;
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
-    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
+    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector);
 }
 
 pub struct DatadogCompositePropagator {
-    propagators: Vec<TracePropagationStyle>,
+    extractors: Vec<TracePropagationStyle>,
+    injectors: Vec<TracePropagationStyle>,
 
     #[allow(dead_code)]
     config: Arc<config::Config>,
@@ -42,21 +43,23 @@ impl Propagator for DatadogCompositePropagator {
         Some(context)
     }
 
-    fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
-        todo!()
+    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
+        self.injectors
+            .iter()
+            .for_each(|propagator| propagator.inject(context, carrier));
     }
 }
 
 impl DatadogCompositePropagator {
     #[must_use]
     pub fn new(config: Arc<config::Config>) -> Self {
-        let mut num_propagators = config.trace_propagation_style_extract.len();
+        let mut num_propagators = config.get_extractors().len();
         if config.trace_propagation_extract_first {
             num_propagators = 1;
         };
 
-        let propagators: Vec<TracePropagationStyle> = config
-            .trace_propagation_style_extract
+        let extractors: Vec<TracePropagationStyle> = config
+            .get_extractors()
             .iter()
             .take(num_propagators)
             .filter_map(|style| match style {
@@ -66,8 +69,19 @@ impl DatadogCompositePropagator {
             })
             .collect();
 
+        let injectors: Vec<TracePropagationStyle> = config
+            .get_injectors()
+            .iter()
+            .filter_map(|style| match style {
+                TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
+                TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
+                _ => None,
+            })
+            .collect();
+
         Self {
-            propagators,
+            extractors,
+            injectors,
             config,
         }
     }
@@ -78,7 +92,7 @@ impl DatadogCompositePropagator {
     ) -> Vec<(SpanContext, TracePropagationStyle)> {
         let mut contexts = vec![];
 
-        for propagator in self.propagators.iter() {
+        for propagator in self.extractors.iter() {
             if let Some(context) = propagator.extract(carrier) {
                 contexts.push((context, *propagator));
             }
@@ -142,11 +156,15 @@ impl DatadogCompositePropagator {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{collections::HashMap, vec};
+    use std::{collections::HashMap, str::FromStr, vec};
+
+    use assert_unordered::assert_eq_unordered;
+
+    use pretty_assertions::assert_eq;
 
     use lazy_static::lazy_static;
 
-    use crate::context::Sampling;
+    use crate::context::{Sampling, SamplingMechanism, SamplingPriority, Tracestate};
 
     use super::*;
 
@@ -287,16 +305,32 @@ pub mod tests {
                 fn $name() {
                     let (styles, carrier, expected) = $value;
                     let mut config = config::Config::default();
-                    config.trace_propagation_style_extract = vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext];
-                    if let Some(s) = styles {
-                        config.trace_propagation_style_extract.clone_from(&s);
-                    }
+                    config.trace_propagation_style_extract = Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]);
+                    config.trace_propagation_style_extract.clone_from(&styles);
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
                     let context = propagator.extract(&carrier).unwrap_or_default();
 
-                    assert_eq!(context, expected);
+                    assert_eq!(context.trace_id, expected.trace_id);
+                    assert_eq!(context.span_id, expected.span_id);
+                    assert_eq!(context.sampling, expected.sampling);
+                    assert_eq!(context.origin, expected.origin);
+                    assert_eq_unordered!(context.tags, expected.tags);
+                    assert_eq!(context.links, expected.links);
+                    assert_eq!(context.is_remote, expected.is_remote);
+
+                    if expected.tracestate.is_some() {
+                        let expected_ts = expected.tracestate.unwrap();
+                        let context_ts = context.tracestate.unwrap();
+
+                        assert_eq!(context_ts.sampling, expected_ts.sampling);
+                        assert_eq!(context_ts.origin, expected_ts.origin);
+                        assert_eq!(context_ts.lower_order_trace_id, expected_ts.lower_order_trace_id);
+                        assert_eq_unordered!(context_ts.propagation_tags, expected_ts.propagation_tags);
+                    } else {
+                        assert_eq!(context.tracestate, expected.tracestate);
+                    }
                 }
             )*
         }
@@ -311,7 +345,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -319,6 +353,8 @@ pub mod tests {
                     ("_dd.p.dm".to_string(), "-3".to_string())
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             }
         ),
         valid_datadog_no_priority: (
@@ -328,7 +364,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(2),
+                    priority: Some(SamplingPriority::UserKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -336,6 +372,8 @@ pub mod tests {
                     ("_dd.p.dm".to_string(), "-3".to_string())
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             },
         ),
         invalid_datadog: (
@@ -350,7 +388,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -358,6 +396,8 @@ pub mod tests {
                     ("_dd.p.dm".to_string(), "-3".to_string())
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             },
         ),
         invalid_datadog_negative_trace_id: (
@@ -386,7 +426,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(2),
+                    priority: Some(SamplingPriority::UserKeep),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -396,6 +436,8 @@ pub mod tests {
                     ("_dd.parent_id".to_string(), "00f067aa0ba902b7".to_string()),
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: Tracestate::from_str("dd=p:00f067aa0ba902b7;s:2;o:rum").ok()
             }
         ),
         valid_tracecontext_rum_no_sampling_decision: (
@@ -405,7 +447,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(0),
+                    priority: Some(SamplingPriority::AutoReject),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -414,6 +456,8 @@ pub mod tests {
                     ("traceparent".to_string(), "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string()),
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: Tracestate::from_str("dd=o:rum").ok()
             }
         ),
         // B3 Headers
@@ -428,7 +472,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -448,6 +492,8 @@ pub mod tests {
                         ])),
                     }
                 ],
+                is_remote: true,
+                tracestate: None
             },
         ),
         valid_all_headers_all_styles: (
@@ -457,7 +503,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -478,6 +524,8 @@ pub mod tests {
                     }
                     // todo: b3 span links
                 ],
+                is_remote: true,
+                tracestate: None
             },
         ),
         valid_all_headers_datadog_style: (
@@ -487,14 +535,16 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
                 ]),
-                links: vec![]
+                links: vec![],
+                is_remote: true,
+                tracestate: None
             },
         ),
         // todo: valid_all_headers_b3_style
@@ -512,7 +562,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -520,6 +570,8 @@ pub mod tests {
                     ("_dd.p.dm".to_string(), "-3".to_string())
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             }
         ),
         // Order matters
@@ -535,7 +587,7 @@ pub mod tests {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -545,6 +597,8 @@ pub mod tests {
                     (TRACESTATE_KEY.to_string(), "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string())
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             }
         ),
         // Tracestate is not added when TraceContext style comes later and does not
@@ -556,7 +610,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -576,6 +630,8 @@ pub mod tests {
                         ])),
                     }
                 ],
+                is_remote: true,
+                tracestate: None
             }
         ),
         valid_all_headers_no_style: (
@@ -597,7 +653,7 @@ pub mod tests {
                 trace_id: 9_291_375_655_657_946_024,
                 span_id: 10,
                 sampling: Some(Sampling {
-                    priority: Some(2),
+                    priority: Some(SamplingPriority::UserKeep),
                     mechanism: None,
                 }),
                 origin: None,
@@ -606,6 +662,8 @@ pub mod tests {
                     ("_dd.p.dm".to_string(), "-3".to_string()),
                 ]),
                 links: vec![],
+                is_remote: true,
+                tracestate: None
             }
         ),
         // todo: all_headers_all_styles_tracecontext_t_id_match_no_span_link
@@ -616,7 +674,7 @@ pub mod tests {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(2),
+                    priority: Some(SamplingPriority::UserKeep),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -634,11 +692,13 @@ pub mod tests {
                         flags: Some(1),
                         tracestate: None,
                         attributes: Some(HashMap::from([
-                            ("reason".to_string(), "terminated_context".to_string()),
                             ("context_headers".to_string(), "datadog".to_string()),
+                            ("reason".to_string(), "terminated_context".to_string()),
                         ])),
                     }
                 ],
+                is_remote: true,
+                tracestate: Tracestate::from_str("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE").ok()
             }
         ),
         all_headers_all_styles_tracecontext_primary_only_datadog_t_id_diff: (
@@ -648,7 +708,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(2),
+                    priority: Some(SamplingPriority::UserKeep),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -671,6 +731,14 @@ pub mod tests {
                         ])),
                     }
                 ],
+                is_remote: true,
+                tracestate: Some(Tracestate {
+                    sampling: Some(Sampling { priority: Some(SamplingPriority::UserKeep), mechanism: Some(SamplingMechanism::Manual) }),
+                    origin: Some("rum".to_string()),
+                    lower_order_trace_id: None,
+                    propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
+                    additional_values: Some(vec!["congo=t61rcWkgMz".to_string()])
+                }),
             }
         ),
 
@@ -681,7 +749,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(1),
+                    priority: Some(SamplingPriority::AutoKeep),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -701,6 +769,8 @@ pub mod tests {
                         ])),
                     }
                 ],
+                is_remote: true,
+                tracestate: None
             }
         ),
         // todo: datadog_primary_match_tracecontext_dif_from_b3_b3multi_invalid
@@ -709,36 +779,36 @@ pub mod tests {
     #[test]
     fn test_new_filter_propagators() {
         let config = config::Config {
-            trace_propagation_style_extract: vec![
+            trace_propagation_style_extract: Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ],
+            ]),
             ..Default::default()
         };
 
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
-        assert_eq!(propagator.propagators.len(), 2);
+        assert_eq!(propagator.extractors.len(), 2);
     }
 
     #[test]
     fn test_new_no_propagators() {
         let config = config::Config {
-            trace_propagation_style_extract: vec![TracePropagationStyle::None],
+            trace_propagation_style_extract: Some(vec![TracePropagationStyle::None]),
             ..Default::default()
         };
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
-        assert_eq!(propagator.propagators.len(), 0);
+        assert_eq!(propagator.extractors.len(), 0);
     }
 
     #[test]
     fn test_extract_available_contexts() {
         let config = config::Config {
-            trace_propagation_style_extract: vec![
+            trace_propagation_style_extract: Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -776,7 +846,7 @@ pub mod tests {
     #[test]
     fn test_extract_available_contexts_no_contexts() {
         let config = config::Config {
-            trace_propagation_style_extract: vec![TracePropagationStyle::Datadog],
+            trace_propagation_style_extract: Some(vec![TracePropagationStyle::Datadog]),
             ..Default::default()
         };
 
@@ -795,5 +865,258 @@ pub mod tests {
         let contexts = propagator.extract_available_contexts(&carrier);
 
         assert_eq!(contexts.len(), 0);
+    }
+
+    fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
+        for (k, expected_value) in hm1.clone() {
+            assert!(
+                hm2.get(&k).is_some(),
+                "{k} is missing in {hm2:?}. Compared to {hm1:?}"
+            );
+
+            if let Some(carrier_value) = &hm2.get(&k) {
+                match k.as_str() {
+                    "x-datadog-tags" => assert_eq_unordered!(
+                        carrier_value.split(',').collect::<Vec<&str>>(),
+                        expected_value.split(',').collect::<Vec<&str>>(),
+                        "wrong x-datadog-tags"
+                    ),
+                    "tracestate" => assert_eq_unordered!(
+                        carrier_value.split(';').collect::<Vec<&str>>(),
+                        expected_value.split(';').collect::<Vec<&str>>(),
+                        "wrong tracestate"
+                    ),
+                    _ => assert_eq!(**carrier_value, expected_value),
+                }
+            }
+        }
+    }
+
+    macro_rules! test_propagation_inject {
+        ($($name:ident: $value:expr,)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let (styles, context, expected) = $value;
+                    let mut config = config::Config::default();
+
+                    config.trace_propagation_style_inject.clone_from(&styles);
+
+                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
+
+                    let mut carrier = HashMap::new();
+                    propagator.inject(context, &mut carrier);
+
+                    assert_hashmap_keys(&expected, &carrier);
+                    assert_hashmap_keys(&carrier, &expected);
+                }
+            )*
+        }
+    }
+
+    lazy_static! {
+        static ref INJECT_DATADOG_VALID_HEADERS_128BIT: HashMap<String, String> = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                TRACE_ID_LOWER_ORDER_BITS.to_string()
+            ),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.tid=80f198ee56343ba8,_dd.p.dm=-3".to_string()
+            ),
+        ]);
+        static ref INJECT_TRACECONTEXT_VALID_HEADERS_128BIT: HashMap<String, String> =
+            HashMap::from([
+                (
+                    "traceparent".to_string(),
+                    "00-80f198ee56343ba864fe8b2a57d3eff7-000000000000162e-01".to_string(),
+                ),
+                (
+                    "tracestate".to_string(),
+                    "dd=s:1;o:synthetics;p:000000000000162e;t.dm:-3".to_string(),
+                ),
+            ]);
+        static ref INJECT_ALL_VALID_HEADERS_128BIT: HashMap<String, String> = {
+            let mut h = HashMap::new();
+            h.extend(INJECT_DATADOG_VALID_HEADERS_128BIT.clone());
+            h.extend(INJECT_TRACECONTEXT_VALID_HEADERS_128BIT.clone());
+
+            // datadog propagator adds _dd.p.tid tag when injecting and it ends up in tracestate
+            h.insert(
+                "tracestate".to_string(),
+                h["tracestate"].clone() + ";t.tid:80f198ee56343ba8",
+            );
+            h
+        };
+        static ref INJECT_ALL_VALID_HEADERS_128BIT_WITHOUT_TID: HashMap<String, String> = {
+            let mut h = HashMap::new();
+            h.extend(INJECT_DATADOG_VALID_HEADERS_128BIT.clone());
+            h.extend(INJECT_TRACECONTEXT_VALID_HEADERS_128BIT.clone());
+
+            h
+        };
+        static ref INJECT_ALL_VALID_HEADERS: HashMap<String, String> = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                TRACE_ID_LOWER_ORDER_BITS.to_string()
+            ),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-tags".to_string(), "_dd.p.dm=-3".to_string()),
+            (
+                "traceparent".to_string(),
+                "00-000000000000000064fe8b2a57d3eff7-000000000000162e-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=s:1;o:synthetics;p:000000000000162e;t.dm:-3".to_string(),
+            ),
+        ]);
+    }
+
+    test_propagation_inject! {
+        inject_default_64bit_trace_id: (
+            None,
+            &mut SpanContext {
+                trace_id: *TRACE_ID_LOWER_ORDER_BITS as u128,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            INJECT_ALL_VALID_HEADERS.clone()
+        ),
+
+        inject_default_128bit_trace_id: (
+            None,
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            INJECT_ALL_VALID_HEADERS_128BIT.clone()
+        ),
+
+        inject_datadog_128bit_trace_id: (
+            Some(vec![TracePropagationStyle::Datadog]),
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            INJECT_DATADOG_VALID_HEADERS_128BIT.clone()
+        ),
+
+        inject_tracecontext_128bit_trace_id: (
+            Some(vec![TracePropagationStyle::TraceContext]),
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            INJECT_TRACECONTEXT_VALID_HEADERS_128BIT.clone()
+        ),
+
+        inject_tracecontext_tracecontext_and_datadog: (
+            Some(vec![TracePropagationStyle::TraceContext, TracePropagationStyle::Datadog]),
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            INJECT_ALL_VALID_HEADERS_128BIT_WITHOUT_TID.clone()
+        ),
+
+        inject_tracecontext_empty_config: (
+            Some(vec![]),
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            HashMap::<String,String>::new()
+        ),
+
+        inject_tracecontext_style_none: (
+            Some(vec![TracePropagationStyle::None]),
+            &mut SpanContext {
+                trace_id: *TRACE_ID,
+                span_id: 5678,
+                sampling: Some(Sampling {
+                    priority: Some(SamplingPriority::AutoKeep),
+                    mechanism: None,
+                }),
+                origin: Some("synthetics".to_string()),
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            HashMap::<String,String>::new()
+        ),
     }
 }
