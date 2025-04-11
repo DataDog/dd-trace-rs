@@ -1,0 +1,22 @@
+[
+  {
+    "Start": 0,
+    "Duration": 10000000000,
+    "Stats": [
+      {
+        "Name": "test",
+        "Resource": "test",
+        "Service": "unnamed-rust-service",
+        "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 2,
+        "TopLevelHits": 2,
+        "Duration": 200000000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      }
+    ]
+  }
+]

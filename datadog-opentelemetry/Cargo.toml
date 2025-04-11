@@ -1,0 +1,35 @@
+[package]
+name = "datadog-opentelemetry"
+# rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+
+[dependencies]
+# Workspace dependencies
+dd-trace = { path = "../dd-trace" }
+
+# External dependencies
+futures = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry = { workspace = true }
+
+# Libdatadog dependencies
+data-pipeline = { workspace = true }
+datadog-trace-utils = { workspace = true }
+tinybytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+# Libdatadog dependencies - change to a stable version once we release
+datadog-trace-utils = { workspace = true, features = ["test-utils"] }
+
+# Depend on ourselves to have APIs exposed only during tests
+datadog-opentelemetry = { path = ".", features = ["test-utils"] }
+
+[features]
+test-utils = ["dd-trace/test-utils"]

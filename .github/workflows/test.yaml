@@ -4,7 +4,7 @@ permissions:
 on: [push]
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.78.0
+  RUST_VERSION: 1.81.0
 
 jobs:
   test:
@@ -49,13 +49,19 @@ jobs:
       - name: "Remove nextest CI report"
         shell: bash
         run: rm -rf target/nextest/ci/junit.xml
-      - name: "[${{ steps.rust-version.outputs.version}}] cargo build --workspace  --verbose"
+      - name: "[${{ steps.rust-version.outputs.version}}] cargo build --workspace  --verbose --locked"
         shell: bash
-        run: cargo build --workspace  --verbose
-      - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci"
+        run: cargo build --workspace  --verbose --locked
+      - name: "[${{ steps.rust-version.outputs.version}}] test agent integration tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo nextest run --workspace  --profile ci --locked -E 'test(datadog_test_agent::)'
+        env:
+          RUST_BACKTRACE: 1
+      - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci --locked"
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
-        run: cargo test --workspace  --doc --verbose && cargo nextest run --workspace  --profile ci
+        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(datadog_test_agent::)'
         env:
           RUST_BACKTRACE: 1
       - name: Report Test Results
@@ -90,5 +96,5 @@ jobs:
         with:
           rust_version: cross-centos7
       - run: cargo install cross || true
-      - run: cross build --workspace --target x86_64-unknown-linux-gnu 
-      - run: cross test --workspace --target x86_64-unknown-linux-gnu
+      - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
+      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "datadog_test_agent::"
