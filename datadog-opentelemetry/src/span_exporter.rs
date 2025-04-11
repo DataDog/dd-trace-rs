@@ -19,6 +19,8 @@ use opentelemetry_sdk::{
     trace::SpanData,
 };
 
+use crate::otel_trace_transform;
+
 /// A reasonnable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
 const SPAN_EXPORTER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
@@ -54,7 +56,8 @@ impl DatadogExporter {
                 .set_tracer_version(config.tracer_version())
                 .set_language_version(config.language_version())
                 .set_service(config.service())
-                .set_output_format(TraceExporterOutputFormat::V04);
+                .set_output_format(TraceExporterOutputFormat::V04)
+                .set_client_computed_top_level();
             if let Some(env) = config.env() {
                 builder.set_env(env);
             }
@@ -137,6 +140,15 @@ impl opentelemetry_sdk::trace::SpanExporter for DatadogExporter {
             })?;
         self.join()
     }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        let _ = self
+            .trace_exporter
+            .tx
+            .send(TraceExporterMessage::SetRessource {
+                resource: resource.clone(),
+            });
+    }
 }
 
 impl fmt::Debug for DatadogExporter {
@@ -148,6 +160,7 @@ impl fmt::Debug for DatadogExporter {
 struct TraceExporterTask {
     trace_exporter: TraceExporter,
     cfg: dd_trace::Config,
+    otel_ressoure: opentelemetry_sdk::Resource,
     rx: Receiver<TraceExporterMessage>,
 }
 
@@ -171,6 +184,7 @@ impl TraceExporterTask {
                 trace_exporter,
                 cfg,
                 rx,
+                otel_ressoure: opentelemetry_sdk::Resource::builder_empty().build(),
             };
             task.run()
         });
@@ -180,7 +194,7 @@ impl TraceExporterTask {
         }
     }
 
-    fn run(self) -> Result<(), TraceExporterError> {
+    fn run(mut self) -> Result<(), TraceExporterError> {
         #[cfg(feature = "test-utils")]
         {
             // Wait for the agent info to be fetched to get deterministic output when deciding
@@ -212,13 +226,18 @@ impl TraceExporterTask {
                         .trace_exporter
                         .shutdown(Some(SPAN_EXPORTER_SHUTDOWN_TIMEOUT));
                 }
+                TraceExporterMessage::SetRessource { resource } => self.otel_ressoure = resource,
             }
         }
     }
 
     fn export_otel_span_data(&self, span_data: Vec<SpanData>) -> OTelSdkResult {
         let trace_chunks: Vec<Vec<datadog_trace_utils::span::Span<tinybytes::BytesString>>> =
-            crate::span_conversion::otel_span_data_to_dd_trace_chunks(&self.cfg, span_data);
+            otel_trace_transform::otel_span_data_to_dd_trace_chunks(
+                &self.cfg,
+                span_data,
+                &self.otel_ressoure,
+            );
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
             Ok(_rate_reponse) => {
                 // TODO: propagate rate response to the sampler configuration
@@ -233,6 +252,9 @@ enum TraceExporterMessage {
     SendSpan {
         span_data: Vec<SpanData>,
         responder: oneshot::Sender<OTelSdkResult>,
+    },
+    SetRessource {
+        resource: opentelemetry_sdk::Resource,
     },
     Shutdown,
 }

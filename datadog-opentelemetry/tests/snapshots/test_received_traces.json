@@ -1,6 +1,6 @@
 [[
   {
-    "name": "test",
+    "name": "client.request",
     "service": "unnamed-rust-service",
     "resource": "test",
     "trace_id": 0,
@@ -8,10 +8,13 @@
     "parent_id": 0,
     "type": "http",
     "meta": {
-      "_dd.p.tid": "0000000000000000",
+      "otel.library.name": "test",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "000000000000000000000000000004d2",
       "span.kind": "client"
     },
     "metrics": {
+      "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0
     },

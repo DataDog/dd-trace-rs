@@ -1,8 +1,9 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-mod span_conversion;
+mod otel_trace_transform;
 mod span_exporter;
+mod transform;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
 // TODO(paullgdc): Should we export this or just the setup function?

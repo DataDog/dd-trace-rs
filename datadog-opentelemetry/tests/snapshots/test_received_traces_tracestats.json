@@ -4,7 +4,7 @@
     "Duration": 10000000000,
     "Stats": [
       {
-        "Name": "test",
+        "Name": "client.request",
         "Resource": "test",
         "Service": "unnamed-rust-service",
         "Type": "http",
