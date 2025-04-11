@@ -13,26 +13,20 @@ description.workspace = true
 dd-trace = { path = "../dd-trace" }
 
 # External dependencies
-futures = "0.3.31"
-opentelemetry_sdk = { version = "0.28.0", features = [
-    "trace",
-], default-features = false }
-opentelemetry = { version = "0.28.0", features = [
-    "trace",
-], default-features = false }
+futures = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry = { workspace = true }
 
-# Libdatadog dependencies - change to a stable version once we release
-data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
-datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
-tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+# Libdatadog dependencies
+data-pipeline = { workspace = true }
+datadog-trace-utils = { workspace = true }
+tinybytes = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "1.44.1", features = ["full"] }
+tokio = { workspace = true }
 
 # Libdatadog dependencies - change to a stable version once we release
-datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd", features = [
-    "test-utils",
-] }
+datadog-trace-utils = { workspace = true, features = ["test-utils"] }
 
 # Depend on ourselves to have APIs exposed only during tests
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }

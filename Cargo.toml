@@ -24,3 +24,18 @@ codegen-units = 1
 debug = false
 incremental = false
 opt-level = 3
+
+[workspace.dependencies]
+# Libdatadog dependencies - change to a stable version once we release
+data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+
+futures = "0.3.31"
+opentelemetry_sdk = { version = "0.28.0", features = [
+    "trace",
+], default-features = false }
+opentelemetry = { version = "0.28.0", features = [
+    "trace",
+], default-features = false }
+tokio = { version = "1.44.1" }
