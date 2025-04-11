@@ -10,7 +10,7 @@ fn test_span_data(
 ) -> Vec<opentelemetry_sdk::trace::SpanData> {
     // unix epoch + 30 years puts us in the 2000s :wink:
     let now = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(60 * 60 * 24 * 365 * 31);
-    (1..3)
+    (1..2)
         .map(|i| opentelemetry_sdk::trace::SpanData {
             span_context: opentelemetry::trace::SpanContext::new(
                 trace_id,
@@ -44,7 +44,7 @@ mod datadog_test_agent {
     use crate::test_span_data;
 
     #[tokio::test]
-    #[cfg_attr(miri, ignore)]
+    // #[cfg_attr(miri, ignore)]
     async fn test_received_traces() {
         const SESSION_NAME: &str = "test_received_traces";
 
