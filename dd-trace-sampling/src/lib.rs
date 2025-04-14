@@ -4,7 +4,9 @@
 mod rate_sampler;
 mod datadog_sampler;
 mod glob_matcher;
+mod constants;
 
 pub use rate_sampler::*;
 pub use datadog_sampler::*;
 pub use glob_matcher::*;
+pub use constants::*;

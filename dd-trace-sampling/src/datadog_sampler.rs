@@ -1,14 +1,13 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-// This file will contain the DatadogSampler implementation
-// Actual implementation will be added later
-
 use opentelemetry::trace::TraceId;
 use opentelemetry::{Context, KeyValue, Value};
 use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextExt};
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
+
+use crate::constants::SamplingMechanism;
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;

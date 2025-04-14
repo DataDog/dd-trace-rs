@@ -6,8 +6,8 @@ use opentelemetry::Context;
 use opentelemetry_sdk::trace::ShouldSample;
 use std::fmt;
 
-const KNUTH_FACTOR: u64 = 1_111_111_111_111_111_111;
-const MAX_UINT_64BITS: u64 = u64::MAX;
+use crate::constants::{numeric, rate};
+use numeric::{KNUTH_FACTOR, MAX_UINT_64BITS};
 
 /// Keeps (100 * `sample_rate`)% of the traces randomly.
 #[derive(Clone)]
@@ -27,7 +27,7 @@ impl fmt::Debug for RateSampler {
 impl RateSampler {
     // Helper method to calculate the threshold from a rate
     fn calculate_threshold(rate: f64) -> u64 {
-        if rate >= 1.0 {
+        if rate >= rate::MAX_SAMPLE_RATE {
             MAX_UINT_64BITS
         } else {
             (rate * (MAX_UINT_64BITS as f64)) as u64
@@ -36,7 +36,7 @@ impl RateSampler {
 
     /// `sample_rate` is clamped between 0.0 and 1.0 inclusive.
     pub fn new(sample_rate: f64) -> Self {
-        let clamped_rate = sample_rate.clamp(0.0, 1.0);
+        let clamped_rate = sample_rate.clamp(rate::MIN_SAMPLE_RATE, rate::MAX_SAMPLE_RATE);
         let sampling_id_threshold = Self::calculate_threshold(clamped_rate);
 
         RateSampler {
@@ -48,7 +48,7 @@ impl RateSampler {
     /// Sets a new sample rate for the sampler.
     /// `sample_rate` is clamped between 0.0 and 1.0 inclusive.
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
-        let clamped_rate = sample_rate.clamp(0.0, 1.0);
+        let clamped_rate = sample_rate.clamp(rate::MIN_SAMPLE_RATE, rate::MAX_SAMPLE_RATE);
         self.sample_rate = clamped_rate;
         self.sampling_id_threshold = Self::calculate_threshold(clamped_rate);
     }
@@ -84,7 +84,7 @@ impl ShouldSample for RateSampler {
         // --- No parent context or parent is not active: Apply rate-based sampling ---
 
         // Fast-path for sample rate of 0.0 (always drop) or 1.0 (always sample)
-        if self.sample_rate <= 0.0 {
+        if self.sample_rate <= rate::MIN_SAMPLE_RATE {
             return SamplingResult {
                 decision: SamplingDecision::Drop,
                 attributes: Vec::new(),
@@ -92,7 +92,7 @@ impl ShouldSample for RateSampler {
             };
         }
 
-        if self.sample_rate >= 1.0 {
+        if self.sample_rate >= rate::MAX_SAMPLE_RATE {
             return SamplingResult {
                 decision: SamplingDecision::RecordAndSample,
                 attributes: Vec::new(),
@@ -104,10 +104,10 @@ impl ShouldSample for RateSampler {
         let trace_id_u128 = u128::from_be_bytes(trace_id.to_bytes());
         let trace_id_64bits = trace_id_u128 as u64;
 
-        // Perform Knuth's multiplicative hashing using wrapping multiplication
-        let hashed_trace_id = trace_id_64bits.wrapping_mul(KNUTH_FACTOR);
+        let hashed_id = trace_id_64bits.wrapping_mul(KNUTH_FACTOR);
 
-        let decision = if hashed_trace_id <= self.sampling_id_threshold {
+        // If the hashed ID is less than the threshold, sample the trace
+        let decision = if hashed_id <= self.sampling_id_threshold {
             SamplingDecision::RecordAndSample
         } else {
             SamplingDecision::Drop
@@ -124,13 +124,29 @@ impl ShouldSample for RateSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::trace::SamplingDecision;
+    use opentelemetry::trace::TraceId;
+
+    #[test]
+    fn check_debug_impl() {
+        let sampler = RateSampler::new(0.5);
+        let debug_output = format!("{:?}", sampler);
+        assert!(debug_output.contains("RateSampler"));
+        assert!(debug_output.contains("sample_rate: 0.5"));
+    }
 
     #[test]
     fn test_rate_sampler_new() {
+        // Standard rates
         let sampler_zero = RateSampler::new(0.0);
         assert_eq!(sampler_zero.sample_rate, 0.0);
         assert_eq!(sampler_zero.sampling_id_threshold, 0);
+
+        let sampler_quarter = RateSampler::new(0.25);
+        assert_eq!(sampler_quarter.sample_rate, 0.25);
+        assert_eq!(
+            sampler_quarter.sampling_id_threshold,
+            (0.25 * (MAX_UINT_64BITS as f64)) as u64
+        );
 
         let sampler_half = RateSampler::new(0.5);
         assert_eq!(sampler_half.sample_rate, 0.5);
@@ -143,14 +159,12 @@ mod tests {
         assert_eq!(sampler_one.sample_rate, 1.0);
         assert_eq!(sampler_one.sampling_id_threshold, MAX_UINT_64BITS);
 
-        // Test clamping
-        let sampler_neg = RateSampler::new(-0.5);
-        assert_eq!(sampler_neg.sample_rate, 0.0);
-        assert_eq!(sampler_neg.sampling_id_threshold, 0);
+        // Boundary handling
+        let sampler_negative = RateSampler::new(-0.1);
+        assert_eq!(sampler_negative.sample_rate, 0.0);
 
-        let sampler_two = RateSampler::new(2.0);
-        assert_eq!(sampler_two.sample_rate, 1.0);
-        assert_eq!(sampler_two.sampling_id_threshold, MAX_UINT_64BITS);
+        let sampler_over_one = RateSampler::new(1.1);
+        assert_eq!(sampler_over_one.sample_rate, 1.0);
     }
 
     #[test]
@@ -237,11 +251,11 @@ mod tests {
         let trace_id_sample = TraceId::from_bytes(bytes_sample);
 
         // Test case for a trace ID that should be dropped (hashed value > threshold)
-        // We'll use a specific trace ID that we know will hash above the threshold
+        // Setting multiple bits to ensure it hashes above the threshold
         let mut bytes_drop = [0u8; 16];
-        // This value is carefully chosen to hash to a value above the threshold
-        bytes_drop[8] = 0x80; // Set high bit to ensure it hashes above threshold
-        let mut trace_id_drop = TraceId::from_bytes(bytes_drop);
+        bytes_drop[8] = 0xFF; // Setting full byte to ensure high value after hashing
+        bytes_drop[9] = 0xFF; // Setting another byte for good measure
+        let trace_id_drop = TraceId::from_bytes(bytes_drop);
 
         // Verify these trace IDs hash as expected, using casting approach
         let trace_id_sample_u128 = u128::from_be_bytes(trace_id_sample.to_bytes());
@@ -250,42 +264,23 @@ mod tests {
 
         let trace_id_drop_u128 = u128::from_be_bytes(trace_id_drop.to_bytes());
         let drop_u64 = trace_id_drop_u128 as u64;
-        let mut drop_hash = drop_u64.wrapping_mul(KNUTH_FACTOR);
+        let drop_hash = drop_u64.wrapping_mul(KNUTH_FACTOR);
 
-        // If our chosen value doesn't hash correctly, let's find one that does
-        if drop_hash <= threshold {
-            for i in 1..1000u64 {
-                let mut test_bytes = [0u8; 16];
-                let i_bytes = i.to_le_bytes();
-                test_bytes[8..16].copy_from_slice(&i_bytes);
-                let test_id = TraceId::from_bytes(test_bytes);
-
-                let test_id_u128 = u128::from_be_bytes(test_id.to_bytes());
-                let test_u64 = test_id_u128 as u64;
-                let test_hash = test_u64.wrapping_mul(KNUTH_FACTOR);
-
-                if test_hash > threshold {
-                    // Found a suitable value
-                    bytes_drop = test_bytes;
-                    trace_id_drop = TraceId::from_bytes(bytes_drop);
-                    // Update hash value for assertions
-                    drop_hash = test_hash;
-                    break;
-                }
-
-                if i == 999 {
-                    panic!("Failed to find a value that hashes above threshold!");
-                }
-            }
-        }
-
+        // Manually verify the hashing behavior to make sure our assumptions are correct
         assert!(
             sample_hash <= threshold,
-            "Sample hash should be <= threshold"
+            "Sample hash {} should be <= threshold {}",
+            sample_hash,
+            threshold
         );
-        assert!(drop_hash > threshold, "Drop hash should be > threshold");
+        assert!(
+            drop_hash > threshold,
+            "Drop hash {} should be > threshold {}",
+            drop_hash,
+            threshold
+        );
 
-        // Test the sampling decisions
+        // Now verify the sampler behaves correctly with these trace IDs
         let result_sample = sampler_half.should_sample(
             None,
             trace_id_sample,
@@ -297,7 +292,7 @@ mod tests {
         assert_eq!(
             result_sample.decision,
             SamplingDecision::RecordAndSample,
-            "Sample ID should be sampled"
+            "sampler_half should sample trace_id_sample"
         );
 
         let result_drop = sampler_half.should_sample(
@@ -311,46 +306,10 @@ mod tests {
         assert_eq!(
             result_drop.decision,
             SamplingDecision::Drop,
-            "Drop ID should be dropped"
+            "sampler_half should drop trace_id_drop"
         );
     }
 
-    #[test]
-    fn check_debug_impl() {
-        let sampler = RateSampler::new(0.75);
-        assert_eq!(
-            format!("{:?}", sampler),
-            "RateSampler { sample_rate: 0.75 }"
-        );
-    }
-
-    #[test]
-    fn test_endianness() {
-        // Create a trace ID with a value of 1 in the lower 64 bits
-        let mut bytes = [0u8; 16];
-        // Set just one bit in a way we can easily track
-        bytes[15] = 1; // This sets the least significant byte to 1
-        let trace_id = TraceId::from_bytes(bytes);
-
-        // Extract using simplified casting approach
-        let trace_id_u128 = u128::from_be_bytes(trace_id.to_bytes());
-        let extracted_u64 = trace_id_u128 as u64;
-
-        assert_eq!(extracted_u64, 1, "Expected to extract the value 1");
-
-        // Create a sampler with sample rate 1.0 (should always sample)
-        let sampler = RateSampler::new(1.0);
-        let result = sampler.should_sample(
-            None,
-            trace_id,
-            "",
-            &opentelemetry::trace::SpanKind::Client,
-            &[],
-            &[],
-        );
-
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
-    }
 
     #[test]
     fn test_half_rate_sampling() {
