@@ -1,6 +1,9 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! This module contains trace mapping from otel to datadog
+//! specific to dd-trace
+
 use std::collections::{hash_map, HashMap};
 
 use datadog_trace_utils::span::SpanBytes as DdSpan;
@@ -10,6 +13,10 @@ use tinybytes::BytesString;
 
 use crate::transform;
 
+/// The OTLP receiver in the agent only receives sampled spans
+/// because others are dropped in the process. In this spirit, we check for the sampling
+/// decision taken by the datadog sampler, and if it is missing assign AUTO_KEEP/AUTO_DROP
+/// based on the otel sampling decision.
 fn otel_sampling_to_dd_sampling(
     otel_trace_flags: opentelemetry::trace::TraceFlags,
     dd_span: &mut DdSpan,

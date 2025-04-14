@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-mod otel_trace_transform;
+mod ddtrace_transform;
 mod span_exporter;
 mod transform;
 

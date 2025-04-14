@@ -19,7 +19,7 @@ use opentelemetry_sdk::{
     trace::SpanData,
 };
 
-use crate::otel_trace_transform;
+use crate::ddtrace_transform;
 
 /// A reasonnable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
@@ -233,7 +233,7 @@ impl TraceExporterTask {
 
     fn export_otel_span_data(&self, span_data: Vec<SpanData>) -> OTelSdkResult {
         let trace_chunks: Vec<Vec<datadog_trace_utils::span::Span<tinybytes::BytesString>>> =
-            otel_trace_transform::otel_span_data_to_dd_trace_chunks(
+            ddtrace_transform::otel_span_data_to_dd_trace_chunks(
                 &self.cfg,
                 span_data,
                 &self.otel_ressoure,

@@ -1,6 +1,36 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! # Transform
+//!
+//! This code has been ported from the otlp receiver in the datadog agent.
+//!
+//! # Source
+//!
+//! This should be a 1:1 port of this commit
+//! https://github.com/DataDog/datadog-agent/blob/97e6db0d4130c8545ede77111a2590eb034c2f11/pkg/trace/transform/transform.go
+//!
+//! It performs a mapping between otel span data and datadog spans. The conversion is done using the default
+//! configuration of the datadog agent, thus compared to the original code, we have removed the following features:
+//! * V1 conversion. The otlp receiver has a v1 and v2 conversion. We only support v2 because we don't
+//! need backward comatibility.
+//! * The `ignore_missing_datadog_fields=true` option. This is false by default in the agent anyway
+//!
+//! # Datastructures
+//!
+//! The original otlp receiver does OLTP -> agent span struct conversion.
+//! Compared to it, we do Otel Span Data -> trace exporter span struct conversion.
+//!
+//! Code in otel_util.rs is generic over the otel span model, but the code manipulating
+//! the datadog span struct is not.
+//!
+//! # Attribute extraction
+//!
+//! Compared to the original code, we read attributes from span a bit differently.
+//! The go code loops through all attributes everytime it is looking for a specific one.
+//! The code in attribute_keys.rs loops only once and then stores the offsets at which the attributes
+//! are stored, for the set of keys we are interested in.  
+
 mod attribute_keys;
 mod otel_util;
 mod semconv;
