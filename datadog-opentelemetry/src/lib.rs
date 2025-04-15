@@ -8,6 +8,8 @@ mod text_map_propagator;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use span_processor::DatadogSpanProcessor;
+
+pub use text_map_propagator::DatadogExtractData;
 use text_map_propagator::DatadogPropagator;
 
 /// Initialize the Datadog OpenTelemetry exporter.

@@ -1,0 +1,39 @@
+[package]
+name = "tracing-http-propagator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+autobenches = false
+
+[[bin]] # Bin to run the http server
+name = "http-server"
+path = "src/server.rs"
+doc = false
+bench = false
+
+[[bin]] # Bin to run the client
+name = "http-client"
+path = "src/client.rs"
+doc = false
+bench = false
+
+[dependencies]
+dd-trace = { path = "../../../dd-trace" }
+datadog-opentelemetry = { path = "../../../datadog-opentelemetry"}
+
+http-body-util = "0.1"
+hyper = { version = "1.3", default-features = false, features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = ["full"] }
+tokio-stream = "0.1"
+opentelemetry = "0.28.0"
+opentelemetry_sdk = "0.28.0"
+opentelemetry-http = "0.28.0"
+opentelemetry-stdout = { version = "0.28.0", features = ["trace", "logs"] }
+opentelemetry-semantic-conventions = "0.28.0"
+opentelemetry-appender-tracing = "0.28.0"
+
+tracing = { version = ">=0.1.40", default-features = false, features = ["std"] }
+# `tracing-core >=0.1.33` is required for compatibility with `tracing >=0.1.40`.
+tracing-core = { version = ">=0.1.33", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter","registry", "std", "fmt"] }

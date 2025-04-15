@@ -43,7 +43,7 @@ impl Injector for InjectorWrapper<'_> {
 }
 
 #[derive(Clone, Default)]
-struct DatadogExtractData {
+pub struct DatadogExtractData {
     origin: Option<String>,
     tags: HashMap<String, String>,
 }
@@ -51,6 +51,12 @@ struct DatadogExtractData {
 impl DatadogExtractData {
     fn from(SpanContext { origin, tags, .. }: SpanContext) -> Self {
         DatadogExtractData { origin, tags }
+    }
+}
+
+impl std::fmt::Display for DatadogExtractData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "origin: {:?}, tags: {:?}", self.origin, self.tags)
     }
 }
 
