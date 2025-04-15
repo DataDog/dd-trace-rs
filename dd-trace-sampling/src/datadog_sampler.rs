@@ -7,7 +7,8 @@ use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextE
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
 
-use crate::constants::SamplingMechanism;
+use crate::constants::{SamplingMechanism, SamplingPriority, SAMPLING_DECISION_TRACE_TAG_KEY, 
+                       SAMPLING_PRIORITY_TAG_KEY, get_sampling_mechanism_priorities};
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
@@ -298,6 +299,7 @@ impl DatadogSampler {
             // If using service-based sampling from the agent
             SamplingMechanism::AgentRateByService 
         } else {
+            // Should not happen, but just in case
             SamplingMechanism::Default
         }
     }
@@ -313,26 +315,46 @@ impl DatadogSampler {
     /// A vector of attributes to add to the sampling result
     fn add_dd_sampling_tags(
         &self,
-        decision: SamplingDecision,
+        decision: &SamplingDecision,
         mechanism: SamplingMechanism,
         rule: Option<&SamplingRule>,
     ) -> Vec<KeyValue> {
         let mut result = Vec::new();
+
         
-        // Only add sampling attributes if we actually sampled the span
-        if decision == SamplingDecision::RecordAndSample {
-            // Add the sampling mechanism
-            result.push(KeyValue::new(
-                "_dd.sampling_mechanism",
-                mechanism.value() as i64,
-            ));
-            
-            // TODO: Add additional attributes based on the sampling rule
-            // - Sample rate
-            // - Rule ID
-            // - Priority
-            // - Other metadata
-        }
+        // Add the sampling decision trace tag with the mechanism
+        result.push(KeyValue::new(
+            SAMPLING_DECISION_TRACE_TAG_KEY,
+            format!("-{}", mechanism.value())
+        ));
+
+        // determine sampling_priority value by looking up in the mechanism priorities map
+        let priorities = get_sampling_mechanism_priorities();
+        
+        // Get the appropriate priority based on the decision
+        let priority = if *decision == SamplingDecision::RecordAndSample {
+            // Use the "keep" priority
+            priorities.get(&mechanism)
+                .map(|p| p.0)
+                .unwrap_or(SamplingPriority::AUTO_KEEP)
+        } else {
+            // Use the "reject" priority
+            priorities.get(&mechanism)
+                .map(|p| p.1)
+                .unwrap_or(SamplingPriority::AUTO_REJECT)
+        };
+
+        // Add the sampling priority tag
+        result.push(KeyValue::new(
+            SAMPLING_PRIORITY_TAG_KEY, 
+            priority.value() as i64
+        ));
+        
+        // TODO: Add additional attributes based on the sampling rule
+        // - Sample rate
+        // - Rule ID
+        // - Priority
+        // - Other metadata
         
         result
     }
@@ -399,7 +421,7 @@ impl ShouldSample for DatadogSampler {
         let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
         
         // Add Datadog-specific sampling tags
-        let result_attributes = self.add_dd_sampling_tags(decision, mechanism, matching_rule);
+        let result_attributes = self.add_dd_sampling_tags(&decision, mechanism, matching_rule);
         
         SamplingResult {
             decision,

@@ -152,6 +152,12 @@ impl From<i8> for SamplingPriority {
     }
 }
 
+// Datadog-specific sampling tags
+pub const SAMPLING_PRIORITY_TAG_KEY: &str = "_sampling_priority_v1";
+
+pub const SAMPLING_DECISION_TRACE_TAG_KEY: &str = "_dd.p.dm";
+
+
 /// Index for the keep priority in the sampling mechanism priority tuples
 pub const KEEP_PRIORITY_INDEX: usize = 0;
 
