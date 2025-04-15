@@ -68,7 +68,7 @@ pub enum SamplingMechanism {
     /// Manual sampling (explicitly set by the user)
     Manual = 4,
     
-    /// AppSec-triggered sampling
+    /// AppSec-triggered sampling, not yet used in dd-trace-rs
     AppSec = 5,
     
     /// Remote rate sampling - user (deprecated)
@@ -77,7 +77,7 @@ pub enum SamplingMechanism {
     /// Remote rate sampling - Datadog (deprecated)
     RemoteRateDatadog = 7,
     
-    /// Span sampling rules
+    /// Span sampling rules, not yet used in dd-trace-rs
     SpanSamplingRule = 8,
     
     /// OTLP ingest probabilistic sampling (not used in dd-trace)
@@ -86,10 +86,10 @@ pub enum SamplingMechanism {
     /// Data jobs monitoring (not used in dd-trace)
     DataJobsMonitoring = 10,
     
-    /// Remote user trace sampling rule
+    /// Remote user trace sampling rule, not yet used in dd-trace-rs
     RemoteUserTraceSamplingRule = 11,
     
-    /// Remote dynamic trace sampling rule
+    /// Remote dynamic trace sampling rule, not yet used in dd-trace-rs
     RemoteDynamicTraceSamplingRule = 12,
 }
 
@@ -119,3 +119,59 @@ impl SamplingMechanism {
         }
     }
 } 
+
+/// Sampling priority values
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i8)]
+pub enum SamplingPriority {
+    /// Use this to explicitly inform the backend that a trace should be rejected and not stored.
+    USER_REJECT = -1,
+    /// Used by the builtin sampler to inform the backend that a trace should be rejected and not stored.
+    AUTO_REJECT = 0,
+    /// Used by the builtin sampler to inform the backend that a trace should be kept and stored.
+    AUTO_KEEP = 1,
+    /// Use this to explicitly inform the backend that a trace should be kept and stored.
+    USER_KEEP = 2,
+}
+impl SamplingPriority {
+    /// Returns the numeric value of the sampling priority
+    pub fn value(&self) -> i8 {
+        *self as i8
+    }
+}
+
+impl From<i8> for SamplingPriority {
+    fn from(value: i8) -> Self {
+        match value {
+            -1 => Self::USER_REJECT,
+            0 => Self::AUTO_REJECT,
+            1 => Self::AUTO_KEEP,
+            2 => Self::USER_KEEP,
+            _ => Self::AUTO_KEEP,
+        }
+    }
+}
+
+/// Index for the keep priority in the sampling mechanism priority tuples
+pub const KEEP_PRIORITY_INDEX: usize = 0;
+
+/// Index for the reject priority in the sampling mechanism priority tuples
+pub const REJECT_PRIORITY_INDEX: usize = 1;
+
+/// Returns the mapping from sampling mechanisms to priority pairs (keep, reject)
+pub fn sampling_mechanism_to_priorities() -> [(SamplingMechanism, (SamplingPriority, SamplingPriority)); 6] {
+    // TODO: Update mapping to include single span sampling and appsec sampling mechanisms
+    [
+        (SamplingMechanism::AgentRateByService, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT)),
+        (SamplingMechanism::Default, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT)),
+        (SamplingMechanism::Manual, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
+        (SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
+        (SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
+        (SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
+    ]
+}
+
+/// Returns a HashMap that maps sampling mechanisms to priority pairs (keep, reject)
+pub fn get_sampling_mechanism_priorities() -> std::collections::HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> {
+    sampling_mechanism_to_priorities().into_iter().collect()
+}

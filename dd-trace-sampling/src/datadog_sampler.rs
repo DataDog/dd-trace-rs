@@ -284,6 +284,58 @@ impl DatadogSampler {
     fn find_matching_rule(&self, name: &str, attributes: &[KeyValue]) -> Option<&SamplingRule> {
         self.rules.iter().find(|rule| rule.matches(name, attributes))
     }
+    
+    /// Returns the sampling mechanism used for the decision 
+    fn get_sampling_mechanism(&self, rule: Option<&SamplingRule>, used_agent_sampler: bool) -> SamplingMechanism {
+        if let Some(rule) = rule {
+            match rule.provenance.as_str() {
+                // Provenance will not be set for rules until we implement remote configuration
+                "customer" => SamplingMechanism::RemoteUserTraceSamplingRule,
+                "dynamic" => SamplingMechanism::RemoteDynamicTraceSamplingRule,
+                _ => SamplingMechanism::LocalUserTraceSamplingRule,
+            }
+        } else if used_agent_sampler {
+            // If using service-based sampling from the agent
+            SamplingMechanism::AgentRateByService 
+        } else {
+            SamplingMechanism::Default
+        }
+    }
+    
+    /// Adds Datadog-specific sampling tags to the attributes
+    /// 
+    /// # Parameters
+    /// * `decision` - The sampling decision (RecordAndSample or Drop)
+    /// * `mechanism` - The sampling mechanism used to make the decision
+    /// * `rule` - The sampling rule that matched, if any
+    /// 
+    /// # Returns
+    /// A vector of attributes to add to the sampling result
+    fn add_dd_sampling_tags(
+        &self,
+        decision: SamplingDecision,
+        mechanism: SamplingMechanism,
+        rule: Option<&SamplingRule>,
+    ) -> Vec<KeyValue> {
+        let mut result = Vec::new();
+        
+        // Only add sampling attributes if we actually sampled the span
+        if decision == SamplingDecision::RecordAndSample {
+            // Add the sampling mechanism
+            result.push(KeyValue::new(
+                "_dd.sampling_mechanism",
+                mechanism.value() as i64,
+            ));
+            
+            // TODO: Add additional attributes based on the sampling rule
+            // - Sample rate
+            // - Rule ID
+            // - Priority
+            // - Other metadata
+        }
+        
+        result
+    }
 }
 
 impl ShouldSample for DatadogSampler {
@@ -298,7 +350,7 @@ impl ShouldSample for DatadogSampler {
     ) -> SamplingResult {
         // Check if there is a parent span context and if it has an active span
         if let Some(parent_ctx) = parent_context.filter(|cx| cx.has_active_span()) {
-            // If a parent exists, inherit its sampling decision
+            // If a parent exists, inherit its sampling decision and trace state
             let span = parent_ctx.span();
             let parent_span_context = span.span_context();
             let decision = if parent_span_context.is_sampled() {
@@ -309,7 +361,7 @@ impl ShouldSample for DatadogSampler {
             
             return SamplingResult {
                 decision,
-                attributes: Vec::new(),
+                attributes: Vec::new(), // Attributes are not modified by this sampler for inherited decisions
                 trace_state: parent_span_context.trace_state().clone(),
             };
         }
@@ -317,8 +369,14 @@ impl ShouldSample for DatadogSampler {
         // Apply rules-based sampling
         let mut decision = SamplingDecision::RecordAndSample;
         
-        // Check for matching rule
-        if let Some(rule) = self.find_matching_rule(name, attributes) {
+        // Find a matching rule
+        let matching_rule = self.find_matching_rule(name, attributes);
+        
+        // Track which sampling mechanism was used
+        let mut used_agent_sampler = false;
+        
+        // Apply sampling logic
+        if let Some(rule) = matching_rule {
             // Rule-based sampling
             if !rule.sample(trace_id) {
                 decision = SamplingDecision::Drop;
@@ -328,6 +386,7 @@ impl ShouldSample for DatadogSampler {
             let service_key = self.service_key(attributes);
             if let Some(sampler) = self.service_samplers.get(&service_key) {
                 // Use the service-based sampler
+                used_agent_sampler = true;
                 let result = sampler.should_sample(None, trace_id, "", &opentelemetry::trace::SpanKind::Client, &[], &[]);
                 if result.decision == SamplingDecision::Drop {
                     decision = SamplingDecision::Drop;
@@ -336,11 +395,15 @@ impl ShouldSample for DatadogSampler {
             // Otherwise keep the default (RecordAndSample)
         }
         
-        // In a complete implementation, apply rate limiting here
+        // Determine the sampling mechanism
+        let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
+        
+        // Add Datadog-specific sampling tags
+        let result_attributes = self.add_dd_sampling_tags(decision, mechanism, matching_rule);
         
         SamplingResult {
             decision,
-            attributes: Vec::new(), // We could add sampling metadata attributes here
+            attributes: result_attributes,
             trace_state: Default::default(),
         }
     }
