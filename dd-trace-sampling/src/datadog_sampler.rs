@@ -8,7 +8,8 @@ use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
 
 use crate::constants::{SamplingMechanism, SamplingPriority, SAMPLING_DECISION_TRACE_TAG_KEY, 
-                       SAMPLING_PRIORITY_TAG_KEY, get_sampling_mechanism_priorities};
+                       SAMPLING_PRIORITY_TAG_KEY, SAMPLING_MECHANISM_TO_PRIORITIES,
+                       KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX};
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
@@ -320,31 +321,29 @@ impl DatadogSampler {
         rule: Option<&SamplingRule>,
     ) -> Vec<KeyValue> {
         let mut result = Vec::new();
-
         
         // Add the sampling decision trace tag with the mechanism
         result.push(KeyValue::new(
             SAMPLING_DECISION_TRACE_TAG_KEY,
             format!("-{}", mechanism.value())
         ));
-
-        // determine sampling_priority value by looking up in the mechanism priorities map
-        let priorities = get_sampling_mechanism_priorities();
         
-        // Get the appropriate priority based on the decision
-        let priority = if *decision == SamplingDecision::RecordAndSample {
-            // Use the "keep" priority
-            priorities.get(&mechanism)
-                .map(|p| p.0)
-                .unwrap_or(SamplingPriority::AUTO_KEEP)
+        // Determine which priority index to use based on the decision
+        let priority_index = if *decision == SamplingDecision::RecordAndSample {
+            KEEP_PRIORITY_INDEX
         } else {
-            // Use the "reject" priority
-            priorities.get(&mechanism)
-                .map(|p| p.1)
-                .unwrap_or(SamplingPriority::AUTO_REJECT)
+            REJECT_PRIORITY_INDEX
         };
 
-        // Add the sampling priority tag
+        // Get the appropriate sampling priority value based on the mechanism and priority index
+        let priority_pair = SAMPLING_MECHANISM_TO_PRIORITIES.get(&mechanism).unwrap();
+        let priority = if priority_index == KEEP_PRIORITY_INDEX {
+            priority_pair.0
+        } else {
+            priority_pair.1
+        };
+
+
         result.push(KeyValue::new(
             SAMPLING_PRIORITY_TAG_KEY, 
             priority.value() as i64

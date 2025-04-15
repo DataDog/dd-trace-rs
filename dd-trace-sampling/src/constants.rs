@@ -3,6 +3,8 @@
 
 //! Shared constants for the dd-trace-sampling crate
 
+use std::collections::HashMap;
+
 /// Sampling rate limits
 pub mod rate {
     /// Default sampling rate
@@ -164,20 +166,17 @@ pub const KEEP_PRIORITY_INDEX: usize = 0;
 /// Index for the reject priority in the sampling mechanism priority tuples
 pub const REJECT_PRIORITY_INDEX: usize = 1;
 
-/// Returns the mapping from sampling mechanisms to priority pairs (keep, reject)
-pub fn sampling_mechanism_to_priorities() -> [(SamplingMechanism, (SamplingPriority, SamplingPriority)); 6] {
-    // TODO: Update mapping to include single span sampling and appsec sampling mechanisms
-    [
-        (SamplingMechanism::AgentRateByService, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT)),
-        (SamplingMechanism::Default, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT)),
-        (SamplingMechanism::Manual, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
-        (SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
-        (SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
-        (SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT)),
-    ]
-}
-
-/// Returns a HashMap that maps sampling mechanisms to priority pairs (keep, reject)
-pub fn get_sampling_mechanism_priorities() -> std::collections::HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> {
-    sampling_mechanism_to_priorities().into_iter().collect()
+lazy_static::lazy_static! {
+    /// HashMap mapping sampling mechanisms to priority pairs (keep, reject)
+    pub static ref SAMPLING_MECHANISM_TO_PRIORITIES: HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> = {
+        let mut map = HashMap::new();
+        // TODO: Update mapping to include single span sampling and appsec sampling mechanisms
+        map.insert(SamplingMechanism::AgentRateByService, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT));
+        map.insert(SamplingMechanism::Default, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT));
+        map.insert(SamplingMechanism::Manual, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
+        map.insert(SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
+        map.insert(SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
+        map.insert(SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
+        map
+    };
 }
