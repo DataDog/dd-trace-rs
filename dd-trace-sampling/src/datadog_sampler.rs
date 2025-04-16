@@ -7,8 +7,10 @@ use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextE
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
 
-use crate::constants::{SamplingMechanism, SamplingPriority, SAMPLING_DECISION_TRACE_TAG_KEY, 
-                       SAMPLING_PRIORITY_TAG_KEY, SAMPLING_MECHANISM_TO_PRIORITIES,
+use crate::constants::{SamplingMechanism, SamplingPriority, 
+                       SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY,
+                       SAMPLING_RULE_RATE_TAG_KEY, SAMPLING_AGENT_RATE_TAG_KEY,
+                       SAMPLING_MECHANISM_TO_PRIORITIES,
                        KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX};
 
 use crate::rate_sampler::RateSampler;
@@ -310,7 +312,7 @@ impl DatadogSampler {
     /// # Parameters
     /// * `decision` - The sampling decision (RecordAndSample or Drop)
     /// * `mechanism` - The sampling mechanism used to make the decision
-    /// * `rule` - The sampling rule that matched, if any
+    /// * `sample_rate` - The sample rate to use for the decision
     /// 
     /// # Returns
     /// A vector of attributes to add to the sampling result
@@ -318,13 +320,13 @@ impl DatadogSampler {
         &self,
         decision: &SamplingDecision,
         mechanism: SamplingMechanism,
-        rule: Option<&SamplingRule>,
+        sample_rate: f64,
     ) -> Vec<KeyValue> {
         let mut result = Vec::new();
         
         // Add the sampling decision trace tag with the mechanism
         result.push(KeyValue::new(
-            SAMPLING_DECISION_TRACE_TAG_KEY,
+            SAMPLING_DECISION_MAKER_TAG_KEY,
             format!("-{}", mechanism.value())
         ));
         
@@ -343,17 +345,23 @@ impl DatadogSampler {
             priority_pair.1
         };
 
-
         result.push(KeyValue::new(
             SAMPLING_PRIORITY_TAG_KEY, 
             priority.value() as i64
         ));
-        
-        // TODO: Add additional attributes based on the sampling rule
-        // - Sample rate
-        // - Rule ID
-        // - Priority
-        // - Other metadata
+
+        // Add the sample rate tag with the correct key based on the mechanism
+        match mechanism {
+            SamplingMechanism::AgentRateByService => {
+                result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, sample_rate));
+            },
+            SamplingMechanism::RemoteUserTraceSamplingRule | 
+            SamplingMechanism::RemoteDynamicTraceSamplingRule | 
+            SamplingMechanism::LocalUserTraceSamplingRule => {
+                result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, sample_rate));
+            },
+            _ => {}
+        }
         
         result
     }
@@ -396,8 +404,14 @@ impl ShouldSample for DatadogSampler {
         // Track which sampling mechanism was used
         let mut used_agent_sampler = false;
         
+        // Store the sample rate to use
+        let sample_rate;
+        
         // Apply sampling logic
         if let Some(rule) = matching_rule {
+            // Get the sample rate from the rule
+            sample_rate = rule.sample_rate;
+            
             // Rule-based sampling
             if !rule.sample(trace_id) {
                 decision = SamplingDecision::Drop;
@@ -408,19 +422,24 @@ impl ShouldSample for DatadogSampler {
             if let Some(sampler) = self.service_samplers.get(&service_key) {
                 // Use the service-based sampler
                 used_agent_sampler = true;
+                sample_rate = sampler.sample_rate();
+                
                 let result = sampler.should_sample(None, trace_id, "", &opentelemetry::trace::SpanKind::Client, &[], &[]);
                 if result.decision == SamplingDecision::Drop {
                     decision = SamplingDecision::Drop;
                 }
+            } else {
+                // Default sample rate, should never happen
+                sample_rate = 1.0;
+                // Keep the default (RecordAndSample)
             }
-            // Otherwise keep the default (RecordAndSample)
         }
         
         // Determine the sampling mechanism
         let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
         
         // Add Datadog-specific sampling tags
-        let result_attributes = self.add_dd_sampling_tags(&decision, mechanism, matching_rule);
+        let result_attributes = self.add_dd_sampling_tags(&decision, mechanism, sample_rate);
         
         SamplingResult {
             decision,

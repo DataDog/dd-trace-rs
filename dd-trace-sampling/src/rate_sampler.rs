@@ -45,6 +45,11 @@ impl RateSampler {
         }
     }
 
+    /// Returns the current sample rate
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+
     /// Sets a new sample rate for the sampler.
     /// `sample_rate` is clamped between 0.0 and 1.0 inclusive.
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
@@ -64,24 +69,6 @@ impl ShouldSample for RateSampler {
         _attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> SamplingResult {
-        // Check if there is a parent span context and if it has an active span
-        if let Some(parent_ctx) = parent_context.filter(|cx| cx.has_active_span()) {
-            // If a parent exists, inherit its sampling decision and trace state
-            let span = parent_ctx.span();
-            let parent_span_context = span.span_context();
-            let decision = if parent_span_context.is_sampled() {
-                SamplingDecision::RecordAndSample
-            } else {
-                SamplingDecision::Drop
-            };
-            return SamplingResult {
-                decision,
-                attributes: Vec::new(), // Attributes are not modified by this sampler
-                trace_state: parent_span_context.trace_state().clone(),
-            };
-        }
-
-        // --- No parent context or parent is not active: Apply rate-based sampling ---
 
         // Fast-path for sample rate of 0.0 (always drop) or 1.0 (always sample)
         if self.sample_rate <= rate::MIN_SAMPLE_RATE {
