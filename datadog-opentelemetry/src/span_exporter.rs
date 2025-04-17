@@ -160,7 +160,7 @@ impl fmt::Debug for DatadogExporter {
 struct TraceExporterTask {
     trace_exporter: TraceExporter,
     cfg: dd_trace::Config,
-    otel_ressoure: opentelemetry_sdk::Resource,
+    otel_resoure: opentelemetry_sdk::Resource,
     rx: Receiver<TraceExporterMessage>,
 }
 
@@ -184,7 +184,7 @@ impl TraceExporterTask {
                 trace_exporter,
                 cfg,
                 rx,
-                otel_ressoure: opentelemetry_sdk::Resource::builder_empty().build(),
+                otel_resoure: opentelemetry_sdk::Resource::builder_empty().build(),
             };
             task.run()
         });
@@ -226,7 +226,7 @@ impl TraceExporterTask {
                         .trace_exporter
                         .shutdown(Some(SPAN_EXPORTER_SHUTDOWN_TIMEOUT));
                 }
-                TraceExporterMessage::SetRessource { resource } => self.otel_ressoure = resource,
+                TraceExporterMessage::SetRessource { resource } => self.otel_resoure = resource,
             }
         }
     }
@@ -236,7 +236,7 @@ impl TraceExporterTask {
             ddtrace_transform::otel_span_data_to_dd_trace_chunks(
                 &self.cfg,
                 span_data,
-                &self.otel_ressoure,
+                &self.otel_resoure,
             );
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
             Ok(_rate_reponse) => {
