@@ -161,6 +161,9 @@ pub const SAMPLING_RULE_RATE_TAG_KEY: &str = "_dd.rule.psr";
 
 pub const SAMPLING_AGENT_RATE_TAG_KEY: &str = "_dd.agent_psr";
 
+pub const SAMPLING_LIMIT_DECISION: &str = "_dd.agent_psr";
+
+
 /// Index for the keep priority in the sampling mechanism priority tuples
 pub const KEEP_PRIORITY_INDEX: usize = 0;
 

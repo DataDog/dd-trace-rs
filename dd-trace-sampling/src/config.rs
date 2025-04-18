@@ -45,7 +45,7 @@ pub struct DatadogSamplerConfig {
     
     /// Optional rate limit in spans per second
     #[serde(default)]
-    pub rate_limit: Option<u32>,
+    pub rate_limit: Option<i32>,
 }
 
 impl DatadogSamplerConfig {
@@ -68,7 +68,7 @@ impl DatadogSamplerConfig {
     /// Create a new sampling configuration with all parameters
     pub fn with_config(
         rules: Vec<SamplingRuleConfig>, 
-        rate_limit: Option<u32>
+        rate_limit: Option<i32>
     ) -> Self {
         DatadogSamplerConfig {
             rules,

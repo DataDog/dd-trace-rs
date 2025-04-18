@@ -2,21 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use opentelemetry::trace::TraceId;
-use opentelemetry::{Context, KeyValue, Value};
-use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextExt};
+use opentelemetry::{Context, KeyValue};
+use opentelemetry::trace::{SamplingDecision, SamplingResult, TraceContextExt};
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
 use serde_json;
 
-use crate::constants::{SamplingMechanism, SamplingPriority, 
+use crate::constants::{SamplingMechanism, 
                        SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY,
-                       SAMPLING_RULE_RATE_TAG_KEY, SAMPLING_AGENT_RATE_TAG_KEY,
+                       SAMPLING_RULE_RATE_TAG_KEY, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_LIMIT_DECISION,
                        SAMPLING_MECHANISM_TO_PRIORITIES,
                        KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX};
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
-use crate::config;
 use crate::utils;
 use crate::rate_limiter::RateLimiter;
 
@@ -313,6 +312,7 @@ impl DatadogSampler {
     /// * `decision` - The sampling decision (RecordAndSample or Drop)
     /// * `mechanism` - The sampling mechanism used to make the decision
     /// * `sample_rate` - The sample rate to use for the decision
+    /// * `rate_limit` - The rate limit if rate limiting was applied
     /// 
     /// # Returns
     /// A vector of attributes to add to the sampling result
@@ -321,15 +321,24 @@ impl DatadogSampler {
         decision: &SamplingDecision,
         mechanism: SamplingMechanism,
         sample_rate: f64,
+        rate_limit: Option<i32>,
     ) -> Vec<KeyValue> {
         let mut result = Vec::new();
         
+        // Add rate limiting tag if applicable
+        if let Some(limit) = rate_limit {
+            result.push(KeyValue::new(
+                SAMPLING_LIMIT_DECISION,
+                limit as i64
+            ));
+        }
+            
         // Add the sampling decision trace tag with the mechanism
         result.push(KeyValue::new(
             SAMPLING_DECISION_MAKER_TAG_KEY,
             format!("-{}", mechanism.value())
         ));
-        
+    
         // Determine which priority index to use based on the decision
         let priority_index = if *decision == SamplingDecision::RecordAndSample {
             KEEP_PRIORITY_INDEX
@@ -407,14 +416,22 @@ impl ShouldSample for DatadogSampler {
         // Store the sample rate to use
         let sample_rate;
         
+        // Store rate limit information if applicable
+        let mut rate_limit: Option<i32> = None;
+        
         // Apply sampling logic
         if let Some(rule) = matching_rule {
             // Get the sample rate from the rule
             sample_rate = rule.sample_rate;
             
-            // Rule-based sampling
+            // First check if the span should be sampled according to the rule
             if !rule.sample(trace_id) {
                 decision = SamplingDecision::Drop;
+            } 
+            // If the span should be sampled, then apply rate limiting
+            else if !self.rate_limiter.is_allowed() {
+                decision = SamplingDecision::Drop;
+                rate_limit = Some(self.rate_limiter.effective_rate() as i32);
             }
         } else {
             // Try service-based sampling from Agent
@@ -424,6 +441,7 @@ impl ShouldSample for DatadogSampler {
                 used_agent_sampler = true;
                 sample_rate = sampler.sample_rate();
                 
+                // For service-based sampling, don't apply rate limiting
                 let result = sampler.should_sample(None, trace_id, "", &opentelemetry::trace::SpanKind::Client, &[], &[]);
                 if result.decision == SamplingDecision::Drop {
                     decision = SamplingDecision::Drop;
@@ -439,7 +457,7 @@ impl ShouldSample for DatadogSampler {
         let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
         
         // Add Datadog-specific sampling tags
-        let result_attributes = self.add_dd_sampling_tags(&decision, mechanism, sample_rate);
+        let result_attributes = self.add_dd_sampling_tags(&decision, mechanism, sample_rate, rate_limit);
         
         SamplingResult {
             decision,
