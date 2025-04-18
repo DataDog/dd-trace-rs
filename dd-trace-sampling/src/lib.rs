@@ -6,7 +6,10 @@ pub mod datadog_sampler;
 pub mod rate_sampler;
 pub mod glob_matcher;
 pub mod config;
+pub mod utils;
+pub mod rate_limiter;
 
 // Re-exports for convenient usage
 pub use datadog_sampler::DatadogSampler;
 pub use config::DatadogSamplerConfig;
+pub use rate_limiter::RateLimiter;

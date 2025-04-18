@@ -17,6 +17,8 @@ use crate::constants::{SamplingMechanism, SamplingPriority,
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
 use crate::config;
+use crate::utils;
+use crate::rate_limiter::RateLimiter;
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -110,17 +112,7 @@ impl SamplingRule {
             tag_matchers,
         }
     }
-    
-    /// Extracts a string value from an OpenTelemetry Value
-    fn extract_string_value(value: &Value) -> Option<String> {
-        match value {
-            Value::String(s) => Some(s.to_string()),
-            Value::I64(i) => Some(i.to_string()),
-            Value::F64(f) => Some(f.to_string()),
-            Value::Bool(b) => Some(b.to_string()),
-            _ => None,
-        }
-    }
+
     
     /// Checks if this rule matches the given span's attributes and name
     pub fn matches(&self, name: &str, attributes: &[KeyValue]) -> bool {
@@ -136,7 +128,7 @@ impl SamplingRule {
             .iter()
             .filter_map(|kv| {
                 // Extract string value from attribute
-                Self::extract_string_value(&kv.value)
+                utils::extract_string_value(&kv.value)
                     .map(|val| (kv.key.as_str(), val))
             })
             .collect();
@@ -226,15 +218,15 @@ pub struct DatadogSampler {
     /// Service-based samplers provided by the Agent
     service_samplers: HashMap<String, RateSampler>,
     
-    // Optional rate limiter (not implemented in this sketch)
-    // rate_limiter: Option<RateLimiter>,
+    /// Rate limiter for limiting the number of spans per second
+    rate_limiter: RateLimiter,
 }
 
 impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
     pub fn new(
         rules: Option<Vec<SamplingRule>>,
-        _rate_limit: Option<u32>,
+        rate_limit: Option<i32>,
     ) -> Self {
         // Sort rules by provenance if provided
         let sorted_rules = if let Some(mut r) = rules {
@@ -244,10 +236,13 @@ impl DatadogSampler {
             Vec::new()
         };
         
+        // Create rate limiter with default value of 100 if not provided
+        let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
+        
         DatadogSampler {
             rules: sorted_rules,
             service_samplers: HashMap::new(),
-            // rate_limiter: rate_limit.map(|limit| RateLimiter::new(limit as u64)),
+            rate_limiter: limiter,
         }
     }
     
@@ -267,11 +262,11 @@ impl DatadogSampler {
         
         for attr in attributes {
             if attr.key.as_str() == SERVICE_TAG {
-                if let Some(val) = SamplingRule::extract_string_value(&attr.value) {
+                if let Some(val) = utils::extract_string_value(&attr.value) {
                     service = val;
                 }
             } else if attr.key.as_str() == ENV_TAG {
-                if let Some(val) = SamplingRule::extract_string_value(&attr.value) {
+                if let Some(val) = utils::extract_string_value(&attr.value) {
                     env = val;
                 }
             }
@@ -436,7 +431,7 @@ impl ShouldSample for DatadogSampler {
             } else {
                 // Default sample rate, should never happen
                 sample_rate = 1.0;
-                // Keep the default (RecordAndSample)
+                // Keep the default decision (RecordAndSample)
             }
         }
         
