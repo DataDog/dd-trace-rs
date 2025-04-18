@@ -46,10 +46,6 @@ pub struct DatadogSamplerConfig {
     /// Optional rate limit in spans per second
     #[serde(default)]
     pub rate_limit: Option<u32>,
-    
-    /// Whether to always apply rate limiting
-    #[serde(default)]
-    pub rate_limit_always_on: bool,
 }
 
 impl DatadogSamplerConfig {
@@ -58,7 +54,6 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules: Vec::new(),
             rate_limit: None,
-            rate_limit_always_on: false,
         }
     }
     
@@ -67,20 +62,17 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules,
             rate_limit: None,
-            rate_limit_always_on: false,
         }
     }
     
     /// Create a new sampling configuration with all parameters
     pub fn with_config(
         rules: Vec<SamplingRuleConfig>, 
-        rate_limit: Option<u32>, 
-        rate_limit_always_on: bool
+        rate_limit: Option<u32>
     ) -> Self {
         DatadogSamplerConfig {
             rules,
             rate_limit,
-            rate_limit_always_on,
         }
     }
     
@@ -111,7 +103,6 @@ impl DatadogSamplerConfig {
         DatadogSampler::new(
             Some(rules),
             self.rate_limit,
-            self.rate_limit_always_on,
         )
     }
 }

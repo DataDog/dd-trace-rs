@@ -226,12 +226,8 @@ pub struct DatadogSampler {
     /// Service-based samplers provided by the Agent
     service_samplers: HashMap<String, RateSampler>,
     
-    /// Optional rate limiter (not implemented in this sketch)
+    // Optional rate limiter (not implemented in this sketch)
     // rate_limiter: Option<RateLimiter>,
-    
-    /// Whether to always apply rate limiting (currently unused)
-    #[allow(dead_code)]
-    rate_limit_always_on: bool,
 }
 
 impl DatadogSampler {
@@ -239,7 +235,6 @@ impl DatadogSampler {
     pub fn new(
         rules: Option<Vec<SamplingRule>>,
         _rate_limit: Option<u32>,
-        rate_limit_always_on: bool,
     ) -> Self {
         // Sort rules by provenance if provided
         let sorted_rules = if let Some(mut r) = rules {
@@ -253,7 +248,6 @@ impl DatadogSampler {
             rules: sorted_rules,
             service_samplers: HashMap::new(),
             // rate_limiter: rate_limit.map(|limit| RateLimiter::new(limit as u64)),
-            rate_limit_always_on,
         }
     }
     
