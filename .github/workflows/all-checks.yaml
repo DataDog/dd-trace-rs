@@ -9,7 +9,7 @@ on:
         - main
 jobs:
     allchecks:
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-latest-dd
         permissions:
             checks: read
             contents: read

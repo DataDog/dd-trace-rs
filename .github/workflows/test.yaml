@@ -74,7 +74,7 @@ jobs:
 
   cross-centos7:
     name: build and test using cross - on centos7
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-dd
     concurrency:
       group: ci-${{ github.ref }}-cross-centos7
       cancel-in-progress: true
