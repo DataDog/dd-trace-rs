@@ -6,6 +6,7 @@ use opentelemetry::{Context, KeyValue, Value};
 use opentelemetry::trace::{SamplingDecision, SamplingResult, Span, TraceContextExt};
 use opentelemetry_sdk::trace::ShouldSample;
 use std::collections::HashMap;
+use serde_json;
 
 use crate::constants::{SamplingMechanism, SamplingPriority, 
                        SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY,
@@ -15,6 +16,7 @@ use crate::constants::{SamplingMechanism, SamplingPriority,
 
 use crate::rate_sampler::RateSampler;
 use crate::glob_matcher::GlobMatcher;
+use crate::config;
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -253,6 +255,15 @@ impl DatadogSampler {
             // rate_limiter: rate_limit.map(|limit| RateLimiter::new(limit as u64)),
             rate_limit_always_on,
         }
+    }
+    
+    /// Creates a new DatadogSampler from a JSON configuration string
+    pub fn from_json(config_json: &str) -> Result<Self, serde_json::Error> {
+        // Parse the JSON config
+        let config = crate::config::DatadogSamplerConfig::from_json(config_json)?;
+        
+        // Build the sampler from the config
+        Ok(config.build_sampler())
     }
     
     /// Computes a key for service-based sampling

@@ -7,8 +7,6 @@ use std::collections::HashMap;
 
 /// Sampling rate limits
 pub mod rate {
-    /// Default sampling rate
-    pub const DEFAULT_SAMPLE_RATE: f64 = 1.0;
     /// Maximum sampling rate
     pub const MAX_SAMPLE_RATE: f64 = 1.0;
     /// Minimum sampling rate

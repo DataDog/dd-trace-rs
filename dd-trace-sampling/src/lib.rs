@@ -1,12 +1,12 @@
-// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-mod rate_sampler;
-mod datadog_sampler;
-mod glob_matcher;
-mod constants;
+pub mod constants;
+pub mod datadog_sampler;
+pub mod rate_sampler;
+pub mod glob_matcher;
+pub mod config;
 
-pub use rate_sampler::*;
-pub use datadog_sampler::*;
-pub use glob_matcher::*;
-pub use constants::*;
+// Re-exports for convenient usage
+pub use datadog_sampler::DatadogSampler;
+pub use config::DatadogSamplerConfig;

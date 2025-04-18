@@ -17,6 +17,8 @@ opentelemetry_sdk = { workspace = true, features = ["trace"] }
 lru = "0.10.1"
 regex = "1.10.3"
 lazy_static = "1.4.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 # Add any testing dependencies here if needed
