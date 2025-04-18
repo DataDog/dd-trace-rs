@@ -35,6 +35,9 @@ mod attribute_keys;
 mod otel_util;
 mod semconv;
 
+#[cfg(test)]
+mod transform_tests;
+
 pub use otel_util::DEFAULT_OTLP_SERVICE_NAME;
 
 use attribute_keys::*;
@@ -48,7 +51,7 @@ use datadog_trace_utils::span::{
 };
 use opentelemetry::{
     trace::{Link, SpanKind},
-    KeyValue, SpanId,
+    Key, KeyValue, SpanId,
 };
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use tinybytes::BytesString;
@@ -394,9 +397,12 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
     if let hash_map::Entry::Vacant(version_slot) =
         dd_span.meta.entry(BytesString::from_static("version"))
     {
-        let version = span_extracted.get_attr_str(SERVICE_VERSION);
+        let version = otel_ressource
+            .get(&Key::from_static_str(SERVICE_VERSION.key()))
+            .map(|v| v.to_string())
+            .unwrap_or(String::new());
         if !version.is_empty() {
-            version_slot.insert(BytesString::from_cow(version));
+            version_slot.insert(BytesString::from_string(version));
         }
     }
 
