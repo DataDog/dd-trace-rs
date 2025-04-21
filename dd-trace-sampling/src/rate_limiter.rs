@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// A token bucket rate limiter implementation
 #[derive(Clone)]
@@ -194,6 +194,7 @@ impl RateLimiter {
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::Duration;
     
     #[test]
     fn test_rate_limiter_allow_all() {

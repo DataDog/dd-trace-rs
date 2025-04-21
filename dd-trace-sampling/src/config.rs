@@ -39,17 +39,23 @@ fn default_provenance() -> String {
 /// Configuration for the DatadogSampler
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatadogSamplerConfig {
-    /// List of sampling rules to apply
+    /// Sampling rules to use
     #[serde(default)]
     pub rules: Vec<SamplingRuleConfig>,
     
-    /// Optional rate limit in spans per second
+    /// Rate limit for sampling (samples/second)
     #[serde(default)]
     pub rate_limit: Option<i32>,
 }
 
+impl Default for DatadogSamplerConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DatadogSamplerConfig {
-    /// Create a new default sampling configuration with no rules
+    /// Creates a new empty configuration
     pub fn new() -> Self {
         DatadogSamplerConfig {
             rules: Vec::new(),
