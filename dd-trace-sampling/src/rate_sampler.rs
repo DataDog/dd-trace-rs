@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use opentelemetry::trace::{SamplingDecision, SamplingResult, TraceContextExt, TraceId};
+use opentelemetry::trace::{SamplingDecision, SamplingResult, TraceId};
 use opentelemetry::Context;
 use opentelemetry_sdk::trace::ShouldSample;
 use std::fmt;
@@ -62,7 +62,7 @@ impl RateSampler {
 impl ShouldSample for RateSampler {
     fn should_sample(
         &self,
-        parent_context: Option<&Context>,
+        _parent_context: Option<&Context>,
         trace_id: TraceId,
         _name: &str,
         _span_kind: &opentelemetry::trace::SpanKind,

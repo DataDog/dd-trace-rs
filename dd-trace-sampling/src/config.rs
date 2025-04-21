@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::datadog_sampler::{DatadogSampler, SamplingRule, NO_RULE};
+use crate::datadog_sampler::{DatadogSampler, SamplingRule};
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize)]

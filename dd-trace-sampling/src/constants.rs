@@ -125,13 +125,13 @@ impl SamplingMechanism {
 #[repr(i8)]
 pub enum SamplingPriority {
     /// Use this to explicitly inform the backend that a trace should be rejected and not stored.
-    USER_REJECT = -1,
+    UserReject = -1,
     /// Used by the builtin sampler to inform the backend that a trace should be rejected and not stored.
-    AUTO_REJECT = 0,
+    AutoReject = 0,
     /// Used by the builtin sampler to inform the backend that a trace should be kept and stored.
-    AUTO_KEEP = 1,
+    AutoKeep = 1,
     /// Use this to explicitly inform the backend that a trace should be kept and stored.
-    USER_KEEP = 2,
+    UserKeep = 2,
 }
 impl SamplingPriority {
     /// Returns the numeric value of the sampling priority
@@ -143,11 +143,11 @@ impl SamplingPriority {
 impl From<i8> for SamplingPriority {
     fn from(value: i8) -> Self {
         match value {
-            -1 => Self::USER_REJECT,
-            0 => Self::AUTO_REJECT,
-            1 => Self::AUTO_KEEP,
-            2 => Self::USER_KEEP,
-            _ => Self::AUTO_KEEP,
+            -1 => Self::UserReject,
+            0 => Self::AutoReject,
+            1 => Self::AutoKeep,
+            2 => Self::UserKeep,
+            _ => Self::AutoKeep,
         }
     }
 }
@@ -175,12 +175,12 @@ lazy_static::lazy_static! {
     pub static ref SAMPLING_MECHANISM_TO_PRIORITIES: HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> = {
         let mut map = HashMap::new();
         // TODO: Update mapping to include single span sampling and appsec sampling mechanisms
-        map.insert(SamplingMechanism::AgentRateByService, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT));
-        map.insert(SamplingMechanism::Default, (SamplingPriority::AUTO_KEEP, SamplingPriority::AUTO_REJECT));
-        map.insert(SamplingMechanism::Manual, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
-        map.insert(SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
-        map.insert(SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
-        map.insert(SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::USER_KEEP, SamplingPriority::USER_REJECT));
+        map.insert(SamplingMechanism::AgentRateByService, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
+        map.insert(SamplingMechanism::Default, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
+        map.insert(SamplingMechanism::Manual, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
+        map.insert(SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
+        map.insert(SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
+        map.insert(SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
         map
     };
 }
