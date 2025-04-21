@@ -7,6 +7,7 @@ mod span_exporter;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 // TODO(paullgdc): Should we export this or just the setup function?
 pub use span_exporter::DatadogExporter;
+use dd_trace_sampling::DatadogSampler;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -40,11 +41,15 @@ pub fn init_datadog(
         opentelemetry_sdk::propagation::TraceContextPropagator::new(),
     );
 
+    // Create a basic DatadogSampler with default configuration
+    let sampler = DatadogSampler::new(None, None);
+
     let tracer_provider = tracer_provider_builder
         .with_batch_exporter(DatadogExporter::new(cfg).unwrap())
+        // Add the Datadog sampler
+        .with_sampler(sampler)
         // TODO: hookup additional components
         // .with_id_generator(id_generator)
-        // .with_sampler(sampler)
         .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     tracer_provider
