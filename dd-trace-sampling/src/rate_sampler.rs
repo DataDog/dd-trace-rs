@@ -69,7 +69,6 @@ impl ShouldSample for RateSampler {
         _attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> SamplingResult {
-
         // Fast-path for sample rate of 0.0 (always drop) or 1.0 (always sample)
         if self.sample_rate <= rate::MIN_SAMPLE_RATE {
             return SamplingResult {
@@ -296,7 +295,6 @@ mod tests {
             "sampler_half should drop trace_id_drop"
         );
     }
-
 
     #[test]
     fn test_half_rate_sampling() {

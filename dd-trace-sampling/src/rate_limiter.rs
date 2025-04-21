@@ -16,28 +16,28 @@ pub struct RateLimiter {
 struct RateLimiterState {
     /// The rate limit to apply (spans per second)
     rate_limit: i32,
-    
+
     /// The time window in nanoseconds where the rate limit applies
     time_window_ns: u64,
-    
+
     /// Current number of tokens available
     tokens: f64,
-    
+
     /// Maximum number of tokens that can be stored
     max_tokens: f64,
-    
+
     /// Last time tokens were replenished
     last_update: Instant,
-    
+
     /// Start time of the current window
     current_window_start: Option<Instant>,
-    
+
     /// Number of tokens allowed in the current window
     tokens_allowed: u64,
-    
+
     /// Total number of token requests in the current window
     tokens_total: u64,
-    
+
     /// Rate from the previous window for calculating effective rate
     prev_window_rate: Option<f64>,
 }
@@ -64,7 +64,7 @@ impl RateLimiter {
     /// * `time_window_ns` - The time window in nanoseconds (default: 1 second)
     pub fn new(rate_limit: i32, time_window_ns: Option<u64>) -> Self {
         let window_ns = time_window_ns.unwrap_or(1_000_000_000); // Default to 1 second in ns
-        
+
         let state = RateLimiterState {
             rate_limit,
             time_window_ns: window_ns,
@@ -76,12 +76,12 @@ impl RateLimiter {
             tokens_total: 0,
             prev_window_rate: None,
         };
-        
+
         RateLimiter {
             inner: Arc::new(Mutex::new(state)),
         }
     }
-    
+
     /// Checks if the current request is allowed and consumes a token if it is.
     ///
     /// # Returns
@@ -92,24 +92,24 @@ impl RateLimiter {
         self.update_rate_counts(allowed, now);
         allowed
     }
-    
+
     /// Internal method to check if a request is allowed at the given time
     fn is_allowed_at(&self, timestamp: Instant) -> bool {
         let mut state = self.inner.lock().unwrap();
-        
+
         // Rate limit of 0 blocks everything
         if state.rate_limit == 0 {
             return false;
         }
-        
+
         // Negative rate limit disables rate limiting
         if state.rate_limit < 0 {
             return true;
         }
-        
+
         // Replenish tokens based on elapsed time
         self.replenish(&mut state, timestamp);
-        
+
         // Check if we have enough tokens and consume one if we do
         if state.tokens >= 1.0 {
             state.tokens -= 1.0;
@@ -118,15 +118,15 @@ impl RateLimiter {
             false
         }
     }
-    
+
     /// Update counts used to determine effective rate
     fn update_rate_counts(&self, allowed: bool, timestamp: Instant) {
         let mut state = self.inner.lock().unwrap();
-        
+
         // No window start yet, start a new window
         if state.current_window_start.is_none() {
             state.current_window_start = Some(timestamp);
-        } 
+        }
         // If more time than the configured time window has passed, reset
         else if let Some(window_start) = state.current_window_start {
             let elapsed = timestamp.duration_since(window_start);
@@ -138,14 +138,14 @@ impl RateLimiter {
                 state.current_window_start = Some(timestamp);
             }
         }
-        
+
         // Keep track of total tokens seen vs allowed
         if allowed {
             state.tokens_allowed += 1;
         }
         state.tokens_total += 1;
     }
-    
+
     /// Replenish tokens based on elapsed time
     fn replenish(&self, state: &mut RateLimiterState, timestamp: Instant) {
         // If we are at the max, we do not need to add any more
@@ -153,34 +153,34 @@ impl RateLimiter {
             state.last_update = timestamp;
             return;
         }
-        
+
         // Add more available tokens based on how much time has passed
         let elapsed = timestamp.duration_since(state.last_update);
         let elapsed_seconds = elapsed.as_nanos() as f64 / state.time_window_ns as f64;
-        
+
         // Update the number of available tokens, but ensure we do not exceed the max
         let new_tokens = state.tokens + (elapsed_seconds * state.rate_limit as f64);
         state.tokens = new_tokens.min(state.max_tokens);
-        
+
         // Update the last update time
         state.last_update = timestamp;
     }
-    
+
     /// Calculate the current window rate
     fn current_window_rate(&self, state: &RateLimiterState) -> f64 {
         // No tokens have been seen, effectively 100% sample rate
         if state.tokens_total == 0 {
             return 1.0;
         }
-        
+
         // Get rate of tokens allowed
         state.tokens_allowed as f64 / state.tokens_total as f64
     }
-    
+
     /// Returns the effective sample rate of this rate limiter (between 0.0 and 1.0)
     pub fn effective_rate(&self) -> f64 {
         let state = self.inner.lock().unwrap();
-        
+
         // If we have not had a previous window yet, return current rate
         if let Some(prev_rate) = state.prev_window_rate {
             (self.current_window_rate(&state) + prev_rate) / 2.0
@@ -195,59 +195,59 @@ mod tests {
     use super::*;
     use std::thread;
     use std::time::Duration;
-    
+
     #[test]
     fn test_rate_limiter_allow_all() {
         let limiter = RateLimiter::new(-1, None);
-        
+
         // Should allow all requests
         for _ in 0..100 {
             assert!(limiter.is_allowed());
         }
-        
+
         // Effective rate should be 1.0 (100%)
         assert_eq!(limiter.effective_rate(), 1.0);
     }
-    
+
     #[test]
     fn test_rate_limiter_block_all() {
         let limiter = RateLimiter::new(0, None);
-        
+
         // Should block all requests
         for _ in 0..10 {
             assert!(!limiter.is_allowed());
         }
-        
+
         // Effective rate should be 0.0 (0%)
         assert_eq!(limiter.effective_rate(), 0.0);
     }
-    
+
     #[test]
     fn test_rate_limiter_limit_rate() {
         let limiter = RateLimiter::new(5, None); // 5 per second
-        
+
         // Should allow exactly 5 requests
         for _ in 0..5 {
             assert!(limiter.is_allowed());
         }
-        
+
         // 6th request should be blocked
         assert!(!limiter.is_allowed());
-        
+
         // Wait for tokens to replenish
         thread::sleep(Duration::from_millis(200)); // 0.2s * 5 tokens/s ≈ 1 token
-        
+
         // Should allow one more request
         assert!(limiter.is_allowed());
-        
+
         // But the next one should be blocked
         assert!(!limiter.is_allowed());
     }
-    
+
     #[test]
     fn test_rate_limiter_effective_rate() {
         let limiter = RateLimiter::new(50, None); // 50 per second
-        
+
         // Request 100 tokens when only 50 are available
         let mut allowed_count = 0;
         for _ in 0..100 {
@@ -255,20 +255,24 @@ mod tests {
                 allowed_count += 1;
             }
         }
-        
+
         // Should have allowed about 50 requests
         assert_eq!(allowed_count, 50);
-        
+
         // Effective rate should be about 0.5 (50%)
         let rate = limiter.effective_rate();
-        assert!(rate >= 0.45 && rate <= 0.55, "Expected rate around 0.5, got {}", rate);
+        assert!(
+            rate >= 0.45 && rate <= 0.55,
+            "Expected rate around 0.5, got {}",
+            rate
+        );
     }
-    
+
     #[test]
     fn test_rate_limiter_thread_safety() {
         let limiter = RateLimiter::new(100, None);
         let limiter_clone = limiter.clone();
-        
+
         // Spawn a thread that uses the limiter
         let handle = thread::spawn(move || {
             let mut allowed_count = 0;
@@ -279,7 +283,7 @@ mod tests {
             }
             allowed_count
         });
-        
+
         // Use the limiter in the main thread too
         let mut main_allowed_count = 0;
         for _ in 0..100 {
@@ -287,13 +291,16 @@ mod tests {
                 main_allowed_count += 1;
             }
         }
-        
+
         // Get the result from the spawned thread
         let thread_allowed_count = handle.join().unwrap();
-        
+
         // Combined, they should have allowed about 100 requests
         let total_allowed = main_allowed_count + thread_allowed_count;
-        assert!(total_allowed >= 95 && total_allowed <= 105, 
-                "Expected around 100 allowed requests, got {}", total_allowed);
+        assert!(
+            total_allowed >= 95 && total_allowed <= 105,
+            "Expected around 100 allowed requests, got {}",
+            total_allowed
+        );
     }
-} 
+}

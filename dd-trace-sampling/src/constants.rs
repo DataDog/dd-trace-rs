@@ -48,47 +48,47 @@ pub mod provenance {
 }
 
 /// Sampling mechanism identifiers
-/// 
+///
 /// These identify which mechanism was responsible for making a sampling decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum SamplingMechanism {
     /// Default sampling mechanism
     Default = 0,
-    
+
     /// Agent-side rate by service sampling
     AgentRateByService = 1,
-    
+
     /// Remote rate sampling (deprecated)
     RemoteRate = 2,
-    
+
     /// Local user-defined trace sampling rules
     LocalUserTraceSamplingRule = 3,
-    
+
     /// Manual sampling (explicitly set by the user)
     Manual = 4,
-    
+
     /// AppSec-triggered sampling, not yet used in dd-trace-rs
     AppSec = 5,
-    
+
     /// Remote rate sampling - user (deprecated)
     RemoteRateUser = 6,
-    
+
     /// Remote rate sampling - Datadog (deprecated)
     RemoteRateDatadog = 7,
-    
+
     /// Span sampling rules, not yet used in dd-trace-rs
     SpanSamplingRule = 8,
-    
+
     /// OTLP ingest probabilistic sampling (not used in dd-trace)
     OtlpIngestProbabilisticSampling = 9,
-    
+
     /// Data jobs monitoring (not used in dd-trace)
     DataJobsMonitoring = 10,
-    
+
     /// Remote user trace sampling rule, not yet used in dd-trace-rs
     RemoteUserTraceSamplingRule = 11,
-    
+
     /// Remote dynamic trace sampling rule, not yet used in dd-trace-rs
     RemoteDynamicTraceSamplingRule = 12,
 }
@@ -98,7 +98,7 @@ impl SamplingMechanism {
     pub fn value(&self) -> u8 {
         *self as u8
     }
-    
+
     /// Creates a SamplingMechanism from a numeric value
     pub fn from_value(value: u8) -> Option<Self> {
         match value {
@@ -118,7 +118,7 @@ impl SamplingMechanism {
             _ => None,
         }
     }
-} 
+}
 
 /// Sampling priority values
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -162,7 +162,6 @@ pub const SAMPLING_RULE_RATE_TAG_KEY: &str = "_dd.rule.psr";
 pub const SAMPLING_AGENT_RATE_TAG_KEY: &str = "_dd.agent_psr";
 
 pub const SAMPLING_LIMIT_DECISION: &str = "_dd.agent_psr";
-
 
 /// Index for the keep priority in the sampling mechanism priority tuples
 pub const KEEP_PRIORITY_INDEX: usize = 0;

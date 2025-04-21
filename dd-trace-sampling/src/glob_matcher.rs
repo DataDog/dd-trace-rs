@@ -1,8 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fmt;
 use lru::LruCache;
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
@@ -31,7 +31,7 @@ impl fmt::Debug for GlobMatcher {
 impl GlobMatcher {
     /// Creates a new GlobMatcher with the given pattern
     pub fn new(pattern: &str) -> Self {
-        // Use a cache of size 256 
+        // Use a cache of size 256
         let cache_size = NonZeroUsize::new(256).unwrap();
         GlobMatcher {
             pattern_lower: pattern.to_lowercase(),
@@ -43,12 +43,12 @@ impl GlobMatcher {
     pub fn pattern(&self) -> String {
         self.pattern_lower.clone()
     }
-    
+
     /// Checks if the given subject matches the glob pattern
     /// The match is case insensitive.
     pub fn matches(&self, subject: &str) -> bool {
         let subject_lower = subject.to_lowercase();
-        
+
         // Try to get from cache first
         {
             let mut cache = self.cache.lock().unwrap();
@@ -56,45 +56,48 @@ impl GlobMatcher {
                 return result;
             }
         }
-        
+
         // Backtracking algorithm
         let pattern = self.pattern_lower.as_bytes();
         let subject = subject_lower.as_bytes();
-        
+
         let mut px = 0; // Pattern index
         let mut sx = 0; // Subject index
         let mut next_px = 0; // Next backtracking pattern index
         let mut next_sx = 0; // Next backtracking subject index
-        
+
         while px < pattern.len() || sx < subject.len() {
             if px < pattern.len() {
                 let char = pattern[px];
-                
-                if char == b'?' { // Single character wildcard
+
+                if char == b'?' {
+                    // Single character wildcard
                     if sx < subject.len() {
                         px += 1;
                         sx += 1;
                         continue;
                     }
-                } else if char == b'*' { // Zero-or-more characters wildcard
+                } else if char == b'*' {
+                    // Zero-or-more characters wildcard
                     next_px = px;
                     next_sx = sx + 1;
                     px += 1;
                     continue;
-                } else if sx < subject.len() && subject[sx] == char { // Normal character match
+                } else if sx < subject.len() && subject[sx] == char {
+                    // Normal character match
                     px += 1;
                     sx += 1;
                     continue;
                 }
             }
-            
+
             // If we can backtrack (we've seen a * and have more characters in subject)
             if 0 < next_sx && next_sx <= subject.len() {
                 px = next_px;
                 sx = next_sx;
                 continue;
             }
-            
+
             // If we're here, we've exhausted all options and no match was found
             // Store in cache and return
             {
@@ -103,7 +106,7 @@ impl GlobMatcher {
             }
             return false;
         }
-        
+
         // If we reached here, we've consumed both strings entirely - it's a match
         // Store in cache and return
         {
@@ -154,7 +157,7 @@ mod tests {
         assert!(matcher.matches("ho"));
         assert!(matcher.matches("hello world o"));
         assert!(!matcher.matches("hell"));
-        
+
         let matcher = GlobMatcher::new("h*");
         assert!(matcher.matches("hello"));
         assert!(matcher.matches("h"));
@@ -168,29 +171,29 @@ mod tests {
         assert!(matcher.matches("cater"));
         assert!(matcher.matches("ctfr!"));
         assert!(!matcher.matches("car"));
-        
+
         let matcher = GlobMatcher::new("*service*");
         assert!(matcher.matches("myservice"));
         assert!(matcher.matches("service"));
         assert!(matcher.matches("my service name"));
         assert!(!matcher.matches("svc"));
     }
-    
+
     #[test]
     fn test_glob_caching() {
         let matcher = GlobMatcher::new("c*t?r*");
-        
+
         // First match should populate cache
         assert!(matcher.matches("contoroller"));
-        
+
         // Check the cache
         let cache = matcher.cache.lock().unwrap();
         assert!(cache.contains(&"contoroller".to_string()));
         drop(cache);
-        
+
         // Add another entry to cache
         assert!(!matcher.matches("car"));
-        
+
         // Verify both are in cache
         let cache = matcher.cache.lock().unwrap();
         assert!(cache.contains(&"contoroller".to_string()));

@@ -6,8 +6,8 @@ mod span_exporter;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
 // TODO(paullgdc): Should we export this or just the setup function?
-pub use span_exporter::DatadogExporter;
 use dd_trace_sampling::DatadogSampler;
+pub use span_exporter::DatadogExporter;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
