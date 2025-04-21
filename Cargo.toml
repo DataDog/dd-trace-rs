@@ -2,13 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [workspace]
-members = ["dd-trace", "dd-trace-propagation", "dd-trace-sampling"]
+members = [
+    "datadog-opentelemetry",
+    "dd-trace",
+    "dd-trace-propagation",
+    "dd-trace-sampling",
+]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.78.0"
+rust-version = "1.81.0"
 edition = "2021"
 version = "0.0.1"
 license = "Apache-2.0"
@@ -17,8 +22,19 @@ readme = "README.md"
 description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
 
 [workspace.dependencies]
-opentelemetry = "0.28.0"
-opentelemetry_sdk = "0.28.0"
+# Libdatadog dependencies - change to a stable version once we release
+data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+
+futures = "0.3.31"
+opentelemetry_sdk = { version = "0.28.0", features = [
+    "trace",
+], default-features = false }
+opentelemetry = { version = "0.28.0", features = [
+    "trace",
+], default-features = false }
+tokio = { version = "1.44.1" }
 
 [profile.dev]
 debug = 2 # full debug info
@@ -28,4 +44,3 @@ codegen-units = 1
 debug = false
 incremental = false
 opt-level = 3
-

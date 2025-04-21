@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, ops::Deref, sync::OnceLock};
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
@@ -33,8 +33,8 @@ pub struct Config {
     language_version: &'static str,
 
     // # Service tagging
+    service: String,
     env: Option<String>,
-    service: Option<String>,
     version: Option<String>,
 
     // # Agent
@@ -54,9 +54,19 @@ pub struct Config {
     trace_enabled: bool,
     /// The log level for the tracer
     log_level: TracerLogLevel,
+
+    /// Configurations for testing. Not exposed to customer
+    #[cfg(feature = "test-utils")]
+    wait_agent_info_ready: bool,
 }
 
 impl Config {
+    pub fn builder() -> ConfigBuilder {
+        ConfigBuilder {
+            config: Config::default(),
+        }
+    }
+
     pub fn runtime_id(&self) -> &str {
         self.runtime_id
     }
@@ -73,8 +83,8 @@ impl Config {
         self.env.as_deref()
     }
 
-    pub fn service(&self) -> Option<&str> {
-        self.service.as_deref()
+    pub fn service(&self) -> &str {
+        self.service.deref()
     }
 
     pub fn version(&self) -> Option<&str> {
@@ -105,6 +115,11 @@ impl Config {
         &self.log_level
     }
 
+    #[cfg(feature = "test-utils")]
+    pub fn __internal_wait_agent_info_ready(&self) -> bool {
+        self.wait_agent_info_ready
+    }
+
     fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
@@ -117,7 +132,8 @@ impl Default for Config {
         Config {
             runtime_id: Config::process_runtime_id(),
             env: None,
-            service: None,
+            // TODO(paulgdc): Default service naming detection, probably from arg0
+            service: "unnamed-rust-service".to_string(),
             version: None,
             tags: Vec::new(),
 
@@ -128,7 +144,28 @@ impl Default for Config {
             log_level: TracerLogLevel::default(),
             tracer_version: TRACER_VERSION,
             language_version: "TODO: Get from env",
+            #[cfg(feature = "test-utils")]
+            wait_agent_info_ready: false,
         }
+    }
+}
+
+pub struct ConfigBuilder {
+    config: Config,
+}
+
+impl ConfigBuilder {
+    pub fn build(self) -> Config {
+        self.config
+    }
+
+    pub fn set_trace_agent_url(&mut self, url: Cow<'static, str>) {
+        self.config.trace_agent_url = Cow::Owned(url.to_string());
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn __internal_set_wait_agent_info_ready(&mut self, wait_agent_info_ready: bool) {
+        self.config.wait_agent_info_ready = wait_agent_info_ready;
     }
 }
 
