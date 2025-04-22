@@ -9,7 +9,7 @@ pub const TRACER_VERSION: &str = "0.0.1";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-/// The log level for the tracer
+/// The level at which the library will log
 pub enum LogLevel {
     Debug,
     Warn,
@@ -37,8 +37,8 @@ impl FromStr for LogLevel {
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
 ///
-/// ! TODO(paullgdc): We also want to keep the origin of the configuration to
-/// ! report it to telemetry.
+// TODO(paullgdc): We also want to keep the origin of each of configuration, and the errors encountered during parsing to
+// report it to telemetry.
 ///
 /// # Usage
 /// ```
@@ -97,9 +97,8 @@ impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
         let default = Config::default();
 
-        /// A helper function to convert a CompositeConfigSourceResult<T> into an Option<T>
-        /// This completely drop any error collected while gathering the value, and the origin
-        /// associated with the configuration
+        /// sHelper function to convert a CompositeConfigSourceResult<T> into an Option<T>
+        /// This drops errors origin associated with the configuration collected while parsing the value
         ///
         /// TODO(paullgdc): We should store the error, and the origin of the configuration
         /// in the Config struct, so we can report it to telemetry.
@@ -135,26 +134,12 @@ impl Config {
                 .map(Cow::Owned)
                 .unwrap_or(default.trace_agent_url),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
-            trace_rate_limit: sources
-                .get_parse("DD_TRACE_RATE_LIMIT")
-                .value
-                .map(|c| c.value)
+            trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .or(default.trace_rate_limit),
-            trace_sample_rate: sources
-                .get_parse("DD_TRACE_SAMPLE_RATE")
-                .value
-                .map(|c| c.value)
+            trace_sample_rate: to_val(sources.get_parse("DD_TRACE_SAMPLE_RATE"))
                 .or(default.trace_sample_rate),
-            enabled: sources
-                .get_parse("DD_TRACE_ENABLED")
-                .value
-                .map(|c| c.value)
-                .unwrap_or(default.enabled),
-            log_level: sources
-                .get_parse("DD_LOG_LEVEL")
-                .value
-                .map(|c| c.value)
-                .unwrap_or(default.log_level),
+            enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
+            log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
         }
@@ -166,6 +151,7 @@ impl Config {
         }
     }
 
+    /// Creates a new builder to set overrides detected configuration
     pub fn builder() -> ConfigBuilder {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
@@ -264,6 +250,7 @@ pub struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
+    /// Finalizes the builder and returns the configuration
     pub fn build(self) -> Config {
         self.config
     }
