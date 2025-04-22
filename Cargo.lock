@@ -817,6 +817,8 @@ name = "dd-trace"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
