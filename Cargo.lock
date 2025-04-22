@@ -756,6 +756,7 @@ dependencies = [
  "datadog-opentelemetry",
  "datadog-trace-utils",
  "dd-trace",
+ "dd-trace-sampling",
  "futures",
  "opentelemetry",
  "opentelemetry_sdk",
