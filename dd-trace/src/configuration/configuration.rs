@@ -36,9 +36,8 @@ impl FromStr for LogLevel {
 #[derive(Debug)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
-///
-// TODO(paullgdc): We also want to keep the origin of each of configuration, and the errors encountered during parsing to
-// report it to telemetry.
+// TODO(paullgdc): We also want to keep the origin of each of configuration, and the errors
+// encountered during parsing to report it to telemetry.
 ///
 /// # Usage
 /// ```
@@ -97,8 +96,9 @@ impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
         let default = Config::default();
 
-        /// sHelper function to convert a CompositeConfigSourceResult<T> into an Option<T>
-        /// This drops errors origin associated with the configuration collected while parsing the value
+        /// Helper function to convert a CompositeConfigSourceResult<T> into an Option<T>
+        /// This drops errors origin associated with the configuration collected while parsing the
+        /// value
         ///
         /// TODO(paullgdc): We should store the error, and the origin of the configuration
         /// in the Config struct, so we can report it to telemetry.
