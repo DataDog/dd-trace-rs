@@ -398,7 +398,8 @@ impl ShouldSample for DatadogSampler {
 
             return SamplingResult {
                 decision,
-                attributes: Vec::new(), // Attributes are not modified by this sampler for inherited decisions
+                attributes: Vec::new(), /* Attributes are not modified by this sampler for
+                                         * inherited decisions */
                 trace_state: parent_span_context.trace_state().clone(),
             };
         }

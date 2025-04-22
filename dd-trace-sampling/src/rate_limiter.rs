@@ -262,7 +262,7 @@ mod tests {
         // Effective rate should be about 0.5 (50%)
         let rate = limiter.effective_rate();
         assert!(
-            rate >= 0.45 && rate <= 0.55,
+            (0.45..=0.55).contains(&rate),
             "Expected rate around 0.5, got {}",
             rate
         );
@@ -298,7 +298,7 @@ mod tests {
         // Combined, they should have allowed about 100 requests
         let total_allowed = main_allowed_count + thread_allowed_count;
         assert!(
-            total_allowed >= 95 && total_allowed <= 105,
+            (95..=105).contains(&total_allowed),
             "Expected around 100 allowed requests, got {}",
             total_allowed
         );

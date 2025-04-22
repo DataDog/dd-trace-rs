@@ -126,7 +126,8 @@ impl SamplingMechanism {
 pub enum SamplingPriority {
     /// Use this to explicitly inform the backend that a trace should be rejected and not stored.
     UserReject = -1,
-    /// Used by the builtin sampler to inform the backend that a trace should be rejected and not stored.
+    /// Used by the builtin sampler to inform the backend that a trace should be rejected and not
+    /// stored.
     AutoReject = 0,
     /// Used by the builtin sampler to inform the backend that a trace should be kept and stored.
     AutoKeep = 1,

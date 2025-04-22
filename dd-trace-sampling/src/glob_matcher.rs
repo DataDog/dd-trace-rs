@@ -9,7 +9,8 @@ use std::sync::Mutex;
 /// A backtracking implementation of the glob matching algorithm.
 ///
 /// The glob pattern language supports `*` as a multiple character wildcard (including empty string)
-/// and `?` as a single character wildcard (not including empty string). The match is case insensitive.
+/// and `?` as a single character wildcard (not including empty string). The match is case
+/// insensitive.
 ///
 /// This implementation includes an LRU cache for faster repeated matching.
 pub struct GlobMatcher {
