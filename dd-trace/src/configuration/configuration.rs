@@ -80,7 +80,8 @@ pub struct Config {
     /// Maximum number of spans to sample per second, per process
     /// if this is not set, the datadog Agent controls rate limiting
     trace_rate_limit: Option<f64>,
-    trace_sample_rate: Option<f64>,
+    /// JSON configuration string for sampling rules
+    trace_sampling_rules: Option<String>,
 
     /// Disables the library if this is false
     enabled: bool,
@@ -136,8 +137,8 @@ impl Config {
             dogstatsd_agent_url: default.dogstatsd_agent_url,
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .or(default.trace_rate_limit),
-            trace_sample_rate: to_val(sources.get_parse("DD_TRACE_SAMPLE_RATE"))
-                .or(default.trace_sample_rate),
+            trace_sampling_rules: to_val(sources.get("DD_TRACE_SAMPLING_RULES"))
+                .or(default.trace_sampling_rules),
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
             #[cfg(feature = "test-utils")]
@@ -196,8 +197,8 @@ impl Config {
         self.trace_rate_limit
     }
 
-    pub fn trace_sample_rate(&self) -> Option<f64> {
-        self.trace_sample_rate
+    pub fn trace_sampling_rules(&self) -> Option<&str> {
+        self.trace_sampling_rules.as_deref()
     }
 
     pub fn enabled(&self) -> bool {
@@ -234,7 +235,7 @@ impl Default for Config {
             trace_agent_url: Cow::Borrowed("http://localhost:8126"),
             dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
             trace_rate_limit: None,
-            trace_sample_rate: None,
+            trace_sampling_rules: None,
             enabled: true,
             log_level: LogLevel::default(),
             tracer_version: TRACER_VERSION,
@@ -290,8 +291,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_sample_rate(&mut self, sample_rate: f64) -> &mut Self {
-        self.config.trace_sample_rate = Some(sample_rate);
+    pub fn set_trace_sampling_rules(&mut self, rules_json: String) -> &mut Self {
+        self.config.trace_sampling_rules = Some(rules_json);
         self
     }
 
@@ -331,9 +332,12 @@ mod tests {
                 ("DD_TAGS", "abc:def,foo:bar"),
                 ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
                 ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_SAMPLE_RATE", "0.5"),
                 ("DD_TRACE_ENABLED", "false"),
                 ("DD_LOG_LEVEL", "DEBUG"),
+                (
+                    "DD_TRACE_SAMPLING_RULES",
+                    r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#,
+                ),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
@@ -348,9 +352,12 @@ mod tests {
         );
         assert_eq!(config.trace_agent_url(), "http://localhost:1234");
         assert_eq!(config.trace_rate_limit(), Some(100.0));
-        assert_eq!(config.trace_sample_rate(), Some(0.5));
         assert!(!config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Debug);
+        assert_eq!(
+            config.trace_sampling_rules(),
+            Some(r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#)
+        );
     }
 
     #[test]
@@ -364,9 +371,12 @@ mod tests {
                 ("DD_TAGS", "abc:def,foo:bar"),
                 ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
                 ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_SAMPLE_RATE", "0.5"),
                 ("DD_TRACE_ENABLED", "false"),
                 ("DD_LOG_LEVEL", "DEBUG"),
+                (
+                    "DD_TRACE_SAMPLING_RULES",
+                    r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#,
+                ),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
@@ -378,9 +388,9 @@ mod tests {
         builder.add_global_tag("another:tag".to_string());
         builder.set_trace_agent_url("http://localhost:4321".into());
         builder.set_trace_rate_limit(200.0);
-        builder.set_trace_sample_rate(0.8);
         builder.set_enabled(true);
         builder.set_log_level(super::LogLevel::Warn);
+        builder.set_trace_sampling_rules(r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#.to_string());
 
         let config = builder.build();
 
@@ -393,8 +403,11 @@ mod tests {
         );
         assert_eq!(config.trace_agent_url(), "http://localhost:4321");
         assert_eq!(config.trace_rate_limit(), Some(200.0));
-        assert_eq!(config.trace_sample_rate(), Some(0.8));
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Warn);
+        assert_eq!(
+            config.trace_sampling_rules(),
+            Some(r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#)
+        );
     }
 }

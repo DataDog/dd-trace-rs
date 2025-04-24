@@ -174,7 +174,7 @@ lazy_static::lazy_static! {
     /// HashMap mapping sampling mechanisms to priority pairs (keep, reject)
     pub static ref SAMPLING_MECHANISM_TO_PRIORITIES: HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> = {
         let mut map = HashMap::new();
-        // TODO: Update mapping to include single span sampling and appsec sampling mechanisms
+        // TODO: Update mapping to include single span sampling and appsec sampling mechanisms when they are implemented
         map.insert(SamplingMechanism::AgentRateByService, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
         map.insert(SamplingMechanism::Default, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
         map.insert(SamplingMechanism::Manual, (SamplingPriority::UserKeep, SamplingPriority::UserReject));

@@ -1,12 +1,12 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+mod sampler;
 mod span_conversion;
 mod span_exporter;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
-// TODO(paullgdc): Should we export this or just the setup function?
-use dd_trace_sampling::DatadogSampler;
+pub use sampler::create_sampler_from_config;
 pub use span_exporter::DatadogExporter;
 
 /// Initialize the Datadog OpenTelemetry exporter.
@@ -41,8 +41,8 @@ pub fn init_datadog(
         opentelemetry_sdk::propagation::TraceContextPropagator::new(),
     );
 
-    // Create a basic DatadogSampler with default configuration
-    let sampler = DatadogSampler::new(None, None);
+    // Create a DatadogSampler from config settings
+    let sampler = sampler::create_sampler_from_config(&cfg);
 
     let tracer_provider = tracer_provider_builder
         .with_batch_exporter(DatadogExporter::new(cfg).unwrap())
@@ -53,4 +53,9 @@ pub fn init_datadog(
         .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     tracer_provider
+}
+
+#[cfg(test)]
+mod tests {
+    // Integration tests for the init_datadog function can go here if needed
 }
