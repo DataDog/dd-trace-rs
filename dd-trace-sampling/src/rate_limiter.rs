@@ -8,15 +8,15 @@ use std::time::Instant;
 /// A token bucket rate limiter implementation
 #[derive(Clone)]
 pub struct RateLimiter {
+    /// Rate limit value that doesn't need to be protected by mutex
+    rate_limit: i32,
+
     /// Inner state protected by a mutex for thread safety
     inner: Arc<Mutex<RateLimiterState>>,
 }
 
 /// The internal state of the rate limiter
 struct RateLimiterState {
-    /// The rate limit to apply (spans per second)
-    rate_limit: i32,
-
     /// The time window in nanoseconds where the rate limit applies
     time_window_ns: u64,
 
@@ -46,7 +46,7 @@ impl fmt::Debug for RateLimiter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.inner.lock().unwrap();
         f.debug_struct("RateLimiter")
-            .field("rate_limit", &state.rate_limit)
+            .field("rate_limit", &self.rate_limit)
             .field("tokens", &state.tokens)
             .field("effective_rate", &self.effective_rate())
             .finish()
@@ -66,7 +66,6 @@ impl RateLimiter {
         let window_ns = time_window_ns.unwrap_or(1_000_000_000); // Default to 1 second in ns
 
         let state = RateLimiterState {
-            rate_limit,
             time_window_ns: window_ns,
             tokens: rate_limit as f64,
             max_tokens: rate_limit as f64,
@@ -78,6 +77,7 @@ impl RateLimiter {
         };
 
         RateLimiter {
+            rate_limit,
             inner: Arc::new(Mutex::new(state)),
         }
     }
@@ -95,17 +95,18 @@ impl RateLimiter {
 
     /// Internal method to check if a request is allowed at the given time
     fn is_allowed_at(&self, timestamp: Instant) -> bool {
-        let mut state = self.inner.lock().unwrap();
-
-        // Rate limit of 0 blocks everything
-        if state.rate_limit == 0 {
+        // Rate limit of 0 blocks everything - check without acquiring the lock
+        if self.rate_limit == 0 {
             return false;
         }
 
-        // Negative rate limit disables rate limiting
-        if state.rate_limit < 0 {
+        // Negative rate limit disables rate limiting - check without acquiring the lock
+        if self.rate_limit < 0 {
             return true;
         }
+
+        // Only acquire the lock if we need to check/modify token state
+        let mut state = self.inner.lock().unwrap();
 
         // Replenish tokens based on elapsed time
         self.replenish(&mut state, timestamp);
@@ -159,7 +160,7 @@ impl RateLimiter {
         let elapsed_seconds = elapsed.as_nanos() as f64 / state.time_window_ns as f64;
 
         // Update the number of available tokens, but ensure we do not exceed the max
-        let new_tokens = state.tokens + (elapsed_seconds * state.rate_limit as f64);
+        let new_tokens = state.tokens + (elapsed_seconds * self.rate_limit as f64);
         state.tokens = new_tokens.min(state.max_tokens);
 
         // Update the last update time
