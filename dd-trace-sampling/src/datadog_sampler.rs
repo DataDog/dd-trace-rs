@@ -124,48 +124,42 @@ impl SamplingRule {
             }
         }
 
-        // Convert attributes to a more easily searchable form
-        let attr_map: HashMap<&str, String> = attributes
-            .iter()
-            .filter_map(|kv| {
-                // Extract string value from attribute
-                utils::extract_string_value(&kv.value).map(|val| (kv.key.as_str(), val))
-            })
-            .collect();
-
         // Check service if specified using glob matcher
         if let Some(ref matcher) = self.service_matcher {
-            match attr_map.get(SERVICE_TAG) {
-                Some(value) => {
-                    if !matcher.matches(value) {
-                        return false;
-                    }
-                }
-                None => return false,
+            let service_match = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == SERVICE_TAG)
+                .and_then(|kv| utils::extract_string_value(&kv.value))
+                .map_or(false, |value| matcher.matches(&value));
+
+            if !service_match {
+                return false;
             }
         }
 
         // Check resource if specified using glob matcher
         if let Some(ref matcher) = self.resource_matcher {
-            match attr_map.get(RESOURCE_TAG) {
-                Some(value) => {
-                    if !matcher.matches(value) {
-                        return false;
-                    }
-                }
-                None => return false,
+            let resource_match = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == RESOURCE_TAG)
+                .and_then(|kv| utils::extract_string_value(&kv.value))
+                .map_or(false, |value| matcher.matches(&value));
+
+            if !resource_match {
+                return false;
             }
         }
 
         // Check all tags using glob matchers
         for (key, matcher) in &self.tag_matchers {
-            match attr_map.get(key.as_str()) {
-                Some(value) => {
-                    if !matcher.matches(value) {
-                        return false;
-                    }
-                }
-                None => return false,
+            let tag_match = attributes
+                .iter()
+                .find(|kv| kv.key.as_str() == key.as_str())
+                .and_then(|kv| utils::extract_string_value(&kv.value))
+                .map_or(false, |value| matcher.matches(&value));
+
+            if !tag_match {
+                return false;
             }
         }
 
@@ -224,6 +218,7 @@ impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
     pub fn new(rules: Option<Vec<SamplingRule>>, rate_limit: Option<i32>) -> Self {
         // Sort rules by provenance if provided
+        // rule order: customer, dynamic, default
         let sorted_rules = if let Some(mut r) = rules {
             r.sort_by_key(|rule| RuleProvenance::from(rule.provenance.as_str()));
             r

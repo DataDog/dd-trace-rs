@@ -390,7 +390,9 @@ mod tests {
         builder.set_trace_rate_limit(200.0);
         builder.set_enabled(true);
         builder.set_log_level(super::LogLevel::Warn);
-        builder.set_trace_sampling_rules(r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#.to_string());
+        builder.set_trace_sampling_rules(
+            r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#.to_string(),
+        );
 
         let config = builder.build();
 

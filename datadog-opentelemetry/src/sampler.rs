@@ -36,7 +36,7 @@ fn create_default_sampler(cfg: &dd_trace::Config) -> DatadogSampler {
 mod tests {
     use super::*;
     use dd_trace::Config;
-    use opentelemetry::trace::{TraceId, SpanKind};
+    use opentelemetry::trace::{SpanKind, TraceId};
     use opentelemetry_sdk::trace::ShouldSample;
 
     #[test]
@@ -44,27 +44,27 @@ mod tests {
         // Create a config with sampling rules
         let mut config_builder = Config::builder();
         config_builder.set_trace_sampling_rules(
-            r#"{"rules":[{"sample_rate":0.5,"service":"test-service"}],"rate_limit":100}"#.to_string(),
+            r#"{"rules":[{"sample_rate":0.5,"service":"test-service"}],"rate_limit":100}"#
+                .to_string(),
         );
         let config = config_builder.build();
 
         // Create a sampler from the config
         let sampler = create_sampler_from_config(&config);
-        
+
         // Generate a simple trace ID for testing
         let trace_id_bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
-        
+
         // Verify the sampler was created (we can't directly check the rules)
         // In a real test environment, we could verify behavior by checking sampling decisions
-        assert!(sampler.should_sample(
-            None,
-            trace_id,
-            "test",
-            &SpanKind::Client,
-            &[],
-            &[]
-        ).attributes.len() > 0);
+        assert!(
+            sampler
+                .should_sample(None, trace_id, "test", &SpanKind::Client, &[], &[])
+                .attributes
+                .len()
+                > 0
+        );
     }
 
     #[test]
@@ -74,22 +74,18 @@ mod tests {
 
         // Create a sampler from the config
         let sampler = create_sampler_from_config(&config);
-        
+
         // Generate a simple trace ID for testing
         let trace_id_bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
-        
+
         // Verify the default sampler was created
-        let result = sampler.should_sample(
-            None,
-            trace_id,
-            "test",
-            &SpanKind::Client,
-            &[],
-            &[]
-        );
-        
+        let result = sampler.should_sample(None, trace_id, "test", &SpanKind::Client, &[], &[]);
+
         // The default sampler should always sample (rate 1.0)
-        assert_eq!(result.decision, opentelemetry::trace::SamplingDecision::RecordAndSample);
+        assert_eq!(
+            result.decision,
+            opentelemetry::trace::SamplingDecision::RecordAndSample
+        );
     }
-} 
+}

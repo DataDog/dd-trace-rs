@@ -40,11 +40,11 @@ fn default_provenance() -> String {
 ///
 /// This is an internal representation used for JSON (de)serialization.
 /// **Note**: Users should not create or interact with DatadogSampler or SamplingRule instances directly.
-/// 
-/// Sampling rules can be configured via the environment variable `DD_TRACE_SAMPLING_RULES`, 
+///
+/// Sampling rules can be configured via the environment variable `DD_TRACE_SAMPLING_RULES`,
 /// which should contain a JSON string with the sampling rules configuration.
 ///
-/// The tracer's initialization process automatically handles creating the appropriate sampler 
+/// The tracer's initialization process automatically handles creating the appropriate sampler
 /// based on these configuration settings.
 ///
 /// # Example JSON Configuration for DD_TRACE_SAMPLING_RULES
