@@ -182,10 +182,8 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             return;
         };
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
-            opentelemetry::otel_error!(
-                name: "DatadogSpanProcessor.on_end",
-                message = "Failed to export trace chunk",
-                error = e,
+            dd_trace::dd_error!(
+                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
             );
         }
     }
