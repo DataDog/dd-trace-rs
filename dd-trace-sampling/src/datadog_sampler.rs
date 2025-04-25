@@ -155,8 +155,26 @@ impl SamplingRule {
             let tag_match = attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == key.as_str())
-                .and_then(|kv| utils::extract_string_value(&kv.value))
-                .map_or(false, |value| matcher.matches(&value));
+                .and_then(|kv| {
+                    // Handle floating point values with special rules
+                    if let Some(float_val) = utils::extract_float_value(&kv.value) {
+                        // Check if the float has a non-zero decimal part
+                        if float_val != (float_val as i64) as f64 {
+                            // For non-integer floats:
+                            // - All "*" pattern returns true
+                            // - Any other pattern returns false
+                            if matcher.pattern().chars().all(|c| c == '*') {
+                                return Some(true);
+                            } else {
+                                return Some(false);
+                            }
+                        }
+                    }
+
+                    // For non-float values or integer floats, use normal matching
+                    utils::extract_string_value(&kv.value).map(|value| matcher.matches(&value))
+                })
+                .unwrap_or(false);
 
             if !tag_match {
                 return false;
@@ -1168,5 +1186,70 @@ mod tests {
         assert_eq!(sampler.rules[0].service, Some("test-service".to_string()));
         assert_eq!(sampler.rules[0].name, Some("test-span".to_string()));
         assert_eq!(sampler.rules[0].provenance, "customer");
+    }
+
+    #[test]
+    fn test_sampling_rule_matches_float_attributes() {
+        use opentelemetry::Value;
+
+        // Helper to create attributes with a float value
+        fn create_attributes_with_float(
+            service: &'static str,
+            tag_key: &'static str,
+            float_value: f64,
+        ) -> Vec<KeyValue> {
+            let mut attrs = vec![
+                KeyValue::new(SERVICE_TAG, service),
+                KeyValue::new(RESOURCE_TAG, "resource"),
+                KeyValue::new(ENV_TAG, "prod"),
+            ];
+            attrs.push(KeyValue::new(tag_key, Value::F64(float_value)));
+            attrs
+        }
+
+        // Test case 1: Rule with exact value matching integer float
+        let rule_integer = SamplingRule::new(
+            0.5,
+            None,
+            None,
+            None,
+            Some(HashMap::from([("float_tag".to_string(), "42".to_string())])),
+            None,
+        );
+
+        // Should match integer float
+        let integer_float_attrs = create_attributes_with_float("service", "float_tag", 42.0);
+        assert!(rule_integer.matches("span", integer_float_attrs.as_slice()));
+
+        // Test case 2: Rule with wildcard pattern and non-integer float
+        let rule_wildcard = SamplingRule::new(
+            0.5,
+            None,
+            None,
+            None,
+            Some(HashMap::from([("float_tag".to_string(), "*".to_string())])),
+            None,
+        );
+
+        // Should match non-integer float with wildcard pattern
+        let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
+        assert!(rule_wildcard.matches("span", decimal_float_attrs.as_slice()));
+
+        // Test case 3: Rule with specific pattern and non-integer float
+        let rule_specific = SamplingRule::new(
+            0.5,
+            None,
+            None,
+            None,
+            Some(HashMap::from([(
+                "float_tag".to_string(),
+                "42*".to_string(),
+            )])),
+            None,
+        );
+
+        // Should NOT match non-integer float with specific pattern
+        let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
+        assert!(!rule_specific.matches("span", decimal_float_attrs.as_slice()));
     }
 }

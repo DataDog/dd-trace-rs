@@ -14,6 +14,15 @@ pub fn extract_string_value(value: &Value) -> Option<String> {
     }
 }
 
+/// Extracts a float value from an OpenTelemetry Value
+pub fn extract_float_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::F64(f) => Some(*f),
+        Value::I64(i) => Some(*i as f64),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +50,13 @@ mod tests {
             extract_string_value(&Value::Bool(false)),
             Some("false".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_float_value() {
+        assert_eq!(extract_float_value(&Value::F64(12.34)), Some(12.34));
+        assert_eq!(extract_float_value(&Value::I64(123)), Some(123.0));
+        assert_eq!(extract_float_value(&Value::String("12.34".into())), None);
+        assert_eq!(extract_float_value(&Value::Bool(true)), None);
     }
 }
