@@ -50,6 +50,20 @@ impl GlobMatcher {
     pub fn matches(&self, subject: &str) -> bool {
         let subject_lower = subject.to_lowercase();
 
+        // short circuit for common cases
+        // "*" matches everything
+        if self.pattern_lower == "*" {
+            return true;
+        }
+        // exact match
+        if self.pattern_lower == subject_lower {
+            return true;
+        }
+        // if not exact, and no wildcards, return false
+        if !self.pattern_lower.contains('*') && !self.pattern_lower.contains('?') {
+            return false;
+        }
+
         // Try to get from cache first
         {
             let mut cache = self.cache.lock().unwrap();

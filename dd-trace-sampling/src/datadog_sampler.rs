@@ -440,8 +440,8 @@ impl ShouldSample for DatadogSampler {
                 let result = sampler.should_sample(
                     None,
                     trace_id,
-                    "",
-                    &opentelemetry::trace::SpanKind::Client,
+                    "",                                      // Empty name, since we don't use it
+                    &opentelemetry::trace::SpanKind::Client, // We don't care about span kind, just using default
                     &[],
                     &[],
                 );
