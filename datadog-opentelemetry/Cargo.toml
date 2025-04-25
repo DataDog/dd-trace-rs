@@ -33,3 +33,4 @@ datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
 [features]
 test-utils = ["dd-trace/test-utils"]
+internal-logs = []
