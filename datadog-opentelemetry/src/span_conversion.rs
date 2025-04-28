@@ -90,7 +90,7 @@ fn otel_sampling_decision_to_metrics(
         });
 }
 
-pub fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
+pub(crate) fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
     // There is a performance otpimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation

@@ -59,6 +59,13 @@ impl InnerTraceRegistry {
     /// This function tries to maintain the invariant that the first span of the trace chunk should
     /// be the local root span, since it makes processing latter easier.
     /// If the root span is not the first span, it will be swapped with the first span.
+    ///
+    /// # Bounding memory usage
+    ///
+    /// Currently traces with unfinished spans are kept forever in memory.
+    /// This lead to unbounded memory usage, if new spans keep getting added to the trace.
+    /// TODO: We should implement partial flushing, as this will allow use to flush traces that are
+    /// too big, and avoid unbounded memory usage.
     fn finish_span(&mut self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
@@ -92,7 +99,7 @@ impl InnerTraceRegistry {
 #[derive(Clone)]
 /// A registry of traces that are currently running
 ///
-/// This registry maintains the following informations:
+/// This registry maintains the following information:
 /// - The root span ID of the trace
 /// - The finished spans of the trace
 /// - The number of open spans in the trace
