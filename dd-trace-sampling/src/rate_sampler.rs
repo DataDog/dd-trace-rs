@@ -59,6 +59,8 @@ impl RateSampler {
     }
 }
 
+// The RateSampler's should_sample method only cares about the trace_id.
+// The other parameters are ignored.
 impl ShouldSample for RateSampler {
     fn should_sample(
         &self,
