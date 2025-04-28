@@ -191,7 +191,7 @@ impl SamplingRule {
             .should_sample(
                 None,
                 trace_id,
-                "", // name not needed for rate sampler
+                "",                                      // name not needed for rate sampler
                 &opentelemetry::trace::SpanKind::Client, // We don't care about span kind, just using default
                 &[],
                 &[],

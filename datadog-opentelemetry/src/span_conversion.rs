@@ -14,24 +14,6 @@ use opentelemetry::{
 use opentelemetry_sdk::trace::SpanData;
 use tinybytes::BytesString;
 
-// Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_span_data_to_dd_trace_chunks(
-    cfg: &dd_trace::Config,
-    span_data: Vec<SpanData>,
-) -> Vec<Vec<DdSpan>> {
-    // TODO: This can maybe faster by sorting the span_data by trace_id
-    // and then handing off groups of span data?
-    span_data
-        .into_iter()
-        .map(|s| (s.span_context.trace_id(), otel_span_to_dd_span(cfg, s)))
-        .fold(HashMap::<_, Vec<_>>::new(), |mut acc, (trace_id, span)| {
-            acc.entry(trace_id).or_default().push(span);
-            acc
-        })
-        .into_values()
-        .collect()
-}
-
 fn extract_otel_attributes(span: &SpanData) -> &'static str {
     match span.span_kind {
         // TODO(paullgdc): Port the db type logic from here
@@ -108,7 +90,7 @@ fn otel_sampling_decision_to_metrics(
         });
 }
 
-fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
+pub(crate) fn otel_span_to_dd_span(cfg: &dd_trace::Config, otel_span: SpanData) -> DdSpan {
     // There is a performance otpimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
