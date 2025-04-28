@@ -3,10 +3,10 @@
 
 mod span_conversion;
 mod span_exporter;
+mod span_processor;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
-// TODO(paullgdc): Should we export this or just the setup function?
-pub use span_exporter::DatadogExporter;
+use span_processor::DatadogSpanProcessor;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -27,7 +27,7 @@ pub use span_exporter::DatadogExporter;
 /// );
 /// ```
 pub fn init_datadog(
-    cfg: dd_trace::Config,
+    config: dd_trace::Config,
     // TODO(paullgdc): Should we take a builder or create it ourselves?
     // because some customer might want to set max_<things>_per_span using
     // the builder APIs
@@ -41,11 +41,25 @@ pub fn init_datadog(
     );
 
     let tracer_provider = tracer_provider_builder
-        .with_batch_exporter(DatadogExporter::new(cfg).unwrap())
+        .with_span_processor(DatadogSpanProcessor::new(config))
         // TODO: hookup additional components
         // .with_id_generator(id_generator)
         // .with_sampler(sampler)
         .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     tracer_provider
+}
+
+#[cfg(feature = "test-utils")]
+/// Create a local instance of the tracer provider
+pub fn make_tracer(
+    config: dd_trace::Config,
+    tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
+) -> SdkTracerProvider {
+    tracer_provider_builder
+        .with_span_processor(DatadogSpanProcessor::new(config))
+        // TODO: hookup additional components
+        // .with_id_generator(id_generator)
+        // .with_sampler(sampler)
+        .build()
 }
