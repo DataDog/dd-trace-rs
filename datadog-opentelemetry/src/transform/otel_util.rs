@@ -20,15 +20,6 @@ pub trait OtelSpan {
     fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'static, str> {
         self.get_attr_str_opt(attr_key).unwrap_or_default()
     }
-
-    fn get_attributes(&self, attribute_keys: &[AttributeKey]) -> Cow<'static, str> {
-        for &attr_key in attribute_keys {
-            if let Some(attr) = self.get_attr_str_opt(attr_key) {
-                return attr;
-            }
-        }
-        Cow::Borrowed("")
-    }
 }
 
 /// Returns the datadog operation name from the otel span
@@ -135,8 +126,8 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
-pub fn get_otel_ressource_v2(span: &impl OtelSpan, res: &Resource) -> Cow<'static, str> {
-    let m = get_res_span_attributes(span, res, &[RESSOURCE_NAME]);
+pub fn get_otel_resource_v2(span: &impl OtelSpan, res: &Resource) -> Cow<'static, str> {
+    let m = get_res_span_attributes(span, res, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
     }
@@ -329,8 +320,8 @@ pub fn get_otel_span_type(span: &impl OtelSpan, res: &Resource) -> Cow<'static, 
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
-pub fn get_otel_env(span: &impl OtelSpan) -> Cow<'static, str> {
-    span.get_attributes(&[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
+pub fn get_otel_env(res: &Resource) -> Cow<'static, str> {
+    get_res_attributes(res, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
 }
 
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
@@ -377,7 +368,7 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'static, str> {
     if let Some(mapped_key) = http_mappings(k) {
         return Cow::Borrowed(mapped_key);
     }
-    if let Some(suffix) = k.strip_prefix("http.request.header") {
+    if let Some(suffix) = k.strip_prefix("http.request.header.") {
         return Cow::Owned(format!("http.request.headers.{}", suffix));
     }
     if is_datadog_convention_key(k) {
@@ -392,7 +383,7 @@ fn get_res_span_attributes(
     attributes: &[AttributeKey],
 ) -> Cow<'static, str> {
     for &attr_key in attributes {
-        let res_attr = get_res_attributes(&attr_key, res);
+        let res_attr = get_res_attribute(res, &attr_key);
         if !res_attr.is_empty() {
             return res_attr;
         }
@@ -403,7 +394,17 @@ fn get_res_span_attributes(
     Cow::Borrowed("")
 }
 
-fn get_res_attributes(attr: &AttributeKey, res: &Resource) -> Cow<'static, str> {
+fn get_res_attributes(res: &Resource, attributes: &[AttributeKey]) -> Cow<'static, str> {
+    for &attr_key in attributes {
+        let res_attr = get_res_attribute(res, &attr_key);
+        if !res_attr.is_empty() {
+            return res_attr;
+        }
+    }
+    Cow::Borrowed("")
+}
+
+fn get_res_attribute(res: &Resource, attr: &AttributeKey) -> Cow<'static, str> {
     let Some(value) = res.get(&opentelemetry::Key::from_static_str(attr.key())) else {
         return Cow::Borrowed("");
     };

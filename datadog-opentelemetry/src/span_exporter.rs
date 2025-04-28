@@ -145,7 +145,7 @@ impl opentelemetry_sdk::trace::SpanExporter for DatadogExporter {
         let _ = self
             .trace_exporter
             .tx
-            .send(TraceExporterMessage::SetRessource {
+            .send(TraceExporterMessage::SetResource {
                 resource: resource.clone(),
             });
     }
@@ -226,7 +226,7 @@ impl TraceExporterTask {
                         .trace_exporter
                         .shutdown(Some(SPAN_EXPORTER_SHUTDOWN_TIMEOUT));
                 }
-                TraceExporterMessage::SetRessource { resource } => self.otel_resoure = resource,
+                TraceExporterMessage::SetResource { resource } => self.otel_resoure = resource,
             }
         }
     }
@@ -253,7 +253,7 @@ enum TraceExporterMessage {
         span_data: Vec<SpanData>,
         responder: oneshot::Sender<OTelSdkResult>,
     },
-    SetRessource {
+    SetResource {
         resource: opentelemetry_sdk::Resource,
     },
     Shutdown,

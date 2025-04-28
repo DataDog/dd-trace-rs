@@ -10,10 +10,11 @@
 //! This should be a 1:1 port of this commit
 //! https://github.com/DataDog/datadog-agent/blob/97e6db0d4130c8545ede77111a2590eb034c2f11/pkg/trace/transform/transform.go
 //!
-//! It performs a mapping between otel span data and datadog spans. The conversion is done using the default
-//! configuration of the datadog agent, thus compared to the original code, we have removed the following features:
-//! * V1 conversion. The otlp receiver has a v1 and v2 conversion. We only support v2 because we don't
-//! need backward comatibility.
+//! It performs a mapping between otel span data and datadog spans. The conversion is done using the
+//! default configuration of the datadog agent, thus compared to the original code, we have removed
+//! the following features:
+//! * V1 conversion. The otlp receiver has a v1 and v2 conversion. We only support v2 because we
+//!   don't need backward comatibility.
 //! * The `ignore_missing_datadog_fields=true` option. This is false by default in the agent anyway
 //!
 //! # Datastructures
@@ -28,8 +29,8 @@
 //!
 //! Compared to the original code, we read attributes from span a bit differently.
 //! The go code loops through all attributes everytime it is looking for a specific one.
-//! The code in attribute_keys.rs loops only once and then stores the offsets at which the attributes
-//! are stored, for the set of keys we are interested in.  
+//! The code in attribute_keys.rs loops only once and then stores the offsets at which the
+//! attributes are stored, for the set of keys we are interested in.  
 
 mod attribute_keys;
 mod otel_util;
@@ -46,18 +47,21 @@ use otel_util::*;
 use std::{borrow::Cow, collections::hash_map};
 
 use datadog_trace_utils::span::{
-    AttributeAnyValueBytes as DdAnyValue, AttributeArrayValueBytes as DdScalarValue,
-    SpanBytes as DdSpan, SpanEventBytes as DdEvent, SpanLinkBytes as DdSpanLink,
+    AttributeAnyValue, AttributeAnyValueBytes as DdAnyValue, AttributeArrayValue,
+    AttributeArrayValueBytes as DdScalarValue, SpanBytes as DdSpan, SpanEventBytes as DdEvent,
+    SpanLinkBytes as DdSpanLink,
 };
 use opentelemetry::{
     trace::{Link, SpanKind},
     Key, KeyValue, SpanId,
 };
-use opentelemetry_sdk::{trace::SpanData, Resource};
+use opentelemetry_sdk::Resource;
 use tinybytes::BytesString;
 
+use crate::ddtrace_transform::ExportSpan;
+
 struct SpanExtractArgs<'a> {
-    span: &'a SpanData,
+    span: &'a ExportSpan,
     span_attrs: AttributeIndices,
 }
 
@@ -179,7 +183,7 @@ fn otel_span_to_dd_span_minimal(
     let mut dd_span = DdSpan {
         service: BytesString::from_cow(span.get_attr_str(DATADOG_SERVICE)),
         name: BytesString::from_cow(span.get_attr_str(DATADOG_NAME)),
-        resource: BytesString::from_cow(span.get_attr_str(DATADOG_RESSOURCE)),
+        resource: BytesString::from_cow(span.get_attr_str(DATADOG_RESOURCE)),
         r#type: BytesString::from_cow(span.get_attr_str(DATADOG_TYPE)),
         trace_id: trace_id_lower_half,
         span_id,
@@ -222,7 +226,7 @@ fn otel_span_to_dd_span_minimal(
     }
 
     if dd_span.resource.is_empty() {
-        dd_span.resource = BytesString::from_cow(get_otel_ressource_v2(span, res));
+        dd_span.resource = BytesString::from_cow(get_otel_resource_v2(span, res));
     }
     if dd_span.r#type.is_empty() {
         dd_span.r#type = BytesString::from_cow(get_otel_span_type(span, res));
@@ -284,7 +288,7 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
         return 0;
     }
     for e in &dd_span.span_events {
-        if e.name.as_str().eq_ignore_ascii_case("exception") {
+        if !e.name.as_str().eq_ignore_ascii_case("exception") {
             continue;
         }
         for (otel_key, dd_key) in [
@@ -293,40 +297,124 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
             (semconv::ATTRIBUTE_EXCEPTION_STACKTRACE, "error.stack"),
         ] {
             if let Some(attr) = e.attributes.get(&BytesString::from_static(otel_key)) {
-                dd_span.meta.insert(
-                    BytesString::from_static(dd_key),
-                    // TODO string conversion
-                    BytesString::from(format!("{:?}", attr)),
-                );
+                dd_span
+                    .meta
+                    .insert(BytesString::from_static(dd_key), dd_value_to_string(attr));
             }
         }
     }
     let error_msg_key = BytesString::from_static("error.msg");
     if let hash_map::Entry::Vacant(error_msg_slot) = dd_span.meta.entry(error_msg_key.clone()) {
-        if let opentelemetry::trace::Status::Error { description } = status {
-            error_msg_slot.insert(BytesString::from_cow(description.clone()));
-        } else {
-            for key in ["http.response.status_code", "http.status_code"] {
-                let Some(code) = dd_span.meta.get(&BytesString::from_static(key)) else {
-                    continue;
-                };
-                if let Some(http_text) = dd_span
-                    .meta
-                    .get(&BytesString::from_static("http.status_text"))
-                {
-                    dd_span.meta.insert(
-                        error_msg_key,
-                        BytesString::from(format!("{} {}", code.as_str(), http_text.as_str())),
-                    );
-                } else {
-                    dd_span.meta.insert(error_msg_key, code.clone());
+        match status {
+            opentelemetry::trace::Status::Error { description, .. } if !description.is_empty() => {
+                error_msg_slot.insert(BytesString::from_cow(description.clone()));
+            }
+            _ => {
+                for key in ["http.response.status_code", "http.status_code"] {
+                    let Some(code) = dd_span.meta.get(&BytesString::from_static(key)) else {
+                        continue;
+                    };
+                    if let Some(http_text) = dd_span
+                        .meta
+                        .get(&BytesString::from_static("http.status_text"))
+                    {
+                        dd_span.meta.insert(
+                            error_msg_key,
+                            BytesString::from(format!("{} {}", code.as_str(), http_text.as_str())),
+                        );
+                    } else {
+                        dd_span.meta.insert(error_msg_key, code.clone());
+                    }
+                    break;
                 }
-                break;
             }
         }
     }
 
     1
+}
+
+/// https://github.com/DataDog/datadog-agent/blob/a4dea246effb49f2781b451a5b60aa2524fbef75/pkg/trace/transform/transform.go#L328
+fn tag_span_if_contains_exception(dd_span: &mut DdSpan) {
+    if dd_span
+        .span_events
+        .iter()
+        .any(|e| e.name.as_str().eq_ignore_ascii_case("exception"))
+    {
+        dd_span.meta.insert(
+            BytesString::from_static("_dd.span_events.has_exception"),
+            "true".into(),
+        );
+    }
+}
+
+fn otel_value_to_dd_scalar(value: opentelemetry::Value) -> AttributeAnyValue<BytesString> {
+    fn map_vec<T>(
+        v: impl IntoIterator<Item = T>,
+        construtor: fn(T) -> DdScalarValue,
+    ) -> DdAnyValue {
+        DdAnyValue::Array(v.into_iter().map(construtor).collect::<Vec<_>>())
+    }
+    match value {
+        opentelemetry::Value::I64(i) => DdAnyValue::SingleValue(DdScalarValue::Integer(i)),
+        opentelemetry::Value::F64(f) => DdAnyValue::SingleValue(DdScalarValue::Double(f)),
+        opentelemetry::Value::Bool(b) => DdAnyValue::SingleValue(DdScalarValue::Boolean(b)),
+        opentelemetry::Value::String(s) => DdAnyValue::SingleValue(DdScalarValue::String(
+            BytesString::from_string(s.to_string()),
+        )),
+        opentelemetry::Value::Array(opentelemetry::Array::Bool(v)) => {
+            map_vec(v, DdScalarValue::Boolean)
+        }
+        opentelemetry::Value::Array(opentelemetry::Array::I64(v)) => {
+            map_vec(v, DdScalarValue::Integer)
+        }
+        opentelemetry::Value::Array(opentelemetry::Array::F64(v)) => {
+            map_vec(v, DdScalarValue::Double)
+        }
+        opentelemetry::Value::Array(opentelemetry::Array::String(v)) => map_vec(
+            v.into_iter()
+                .map(|s| BytesString::from_string(s.to_string())),
+            DdScalarValue::String,
+        ),
+        _ => DdAnyValue::SingleValue(DdScalarValue::String(BytesString::from_string(
+            value.to_string(),
+        ))),
+    }
+}
+
+fn dd_value_to_string(value: &AttributeAnyValue<BytesString>) -> BytesString {
+    use std::fmt::Write;
+    fn write_scalar(value: &AttributeArrayValue<BytesString>, w: &mut String) {
+        let _ = match value {
+            AttributeArrayValue::String(s) => write!(w, "{}", s.as_str()),
+            AttributeArrayValue::Integer(i) => write!(w, "{}", i),
+            AttributeArrayValue::Double(d) => write!(w, "{}", d),
+            AttributeArrayValue::Boolean(b) => write!(w, "{}", b),
+        };
+    }
+    fn write_vec(value: &[AttributeArrayValue<BytesString>], w: &mut String) {
+        w.push('[');
+        for (i, v) in value.iter().enumerate() {
+            if i != 0 {
+                w.push(',');
+            }
+            write_scalar(v, w);
+        }
+        w.push(']');
+    }
+    match value {
+        AttributeAnyValue::SingleValue(AttributeArrayValue::String(s)) => s.clone(),
+        AttributeAnyValue::SingleValue(attribute_array_value) => {
+            let mut w = String::new();
+            write_scalar(attribute_array_value, &mut w);
+            BytesString::from(w)
+        }
+        AttributeAnyValue::Array(attribute_array_values) => {
+            let mut w = String::new();
+            write_vec(attribute_array_values, &mut w);
+            BytesString::from(w)
+        }
+    }
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L217
@@ -347,7 +435,17 @@ fn is_meta_key(key: &str) -> bool {
     )
 }
 
-pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> DdSpan {
+/// Converts an OpenTelemetry span to a Datadog span.
+/// https://github.com/DataDog/datadog-agent/blob/d91c1b47da4f5f24559f49be284e547cc847d5e2/pkg/trace/transform/transform.go#L236
+///
+/// Here are the main differences with the original code:
+/// * No tag normalization
+///
+/// And we don't implement the following feature flags, and instead use the default paths:
+/// * `enable_otlp_compute_top_level_by_span_kind` => default to true
+/// * `IgnoreMissingDatadogFields` => default to false
+/// * `disable_operation_and_resource_name_logic_v2` => default to false
+pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> DdSpan {
     // There is a performance otpimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
@@ -364,7 +462,7 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
     let is_top_level = otel_span.parent_span_id == SpanId::INVALID
         || matches!(otel_span.span_kind, SpanKind::Server | SpanKind::Consumer);
 
-    let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, otel_ressource, is_top_level);
+    let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, otel_resource, is_top_level);
 
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {
         let value = span_extracted.get_attr_str(*dd_semantics_key);
@@ -376,7 +474,7 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
         }
     }
 
-    for (key, value) in otel_ressource.iter() {
+    for (key, value) in otel_resource.iter() {
         set_meta_otlp_with_semconv_mappings(key.as_str(), value, &mut dd_span);
     }
 
@@ -397,10 +495,10 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
     if let hash_map::Entry::Vacant(version_slot) =
         dd_span.meta.entry(BytesString::from_static("version"))
     {
-        let version = otel_ressource
+        let version = otel_resource
             .get(&Key::from_static_str(SERVICE_VERSION.key()))
             .map(|v| v.to_string())
-            .unwrap_or(String::new());
+            .unwrap_or_default();
         if !version.is_empty() {
             version_slot.insert(BytesString::from_string(version));
         }
@@ -425,7 +523,7 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
     }
 
     if let hash_map::Entry::Vacant(env_slot) = dd_span.meta.entry(BytesString::from_static("env")) {
-        let env = get_otel_env(&span_extracted);
+        let env = get_otel_env(otel_resource);
         if !env.is_empty() {
             env_slot.insert(BytesString::from_cow(env));
         }
@@ -444,7 +542,6 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
                 let span_id = otel_span_id_to_dd_id(span_context.span_id());
                 let tracestate = BytesString::from(span_context.trace_state().header());
                 let flags = span_context.trace_flags().to_u8() as u64;
-                // TODO(paullgdc): attributes conversion
                 let attributes = otel_attributes
                     .into_iter()
                     .map(|KeyValue { key, value, .. }| {
@@ -470,49 +567,12 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
         .map(|e| {
             let time_unix_nano = time_as_unix_nanos(e.timestamp).max(0) as u64;
             let name = BytesString::from_cow(e.name);
-            // TODO(paullgdc): attributes conversion
             let attributes = e
                 .attributes
                 .into_iter()
                 .map(|KeyValue { key, value, .. }| {
                     let key = BytesString::from(key.to_string());
-                    fn map_vec<T>(
-                        v: impl IntoIterator<Item = T>,
-                        construtor: fn(T) -> DdScalarValue,
-                    ) -> DdAnyValue {
-                        DdAnyValue::Array(v.into_iter().map(construtor).collect::<Vec<_>>())
-                    }
-                    let value = match value {
-                        opentelemetry::Value::I64(i) => {
-                            DdAnyValue::SingleValue(DdScalarValue::Integer(i))
-                        }
-                        opentelemetry::Value::F64(f) => {
-                            DdAnyValue::SingleValue(DdScalarValue::Double(f))
-                        }
-                        opentelemetry::Value::Bool(b) => {
-                            DdAnyValue::SingleValue(DdScalarValue::Boolean(b))
-                        }
-                        opentelemetry::Value::String(s) => DdAnyValue::SingleValue(
-                            DdScalarValue::String(BytesString::from_string(s.to_string())),
-                        ),
-                        opentelemetry::Value::Array(opentelemetry::Array::Bool(v)) => {
-                            map_vec(v, DdScalarValue::Boolean)
-                        }
-                        opentelemetry::Value::Array(opentelemetry::Array::I64(v)) => {
-                            map_vec(v, DdScalarValue::Integer)
-                        }
-                        opentelemetry::Value::Array(opentelemetry::Array::F64(v)) => {
-                            map_vec(v, DdScalarValue::Double)
-                        }
-                        opentelemetry::Value::Array(opentelemetry::Array::String(v)) => map_vec(
-                            v.into_iter()
-                                .map(|s| BytesString::from_string(s.to_string())),
-                            DdScalarValue::String,
-                        ),
-                        _ => DdAnyValue::SingleValue(DdScalarValue::String(
-                            BytesString::from_string(value.to_string()),
-                        )),
-                    };
+                    let value = otel_value_to_dd_scalar(value);
                     (key, value)
                 })
                 .collect();
@@ -523,6 +583,7 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
             }
         })
         .collect();
+    tag_span_if_contains_exception(&mut dd_span);
 
     if !otel_span.span_context.trace_state().header().is_empty() {
         dd_span.meta.insert(
@@ -560,10 +621,12 @@ pub fn otel_span_to_dd_span(otel_span: SpanData, otel_ressource: &Resource) -> D
         }),
     );
     if let opentelemetry::trace::Status::Error { description } = &otel_span.status {
-        dd_span.meta.insert(
-            BytesString::from_static(semconv::ATTRIBUTE_OTEL_STATUS_DESCRIPTION),
-            BytesString::from_cow(description.clone()),
-        );
+        if !description.is_empty() {
+            dd_span.meta.insert(
+                BytesString::from_static(semconv::ATTRIBUTE_OTEL_STATUS_DESCRIPTION),
+                BytesString::from_cow(description.clone()),
+            );
+        }
     }
 
     if ["error.msg", "error.type", "error.stack"]
