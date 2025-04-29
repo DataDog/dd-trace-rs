@@ -16,6 +16,7 @@ use crate::constants::{
 
 // Import the attr constants
 use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
+use crate::otel_utils::get_dd_key_for_otlp_attribute;
 
 use crate::glob_matcher::GlobMatcher;
 use crate::rate_limiter::RateLimiter;
@@ -152,29 +153,30 @@ impl SamplingRule {
 
         // Check all tags using glob matchers
         for (key, matcher) in &self.tag_matchers {
-            let tag_match = attributes
+            // First, try to match directly with the provided tag key
+            let direct_match = attributes
                 .iter()
                 .find(|kv| kv.key.as_str() == key.as_str())
-                .and_then(|kv| {
-                    // Handle floating point values with special rules
-                    if let Some(float_val) = utils::extract_float_value(&kv.value) {
-                        // Check if the float has a non-zero decimal part
-                        if float_val != (float_val as i64) as f64 {
-                            // For non-integer floats:
-                            // - All "*" pattern returns true
-                            // - Any other pattern returns false
-                            if matcher.pattern().chars().all(|c| c == '*') {
-                                return Some(true);
-                            } else {
-                                return Some(false);
-                            }
-                        }
-                    }
+                .and_then(|kv| self.match_attribute_value(&kv.value, matcher));
 
-                    // For non-float values or integer floats, use normal matching
-                    utils::extract_string_value(&kv.value).map(|value| matcher.matches(&value))
-                })
-                .unwrap_or(false);
+            if direct_match.unwrap_or(false) {
+                continue;
+            }
+
+            // If no direct match, try to find the corresponding OpenTelemetry attribute that maps to the Datadog tag key
+            // Look for the tag in all attributes, converting from OpenTelemetry to Datadog format if needed
+            let tag_match = attributes.iter().any(|kv| {
+                // Convert OTel attribute key to Datadog format
+                let dd_key = get_dd_key_for_otlp_attribute(kv.key.as_str());
+
+                // Check if this is the tag we're looking for
+                if dd_key.as_ref() == key.as_str() {
+                    return self
+                        .match_attribute_value(&kv.value, matcher)
+                        .unwrap_or(false);
+                }
+                false
+            });
 
             if !tag_match {
                 return false;
@@ -182,6 +184,31 @@ impl SamplingRule {
         }
 
         true
+    }
+
+    // Helper method to match attribute values considering different value types
+    fn match_attribute_value(
+        &self,
+        value: &opentelemetry::Value,
+        matcher: &GlobMatcher,
+    ) -> Option<bool> {
+        // Floating point values are handled with special rules
+        if let Some(float_val) = utils::extract_float_value(value) {
+            // Check if the float has a non-zero decimal part
+            let has_decimal = float_val != (float_val as i64) as f64;
+
+            // For non-integer floats, only match if it's a wildcard pattern
+            if has_decimal {
+                // All '*' pattern returns true, any other pattern returns false
+                return Some(matcher.pattern().chars().all(|c| c == '*'));
+            }
+
+            // For integer floats, convert to string for matching
+            return Some(matcher.matches(&float_val.to_string()));
+        }
+
+        // For non-float values, use normal matching
+        utils::extract_string_value(value).map(|string_value| matcher.matches(&string_value))
     }
 
     /// Samples a trace ID using this rule's sample rate
@@ -1236,6 +1263,7 @@ mod tests {
         assert!(rule_wildcard.matches("span", decimal_float_attrs.as_slice()));
 
         // Test case 3: Rule with specific pattern and non-integer float
+        // With our simplified logic, non-integer floats will never match non-wildcard patterns
         let rule_specific = SamplingRule::new(
             0.5,
             None,
@@ -1243,13 +1271,184 @@ mod tests {
             None,
             Some(HashMap::from([(
                 "float_tag".to_string(),
-                "42*".to_string(),
+                "42.5".to_string(),
             )])),
             None,
         );
 
-        // Should NOT match non-integer float with specific pattern
+        // Should NOT match the exact decimal value because non-integer floats only match wildcards
         let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
         assert!(!rule_specific.matches("span", decimal_float_attrs.as_slice()));
+
+        // Test case 4: Pattern with partial wildcard '*' for suffix
+        let rule_prefix = SamplingRule::new(
+            0.5,
+            None,
+            None,
+            None,
+            Some(HashMap::from([(
+                "float_tag".to_string(),
+                "42.*".to_string(),
+            )])),
+            None,
+        );
+
+        // Should NOT match decimal values as we don't do partial pattern matching for non-integer floats
+        assert!(!rule_prefix.matches("span", decimal_float_attrs.as_slice()));
+    }
+
+    #[test]
+    fn test_otel_to_datadog_attribute_mapping() {
+        // Test with a rule that matches against a Datadog attribute name
+        let rule = SamplingRule::new(
+            1.0,
+            None,
+            None,
+            None,
+            Some(HashMap::from([(
+                "http.status_code".to_string(),
+                "5*".to_string(),
+            )])),
+            None,
+        );
+
+        // Create attributes with OpenTelemetry naming convention
+        let otel_attrs = vec![
+            // OpenTelemetry uses http.response.status_code, but Datadog uses http.status_code
+            KeyValue::new("http.response.status_code", 500),
+        ];
+
+        // The rule should match because http.response.status_code maps to http.status_code
+        assert!(rule.matches("span-name", otel_attrs.as_slice()));
+
+        // Create attributes with Datadog naming convention (direct match)
+        let dd_attrs = vec![KeyValue::new("http.status_code", 500)];
+
+        // Direct match should also work
+        assert!(rule.matches("span-name", dd_attrs.as_slice()));
+
+        // Attributes that don't match the value pattern shouldn't match
+        let non_matching_attrs = vec![KeyValue::new("http.response.status_code", 200)];
+        assert!(!rule.matches("span-name", non_matching_attrs.as_slice()));
+
+        // Attributes that have no mapping to the rule tag shouldn't match
+        let unrelated_attrs = vec![KeyValue::new("unrelated.attribute", "value")];
+        assert!(!rule.matches("span-name", unrelated_attrs.as_slice()));
+    }
+
+    #[test]
+    fn test_multiple_otel_attribute_mappings() {
+        // Test with a rule that has multiple tag criteria
+        let mut tags = HashMap::new();
+        tags.insert("http.status_code".to_string(), "5*".to_string());
+        tags.insert("http.method".to_string(), "POST".to_string());
+        tags.insert("http.url".to_string(), "*api*".to_string());
+
+        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
+
+        // Create attributes with mixed OpenTelemetry and Datadog naming
+        let mixed_attrs = vec![
+            // OTel attribute that maps to http.status_code
+            KeyValue::new("http.response.status_code", 503),
+            // OTel attribute that maps to http.method
+            KeyValue::new("http.request.method", "POST"),
+            // OTel attribute that maps to http.url
+            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
+        ];
+
+        // The rule should match because all three criteria are satisfied through mapping
+        assert!(rule.matches("span-name", mixed_attrs.as_slice()));
+
+        // If any criteria is not met, the rule shouldn't match
+        let missing_method = vec![
+            KeyValue::new("http.response.status_code", 503),
+            // Missing http.method/http.request.method
+            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
+        ];
+
+        assert!(!rule.matches("span-name", missing_method.as_slice()));
+
+        // Wrong value should also not match
+        let wrong_method = vec![
+            KeyValue::new("http.response.status_code", 503),
+            KeyValue::new("http.request.method", "GET"), // Not POST
+            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
+        ];
+
+        assert!(!rule.matches("span-name", wrong_method.as_slice()));
+    }
+
+    #[test]
+    fn test_direct_and_mapped_mixed_attributes() {
+        // Test with both direct matches and mapped attributes
+        let mut tags = HashMap::new();
+        tags.insert("http.status_code".to_string(), "5*".to_string());
+        tags.insert("custom.tag".to_string(), "value".to_string()); // This has no mapping
+
+        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
+
+        // A mix of direct and mapped attributes
+        let mixed_attrs = vec![
+            // OTel attribute that maps to http.status_code
+            KeyValue::new("http.response.status_code", 503),
+            // Direct match attribute with no mapping
+            KeyValue::new("custom.tag", "value"),
+        ];
+
+        // The rule should match with both direct and mapped attributes
+        assert!(rule.matches("span-name", mixed_attrs.as_slice()));
+
+        // Using the Datadog convention for both should also match
+        let dd_attrs = vec![
+            KeyValue::new("http.status_code", 503),
+            KeyValue::new("custom.tag", "value"),
+        ];
+
+        assert!(rule.matches("span-name", dd_attrs.as_slice()));
+
+        // Missing the custom tag should fail
+        let missing_custom = vec![
+            KeyValue::new("http.response.status_code", 503),
+            // Missing custom.tag
+        ];
+
+        assert!(!rule.matches("span-name", missing_custom.as_slice()));
+    }
+
+    #[test]
+    fn test_sampling_rule_with_various_attribute_types() {
+        // Test with different attribute value types (stick to numeric types which are more reliable for matching)
+        let mut tags = HashMap::new();
+        tags.insert("integer.tag".to_string(), "500".to_string()); // Integer
+        tags.insert("float.tag".to_string(), "*".to_string()); // Use wildcard for float to match any value
+
+        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
+
+        // Attributes with various types
+        let attrs = vec![
+            KeyValue::new("integer.tag", 500),
+            KeyValue::new("float.tag", 1.5), // 1.5 will be preserved as a float
+        ];
+
+        // The rule should match with numeric types
+        assert!(rule.matches("span-name", attrs.as_slice()));
+
+        // Attributes that don't match the pattern shouldn't match
+        let non_matching_attrs = vec![
+            KeyValue::new("integer.tag", 501), // Not 500
+            KeyValue::new("float.tag", 1.5),
+        ];
+
+        assert!(!rule.matches("span-name", non_matching_attrs.as_slice()));
+
+        // Wildcard pattern should match any float
+        let mut wildcard_tags = HashMap::new();
+        wildcard_tags.insert("float.tag".to_string(), "*".to_string()); // Any float
+
+        let wildcard_rule = SamplingRule::new(1.0, None, None, None, Some(wildcard_tags), None);
+
+        let wildcard_float = vec![KeyValue::new("float.tag", 1.6)];
+
+        assert!(wildcard_rule.matches("span-name", wildcard_float.as_slice()));
     }
 }
