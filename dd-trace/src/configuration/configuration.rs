@@ -591,6 +591,6 @@ mod tests {
             config.trace_propagation_style_inject(),
             Some(vec![TracePropagationStyle::Datadog]).as_deref()
         );
-        assert_eq!(config.trace_propagation_extract_first(), false);
+        assert!(!config.trace_propagation_extract_first());
     }
 }

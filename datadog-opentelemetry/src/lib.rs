@@ -8,9 +8,6 @@ mod text_map_propagator;
 mod trace_id;
 mod transform;
 
-use std::sync::Arc;
-
-use dd_trace_propagation::config::PropagationConfig;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use span_processor::DatadogSpanProcessor;
 use text_map_propagator::DatadogPropagator;
@@ -42,7 +39,7 @@ pub fn init_datadog(
     // all parameters and has an install method?
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
-    let propagator = DatadogPropagator::new(Arc::new(PropagationConfig::from(&config)));
+    let propagator = DatadogPropagator::new(&config);
     opentelemetry::global::set_text_map_propagator(propagator);
 
     let tracer_provider = tracer_provider_builder
