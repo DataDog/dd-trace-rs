@@ -1,8 +1,9 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
+use std::{collections::HashMap, str::FromStr, vec};
 
+use dd_trace::Config;
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
@@ -10,7 +11,6 @@ use opentelemetry::{
 
 use dd_trace_propagation::{
     carrier::{Extractor, Injector},
-    config::PropagationConfig,
     context::{Sampling, SamplingPriority, SpanContext, Tracestate},
     tracecontext::TRACESTATE_KEY,
     DatadogCompositePropagator, Propagator,
@@ -80,7 +80,7 @@ pub struct DatadogPropagator {
 }
 
 impl DatadogPropagator {
-    pub fn new(config: Arc<PropagationConfig>) -> Self {
+    pub fn new(config: &Config) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
         }
@@ -200,36 +200,32 @@ fn extract_trace_state(sc: &SpanContext) -> opentelemetry::trace::TraceState {
 
 #[cfg(test)]
 pub mod tests {
-    use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
+    use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
-    use dd_trace::configuration::TracePropagationStyle;
+    use dd_trace::{configuration::TracePropagationStyle, Config};
     use opentelemetry::{
         propagation::{Extractor, TextMapPropagator},
         trace::{Span, SpanContext as OtelSpanContext, Status, TraceContextExt, TraceState},
         Context, KeyValue, SpanId, TraceFlags, TraceId,
     };
 
-    use dd_trace_propagation::{
-        config::PropagationConfig,
-        tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
-    };
+    use dd_trace_propagation::tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY};
 
     use super::DatadogPropagator;
 
     fn get_propagator(styles: Option<Vec<TracePropagationStyle>>) -> DatadogPropagator {
-        let mut config = PropagationConfig {
-            style_extract: Some(vec![
+        let mut builder = Config::builder();
+
+        if let Some(ref styles) = styles {
+            builder.set_trace_propagation_style(styles.to_vec());
+        } else {
+            builder.set_trace_propagation_style_extract(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ]),
-            ..Default::default()
-        };
-
-        if let Some(ref _s) = styles {
-            config.style_extract.clone_from(&styles);
+            ]);
         }
 
-        DatadogPropagator::new(Arc::new(config))
+        DatadogPropagator::new(&builder.build())
     }
 
     #[derive(Debug)]
