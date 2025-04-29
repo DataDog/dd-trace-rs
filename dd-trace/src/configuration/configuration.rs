@@ -45,13 +45,14 @@ impl TracePropagationStyle {
         source: CompositeConfigSourceResult<String>,
     ) -> Option<Vec<TracePropagationStyle>> {
         match source.value {
-            Some(config_key) => Some(
+            Some(config_key) if !config_key.value.is_empty() => Some(
                 config_key
                     .value
                     .split(',')
                     .filter_map(|value| TracePropagationStyle::from_str(value).ok())
                     .collect(),
             ),
+            Some(_) => None,
             None => None,
         }
     }
@@ -404,6 +405,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &Self {
+        self.config.trace_propagation_extract_first = first;
+        self
+    }
+
     pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.enabled = enabled;
         self
@@ -427,7 +433,10 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::Config;
-    use crate::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
+    use crate::configuration::{
+        sources::{CompositeSource, ConfigSourceOrigin, HashMapSource},
+        TracePropagationStyle,
+    };
 
     #[test]
     fn test_config_from_source() {
@@ -505,5 +514,83 @@ mod tests {
         assert_eq!(config.trace_sample_rate(), Some(0.8));
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_propagation_config_from_source() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", ""),
+                (
+                    "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
+                    "datadog,  tracecontext, invalid",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "tracecontext"),
+                ("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_propagation_style(), None);
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+        assert!(config.trace_propagation_extract_first())
+    }
+
+    #[test]
+    fn test_propagation_config_from_source_override() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", ""),
+                (
+                    "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
+                    "datadog,  tracecontext",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "tracecontext"),
+                ("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let mut builder = Config::builder_with_sources(&sources);
+        builder.set_trace_propagation_style(vec![
+            TracePropagationStyle::TraceContext,
+            TracePropagationStyle::Datadog,
+        ]);
+        builder.set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext]);
+        builder.set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog]);
+        builder.set_trace_propagation_extract_first(false);
+
+        let config = builder.build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Datadog
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+        assert_eq!(config.trace_propagation_extract_first(), false);
     }
 }
