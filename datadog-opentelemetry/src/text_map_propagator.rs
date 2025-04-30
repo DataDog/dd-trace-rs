@@ -114,7 +114,7 @@ impl TextMapPropagator for DatadogPropagator {
             .extract(&ExtractorWrapper { extractor })
             .map(|dd_span_context| {
                 let trace_flags = extract_trace_flags(&dd_span_context);
-                let trace_state = extract_trace_state(&dd_span_context);
+                let trace_state = extract_trace_state(extractor);
 
                 let otel_span_context = opentelemetry::trace::SpanContext::new(
                     opentelemetry::TraceId::from(dd_span_context.trace_id),
@@ -151,12 +151,13 @@ fn extract_trace_flags(sc: &SpanContext) -> opentelemetry::TraceFlags {
     }
 }
 
-fn extract_trace_state(sc: &SpanContext) -> opentelemetry::trace::TraceState {
+fn extract_trace_state(
+    extractor: &dyn opentelemetry::propagation::Extractor,
+) -> opentelemetry::trace::TraceState {
     // TODO: we are parsing twice tracestate
-    match sc.tags.get(TRACESTATE_KEY) {
-        Some(trace_state) => {
-            opentelemetry::trace::TraceState::from_str(trace_state).unwrap_or_default()
-        }
+    match extractor.get(TRACESTATE_KEY) {
+        Some(trace_state) => opentelemetry::trace::TraceState::from_str(trace_state)
+            .unwrap_or_else(|_| opentelemetry::trace::TraceState::default()),
         None => opentelemetry::trace::TraceState::default(),
     }
 }
