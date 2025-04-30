@@ -22,9 +22,6 @@ use crate::otel_utils::get_otel_operation_name_v2;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::utils;
-use crate::attribute_keys::{
-    DB_SYSTEM, HTTP_METHOD, MESSAGING_SYSTEM, MESSAGING_OPERATION, NETWORK_PROTOCOL_NAME
-};
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -534,6 +531,9 @@ mod tests {
     use opentelemetry::trace::{Span, SpanContext, SpanId, SpanKind};
     use opentelemetry::trace::{Status, TraceFlags, TraceState};
     use opentelemetry::Context as OtelContext;
+    use crate::attribute_keys::{
+        DB_SYSTEM, HTTP_METHOD, MESSAGING_SYSTEM, MESSAGING_OPERATION, NETWORK_PROTOCOL_NAME
+    };
     use std::borrow::Cow;
 
     // Helper function to create a trace ID
