@@ -42,7 +42,7 @@ impl Injector for InjectorWrapper<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct DatadogExtractData {
     origin: Option<String>,
     tags: HashMap<String, String>,
@@ -51,15 +51,6 @@ struct DatadogExtractData {
 impl DatadogExtractData {
     fn from(SpanContext { origin, tags, .. }: SpanContext) -> Self {
         DatadogExtractData { origin, tags }
-    }
-}
-
-impl Default for DatadogExtractData {
-    fn default() -> Self {
-        DatadogExtractData {
-            origin: None,
-            tags: HashMap::new(),
-        }
     }
 }
 
