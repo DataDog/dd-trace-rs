@@ -3,9 +3,10 @@
 
 use std::borrow::Cow;
 
-use super::{attribute_keys::*, sem_convs};
+use super::{attribute_keys::*, sem_convs, utils};
 
 use opentelemetry::trace::SpanKind;
+use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 
 /// The Span trait is used to implement utils function is a way that is generic
@@ -22,18 +23,30 @@ pub trait OtelSpan {
     }
 }
 
-/// Returns the datadog operation name from the otel span
+/// Returns the datadog operation name based on the span kind and attributes
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
-pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
-    if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
-        return name;
+pub fn get_otel_operation_name_v2(
+    attributes: &[KeyValue],
+    span_kind: &opentelemetry::trace::SpanKind,
+) -> Cow<'static, str> {
+    // Look for operation name in attributes
+    if let Some(op_name) = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == OPERATION_NAME.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+    {
+        return Cow::Owned(op_name);
     }
 
-    let is_client = matches!(span.span_kind(), SpanKind::Client);
-    let is_server = matches!(span.span_kind(), SpanKind::Server);
+    let is_client = matches!(span_kind, SpanKind::Client);
+    let is_server = matches!(span_kind, SpanKind::Server);
 
     // http
-    if span.has_attr(HTTP_METHOD) || span.has_attr(HTTP_REQUEST_METHOD) {
+    let has_http_method = attributes.iter().any(|kv| {
+        kv.key.as_str() == HTTP_METHOD.key() || kv.key.as_str() == HTTP_REQUEST_METHOD.key()
+    });
+
+    if has_http_method {
         if is_client {
             return Cow::Borrowed("http.client.request");
         } else if is_server {
@@ -42,18 +55,33 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // database
-    let db_system = span.get_attr_str(DB_SYSTEM);
+    let db_system = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == DB_SYSTEM.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     if !db_system.is_empty() && is_client {
         return Cow::Owned(format!("{}.query", db_system));
     }
 
     // messaging
-    let messaging_system = span.get_attr_str(MESSAGING_SYSTEM);
-    let messaging_operation = span.get_attr_str(MESSAGING_OPERATION);
+    let messaging_system = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == MESSAGING_SYSTEM.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
+    let messaging_operation = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == MESSAGING_OPERATION.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     if !messaging_system.is_empty()
         && !messaging_operation.is_empty()
         && matches!(
-            span.span_kind(),
+            span_kind,
             SpanKind::Client | SpanKind::Server | SpanKind::Consumer | SpanKind::Producer
         )
     {
@@ -61,26 +89,49 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // RPC & AWS
-    let rpc_system = span.get_attr_str(RPC_SYSTEM);
+    let rpc_system = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == RPC_SYSTEM.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     let is_rpc = !rpc_system.is_empty();
     let is_aws = rpc_system == "aws-api";
+
     if is_client && is_aws {
-        let rpc_service = span.get_attr_str(RPC_SERVICE);
+        let rpc_service = attributes
+            .iter()
+            .find(|kv| kv.key.as_str() == RPC_SERVICE.key())
+            .and_then(|kv| utils::extract_string_value(&kv.value))
+            .unwrap_or_default();
+
         if !rpc_service.is_empty() {
             return Cow::Owned(format!("aws.{}.request", rpc_service));
         }
         return Cow::Borrowed("aws.client.request");
     }
+
     if is_client && is_rpc {
         return Cow::Owned(format!("{}.client.request", rpc_system));
     }
+
     if is_server && is_rpc {
         return Cow::Owned(format!("{}.server.request", rpc_system));
     }
 
     // FAAS client
-    let faas_invoked_provider = span.get_attr_str(FAAS_INVOKED_PROVIDER);
-    let faas_invoked_name = span.get_attr_str(FAAS_INVOKED_NAME);
+    let faas_invoked_provider = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == FAAS_INVOKED_PROVIDER.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
+    let faas_invoked_name = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == FAAS_INVOKED_NAME.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     if is_client && !faas_invoked_provider.is_empty() && !faas_invoked_name.is_empty() {
         return Cow::Owned(format!(
             "{}.{}.invoke",
@@ -89,18 +140,34 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // FAAS server
-    let faas_trigger = span.get_attr_str(FAAS_TRIGGER);
+    let faas_trigger = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == FAAS_TRIGGER.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     if !faas_trigger.is_empty() && is_server {
         return Cow::Owned(format!("{}.invoke", faas_trigger));
     }
 
     // GraphQL
-    if !span.get_attr_str(GRAPHQL_OPERATION_TYPE).is_empty() {
+    let graphql_operation_type = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == GRAPHQL_OPERATION_TYPE.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
+    if !graphql_operation_type.is_empty() {
         return Cow::Borrowed("graphql.server.request");
     }
 
     // Generic HTTP server/client
-    let protocol = span.get_attr_str(NETWORK_PROTOCOL_NAME);
+    let protocol = attributes
+        .iter()
+        .find(|kv| kv.key.as_str() == NETWORK_PROTOCOL_NAME.key())
+        .and_then(|kv| utils::extract_string_value(&kv.value))
+        .unwrap_or_default();
+
     if is_server {
         if !protocol.is_empty() {
             return Cow::Owned(format!("{}.server.request", protocol));
@@ -113,10 +180,8 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return Cow::Borrowed("client.request");
     }
 
-    // if nothing matches, checking for generic http server/client
-
     // Fallback in span kind
-    Cow::Borrowed(match span.span_kind() {
+    Cow::Borrowed(match span_kind {
         SpanKind::Client => "Client",
         SpanKind::Server => "Server",
         SpanKind::Producer => "Producer",

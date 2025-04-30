@@ -16,12 +16,15 @@ use crate::constants::{
 
 // Import the attr constants
 use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
-use crate::otel_utils::get_dd_key_for_otlp_attribute;
-
 use crate::glob_matcher::GlobMatcher;
+use crate::otel_utils::get_dd_key_for_otlp_attribute;
+use crate::otel_utils::get_otel_operation_name_v2;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::utils;
+use crate::attribute_keys::{
+    DB_SYSTEM, HTTP_METHOD, MESSAGING_SYSTEM, MESSAGING_OPERATION, NETWORK_PROTOCOL_NAME
+};
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -427,8 +430,8 @@ impl ShouldSample for DatadogSampler {
         &self,
         parent_context: Option<&Context>,
         trace_id: TraceId,
-        name: &str,
-        _span_kind: &opentelemetry::trace::SpanKind,
+        _name: &str,
+        span_kind: &opentelemetry::trace::SpanKind,
         attributes: &[KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> SamplingResult {
@@ -455,7 +458,9 @@ impl ShouldSample for DatadogSampler {
         let mut decision = SamplingDecision::RecordAndSample;
 
         // Find a matching rule
-        let matching_rule = self.find_matching_rule(name, attributes);
+        // Get the operation name from the attributes and span kind
+        let name = get_otel_operation_name_v2(attributes, span_kind);
+        let matching_rule = self.find_matching_rule(name.as_ref(), attributes);
 
         // Track which sampling mechanism was used
         let mut used_agent_sampler = false;
@@ -525,8 +530,9 @@ impl ShouldSample for DatadogSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::trace::{Span, SpanContext, SpanId};
-    use opentelemetry::trace::{SpanKind, Status, TraceFlags, TraceState};
+    use opentelemetry::{Key, Value};
+    use opentelemetry::trace::{Span, SpanContext, SpanId, SpanKind};
+    use opentelemetry::trace::{Status, TraceFlags, TraceState};
     use opentelemetry::Context as OtelContext;
     use std::borrow::Cow;
 
@@ -1457,5 +1463,199 @@ mod tests {
         let wildcard_float = vec![KeyValue::new("float.tag", 1.6)];
 
         assert!(wildcard_rule.matches("span-name", wildcard_float.as_slice()));
+    }
+
+    #[test]
+    fn test_operation_name_integration() {
+        // Create rules that match different operation name patterns
+        let http_rule = SamplingRule::new(
+            1.0,                                // 100% sample rate
+            None,                               // no service matcher
+            Some("http.*.request".to_string()), // matches both client and server HTTP requests
+            None,                               // no resource matcher
+            None,                               // no tag matchers
+            Some("default".to_string()),        // rule name - default provenance
+        );
+
+        let db_rule = SamplingRule::new(
+            1.0,                                  // 100% sample rate
+            None,                                 // no service matcher
+            Some("postgresql.query".to_string()), // matches database queries
+            None,                                 // no resource matcher
+            None,                                 // no tag matchers
+            Some("default".to_string()),          // rule name - default provenance
+        );
+
+        let messaging_rule = SamplingRule::new(
+            1.0,                               // 100% sample rate
+            None,                              // no service matcher
+            Some("kafka.process".to_string()), // matches Kafka messaging operations
+            None,                              // no resource matcher
+            None,                              // no tag matchers
+            Some("default".to_string()),       // rule name - default provenance
+        );
+
+        // Create a sampler with these rules
+        let sampler = DatadogSampler::new(Some(vec![http_rule, db_rule, messaging_rule]), None);
+
+        // Create a trace ID for testing
+        let trace_id = create_trace_id();
+
+        // Test cases for different span kinds and attributes
+
+        // 1. HTTP client request
+        let http_client_attrs = vec![KeyValue::new(
+            Key::from_static_str(HTTP_METHOD.key()),
+            Value::String("GET".into()),
+        )];
+
+        // Print the operation name that will be generated
+        let http_client_op_name = get_otel_operation_name_v2(&http_client_attrs, &SpanKind::Client);
+        assert_eq!(
+            http_client_op_name, "http.client.request",
+            "HTTP client operation name should be correct"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Client,
+            &http_client_attrs,
+            &[],
+        );
+
+        // Should be sampled due to matching the http_rule
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // 2. HTTP server request
+        let http_server_attrs = vec![KeyValue::new(
+            Key::from_static_str(HTTP_METHOD.key()),
+            Value::String("POST".into()),
+        )];
+
+        // Print the operation name that will be generated
+        let http_server_op_name = get_otel_operation_name_v2(&http_server_attrs, &SpanKind::Server);
+        assert_eq!(
+            http_server_op_name, "http.server.request",
+            "HTTP server operation name should be correct"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Server,
+            &http_server_attrs,
+            &[],
+        );
+
+        // Should be sampled due to matching the http_rule
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // 3. Database query
+        let db_attrs = vec![KeyValue::new(
+            Key::from_static_str(DB_SYSTEM.key()),
+            Value::String("postgresql".into()),
+        )];
+
+        // Print the operation name that will be generated
+        let db_op_name = get_otel_operation_name_v2(&db_attrs, &SpanKind::Client);
+        assert_eq!(
+            db_op_name, "postgresql.query",
+            "Database operation name should be correct"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Client, // DB queries use client span kind
+            &db_attrs,
+            &[],
+        );
+
+        // Should be sampled due to matching the db_rule
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // 4. Messaging operation
+        let messaging_attrs = vec![
+            KeyValue::new(
+                Key::from_static_str(MESSAGING_SYSTEM.key()),
+                Value::String("kafka".into()),
+            ),
+            KeyValue::new(
+                Key::from_static_str(MESSAGING_OPERATION.key()),
+                Value::String("process".into()),
+            ),
+        ];
+
+        // Print the operation name that will be generated
+        let messaging_op_name = get_otel_operation_name_v2(&messaging_attrs, &SpanKind::Consumer);
+        assert_eq!(
+            messaging_op_name, "kafka.process",
+            "Messaging operation name should be correct"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Consumer, // Messaging uses consumer span kind
+            &messaging_attrs,
+            &[],
+        );
+
+        // Should be sampled due to matching the messaging_rule
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // 5. Generic internal span (should not match any rules)
+        let internal_attrs = vec![KeyValue::new("custom.tag", "value")];
+
+        // Print the operation name that will be generated
+        let internal_op_name = get_otel_operation_name_v2(&internal_attrs, &SpanKind::Internal);
+        assert_eq!(
+            internal_op_name, "Internal",
+            "Internal operation name should be the span kind"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Internal,
+            &internal_attrs,
+            &[],
+        );
+
+        // Should still be sampled (default behavior when no rules match)
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+
+        // 6. Server with protocol but no HTTP method
+        let server_protocol_attrs = vec![KeyValue::new(
+            Key::from_static_str(NETWORK_PROTOCOL_NAME.key()),
+            Value::String("http".into()),
+        )];
+
+        // Print the operation name that will be generated
+        let server_protocol_op_name =
+            get_otel_operation_name_v2(&server_protocol_attrs, &SpanKind::Server);
+        assert_eq!(
+            server_protocol_op_name, "http.server.request",
+            "Server with protocol operation name should use protocol"
+        );
+
+        let result = sampler.should_sample(
+            None,
+            trace_id,
+            "test-span",
+            &SpanKind::Server,
+            &server_protocol_attrs,
+            &[],
+        );
+
+        // Should not match our http rule since operation name would be "http.server.request"
+        // But should still be sampled (default behavior)
+        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
     }
 }
