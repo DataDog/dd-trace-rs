@@ -18,22 +18,6 @@ use dd_trace_propagation::{
 
 const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags::new(0x02);
 
-// impl Extractor for &dyn opentelemetry::propagation::Extractor {
-//     fn get(&self, key: &str) -> Option<&str> {
-//         opentelemetry::propagation::Extractor::get(*self, key)
-//     }
-
-//     fn keys(&self) -> Vec<&str> {
-//         opentelemetry::propagation::Extractor::keys(*self)
-//     }
-// }
-
-// impl Injector for &mut dyn opentelemetry::propagation::Injector {
-//     fn set(&mut self, key: &str, value: String) {
-//         opentelemetry::propagation::Injector::set(*self, key, value);
-//     }
-// }
-
 struct ExtractorWrapper<'a> {
     extractor: &'a dyn opentelemetry::propagation::Extractor,
 }
@@ -58,19 +42,15 @@ impl Injector for InjectorWrapper<'_> {
     }
 }
 
-struct PropagationSpanData {
+#[derive(Clone, Default)]
+struct DatadogExtractData {
     origin: Option<String>,
     tags: HashMap<String, String>,
-    tracestate: Option<Tracestate>,
 }
 
-impl PropagationSpanData {
-    fn from(span_context: SpanContext) -> Self {
-        PropagationSpanData {
-            origin: span_context.origin,
-            tags: span_context.tags,
-            tracestate: span_context.tracestate,
-        }
+impl DatadogExtractData {
+    fn from(SpanContext { origin, tags, .. }: SpanContext) -> Self {
+        DatadogExtractData { origin, tags }
     }
 }
 
@@ -103,8 +83,11 @@ impl TextMapPropagator for DatadogPropagator {
             mechanism: None,
         });
 
-        let (origin, tags, tracestate) =
-            get_dd_propagation_data(cx, otel_span_context.trace_state());
+        let DatadogExtractData { origin, tags } =
+            cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
+
+        // TODO: review
+        let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let dd_span_context = &mut SpanContext {
             trace_id: u128::from_be_bytes(otel_span_context.trace_id().to_bytes()),
@@ -142,33 +125,13 @@ impl TextMapPropagator for DatadogPropagator {
                 );
 
                 cx.with_remote_span_context(otel_span_context)
-                    .with_value(PropagationSpanData::from(dd_span_context))
+                    .with_value(DatadogExtractData::from(dd_span_context))
             })
             .unwrap_or_else(|| cx.clone())
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
         FieldIter::new(self.inner.keys())
-    }
-}
-
-fn get_dd_propagation_data(
-    cx: &opentelemetry::Context,
-    trace_state: &opentelemetry::trace::TraceState,
-) -> (Option<String>, HashMap<String, String>, Option<Tracestate>) {
-    // Taking into account that Tracestate has not been modified by otel
-    if let Some(span_context) = cx.get::<PropagationSpanData>() {
-        (
-            span_context.origin.clone(),
-            span_context.tags.clone(),
-            span_context.tracestate.clone(),
-        )
-    } else {
-        (
-            None,
-            HashMap::new(),
-            Tracestate::from_str(&trace_state.header()).ok(), // TODO: review
-        )
     }
 }
 
