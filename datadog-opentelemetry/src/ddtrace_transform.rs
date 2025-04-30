@@ -4,11 +4,7 @@
 //! This module contains trace mapping from otel to datadog
 //! specific to dd-trace
 
-use std::{
-    borrow::Cow,
-    collections::{hash_map, HashMap},
-    time::SystemTime,
-};
+use std::{borrow::Cow, collections::hash_map, time::SystemTime};
 
 use datadog_trace_utils::span::SpanBytes as DdSpan;
 use dd_trace::constants::{SAMPLING_DECISION_AUTO_DROP, SAMPLING_DECISION_AUTO_KEEP};
@@ -82,17 +78,16 @@ fn otel_sampling_to_dd_sampling(
 }
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_span_data_to_dd_trace_chunks(
+pub fn otel_trace_chunk_to_dd_trace_chunk(
     cfg: &dd_trace::Config,
     span_data: Vec<SpanData>,
     otel_resource: &Resource,
-) -> Vec<Vec<DdSpan>> {
+) -> Vec<DdSpan> {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
     span_data
         .into_iter()
         .map(|s| {
-            let trace_id = s.span_context.trace_id();
             let trace_flags = s.span_context.trace_flags();
             let mut dd_span =
                 transform::otel_span_to_dd_span(ExportSpan::from_otel_span(s), otel_resource);
@@ -101,12 +96,7 @@ pub fn otel_span_data_to_dd_trace_chunks(
                 dd_span.service = BytesString::from_string(cfg.service().to_string());
             }
 
-            (trace_id, dd_span)
+            dd_span
         })
-        .fold(HashMap::<_, Vec<_>>::new(), |mut acc, (trace_id, span)| {
-            acc.entry(trace_id).or_default().push(span);
-            acc
-        })
-        .into_values()
         .collect()
 }

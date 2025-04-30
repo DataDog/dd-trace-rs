@@ -1,0 +1,213 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+use std::{
+    collections::{hash_map, HashMap},
+    sync::{Arc, RwLock},
+};
+
+use opentelemetry::global::ObjectSafeSpan;
+use opentelemetry_sdk::trace::SpanData;
+
+use crate::span_exporter::DatadogExporter;
+
+struct Trace {
+    root_span_id: [u8; 8],
+    /// Root span will always be the first span in this vector if it is present
+    finished_spans: Vec<SpanData>,
+    open_span_count: usize,
+    #[allow(dead_code)]
+    sampling_decision: Option<SamplingDecision>,
+}
+
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct SamplingDecision {
+    decision: i8,
+    decision_maker: i8,
+}
+
+struct InnerTraceRegistry {
+    registry: HashMap<[u8; 16], Trace>,
+}
+
+impl InnerTraceRegistry {
+    /// Register a new trace with the given trace ID and span ID.
+    /// If the trace is already registered, increment the open span count.
+    /// If the trace is not registered, create a new entry with the given trace ID
+    fn register_span(
+        &mut self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+        sampling_decision: Option<SamplingDecision>,
+    ) {
+        self.registry
+            .entry(trace_id)
+            .or_insert_with(|| Trace {
+                root_span_id: span_id,
+                finished_spans: Vec::new(),
+                open_span_count: 0,
+                sampling_decision,
+            })
+            .open_span_count += 1;
+    }
+
+    /// Finish a span with the given trace ID and span data.
+    /// If the trace is finished (i.e., all spans are finished), return the full trace chunk.
+    /// Otherwise, return None.
+    ///
+    /// This function tries to maintain the invariant that the first span of the trace chunk should
+    /// be the local root span, since it makes processing latter easier.
+    /// If the root span is not the first span, it will be swapped with the first span.
+    ///
+    /// # Bounding memory usage
+    ///
+    /// Currently traces with unfinished spans are kept forever in memory.
+    /// This lead to unbounded memory usage, if new spans keep getting added to the trace.
+    /// TODO: We should implement partial flushing, as this will allow use to flush traces that are
+    /// too big, and avoid unbounded memory usage.
+    fn finish_span(&mut self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
+        if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
+            let trace = slot.get_mut();
+            if !trace.finished_spans.is_empty()
+                && span_data.span_context.span_id().to_bytes() == trace.root_span_id
+            {
+                let swapped_span = std::mem::replace(&mut trace.finished_spans[0], span_data);
+                trace.finished_spans.push(swapped_span);
+            } else {
+                trace.finished_spans.push(span_data);
+            }
+            trace.open_span_count -= 1;
+            if trace.open_span_count == 0 {
+                Some(slot.remove())
+            } else {
+                None
+            }
+        } else {
+            // if we somehow don't have the trace registered, we just flush the span...
+            // this is probably a bug, so we should log telemetry
+            Some(Trace {
+                root_span_id: span_data.span_context.span_id().to_bytes(),
+                finished_spans: vec![span_data],
+                open_span_count: 0,
+                sampling_decision: None,
+            })
+        }
+    }
+}
+
+#[derive(Clone)]
+/// A registry of traces that are currently running
+///
+/// This registry maintains the following information:
+/// - The root span ID of the trace
+/// - The finished spans of the trace
+/// - The number of open spans in the trace
+/// - The sampling decision of the trace
+pub(crate) struct TraceRegistry {
+    // TODO: The lock should probably sharded based on the hash of the trace id
+    // so we reduce contention...
+    // Example:
+    // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
+    // to access a trace we do inner[hash(trace_id) % N].read()
+    inner: Arc<RwLock<InnerTraceRegistry>>,
+}
+
+impl TraceRegistry {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(InnerTraceRegistry {
+                registry: HashMap::new(),
+            })),
+        }
+    }
+
+    /// Register a new span with the given trace ID and span ID.
+    fn register_span(
+        &self,
+        trace_id: [u8; 16],
+        span_id: [u8; 8],
+        sampling_decision: Option<SamplingDecision>,
+    ) {
+        let mut inner = self
+            .inner
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.register_span(trace_id, span_id, sampling_decision);
+    }
+
+    /// Finish a span with the given trace ID and span data.
+    /// If the trace is finished (i.e., all spans are finished), return the full trace chunk to
+    /// flush
+    fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
+        let mut inner = self
+            .inner
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.finish_span(trace_id, span_data)
+    }
+}
+
+pub(crate) struct DatadogSpanProcessor {
+    registry: TraceRegistry,
+    span_exporter: DatadogExporter,
+}
+
+impl std::fmt::Debug for DatadogSpanProcessor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatadogSpanProcessor").finish()
+    }
+}
+
+impl DatadogSpanProcessor {
+    pub(crate) fn new(config: dd_trace::Config) -> Self {
+        Self {
+            registry: TraceRegistry::new(),
+            span_exporter: DatadogExporter::new(config),
+        }
+    }
+}
+
+impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
+    fn on_start(
+        &self,
+        span: &mut opentelemetry_sdk::trace::Span,
+        _parent_ctx: &opentelemetry::Context,
+    ) {
+        let trace_id = span.span_context().trace_id().to_bytes();
+        let span_id = span.span_context().span_id().to_bytes();
+        self.registry.register_span(trace_id, span_id, None);
+    }
+
+    fn on_end(&self, span: SpanData) {
+        let trace_id = span.span_context.trace_id().to_bytes();
+        let Some(Trace {
+            finished_spans: trace_chunk,
+            ..
+        }) = self.registry.finish_span(trace_id, span)
+        else {
+            return;
+        };
+        if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
+            dd_trace::dd_error!(
+                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
+            );
+        }
+    }
+
+    fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+        self.span_exporter.force_flush()
+    }
+
+    fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+        self.span_exporter.shutdown()
+    }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        if let Err(e) = self.span_exporter.set_resource(resource.clone()) {
+            dd_trace::dd_error!(
+                "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
+            );
+        }
+    }
+}

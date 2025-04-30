@@ -32,4 +32,4 @@ datadog-trace-utils = { workspace = true, features = ["test-utils"] }
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
 [features]
-test-utils = ["dd-trace/test-utils"]
+test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]
