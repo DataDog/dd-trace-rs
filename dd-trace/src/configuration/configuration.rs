@@ -3,6 +3,8 @@
 
 use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
+use crate::dd_warn;
+
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
 pub const TRACER_VERSION: &str = "0.0.1";
@@ -41,17 +43,26 @@ pub enum TracePropagationStyle {
 }
 
 impl TracePropagationStyle {
-    fn parse_source(
-        source: CompositeConfigSourceResult<String>,
-    ) -> Option<Vec<TracePropagationStyle>> {
-        match source.value {
-            Some(config_key) if !config_key.value.is_empty() => Some(
-                config_key
-                    .value
-                    .split(',')
-                    .filter_map(|value| TracePropagationStyle::from_str(value).ok())
-                    .collect(),
-            ),
+    fn from_tags(tags: Option<Vec<String>>) -> Option<Vec<TracePropagationStyle>> {
+        match tags {
+            Some(tags) if !tags.is_empty() => {
+                let styles = tags
+                    .iter()
+                    .filter_map(|value| match TracePropagationStyle::from_str(value) {
+                        Ok(style) => Some(style),
+                        Err(err) => {
+                            dd_warn!("Error parsing: {err}");
+                            None
+                        }
+                    })
+                    .collect::<Vec<TracePropagationStyle>>();
+
+                if styles.is_empty() {
+                    None
+                } else {
+                    Some(styles)
+                }
+            }
             Some(_) => None,
             None => None,
         }
@@ -66,7 +77,7 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "none" => Ok(TracePropagationStyle::None),
-            _ => Err(format!("Unknown trace propagation style: {s}")),
+            _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
     }
 }
@@ -140,7 +151,7 @@ pub struct Config {
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
 
-    // Trace propagation configuration
+    /// Trace propagation configuration
     trace_propagation_style: Option<Vec<TracePropagationStyle>>,
     trace_propagation_style_extract: Option<Vec<TracePropagationStyle>>,
     trace_propagation_style_inject: Option<Vec<TracePropagationStyle>>,
@@ -195,14 +206,20 @@ impl Config {
                 .or(default.trace_sample_rate),
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
-            trace_propagation_style: TracePropagationStyle::parse_source(
-                sources.get("DD_TRACE_PROPAGATION_STYLE"),
+            trace_propagation_style: TracePropagationStyle::from_tags(
+                to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
+                    .map(|DdTags(tags)| Some(tags))
+                    .unwrap_or_default(),
             ),
-            trace_propagation_style_extract: TracePropagationStyle::parse_source(
-                sources.get("DD_TRACE_PROPAGATION_STYLE_EXTRACT"),
+            trace_propagation_style_extract: TracePropagationStyle::from_tags(
+                to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE_EXTRACT"))
+                    .map(|DdTags(tags)| Some(tags))
+                    .unwrap_or_default(),
             ),
-            trace_propagation_style_inject: TracePropagationStyle::parse_source(
-                sources.get("DD_TRACE_PROPAGATION_STYLE_INJECT"),
+            trace_propagation_style_inject: TracePropagationStyle::from_tags(
+                to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE_INJECT"))
+                    .map(|DdTags(tags)| Some(tags))
+                    .unwrap_or_default(),
             ),
             trace_propagation_extract_first: to_val(
                 sources.get_parse("DD_TRACE_PROPAGATION_EXTRACT_FIRST"),
@@ -592,5 +609,35 @@ mod tests {
             Some(vec![TracePropagationStyle::Datadog]).as_deref()
         );
         assert!(!config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_config_empty_extract() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog,  tracecontext"),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "incorrect,"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "tracecontext"),
+                ("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
+        assert_eq!(config.trace_propagation_style_extract(), None);
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+        assert!(config.trace_propagation_extract_first());
     }
 }
