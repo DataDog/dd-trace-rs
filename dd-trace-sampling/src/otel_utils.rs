@@ -372,7 +372,7 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'static, str> {
         return Cow::Owned(format!("http.request.headers.{}", suffix));
     }
     if is_datadog_convention_key(k) {
-        return Cow::Borrowed("");
+        return Cow::Owned(k.to_owned());
     }
     Cow::Owned(k.to_owned())
 }

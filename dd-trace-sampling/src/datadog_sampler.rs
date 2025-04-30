@@ -165,20 +165,27 @@ impl SamplingRule {
 
             // If no direct match, try to find the corresponding OpenTelemetry attribute that maps to the Datadog tag key
             // Look for the tag in all attributes, converting from OpenTelemetry to Datadog format if needed
-            let tag_match = attributes.iter().any(|kv| {
-                // Convert OTel attribute key to Datadog format
-                let dd_key = get_dd_key_for_otlp_attribute(kv.key.as_str());
+            // short circuit since we currently only match to attributes starting with "http."
+            if key.starts_with("http.") {
+                let tag_match = attributes.iter().any(|kv| {
+                    // http.response.status_code -> http.request.status_code
+                    // Convert OTel attribute key to Datadog format
+                    let dd_key = get_dd_key_for_otlp_attribute(kv.key.as_str());
 
-                // Check if this is the tag we're looking for
-                if dd_key.as_ref() == key.as_str() {
-                    return self
-                        .match_attribute_value(&kv.value, matcher)
-                        .unwrap_or(false);
+                    // Check if this is the tag we're looking for
+                    if dd_key.as_ref() == key.as_str() {
+                        return self
+                            .match_attribute_value(&kv.value, matcher)
+                            .unwrap_or(false);
+                    }
+                    false
+                });
+
+                if !tag_match {
+                    return false;
                 }
-                false
-            });
-
-            if !tag_match {
+            } else {
+                // For non-HTTP attributes, if we don't have a direct match, the rule doesn't match
                 return false;
             }
         }
