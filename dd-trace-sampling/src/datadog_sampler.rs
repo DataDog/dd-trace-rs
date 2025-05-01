@@ -19,6 +19,7 @@ use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
 use crate::glob_matcher::GlobMatcher;
 use crate::otel_utils::get_dd_key_for_otlp_attribute;
 use crate::otel_utils::get_otel_operation_name_v2;
+use crate::otel_utils::get_otel_resource_v2;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::utils;
@@ -117,10 +118,14 @@ impl SamplingRule {
     }
 
     /// Checks if this rule matches the given span's attributes and name
-    pub fn matches(&self, name: &str, attributes: &[KeyValue]) -> bool {
+    /// The name is derived from the attributes and span kind
+    pub fn matches(&self, attributes: &[KeyValue], span_kind: &opentelemetry::trace::SpanKind) -> bool {
+        // Get the operation name from the attributes and span kind
+        let name = get_otel_operation_name_v2(attributes, span_kind);
+        
         // Check name using glob matcher if specified
         if let Some(ref matcher) = self.name_matcher {
-            if !matcher.matches(name) {
+            if !matcher.matches(name.as_ref()) {
                 return false;
             }
         }
@@ -137,6 +142,9 @@ impl SamplingRule {
                 return false;
             }
         }
+
+        // need to think about how to get the resource from the attributes
+        let resource = get_otel_resource_v2(attributes, &opentelemetry::sdk::Resource::default(), name, *span_kind);
 
         // Check resource if specified using glob matcher
         if let Some(ref matcher) = self.resource_matcher {
@@ -327,10 +335,10 @@ impl DatadogSampler {
     }
 
     /// Finds the highest precedence rule that matches the span
-    fn find_matching_rule(&self, name: &str, attributes: &[KeyValue]) -> Option<&SamplingRule> {
+    fn find_matching_rule(&self, attributes: &[KeyValue], span_kind: &opentelemetry::trace::SpanKind) -> Option<&SamplingRule> {
         self.rules
             .iter()
-            .find(|rule| rule.matches(name, attributes))
+            .find(|rule| rule.matches(attributes, span_kind))
     }
 
     /// Returns the sampling mechanism used for the decision
@@ -455,9 +463,7 @@ impl ShouldSample for DatadogSampler {
         let mut decision = SamplingDecision::RecordAndSample;
 
         // Find a matching rule
-        // Get the operation name from the attributes and span kind
-        let name = get_otel_operation_name_v2(attributes, span_kind);
-        let matching_rule = self.find_matching_rule(name.as_ref(), attributes);
+        let matching_rule = self.find_matching_rule(attributes, span_kind);
 
         // Track which sampling mechanism was used
         let mut used_agent_sampler = false;
@@ -715,8 +721,8 @@ mod tests {
         let attributes = create_attributes("some-service", "some-resource", "some-env");
 
         // Both rules should match any span since they have no criteria
-        assert!(rule.matches("some-span", attributes.as_slice()));
-        assert!(rule_with_empty_strings.matches("some-span", attributes.as_slice()));
+        assert!(rule.matches(attributes.as_slice(), &SpanKind::Client));
+        assert!(rule_with_empty_strings.matches(attributes.as_slice(), &SpanKind::Client));
     }
 
     #[test]
@@ -734,44 +740,56 @@ mod tests {
             None,
         );
 
-        // Should match this span
-        let matching_attributes = create_attributes_with_custom_tag(
-            "web-service",
-            "some-resource",
-            "custom_key",
-            "custom_value",
-        );
-        assert!(rule.matches("http-request", matching_attributes.as_slice()));
+        // Should match this span - we need to mock the name generation here by adding
+        // a key that will result in "http-request" operation name
+        let matching_attributes = vec![
+            KeyValue::new(SERVICE_TAG, "web-service"),
+            KeyValue::new(RESOURCE_TAG, "some-resource"),
+            KeyValue::new("custom_key", "custom_value"),
+            KeyValue::new(HTTP_METHOD.key(), "GET"), // This will generate "http.client.request" in SpanKind::Client
+        ];
+        
+        assert!(rule.matches(&matching_attributes, &SpanKind::Client));
 
         // Should not match due to wrong service pattern
-        let wrong_service = create_attributes_with_custom_tag(
-            "api-service",
-            "some-resource",
-            "custom_key",
-            "custom_value",
-        );
-        assert!(!rule.matches("http-request", wrong_service.as_slice()));
+        let wrong_service = vec![
+            KeyValue::new(SERVICE_TAG, "api-service"),
+            KeyValue::new(RESOURCE_TAG, "some-resource"),
+            KeyValue::new("custom_key", "custom_value"),
+            KeyValue::new(HTTP_METHOD.key(), "GET"), // This will generate "http.client.request" in SpanKind::Client
+        ];
+        
+        assert!(!rule.matches(&wrong_service, &SpanKind::Client));
 
         // Should not match due to wrong name pattern
-        assert!(!rule.matches("grpc-request", matching_attributes.as_slice()));
+        let wrong_name_attributes = vec![
+            KeyValue::new(SERVICE_TAG, "web-service"),
+            KeyValue::new(RESOURCE_TAG, "some-resource"),
+            KeyValue::new("custom_key", "custom_value"),
+            // Without HTTP_METHOD, the operation name won't match "http-*"
+        ];
+        
+        assert!(!rule.matches(&wrong_name_attributes, &SpanKind::Client));
 
         // Should not match due to wrong tag value
-        let wrong_tag_value = create_attributes_with_custom_tag(
-            "web-service",
-            "some-resource",
-            "custom_key",
-            "different_value",
-        );
-        assert!(!rule.matches("http-request", wrong_tag_value.as_slice()));
+        let wrong_tag_value = vec![
+            KeyValue::new(SERVICE_TAG, "web-service"),
+            KeyValue::new(RESOURCE_TAG, "some-resource"),
+            KeyValue::new("custom_key", "different_value"),
+            KeyValue::new(HTTP_METHOD.key(), "GET"), // This will generate "http.client.request" in SpanKind::Client
+        ];
+        
+        assert!(!rule.matches(&wrong_tag_value, &SpanKind::Client));
 
         // Should not match due to wrong tag key
-        let wrong_tag_key = create_attributes_with_custom_tag(
-            "web-service",
-            "some-resource",
-            "different_key",
-            "custom_value",
-        );
-        assert!(!rule.matches("http-request", wrong_tag_key.as_slice()));
+        let wrong_tag_key = vec![
+            KeyValue::new(SERVICE_TAG, "web-service"),
+            KeyValue::new(RESOURCE_TAG, "some-resource"),
+            KeyValue::new("different_key", "custom_value"),
+            KeyValue::new(HTTP_METHOD.key(), "GET"), // This will generate "http.client.request" in SpanKind::Client
+        ];
+        
+        assert!(!rule.matches(&wrong_tag_key, &SpanKind::Client));
     }
 
     #[test]
@@ -895,25 +913,25 @@ mod tests {
 
         // Test with a specific service that matches the first rule
         let attrs1 = create_attributes("service1", "resource", "prod");
-        let matching_rule1 = sampler.find_matching_rule("span", attrs1.as_slice());
+        let matching_rule1 = sampler.find_matching_rule(attrs1.as_slice(), &SpanKind::Client);
         assert!(matching_rule1.is_some());
         assert_eq!(matching_rule1.unwrap().sample_rate, 0.1);
 
         // Test with a specific service that matches the second rule
         let attrs2 = create_attributes("service2", "resource", "prod");
-        let matching_rule2 = sampler.find_matching_rule("span", attrs2.as_slice());
+        let matching_rule2 = sampler.find_matching_rule(attrs2.as_slice(), &SpanKind::Client);
         assert!(matching_rule2.is_some());
         assert_eq!(matching_rule2.unwrap().sample_rate, 0.2);
 
         // Test with a service that matches the wildcard rule
         let attrs3 = create_attributes("service3", "resource", "prod");
-        let matching_rule3 = sampler.find_matching_rule("span", attrs3.as_slice());
+        let matching_rule3 = sampler.find_matching_rule(attrs3.as_slice(), &SpanKind::Client);
         assert!(matching_rule3.is_some());
         assert_eq!(matching_rule3.unwrap().sample_rate, 0.3);
 
         // Test with a service that doesn't match any rule
         let attrs4 = create_attributes("other", "resource", "prod");
-        let matching_rule4 = sampler.find_matching_rule("span", attrs4.as_slice());
+        let matching_rule4 = sampler.find_matching_rule(attrs4.as_slice(), &SpanKind::Client);
         assert!(matching_rule4.is_none());
     }
 
@@ -1259,7 +1277,7 @@ mod tests {
 
         // Should match integer float
         let integer_float_attrs = create_attributes_with_float("service", "float_tag", 42.0);
-        assert!(rule_integer.matches("span", integer_float_attrs.as_slice()));
+        assert!(rule_integer.matches(integer_float_attrs.as_slice(), &SpanKind::Client));
 
         // Test case 2: Rule with wildcard pattern and non-integer float
         let rule_wildcard = SamplingRule::new(
@@ -1273,7 +1291,7 @@ mod tests {
 
         // Should match non-integer float with wildcard pattern
         let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
-        assert!(rule_wildcard.matches("span", decimal_float_attrs.as_slice()));
+        assert!(rule_wildcard.matches(decimal_float_attrs.as_slice(), &SpanKind::Client));
 
         // Test case 3: Rule with specific pattern and non-integer float
         // With our simplified logic, non-integer floats will never match non-wildcard patterns
@@ -1291,7 +1309,7 @@ mod tests {
 
         // Should NOT match the exact decimal value because non-integer floats only match wildcards
         let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
-        assert!(!rule_specific.matches("span", decimal_float_attrs.as_slice()));
+        assert!(!rule_specific.matches(decimal_float_attrs.as_slice(), &SpanKind::Client));
 
         // Test case 4: Pattern with partial wildcard '*' for suffix
         let rule_prefix = SamplingRule::new(
@@ -1307,7 +1325,7 @@ mod tests {
         );
 
         // Should NOT match decimal values as we don't do partial pattern matching for non-integer floats
-        assert!(!rule_prefix.matches("span", decimal_float_attrs.as_slice()));
+        assert!(!rule_prefix.matches(decimal_float_attrs.as_slice(), &SpanKind::Client));
     }
 
     #[test]
@@ -1332,21 +1350,21 @@ mod tests {
         ];
 
         // The rule should match because http.response.status_code maps to http.status_code
-        assert!(rule.matches("span-name", otel_attrs.as_slice()));
+        assert!(rule.matches(otel_attrs.as_slice(), &SpanKind::Client));
 
         // Create attributes with Datadog naming convention (direct match)
         let dd_attrs = vec![KeyValue::new("http.status_code", 500)];
 
         // Direct match should also work
-        assert!(rule.matches("span-name", dd_attrs.as_slice()));
+        assert!(rule.matches(dd_attrs.as_slice(), &SpanKind::Client));
 
         // Attributes that don't match the value pattern shouldn't match
         let non_matching_attrs = vec![KeyValue::new("http.response.status_code", 200)];
-        assert!(!rule.matches("span-name", non_matching_attrs.as_slice()));
+        assert!(!rule.matches(non_matching_attrs.as_slice(), &SpanKind::Client));
 
         // Attributes that have no mapping to the rule tag shouldn't match
         let unrelated_attrs = vec![KeyValue::new("unrelated.attribute", "value")];
-        assert!(!rule.matches("span-name", unrelated_attrs.as_slice()));
+        assert!(!rule.matches(unrelated_attrs.as_slice(), &SpanKind::Client));
     }
 
     #[test]
@@ -1370,7 +1388,7 @@ mod tests {
         ];
 
         // The rule should match because all three criteria are satisfied through mapping
-        assert!(rule.matches("span-name", mixed_attrs.as_slice()));
+        assert!(rule.matches(mixed_attrs.as_slice(), &SpanKind::Client));
 
         // If any criteria is not met, the rule shouldn't match
         let missing_method = vec![
@@ -1379,7 +1397,7 @@ mod tests {
             KeyValue::new("url.full", "https://example.com/api/v1/resource"),
         ];
 
-        assert!(!rule.matches("span-name", missing_method.as_slice()));
+        assert!(!rule.matches(missing_method.as_slice(), &SpanKind::Client));
 
         // Wrong value should also not match
         let wrong_method = vec![
@@ -1388,7 +1406,7 @@ mod tests {
             KeyValue::new("url.full", "https://example.com/api/v1/resource"),
         ];
 
-        assert!(!rule.matches("span-name", wrong_method.as_slice()));
+        assert!(!rule.matches(wrong_method.as_slice(), &SpanKind::Client));
     }
 
     #[test]
@@ -1409,7 +1427,7 @@ mod tests {
         ];
 
         // The rule should match with both direct and mapped attributes
-        assert!(rule.matches("span-name", mixed_attrs.as_slice()));
+        assert!(rule.matches(mixed_attrs.as_slice(), &SpanKind::Client));
 
         // Using the Datadog convention for both should also match
         let dd_attrs = vec![
@@ -1417,7 +1435,7 @@ mod tests {
             KeyValue::new("custom.tag", "value"),
         ];
 
-        assert!(rule.matches("span-name", dd_attrs.as_slice()));
+        assert!(rule.matches(dd_attrs.as_slice(), &SpanKind::Client));
 
         // Missing the custom tag should fail
         let missing_custom = vec![
@@ -1425,7 +1443,7 @@ mod tests {
             // Missing custom.tag
         ];
 
-        assert!(!rule.matches("span-name", missing_custom.as_slice()));
+        assert!(!rule.matches(missing_custom.as_slice(), &SpanKind::Client));
     }
 
     #[test]
@@ -1444,7 +1462,7 @@ mod tests {
         ];
 
         // The rule should match with numeric types
-        assert!(rule.matches("span-name", attrs.as_slice()));
+        assert!(rule.matches(attrs.as_slice(), &SpanKind::Client));
 
         // Attributes that don't match the pattern shouldn't match
         let non_matching_attrs = vec![
@@ -1452,7 +1470,7 @@ mod tests {
             KeyValue::new("float.tag", 1.5),
         ];
 
-        assert!(!rule.matches("span-name", non_matching_attrs.as_slice()));
+        assert!(!rule.matches(non_matching_attrs.as_slice(), &SpanKind::Client));
 
         // Wildcard pattern should match any float
         let mut wildcard_tags = HashMap::new();
@@ -1462,7 +1480,7 @@ mod tests {
 
         let wildcard_float = vec![KeyValue::new("float.tag", 1.6)];
 
-        assert!(wildcard_rule.matches("span-name", wildcard_float.as_slice()));
+        assert!(wildcard_rule.matches(wildcard_float.as_slice(), &SpanKind::Client));
     }
 
     #[test]
