@@ -33,7 +33,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
         vec![
             Event::new(
                 "boom",
-                timestamp_nano(123),
+                timestamp_nano(100),
                 vec![
                     KeyValue::new("key", "Out of memory"),
                     KeyValue::new("accuracy", 2.4),
@@ -42,7 +42,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
             ),
             Event::new(
                 "exception",
-                timestamp_nano(456),
+                timestamp_nano(400),
                 vec![
                     KeyValue::new("exception.message", "Out of memory"),
                     KeyValue::new("exception.type", "mem"),
@@ -53,7 +53,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
         ],
         vec![
             SpanEvent {
-                time_unix_nano: 123,
+                time_unix_nano: 100,
                 name: "boom".into(),
                 attributes: HashMap::from_iter([
                     (
@@ -64,7 +64,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
                 ]),
             },
             SpanEvent {
-                time_unix_nano: 456,
+                time_unix_nano: 400,
                 name: "exception".into(),
                 attributes: HashMap::from_iter([
                     (
