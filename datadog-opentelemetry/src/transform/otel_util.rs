@@ -3,10 +3,11 @@
 
 use std::borrow::Cow;
 
-use super::{attribute_keys::*, semconv};
+use super::{attribute_keys::*, semconv_shim};
 
 use opentelemetry::trace::SpanKind;
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions as semconv;
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
@@ -232,69 +233,69 @@ macro_rules! db_mapping {
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L118
 fn check_db_type(db_type: &str) -> &'static str {
     let span_type = db_mapping!(match db_type => {
-       semconv::ATTRIBUTE_DB_SYSTEM_OTHER_SQL  => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_MSSQL => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_MYSQL => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_ORACLE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_DB2 => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_POSTGRESQL => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_REDSHIFT => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_CLOUDSCAPE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_HSQLDB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_MAXDB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_INGRES => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_FIRSTSQL => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_EDB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_CACHE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_FIREBIRD => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_DERBY => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_INFORMIX => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_MARIADB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_SQLITE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_SYBASE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_TERADATA => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_VERTICA => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_H2 => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_COLDFUSION => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_COCKROACHDB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_PROGRESS => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_HANADB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_ADABAS => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_FILEMAKER => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_INSTANTDB => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_INTERBASE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_NETEZZA => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_PERVASIVE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_POINTBASE => SPAN_TYPE_SQL,
-        semconv::ATTRIBUTE_DB_SYSTEM_CLICKHOUSE => SPAN_TYPE_SQL,
+       semconv_shim::ATTRIBUTE_DB_SYSTEM_OTHER_SQL  => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MSSQL => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MYSQL => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_ORACLE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_DB2 => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_POSTGRESQL => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_REDSHIFT => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_CLOUDSCAPE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_HSQLDB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MAXDB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_INGRES => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_FIRSTSQL => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_EDB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_CACHE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_FIREBIRD => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_DERBY => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_INFORMIX => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MARIADB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_SQLITE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_SYBASE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_TERADATA => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_VERTICA => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_H2 => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_COLDFUSION => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_COCKROACHDB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_PROGRESS => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_HANADB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_ADABAS => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_FILEMAKER => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_INSTANTDB => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_INTERBASE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_NETEZZA => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_PERVASIVE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_POINTBASE => SPAN_TYPE_SQL,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_CLICKHOUSE => SPAN_TYPE_SQL,
 
         // Cassandra db types
-        semconv::ATTRIBUTE_DB_SYSTEM_CASSANDRA => SPAN_TYPE_CASSANDRA,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_CASSANDRA => SPAN_TYPE_CASSANDRA,
 
         // Redis db types
-        semconv::ATTRIBUTE_DB_SYSTEM_REDIS => SPAN_TYPE_REDIS,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_REDIS => SPAN_TYPE_REDIS,
 
         // Memcached db types
-        semconv::ATTRIBUTE_DB_SYSTEM_MEMCACHED => SPAN_TYPE_MEMCACHED,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MEMCACHED => SPAN_TYPE_MEMCACHED,
 
         // Mongodb db types
-        semconv::ATTRIBUTE_DB_SYSTEM_MONGODB => SPAN_TYPE_MONGODB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_MONGODB => SPAN_TYPE_MONGODB,
 
         // Elasticsearch db types
-        semconv::ATTRIBUTE_DB_SYSTEM_ELASTICSEARCH => SPAN_TYPE_ELASTICSEARCH,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_ELASTICSEARCH => SPAN_TYPE_ELASTICSEARCH,
 
         // Opensearch db types
-        semconv::ATTRIBUTE_DB_SYSTEM_OPENSEARCH => SPAN_TYPE_OPENSEARCH,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_OPENSEARCH => SPAN_TYPE_OPENSEARCH,
 
         // Generic db types
-        semconv::ATTRIBUTE_DB_SYSTEM_HIVE => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_HBASE => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_NEO4J => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_COUCHBASE => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_COUCHDB => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_COSMOSDB => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_DYNAMODB => SPAN_TYPE_DB,
-        semconv::ATTRIBUTE_DB_SYSTEM_GEODE => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_HIVE => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_HBASE => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_NEO4J => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_COUCHBASE => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_COUCHDB => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_COSMOSDB => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_DYNAMODB => SPAN_TYPE_DB,
+        semconv_shim::ATTRIBUTE_DB_SYSTEM_GEODE => SPAN_TYPE_DB,
     });
     span_type.unwrap_or(SPAN_TYPE_DB)
 }
@@ -329,7 +330,7 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service(res: &Resource) -> Cow<'static, str> {
     let service = res.get(&opentelemetry::Key::from_static_str(
-        semconv::ATTRIBUTE_SERVICE_NAME,
+        semconv::resource::SERVICE_NAME,
     ));
     if let Some(service) = service {
         if !service.as_str().is_empty() {
@@ -342,17 +343,17 @@ pub fn get_otel_service(res: &Resource) -> Cow<'static, str> {
 // https://github.com/DataDog/opentelemetry-mapping-go/blob/67e66831012599082cc42cf877ea340266d95bb4/pkg/otlp/attributes/attributes.go#L175
 fn http_mappings(k: &str) -> Option<&'static str> {
     match k {
-        semconv::ATTRIBUTE_CLIENT_ADDRESS => Some("http.client_ip"),
-        semconv::ATTRIBUTE_HTTP_RESPONSE_BODY_SIZE => Some("http.response.content_length"),
-        semconv::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE => Some("http.status_code"),
-        semconv::ATTRIBUTE_HTTP_REQUEST_BODY_SIZE => Some("http.request.content_length"),
+        semconv::attribute::CLIENT_ADDRESS => Some("http.client_ip"),
+        semconv::attribute::HTTP_RESPONSE_BODY_SIZE => Some("http.response.content_length"),
+        semconv::attribute::HTTP_RESPONSE_STATUS_CODE => Some("http.status_code"),
+        semconv::attribute::HTTP_REQUEST_BODY_SIZE => Some("http.request.content_length"),
         "http.request.header.referrer" => Some("http.referrer"),
-        semconv::ATTRIBUTE_HTTP_REQUEST_METHOD => Some("http.method"),
-        semconv::ATTRIBUTE_HTTP_ROUTE => Some("http.route"),
-        semconv::ATTRIBUTE_NETWORK_PROTOCOL_VERSION => Some("http.version"),
-        semconv::ATTRIBUTE_SERVER_ADDRESS => Some("http.server_name"),
-        semconv::ATTRIBUTE_URL_FULL => Some("http.url"),
-        semconv::ATTRIBUTE_USER_AGENT_ORIGINAL => Some("http.useragent"),
+        semconv::attribute::HTTP_REQUEST_METHOD => Some("http.method"),
+        semconv::attribute::HTTP_ROUTE => Some("http.route"),
+        semconv::attribute::NETWORK_PROTOCOL_VERSION => Some("http.version"),
+        semconv::attribute::SERVER_ADDRESS => Some("http.server_name"),
+        semconv::attribute::URL_FULL => Some("http.url"),
+        semconv::attribute::USER_AGENT_ORIGINAL => Some("http.useragent"),
         _ => None,
     }
 }

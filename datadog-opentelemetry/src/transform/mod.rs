@@ -34,7 +34,7 @@
 
 mod attribute_keys;
 mod otel_util;
-mod semconv;
+mod semconv_shim;
 
 #[cfg(test)]
 mod transform_tests;
@@ -56,6 +56,7 @@ use opentelemetry::{
     Key, KeyValue, SpanId,
 };
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions as semconv;
 use tinybytes::BytesString;
 
 use crate::ddtrace_transform::ExportSpan;
@@ -292,9 +293,9 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
             continue;
         }
         for (otel_key, dd_key) in [
-            (semconv::ATTRIBUTE_EXCEPTION_MESSAGE, "error.msg"),
-            (semconv::ATTRIBUTE_EXCEPTION_TYPE, "error.type"),
-            (semconv::ATTRIBUTE_EXCEPTION_STACKTRACE, "error.stack"),
+            (semconv::attribute::EXCEPTION_MESSAGE, "error.msg"),
+            (semconv::attribute::EXCEPTION_TYPE, "error.type"),
+            (semconv::attribute::EXCEPTION_STACKTRACE, "error.stack"),
         ] {
             if let Some(attr) = e.attributes.get(&BytesString::from_static(otel_key)) {
                 dd_span
@@ -595,7 +596,7 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     let lib_name = otel_span.instrumentation_scope.name();
     if !lib_name.is_empty() {
         dd_span.meta.insert(
-            BytesString::from_static(semconv::ATTRIBUTE_OTEL_LIBRARY_NAME),
+            BytesString::from_static(semconv::attribute::OTEL_LIBRARY_NAME),
             BytesString::from_string(lib_name.to_owned()),
         );
     }
@@ -604,7 +605,7 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     if let Some(version) = lib_version {
         if !version.is_empty() {
             dd_span.meta.insert(
-                BytesString::from_static(semconv::ATTRIBUTE_OTEL_LIBRARY_VERSION),
+                BytesString::from_static(semconv::attribute::OTEL_LIBRARY_VERSION),
                 BytesString::from_string(version.to_owned()),
             );
         }
@@ -613,7 +614,7 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     // Code from the OTLP protocol
     // https://github.com/open-telemetry/opentelemetry-proto/blob/724e427879e3d2bae2edc0218fff06e37b9eb46e/opentelemetry/proto/trace/v1/trace.proto#L268
     dd_span.meta.insert(
-        BytesString::from_static(semconv::ATTRIBUTE_OTEL_STATUS_CODE),
+        BytesString::from_static(semconv::attribute::OTEL_STATUS_CODE),
         BytesString::from_static(match &otel_span.status {
             opentelemetry::trace::Status::Unset => "Unset",
             opentelemetry::trace::Status::Ok => "Ok",
@@ -623,7 +624,7 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     if let opentelemetry::trace::Status::Error { description } = &otel_span.status {
         if !description.is_empty() {
             dd_span.meta.insert(
-                BytesString::from_static(semconv::ATTRIBUTE_OTEL_STATUS_DESCRIPTION),
+                BytesString::from_static(semconv::attribute::OTEL_STATUS_DESCRIPTION),
                 BytesString::from_cow(description.clone()),
             );
         }

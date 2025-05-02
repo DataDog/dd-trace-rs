@@ -3,25 +3,8 @@
 
 #![allow(unused)]
 
-// Service instance
-pub const ATTRIBUTE_SERVICE_NAME: &str = "service.name";
-pub const ATTRIBUTE_SERVICE_VERSION: &str = "service.version";
-
-// Library
-pub const ATTRIBUTE_OTEL_LIBRARY_NAME: &str = "otel.library.name";
-pub const ATTRIBUTE_OTEL_LIBRARY_VERSION: &str = "otel.library.version";
-
-// Span attributes
-pub const ATTRIBUTE_OTEL_STATUS_CODE: &str = "otel.status_code";
-pub const ATTRIBUTE_OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
-
-// Exception reporting
-pub const ATTRIBUTE_EXCEPTION_MESSAGE: &str = "exception.message";
-pub const ATTRIBUTE_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
-pub const ATTRIBUTE_EXCEPTION_TYPE: &str = "exception.type";
-
-// Software deployment
-pub const ATTRIBUTE_DEPLOYMENT_ENVIRONMENT: &str = "deployment.environment";
+//! This module contains constants for OpenTelemetry semantic conventions that are currently missing
+//! in the `opentelemetry-semantic-conventions` crate.
 
 // DB system vendors
 // https://github.com/open-telemetry/opentelemetry-collector/blob/0f5d764c255eb70bc4ccdaa4438c01d5cfcd89ed/semconv/v1.26.0/generated_attribute_group.go#L1048-L1153
@@ -78,22 +61,3 @@ pub const ATTRIBUTE_DB_SYSTEM_OPENSEARCH: &str = "opensearch";
 pub const ATTRIBUTE_DB_SYSTEM_CLICKHOUSE: &str = "clickhouse";
 pub const ATTRIBUTE_DB_SYSTEM_SPANNER: &str = "spanner";
 pub const ATTRIBUTE_DB_SYSTEM_TRINO: &str = "trino";
-
-// Http mappings
-pub const ATTRIBUTE_HTTP_STATUS_CODE: &str = "http.status_code";
-pub const ATTRIBUTE_HTTP_CONNECTION_STATE: &str = "http.connection.state";
-pub const ATTRIBUTE_HTTP_REQUEST_BODY_SIZE: &str = "http.request.body.size";
-pub const ATTRIBUTE_HTTP_REQUEST_METHOD: &str = "http.request.method";
-pub const ATTRIBUTE_HTTP_REQUEST_METHOD_ORIGINAL: &str = "http.request.method_original";
-pub const ATTRIBUTE_HTTP_REQUEST_RESEND_COUNT: &str = "http.request.resend_count";
-pub const ATTRIBUTE_HTTP_REQUEST_SIZE: &str = "http.request.size";
-pub const ATTRIBUTE_HTTP_RESPONSE_BODY_SIZE: &str = "http.response.body.size";
-pub const ATTRIBUTE_HTTP_RESPONSE_SIZE: &str = "http.response.size";
-pub const ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
-pub const ATTRIBUTE_HTTP_ROUTE: &str = "http.route";
-
-pub const ATTRIBUTE_NETWORK_PROTOCOL_VERSION: &str = "network.protocol.version";
-pub const ATTRIBUTE_CLIENT_ADDRESS: &str = "client.address";
-pub const ATTRIBUTE_SERVER_ADDRESS: &str = "server.address";
-pub const ATTRIBUTE_URL_FULL: &str = "url.full";
-pub const ATTRIBUTE_USER_AGENT_ORIGINAL: &str = "user_agent.original";

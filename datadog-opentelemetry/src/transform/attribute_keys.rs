@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use opentelemetry::KeyValue;
-
-use super::semconv;
+use opentelemetry_semantic_conventions as semconv;
 
 macro_rules! token_count {
     () => {
@@ -86,10 +85,10 @@ attribute_key! {
     "db.query.text" => DB_QUERY_TEXT,
     "span.type" => SPAN_TYPE,
     "http.response.status_code" => HTTP_RESPONSE_STATUS_CODE,
-    semconv::ATTRIBUTE_HTTP_STATUS_CODE => HTTP_STATUS_CODE,
-    semconv::ATTRIBUTE_SERVICE_VERSION => SERVICE_VERSION,
+    opentelemetry_semantic_conventions::attribute::HTTP_STATUS_CODE => HTTP_STATUS_CODE,
+    semconv::attribute::SERVICE_VERSION => SERVICE_VERSION,
     "deployment.environment.name" => DEPLOYMENT_ENVIRONMENT_NAME,
-    semconv::ATTRIBUTE_DEPLOYMENT_ENVIRONMENT => DEPLOYMENT_ENVIRONMENT,
+    semconv::attribute::DEPLOYMENT_ENVIRONMENT => DEPLOYMENT_ENVIRONMENT,
 
     "_dd.measured" => DD_MEASURED,
 }
