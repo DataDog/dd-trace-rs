@@ -35,6 +35,7 @@ opentelemetry = { version = "0.28.0", features = [
     "trace",
 ], default-features = false }
 tokio = { version = "1.44.1" }
+rand = { version = "0.8" }
 
 [profile.dev]
 debug = 2 # full debug info
