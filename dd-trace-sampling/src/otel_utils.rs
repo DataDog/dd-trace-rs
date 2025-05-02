@@ -7,7 +7,6 @@ use super::{attribute_keys::*, sem_convs, utils};
 
 use opentelemetry::trace::SpanKind;
 use opentelemetry::KeyValue;
-use opentelemetry_sdk::Resource;
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
@@ -307,143 +306,6 @@ fn extract_numeric_value<T: TryFrom<i64>>(value: &opentelemetry::Value) -> Optio
     }
 }
 
-const SPAN_TYPE_SQL: &str = "sql";
-const SPAN_TYPE_CASSANDRA: &str = "cassandra";
-const SPAN_TYPE_REDIS: &str = "redis";
-const SPAN_TYPE_MEMCACHED: &str = "memcached";
-const SPAN_TYPE_MONGODB: &str = "mongodb";
-const SPAN_TYPE_ELASTICSEARCH: &str = "elasticsearch";
-const SPAN_TYPE_OPENSEARCH: &str = "opensearch";
-const SPAN_TYPE_DB: &str = "db";
-
-macro_rules! db_mapping {
-    (match $val:expr => {
-        $($otel_db_type:expr => $dd_db_type:expr),* $(,)?
-    }) => {
-        (|| {
-            $(
-                if $val == $otel_db_type {
-                    return Some($dd_db_type);
-                }
-            )*
-            None
-        })()
-    };
-}
-
-// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L118
-fn check_db_type(db_type: &str) -> &'static str {
-    let span_type = db_mapping!(match db_type => {
-       sem_convs::ATTRIBUTE_DB_SYSTEM_OTHER_SQL  => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MSSQL => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MYSQL => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_ORACLE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_DB2 => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_POSTGRESQL => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_REDSHIFT => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_CLOUDSCAPE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_HSQLDB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MAXDB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_INGRES => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_FIRSTSQL => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_EDB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_CACHE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_FIREBIRD => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_DERBY => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_INFORMIX => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MARIADB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_SQLITE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_SYBASE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_TERADATA => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_VERTICA => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_H2 => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_COLDFUSION => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_COCKROACHDB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_PROGRESS => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_HANADB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_ADABAS => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_FILEMAKER => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_INSTANTDB => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_INTERBASE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_NETEZZA => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_PERVASIVE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_POINTBASE => SPAN_TYPE_SQL,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_CLICKHOUSE => SPAN_TYPE_SQL,
-
-        // Cassandra db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_CASSANDRA => SPAN_TYPE_CASSANDRA,
-
-        // Redis db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_REDIS => SPAN_TYPE_REDIS,
-
-        // Memcached db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MEMCACHED => SPAN_TYPE_MEMCACHED,
-
-        // Mongodb db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_MONGODB => SPAN_TYPE_MONGODB,
-
-        // Elasticsearch db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_ELASTICSEARCH => SPAN_TYPE_ELASTICSEARCH,
-
-        // Opensearch db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_OPENSEARCH => SPAN_TYPE_OPENSEARCH,
-
-        // Generic db types
-        sem_convs::ATTRIBUTE_DB_SYSTEM_HIVE => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_HBASE => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_NEO4J => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_COUCHBASE => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_COUCHDB => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_COSMOSDB => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_DYNAMODB => SPAN_TYPE_DB,
-        sem_convs::ATTRIBUTE_DB_SYSTEM_GEODE => SPAN_TYPE_DB,
-    });
-    span_type.unwrap_or(SPAN_TYPE_DB)
-}
-
-// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L250
-pub fn get_otel_span_type(
-    span_attributes: &[KeyValue],
-    span_kind: SpanKind
-) -> Cow<'static, str> {
-    let typ = get_res_span_attributes_v2(span_attributes, &[SPAN_TYPE]);
-    if !typ.is_empty() {
-        return typ;
-    }
-    match span_kind {
-        SpanKind::Server => Cow::Borrowed("web"),
-        SpanKind::Client => {
-            let db = get_res_span_attributes_v2(span_attributes, &[DB_SYSTEM]);
-            if db.is_empty() {
-                Cow::Borrowed("http")
-            } else {
-                Cow::Borrowed(check_db_type(&db))
-            }
-        }
-        _ => Cow::Borrowed("custom"),
-    }
-}
-
-/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
-pub fn get_otel_env(res: &Resource) -> Cow<'static, str> {
-    get_res_attributes(res, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
-}
-
-pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
-
-/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
-pub fn get_otel_service(res: &Resource) -> Cow<'static, str> {
-    let service = res.get(&opentelemetry::Key::from_static_str(
-        sem_convs::ATTRIBUTE_SERVICE_NAME,
-    ));
-    if let Some(service) = service {
-        if !service.as_str().is_empty() {
-            return Cow::Owned(service.to_string());
-        }
-    }
-    Cow::Borrowed(DEFAULT_OTLP_SERVICE_NAME)
-}
-
 // https://github.com/DataDog/opentelemetry-mapping-go/blob/67e66831012599082cc42cf877ea340266d95bb4/pkg/otlp/attributes/attributes.go#L175
 fn http_mappings(k: &str) -> Option<&'static str> {
     match k {
@@ -480,21 +342,4 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'static, str> {
         return Cow::Owned(k.to_owned());
     }
     Cow::Owned(k.to_owned())
-}
-
-fn get_res_attributes(res: &Resource, attributes: &[AttributeKey]) -> Cow<'static, str> {
-    for &attr_key in attributes {
-        let res_attr = get_res_attribute(res, &attr_key);
-        if !res_attr.is_empty() {
-            return res_attr;
-        }
-    }
-    Cow::Borrowed("")
-}
-
-fn get_res_attribute(res: &Resource, attr: &AttributeKey) -> Cow<'static, str> {
-    let Some(value) = res.get(&opentelemetry::Key::from_static_str(attr.key())) else {
-        return Cow::Borrowed("");
-    };
-    Cow::Owned(value.to_string())
 }

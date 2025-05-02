@@ -561,20 +561,6 @@ mod tests {
         ]
     }
 
-    // Helper function to create attributes with a custom tag
-    fn create_attributes_with_custom_tag(
-        service: &'static str,
-        resource: &'static str,
-        tag_key: &'static str,
-        tag_value: &'static str,
-    ) -> Vec<KeyValue> {
-        vec![
-            KeyValue::new(SERVICE_TAG, service),
-            KeyValue::new(RESOURCE_TAG, resource),
-            KeyValue::new(tag_key, tag_value),
-        ]
-    }
-
     // Helper function to create a parent context
     fn create_parent_context(sampled: bool) -> OtelContext {
         let span_context = SpanContext::new(
@@ -731,7 +717,7 @@ mod tests {
         let rule = SamplingRule::new(
             0.5,
             Some("web-*".to_string()),
-            Some("http-*".to_string()),
+            Some("http.*".to_string()),
             None,
             Some(HashMap::from([(
                 "custom_key".to_string(),
@@ -741,7 +727,7 @@ mod tests {
         );
 
         // Should match this span - we need to mock the name generation here by adding
-        // a key that will result in "http-request" operation name
+        // a key that will result in "http.client.request" operation name
         let matching_attributes = vec![
             KeyValue::new(SERVICE_TAG, "web-service"),
             KeyValue::new(RESOURCE_TAG, "some-resource"),
