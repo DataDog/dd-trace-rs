@@ -45,12 +45,36 @@ impl Injector for InjectorWrapper<'_> {
 #[derive(Clone, Default)]
 struct DatadogExtractData {
     origin: Option<String>,
-    tags: HashMap<String, String>,
+    propagation_tags: HashMap<String, String>,
 }
 
 impl DatadogExtractData {
     fn from(SpanContext { origin, tags, .. }: SpanContext) -> Self {
-        DatadogExtractData { origin, tags }
+        let propagation_tags = tags
+            .iter()
+            .filter_map(|tag| {
+                if tag.0.starts_with("_dd.p.") {
+                    Some((tag.0.clone(), tag.1.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        DatadogExtractData {
+            origin,
+            propagation_tags,
+        }
+    }
+}
+
+impl std::fmt::Display for DatadogExtractData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "origin: {:?}, tags: {:?}",
+            self.origin, self.propagation_tags
+        )
     }
 }
 
@@ -83,8 +107,10 @@ impl TextMapPropagator for DatadogPropagator {
             mechanism: None,
         });
 
-        let DatadogExtractData { origin, tags } =
-            cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
+        let DatadogExtractData {
+            origin,
+            propagation_tags,
+        } = cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
 
         // TODO: is there a more efficient way?
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
@@ -96,7 +122,7 @@ impl TextMapPropagator for DatadogPropagator {
             links: vec![],
             sampling,
             origin,
-            tags,
+            tags: propagation_tags, // FIXME: this should get DD Span tags
             tracestate,
         };
 

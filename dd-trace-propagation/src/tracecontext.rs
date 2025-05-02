@@ -123,7 +123,9 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         .collect::<Vec<String>>()
         .join(TRACESTATE_DD_PAIR_SEPARATOR);
 
-    tracestate_parts.push(tags);
+    if !tags.is_empty() {
+        tracestate_parts.push(tags);
+    }
 
     let dd = tracestate_parts
         .into_iter()
