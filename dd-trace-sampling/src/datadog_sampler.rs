@@ -15,7 +15,7 @@ use crate::constants::{
 };
 
 // Import the attr constants
-use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
+use crate::constants::attr::{ENV_TAG, SERVICE_TAG};
 use crate::glob_matcher::GlobMatcher;
 use crate::otel_utils::get_dd_key_for_otlp_attribute;
 use crate::otel_utils::get_otel_operation_name_v2;
@@ -33,13 +33,13 @@ pub struct SamplingRule {
     /// The sample rate to apply when this rule matches (0.0-1.0)
     pub sample_rate: f64,
 
-    /// Optional service name to match (checked in span attributes for "SERVICE_TAG")
+    /// Optional service name to match
     pub service: Option<String>,
 
     /// Optional span name to match
     pub name: Option<String>,
 
-    /// Optional resource name to match (checked in span attributes for "RESOURCE_TAG")
+    /// Optional resource name to match
     pub resource: Option<String>,
 
     /// Key-value pairs that must all match in the span's attributes
@@ -121,7 +121,7 @@ impl SamplingRule {
     /// The name is derived from the attributes and span kind
     pub fn matches(&self, attributes: &[KeyValue], span_kind: &opentelemetry::trace::SpanKind) -> bool {
         // Get the operation name from the attributes and span kind
-        let name = get_otel_operation_name_v2(attributes, span_kind);
+        let name: std::borrow::Cow<'_, str> = get_otel_operation_name_v2(attributes, span_kind);
         
         // Check name using glob matcher if specified
         if let Some(ref matcher) = self.name_matcher {
@@ -146,9 +146,8 @@ impl SamplingRule {
         // Get the resource from the attributes as late as possible
         let resource: std::borrow::Cow<'_, str> = get_otel_resource_v2(
             attributes, 
-            &opentelemetry_sdk::Resource::new(Vec::<KeyValue>::new()), 
             name.clone(), 
-            *span_kind
+            span_kind.clone()
         );
         
         // Check resource if specified using glob matcher
@@ -541,6 +540,7 @@ mod tests {
         DB_SYSTEM, HTTP_METHOD, MESSAGING_SYSTEM, MESSAGING_OPERATION, NETWORK_PROTOCOL_NAME
     };
     use std::borrow::Cow;
+    use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
 
     // Helper function to create a trace ID
     fn create_trace_id() -> TraceId {
@@ -1310,7 +1310,6 @@ mod tests {
         // Should NOT match the exact decimal value because non-integer floats only match wildcards
         let decimal_float_attrs = create_attributes_with_float("service", "float_tag", 42.5);
         assert!(!rule_specific.matches(decimal_float_attrs.as_slice(), &SpanKind::Client));
-
         // Test case 4: Pattern with partial wildcard '*' for suffix
         let rule_prefix = SamplingRule::new(
             0.5,
@@ -1677,3 +1676,4 @@ mod tests {
         assert_eq!(result.decision, SamplingDecision::RecordAndSample);
     }
 }
+
