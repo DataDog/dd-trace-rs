@@ -86,7 +86,7 @@ impl TextMapPropagator for DatadogPropagator {
         let DatadogExtractData { origin, tags } =
             cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
 
-        // TODO: review
+        // TODO: is there a more efficient way?
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let dd_span_context = &mut SpanContext {
@@ -154,7 +154,7 @@ fn extract_trace_flags(sc: &SpanContext) -> opentelemetry::TraceFlags {
 fn extract_trace_state(
     extractor: &dyn opentelemetry::propagation::Extractor,
 ) -> opentelemetry::trace::TraceState {
-    // TODO: we are parsing twice tracestate
+    // TODO: should we remove dd vendor part if tracecontext propagation is not enabled?
     match extractor.get(TRACESTATE_KEY) {
         Some(trace_state) => opentelemetry::trace::TraceState::from_str(trace_state)
             .unwrap_or_else(|_| opentelemetry::trace::TraceState::default()),
