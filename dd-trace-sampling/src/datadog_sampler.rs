@@ -7,6 +7,7 @@ use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::ShouldSample;
 use serde_json;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::constants::{
     SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, SAMPLING_AGENT_RATE_TAG_KEY,
@@ -26,6 +27,25 @@ use crate::utils;
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
+
+/// A trait to handle access to a Resource, whether it's a direct reference or wrapped in Arc<RwLock<>>
+pub trait ResourceAccess {
+    fn get_resource(&self) -> &opentelemetry_sdk::Resource;
+}
+
+impl ResourceAccess for opentelemetry_sdk::Resource {
+    fn get_resource(&self) -> &opentelemetry_sdk::Resource {
+        self
+    }
+}
+
+impl ResourceAccess for Arc<RwLock<opentelemetry_sdk::Resource>> {
+    fn get_resource(&self) -> &opentelemetry_sdk::Resource {
+        // For testing only, this is okay to panic
+        // In production code, we handle the Result properly
+        &*self.read().expect("Failed to read resource lock")
+    }
+}
 
 /// Represents a sampling rule with criteria for matching spans
 #[derive(Clone, Debug)]
@@ -119,11 +139,11 @@ impl SamplingRule {
 
     /// Checks if this rule matches the given span's attributes and name
     /// The name is derived from the attributes and span kind
-    pub fn matches(
+    pub fn matches<R: ResourceAccess>(
         &self, 
         attributes: &[KeyValue], 
         span_kind: &opentelemetry::trace::SpanKind,
-        resource: &opentelemetry_sdk::Resource
+        resource: &R
     ) -> bool {
         // Get the operation name from the attributes and span kind
         let name: std::borrow::Cow<'_, str> = get_otel_operation_name_v2(attributes, span_kind);
@@ -153,7 +173,7 @@ impl SamplingRule {
             attributes, 
             name.clone(), 
             span_kind.clone(),
-            &resource
+            resource.get_resource()
         );
         
         // Check resource if specified using glob matcher
@@ -278,8 +298,8 @@ pub struct DatadogSampler {
     /// Rate limiter for limiting the number of spans per second
     rate_limiter: RateLimiter,
     
-    /// Resource with service information
-    resource: opentelemetry_sdk::Resource,
+    /// Resource with service information, wrapped in Arc<RwLock<>> for sharing
+    resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
 }
 
 impl DatadogSampler {
@@ -312,9 +332,19 @@ impl DatadogSampler {
             rules: sorted_rules,
             service_samplers: HashMap::new(),
             rate_limiter: limiter,
-            resource,
+            resource: Arc::new(RwLock::new(resource)),
         }
     }
+
+    /// Updates the Resource information in the sampler
+    ///
+    /// This method takes a thread-safe reference to a resource that can be shared
+    /// between different components of the tracing system
+    pub fn update_resource(&mut self, resource_arc: Arc<RwLock<opentelemetry_sdk::Resource>>) {
+        // Simply replace the current resource Arc with the new one
+        self.resource = resource_arc;
+    }
+    
 
     /// Creates a new DatadogSampler from a JSON configuration string
     pub fn from_json(config_json: &str) -> Result<Self, serde_json::Error> {
@@ -323,7 +353,11 @@ impl DatadogSampler {
 
         // Build the sampler from the config with a default empty resource
         let mut sampler = config.build_sampler();
-        sampler.resource = opentelemetry_sdk::Resource::builder().build();
+        
+        // Ensure the resource is properly wrapped in Arc<RwLock<>>
+        let default_resource = opentelemetry_sdk::Resource::builder().build();
+        sampler.resource = Arc::new(RwLock::new(default_resource));
+        
         Ok(sampler)
     }
 
@@ -358,9 +392,18 @@ impl DatadogSampler {
 
     /// Finds the highest precedence rule that matches the span
     fn find_matching_rule(&self, attributes: &[KeyValue], span_kind: &opentelemetry::trace::SpanKind) -> Option<&SamplingRule> {
+        // For now, create a temporary reference to our resource for rule matching
+        let resource_result = self.resource.read().map(|r| r.clone());
+        
+        // Use a default empty resource if we can't get the lock
+        let resource = match resource_result {
+            Ok(r) => r,
+            Err(_) => opentelemetry_sdk::Resource::builder().build(),
+        };
+        
         self.rules
             .iter()
-            .find(|rule| rule.matches(attributes, span_kind, &self.resource))
+            .find(|rule| rule.matches(attributes, span_kind, &resource))
     }
 
     /// Returns the sampling mechanism used for the decision
@@ -565,9 +608,14 @@ mod tests {
     use std::borrow::Cow;
     use crate::constants::attr::{ENV_TAG, RESOURCE_TAG, SERVICE_TAG};
 
-    // Helper function to create an empty resource
-    fn create_empty_resource() -> opentelemetry_sdk::Resource {
+    // Modified function signature to return a reference suitable for the matches method
+    fn create_empty_resource_for_matching() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder().build()
+    }
+    
+    // Helper function to create an empty resource wrapped in Arc<RwLock> for DatadogSampler
+    fn create_empty_resource() -> Arc<RwLock<opentelemetry_sdk::Resource>> {
+        Arc::new(RwLock::new(opentelemetry_sdk::Resource::builder().build()))
     }
 
     // Helper function to create a trace ID
@@ -734,8 +782,8 @@ mod tests {
         // Create a span with some attributes
         let attributes = create_attributes("some-service", "some-resource", "some-env");
 
-        // Empty resource for testing
-        let empty_resource = create_empty_resource();
+        // Empty resource for testing (unwrapped for the test)
+        let empty_resource = create_empty_resource_for_matching();
 
         // Both rules should match any span since they have no criteria
         assert!(rule.matches(attributes.as_slice(), &SpanKind::Client, &empty_resource));

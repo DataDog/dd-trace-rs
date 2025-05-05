@@ -121,8 +121,8 @@ impl DatadogSamplerConfig {
 
     /// Create a DatadogSampler from this configuration
     pub fn build_sampler(&self) -> DatadogSampler {
-        // Convert the rule configs to actual SamplingRule instances
-        let rules = self
+        // Convert rule configs to actual SamplingRules
+        let rules: Vec<SamplingRule> = self
             .rules
             .iter()
             .map(|config| {
