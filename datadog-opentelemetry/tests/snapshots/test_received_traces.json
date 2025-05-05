@@ -1,6 +1,6 @@
 [[
   {
-    "name": "test",
+    "name": "client.request",
     "service": "unnamed-rust-service",
     "resource": "test",
     "trace_id": 0,
@@ -8,13 +8,19 @@
     "parent_id": 0,
     "type": "http",
     "meta": {
-      "_dd.p.tid": "0000000000000000",
-      "span.kind": "client"
+      "otel.library.name": "test",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "00d056b3f029e865f1d74b6959eb3fa6",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.version": "0.28.0"
     },
     "metrics": {
+      "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0
     },
-    "duration": 100000000,
-    "start": 977616000000000000
+    "duration": 1000,
+    "start": 1746015595471712000
   }]]

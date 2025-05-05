@@ -202,4 +202,12 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
         self.span_exporter.shutdown()
     }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        if let Err(e) = self.span_exporter.set_resource(resource.clone()) {
+            dd_trace::dd_error!(
+                "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
+            );
+        }
+    }
 }
