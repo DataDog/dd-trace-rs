@@ -16,6 +16,7 @@ dd-trace = { path = "../dd-trace" }
 futures = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
 
 # Libdatadog dependencies
 data-pipeline = { workspace = true }
@@ -32,4 +33,4 @@ datadog-trace-utils = { workspace = true, features = ["test-utils"] }
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
 [features]
-test-utils = ["dd-trace/test-utils"]
+test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]

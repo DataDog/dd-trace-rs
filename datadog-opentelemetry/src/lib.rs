@@ -1,9 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-mod span_conversion;
+mod ddtrace_transform;
 mod span_exporter;
 mod span_processor;
+mod transform;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use span_processor::DatadogSpanProcessor;
@@ -56,7 +57,15 @@ pub fn make_tracer(
     config: dd_trace::Config,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::Resource;
+
     tracer_provider_builder
+        .with_resource(
+            Resource::builder()
+                .with_attribute(KeyValue::new("service.name", config.service().to_string()))
+                .build(),
+        )
         .with_span_processor(DatadogSpanProcessor::new(config))
         // TODO: hookup additional components
         // .with_id_generator(id_generator)

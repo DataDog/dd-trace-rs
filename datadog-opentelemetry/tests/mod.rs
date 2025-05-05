@@ -11,13 +11,23 @@ mod datadog_test_agent {
     use opentelemetry::Context;
 
     #[tokio::test]
-    #[cfg_attr(miri, ignore)]
+    // #[cfg_attr(miri, ignore)]
     async fn test_received_traces() {
         const SESSION_NAME: &str = "test_received_traces";
 
         let relative_snapshot_path = "datadog-opentelemetry/tests/snapshots/";
-        let test_agent =
-            DatadogTestAgent::new_create_snapshot(Some(relative_snapshot_path), None).await;
+        let test_agent = DatadogTestAgent::new(
+            Some(relative_snapshot_path),
+            None,
+            &[
+                ("SNAPSHOT_CI", "0"),
+                (
+                    "SNAPSHOT_IGNORED_ATTRS",
+                    "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id",
+                ),
+            ],
+        )
+        .await;
         let url = test_agent.get_base_uri().await;
         test_agent.start_session(SESSION_NAME, None).await;
 

@@ -14,9 +14,12 @@ use data_pipeline::trace_exporter::{
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     trace::SpanData,
+    Resource,
 };
 
-/// A reasonnable amount of time that shouldn't impact normal app shutdown while allowing
+use crate::ddtrace_transform;
+
+/// A reasonnable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
 const SPAN_EXPORTER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -137,14 +140,15 @@ impl DatadogExporter {
                 .set_tracer_version(config.tracer_version())
                 .set_language_version(config.language_version())
                 .set_service(config.service())
-                .set_output_format(TraceExporterOutputFormat::V04);
+                .set_output_format(TraceExporterOutputFormat::V04)
+                .set_client_computed_top_level();
             if let Some(env) = config.env() {
                 builder.set_env(env);
             }
             if let Some(version) = config.version() {
                 builder.set_app_version(version);
             }
-            TraceExporterWorker::spawn(config, builder, rx)
+            TraceExporterWorker::spawn(config, builder, rx, Resource::builder_empty().build())
         };
         Self { trace_exporter, tx }
     }
@@ -164,6 +168,22 @@ impl DatadogExporter {
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
                 "DatadogExporter: failed to add trace chunk: {:?}",
+                e
+            ))),
+            Ok(()) => Ok(()),
+        }
+    }
+
+    pub fn set_resource(&self, resource: Resource) -> OTelSdkResult {
+        match self.tx.set_resource(resource) {
+            Err(SenderError::AlreadyShutdown) => {
+                self.join()?;
+                Err(OTelSdkError::InternalFailure(
+                    "DatadogExporter: trace exporter has already shutdown".to_string(),
+                ))
+            }
+            Err(e) => Err(OTelSdkError::InternalFailure(format!(
+                "DatadogExporter: failed to set resource: {:?}",
                 e
             ))),
             Ok(()) => Ok(()),
@@ -247,6 +267,7 @@ fn channel(flush_trigger_number_of_spans: usize, max_number_of_spans: usize) -> 
             shutdown_needed: false,
             has_shutdown: false,
             batch: Batch::new(max_number_of_spans),
+            set_resource: None,
         }),
         notifier: Condvar::new(),
     });
@@ -296,6 +317,14 @@ impl Sender {
             state.flush_needed = true;
             self.waiter.notifier.notify_all();
         }
+        Ok(())
+    }
+
+    /// Set the otel resource to be used for the next trace mapping
+    fn set_resource(&self, resource: Resource) -> Result<(), SenderError> {
+        let mut state = self.get_running_state()?;
+        state.set_resource = Some(resource);
+        self.waiter.notifier.notify_all();
         Ok(())
     }
 
@@ -363,6 +392,9 @@ impl Receiver {
         let deadline = Instant::now() + timeout;
         let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonnedError)?;
         loop {
+            if let Some(res) = state.set_resource.take() {
+                return Ok((TraceExporterMessage::SetResource { resource: res }, vec![]));
+            }
             // If shutdown was asked, grab the batch and shutdown
             if state.shutdown_needed {
                 return Ok((TraceExporterMessage::Shutdown, state.batch.export()));
@@ -393,6 +425,7 @@ struct SharedState {
     shutdown_needed: bool,
     has_shutdown: bool,
     batch: Batch,
+    set_resource: Option<Resource>,
 }
 
 struct Waiter {
@@ -404,6 +437,7 @@ struct TraceExporterWorker {
     cfg: dd_trace::Config,
     trace_exporter: TraceExporter,
     rx: Receiver,
+    otel_resoure: opentelemetry_sdk::Resource,
 }
 
 impl TraceExporterWorker {
@@ -417,6 +451,7 @@ impl TraceExporterWorker {
         cfg: dd_trace::Config,
         builder: TraceExporterBuilder,
         rx: Receiver,
+        otel_resoure: opentelemetry_sdk::Resource,
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
             move || {
@@ -430,6 +465,7 @@ impl TraceExporterWorker {
                     trace_exporter,
                     cfg,
                     rx,
+                    otel_resoure,
                 };
                 task.run()
             }
@@ -461,6 +497,9 @@ impl TraceExporterWorker {
                 TraceExporterMessage::Shutdown => break,
                 TraceExporterMessage::FlushTraceChunks
                 | TraceExporterMessage::FlushTraceChunksWithTimeout => {}
+                TraceExporterMessage::SetResource { resource } => {
+                    self.otel_resoure = resource;
+                }
             }
         }
         self.trace_exporter
@@ -471,12 +510,11 @@ impl TraceExporterWorker {
         let trace_chunks = trace_chunks
             .into_iter()
             .map(|TraceChunk { chunk }| -> Vec<_> {
-                chunk
-                    .into_iter()
-                    .map(|span_data| {
-                        crate::span_conversion::otel_span_to_dd_span(&self.cfg, span_data)
-                    })
-                    .collect()
+                ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
+                    &self.cfg,
+                    chunk,
+                    &self.otel_resoure,
+                )
             })
             .collect();
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
@@ -493,10 +531,13 @@ impl TraceExporterWorker {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum TraceExporterMessage {
     FlushTraceChunks,
     FlushTraceChunksWithTimeout,
+    SetResource {
+        resource: opentelemetry_sdk::Resource,
+    },
     Shutdown,
 }
 

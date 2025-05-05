@@ -23,9 +23,9 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
-data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
-datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
-tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "d5b853e7898f6eae69b698847e905f91be9b86bd" }
+data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
+datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
+tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
 
 futures = "0.3.31"
 opentelemetry_sdk = { version = "0.28.0", features = [
@@ -34,6 +34,7 @@ opentelemetry_sdk = { version = "0.28.0", features = [
 opentelemetry = { version = "0.28.0", features = [
     "trace",
 ], default-features = false }
+opentelemetry-semantic-conventions = { version = "0.29.0", features = ["semconv_experimental"] }
 tokio = { version = "1.44.1" }
 
 [profile.dev]
