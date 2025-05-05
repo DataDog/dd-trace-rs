@@ -137,7 +137,10 @@ impl DatadogSamplerConfig {
             })
             .collect();
 
-        DatadogSampler::new(Some(rules), self.rate_limit)
+        // Create an empty resource by default
+        let empty_resource = opentelemetry_sdk::Resource::builder().build();
+        
+        DatadogSampler::new(Some(rules), self.rate_limit, empty_resource)
     }
 }
 

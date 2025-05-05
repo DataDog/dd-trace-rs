@@ -7,6 +7,9 @@ use super::{attribute_keys::*, sem_convs, utils};
 
 use opentelemetry::trace::SpanKind;
 use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
+extern crate opentelemetry_semantic_conventions as semconv;
+
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
@@ -193,19 +196,20 @@ pub fn get_otel_resource_v2(
     span_attributes: &[KeyValue],
     name: Cow<'static, str>,
     span_kind: SpanKind,
+    res: &Resource,
 ) -> Cow<'static, str> {
-    let m = get_res_span_attributes_v2(span_attributes, &[RESOURCE_NAME]);
+    let m = get_res_span_attributes(span_attributes, res, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
     }
 
-    let mut m = get_res_span_attributes_v2(span_attributes, &[HTTP_REQUEST_METHOD, HTTP_METHOD]);
+    let mut m = get_res_span_attributes(span_attributes, res, &[HTTP_REQUEST_METHOD, HTTP_METHOD]);
     if !m.is_empty() {
         if m == "_OTHER" {
             m = Cow::Borrowed("HTTP");
         }
         if matches!(span_kind, SpanKind::Server) {
-            let route = get_res_span_attributes_v2(span_attributes, &[HTTP_ROUTE]);
+            let route = get_res_span_attributes(span_attributes, res, &[HTTP_ROUTE]);
             if !route.is_empty() {
                 return Cow::Owned(format!("{} {}", m, route));
             }
@@ -213,11 +217,12 @@ pub fn get_otel_resource_v2(
         return m;
     }
 
-    let messaging_operation = get_res_span_attributes_v2(span_attributes, &[MESSAGING_OPERATION]);
+    let messaging_operation = get_res_span_attributes(span_attributes, res, &[MESSAGING_OPERATION]);
     if !messaging_operation.is_empty() {
         let mut res_name = messaging_operation;
-        let messaging_destination = get_res_span_attributes_v2(
+        let messaging_destination = get_res_span_attributes(
             span_attributes,
+            res,
             &[MESSAGING_DESTINATION, MESSAGING_DESTINATION_NAME],
         );
         if !messaging_destination.is_empty() {
@@ -226,33 +231,33 @@ pub fn get_otel_resource_v2(
         return res_name;
     }
 
-    let rpc_method = get_res_span_attributes_v2(span_attributes, &[RPC_METHOD]);
+    let rpc_method = get_res_span_attributes(span_attributes, res, &[RPC_METHOD]);
     if !rpc_method.is_empty() {
         let mut res_name = rpc_method;
-        let rpc_service = get_res_span_attributes_v2(span_attributes, &[RPC_SERVICE]);
+        let rpc_service = get_res_span_attributes(span_attributes, res, &[RPC_SERVICE]);
         if !rpc_service.is_empty() {
             res_name = Cow::Owned(format!("{} {}", res_name, rpc_service));
         }
         return res_name;
     }
 
-    let graphql_operation_type = get_res_span_attributes_v2(span_attributes, &[GRAPHQL_OPERATION_TYPE]);
+    let graphql_operation_type = get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_TYPE]);
     if !graphql_operation_type.is_empty() {
         let mut res_name = graphql_operation_type;
-        let graphql_operation_name = get_res_span_attributes_v2(span_attributes, &[GRAPHQL_OPERATION_NAME]);
+        let graphql_operation_name = get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_NAME]);
         if !graphql_operation_name.is_empty() {
             res_name = Cow::Owned(format!("{} {}", res_name, graphql_operation_name));
         }
         return res_name;
     }
 
-    let db_system = get_res_span_attributes_v2(span_attributes, &[DB_SYSTEM]);
+    let db_system = get_res_span_attributes(span_attributes, res, &[DB_SYSTEM]);
     if !db_system.is_empty() {
-        let db_statement = get_res_span_attributes_v2(span_attributes, &[DB_STATEMENT]);
+        let db_statement = get_res_span_attributes(span_attributes, res, &[DB_STATEMENT]);
         if !db_statement.is_empty() {
             return db_statement;
         }
-        let db_query = get_res_span_attributes_v2(span_attributes, &[DB_QUERY_TEXT]);
+        let db_query = get_res_span_attributes(span_attributes, res, &[DB_QUERY_TEXT]);
         if !db_query.is_empty() {
             return db_query;
         }
@@ -260,12 +265,19 @@ pub fn get_otel_resource_v2(
     name
 }
 
-fn get_res_span_attributes_v2(
+fn get_res_span_attributes(
     span_attributes: &[KeyValue],
+    res: &Resource,
     attributes: &[AttributeKey],
 ) -> Cow<'static, str> {
     for &attr_key in attributes {
+        // First check the resource for the attribute
+        let res_attr = get_res_attribute(res, &attr_key);
+        if !res_attr.is_empty() {
+            return res_attr;
+        }
         
+        // Then check the span attributes
         if let Some(attr) = span_attributes
             .iter()
             .find(|kv| kv.key.as_str() == attr_key.key())
@@ -274,6 +286,29 @@ fn get_res_span_attributes_v2(
         }
     }
     Cow::Borrowed("")
+}
+
+fn get_res_attribute(res: &Resource, attr: &AttributeKey) -> Cow<'static, str> {
+    let Some(value) = res.get(&opentelemetry::Key::from_static_str(attr.key())) else {
+        return Cow::Borrowed("");
+    };
+    Cow::Owned(value.to_string())
+}
+
+pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
+
+
+/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
+pub fn get_otel_service(res: &Resource) -> Cow<'static, str> {
+    let service = res.get(&opentelemetry::Key::from_static_str(
+        semconv::resource::SERVICE_NAME,
+    ));
+    if let Some(service) = service {
+        if !service.as_str().is_empty() {
+            return Cow::Owned(service.to_string());
+        }
+    }
+    Cow::Borrowed(DEFAULT_OTLP_SERVICE_NAME)
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
