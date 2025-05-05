@@ -17,6 +17,7 @@ futures = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+rand = { workspace = true }
 
 # Libdatadog dependencies
 data-pipeline = { workspace = true }

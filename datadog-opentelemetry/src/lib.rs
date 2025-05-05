@@ -4,6 +4,7 @@
 mod ddtrace_transform;
 mod span_exporter;
 mod span_processor;
+mod trace_id;
 mod transform;
 
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -43,8 +44,8 @@ pub fn init_datadog(
 
     let tracer_provider = tracer_provider_builder
         .with_span_processor(DatadogSpanProcessor::new(config))
+        .with_id_generator(trace_id::TraceidGenerator)
         // TODO: hookup additional components
-        // .with_id_generator(id_generator)
         // .with_sampler(sampler)
         .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -67,8 +68,8 @@ pub fn make_tracer(
                 .build(),
         )
         .with_span_processor(DatadogSpanProcessor::new(config))
+        .with_id_generator(trace_id::TraceidGenerator)
         // TODO: hookup additional components
-        // .with_id_generator(id_generator)
         // .with_sampler(sampler)
         .build()
 }

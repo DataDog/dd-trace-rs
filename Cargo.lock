@@ -748,6 +748,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "rand 0.8.5",
  "tinybytes",
  "tokio",
 ]
