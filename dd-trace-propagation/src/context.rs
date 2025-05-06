@@ -206,10 +206,10 @@ impl FromStr for Tracestate {
                                 return None;
                             }
 
-                            if INVALID_ASCII_CHARACTERS_REGEX.is_match(&item) {
+                            if INVALID_ASCII_CHARACTERS_REGEX.is_match(item) {
                                 dd_debug!("Received invalid tracestate header value: {item}");
                                 valid_header = false;
-                                return None;
+                                None
                             } else {
                                 let mut parts = item.splitn(2, ':');
                                 Some((parts.next()?.to_string(), decode_tag_value(parts.next()?)))
@@ -220,8 +220,20 @@ impl FromStr for Tracestate {
             } else if !v.is_empty() {
                 let mut parts = v.splitn(2, '=');
                 let key = parts.next().map(str::trim).unwrap_or_default().to_string();
-                let value = parts.next().map(str::trim).unwrap_or_default().to_string();
-                additional_values.push(format!("{key}={value}"));
+
+                let additional = if let Some(value) = parts.next() {
+                    let value = value.trim().to_string();
+                    format!("{key}={value}")
+                } else {
+                    key
+                };
+
+                if INVALID_ASCII_CHARACTERS_REGEX.is_match(&additional) {
+                    dd_debug!("Received invalid tracestate header value: {additional}");
+                    valid_header = false;
+                } else {
+                    additional_values.push(additional)
+                }
             }
         }
 
@@ -318,7 +330,11 @@ pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
+
     use crate::context::{combine_trace_id, split_trace_id};
+
+    use super::Tracestate;
 
     #[test]
     fn test_combine() {
@@ -331,5 +347,75 @@ mod test {
         let combined = combine_trace_id(lower, Some(&higher_hex));
 
         assert_eq!(trace_id, combined)
+    }
+
+    #[test]
+    fn test_invalid_tracestate_no_key() {
+        let tracestate = Tracestate::from_str("foo=1,=2").expect("parsed tracesate");
+
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec!["foo=1".to_string(), "=2".to_string()])
+        )
+    }
+
+    #[test]
+    fn test_invalid_tracestate_no_value() {
+        let tracestate = Tracestate::from_str("foo=1,2").expect("parsed tracesate");
+
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec!["foo=1".to_string(), "2".to_string()])
+        )
+    }
+
+    #[test]
+    fn test_invalid_tracestate_multiple_eq_value() {
+        let tracestate = Tracestate::from_str("foo=1,bar=2=2").expect("parsed tracesate");
+
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec!["foo=1".to_string(), "bar=2=2".to_string()])
+        )
+    }
+
+    #[test]
+    fn test_invalid_tracestate_non_ascii_char() {
+        assert!(Tracestate::from_str("foo=öï,bar=2=2").is_err())
+    }
+
+    #[test]
+    fn test_invalid_tracestate_non_ascii_char_with_tabs() {
+        assert!(Tracestate::from_str("foo=\t öï  \t\t ").is_err())
+    }
+
+    #[test]
+    fn test_valid_tracestate_ascii_char_with_tabs() {
+        let tracestate = Tracestate::from_str("foo=\t valid  \t\t ").expect("parsed tracestate");
+
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec!["foo=valid".to_string()])
+        )
+    }
+
+    #[test]
+    fn test_valid_tracestate_dd_ascii_char_with_tabs() {
+        let tracestate = Tracestate::from_str("dd=\t  o:valid  \t\t ").expect("parsed tracestate");
+
+        assert_eq!(tracestate.origin, Some("valid".to_string()))
+    }
+
+    #[test]
+    fn test_invalid_tracestate_dd_non_ascii_char_with_tabs() {
+        assert!(Tracestate::from_str("dd=o:ïnvälïd  \t\t ").is_err())
+    }
+
+    #[test]
+    fn test_malformed_tracestate_dd_ascii_char_with_tabs() {
+        let tracestate =
+            Tracestate::from_str("dd=\t  o:valid;;s:1; \t").expect("parsed tracestate");
+
+        assert_eq!(tracestate.origin, Some("valid".to_string()))
     }
 }
