@@ -23,7 +23,7 @@ pub fn create_sampler_from_config(cfg: &dd_trace::Config, resource: Arc<RwLock<R
             },
             Err(e) => {
                 // Log error and fall back to default sampler
-                eprintln!("Error parsing sampling rules configuration: {}", e);
+                dd_warn!("Error parsing sampling rules configuration: {}", e);
                 create_default_sampler(cfg, resource)
             }
         }
