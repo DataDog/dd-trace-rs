@@ -15,7 +15,7 @@ use crate::{
     error::Error,
 };
 
-use dd_trace::{dd_debug, dd_error, dd_warn};
+use dd_trace::{dd_error, dd_warn};
 
 // Traceparent Keys
 pub const TRACEPARENT_KEY: &str = "traceparent";
@@ -196,7 +196,6 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
                     Some(tracestate)
                 } else {
-                    dd_debug!("No `dd` value found in tracestate");
                     None
                 }
             } else {
@@ -484,6 +483,75 @@ mod test {
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
+
+    #[test]
+    fn test_extract_traceparent_incorrect_trace_flags() {
+        let headers = HashMap::from([(
+            "traceparent".to_string(),
+            "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-1x".to_string(),
+        )]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator.extract(&headers);
+
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_extract_tracestate_incorrect_priority() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "01-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-02".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;s:incorrect".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert!(context.sampling.is_some());
+        assert!(context.sampling.unwrap().priority.is_some());
+        assert_eq!(
+            context.sampling.unwrap().priority.unwrap(),
+            SamplingPriority::AutoReject
+        );
+    }
+
+    #[test]
+    fn test_extract_tracestate_ows_handling() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd= \t p:00f067aa0ba902b7;s:1, \tfoo=1, bar= \t 2".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let tracestate = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context")
+            .tracestate
+            .expect("tracestate should be extracted");
+
+        assert!(tracestate.additional_values.is_some());
+        assert_eq!(
+            tracestate.additional_values.unwrap(),
+            vec!["foo=1", "bar=2"]
+        );
     }
 
     #[test]

@@ -260,6 +260,11 @@ pub mod tests {
             ("02-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09-XYZxsf09", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
             ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
             ("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09-", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
+            (" 01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
+            ("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09 ", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
+            ("\t01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
+            ("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09\t", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
+            ("\t 01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-09\t", "foo=bar", OtelSpanContext::new(TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736), SpanId::from(0x00f0_67aa_0ba9_02b7), TraceFlags::SAMPLED, true, TraceState::from_str("foo=bar").unwrap())),
         ]
     }
 
@@ -368,6 +373,29 @@ pub mod tests {
                 expected_trace_parent
             );
 
+            assert_eq!(
+                Extractor::get(&injector, TRACESTATE_KEY).unwrap_or(""),
+                expected_trace_state
+            );
+        }
+    }
+
+    #[test]
+    fn inject_dd_tracestate() {
+        let propagator = get_propagator(Some(vec![TracePropagationStyle::TraceContext]));
+        for (_, _, context) in inject_data() {
+            if context == opentelemetry::trace::SpanContext::NONE {
+                continue;
+            }
+
+            let sampled = if context.is_sampled() { 1 } else { 0 };
+            let mut injector = HashMap::new();
+            propagator.inject_context(
+                &Context::current_with_span(TestSpan(context)),
+                &mut injector,
+            );
+
+            let expected_trace_state = format!("dd=s:{sampled};p:00f067aa0ba902b7,foo=bar");
             assert_eq!(
                 Extractor::get(&injector, TRACESTATE_KEY).unwrap_or(""),
                 expected_trace_state

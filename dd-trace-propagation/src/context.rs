@@ -191,29 +191,42 @@ impl FromStr for Tracestate {
     type Err = String;
     fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
         let ts_v = tracestate.split(',').map(str::trim);
-        let ts = ts_v.clone().collect::<Vec<&str>>().join(",");
-
-        if INVALID_ASCII_CHARACTERS_REGEX.is_match(&ts) {
-            dd_debug!("Received invalid tracestate header {tracestate}");
-            return Err(String::from("Invalid tracestate"));
-        }
 
         let mut dd: Option<HashMap<String, String>> = None;
         let mut additional_values = vec![];
+        let mut valid_header = true;
         for v in ts_v {
             if let Some(stripped) = v.strip_prefix("dd=") {
                 dd = Some(
                     stripped
+                        .trim()
                         .split(';')
                         .filter_map(|item| {
-                            let mut parts = item.splitn(2, ':');
-                            Some((parts.next()?.to_string(), decode_tag_value(parts.next()?)))
+                            if !valid_header {
+                                return None;
+                            }
+
+                            if INVALID_ASCII_CHARACTERS_REGEX.is_match(&item) {
+                                dd_debug!("Received invalid tracestate header value: {item}");
+                                valid_header = false;
+                                return None;
+                            } else {
+                                let mut parts = item.splitn(2, ':');
+                                Some((parts.next()?.to_string(), decode_tag_value(parts.next()?)))
+                            }
                         })
                         .collect(),
                 );
             } else if !v.is_empty() {
-                additional_values.push(v.to_string());
+                let mut parts = v.splitn(2, '=');
+                let key = parts.next().map(str::trim).unwrap_or_default().to_string();
+                let value = parts.next().map(str::trim).unwrap_or_default().to_string();
+                additional_values.push(format!("{key}={value}"));
             }
+        }
+
+        if !valid_header {
+            return Err(String::from("Invalid tracestate"));
         }
 
         let mut tracestate = Tracestate {
@@ -262,6 +275,7 @@ impl FromStr for Tracestate {
 
             Some(tags)
         } else {
+            dd_debug!("No `dd` value found in tracestate");
             None
         };
 

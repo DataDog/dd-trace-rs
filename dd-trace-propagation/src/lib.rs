@@ -876,6 +876,43 @@ pub mod tests {
         assert_eq!(contexts.len(), 0);
     }
 
+    #[test]
+    fn test_extract_first_datadog() {
+        let extract = vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ];
+
+        let mut builder = Config::builder();
+        builder.set_trace_propagation_style_extract(extract);
+        builder.set_trace_propagation_extract_first(true);
+
+        let config = builder.build();
+
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        let carrier = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-11111111111111110000000000000001-000000000000000f-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=s:2;p:0123456789abcdef,foo=1".to_string(),
+            ),
+            ("x-datadog-trace-id".to_string(), "1".to_string()),
+            ("x-datadog-parent-id".to_string(), "987654320".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.tid=1111111111111111".to_string(),
+            ),
+        ]);
+        let context = propagator.extract(&carrier).expect("context is extracted");
+
+        assert_eq!(context.span_id, 987654320);
+        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
+    }
+
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
         for (k, expected_value) in hm1.clone() {
             assert!(

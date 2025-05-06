@@ -459,6 +459,45 @@ mod test {
     }
 
     #[test]
+    fn test_extract_datadog_propagator_incorrect_sampling_priority() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            (
+                "x-datadog-sampling-priority".to_string(),
+                "incorrect".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::Datadog;
+
+        let context = propagator.extract(&headers);
+
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_extract_datadog_propagator_missing_sampling_priority() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+        ]);
+
+        let propagator = TracePropagationStyle::Datadog;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(
+            context.sampling.unwrap().priority,
+            Some(SamplingPriority::UserKeep)
+        );
+    }
+
+    #[test]
     fn test_inject_datadog_propagator() {
         let mut tags = HashMap::new();
         tags.set("_dd.p.test", "value".to_string());
