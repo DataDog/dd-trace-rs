@@ -385,7 +385,18 @@ pub mod tests {
         invalid_datadog: (
             Some(vec![TracePropagationStyle::Datadog]),
             INVALID_DATADOG_HEADERS.clone(),
-            SpanContext::default(),
+            SpanContext {
+                trace_id: 13_088_165_645_273_925_489,
+                span_id: 0,
+                sampling: None,
+                origin: None,
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
         ),
         valid_datadog_explicit_style: (
             Some(vec![TracePropagationStyle::Datadog]),

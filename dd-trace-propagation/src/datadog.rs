@@ -162,12 +162,22 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
         }
     };
 
-    let parent_id = extract_parent_id(carrier).unwrap_or(0);
-    let sampling_priority = match extract_sampling_priority(carrier) {
-        Ok(sampling_priority) => sampling_priority,
+    let parent_id = match extract_parent_id(carrier) {
+        Ok(parent_id) => parent_id,
         Err(e) => {
             dd_debug!("{e}");
-            return None;
+            0
+        }
+    };
+
+    let sampling = match extract_sampling_priority(carrier) {
+        Ok(sampling_priority) => Some(Sampling {
+            priority: Some(sampling_priority),
+            mechanism: None,
+        }),
+        Err(e) => {
+            dd_debug!("{e}");
+            None
         }
     };
     let origin = extract_origin(carrier);
@@ -181,10 +191,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     Some(SpanContext {
         trace_id,
         span_id: parent_id,
-        sampling: Some(Sampling {
-            priority: Some(sampling_priority),
-            mechanism: None,
-        }),
+        sampling,
         origin,
         tags,
         links: Vec::new(),
@@ -207,8 +214,12 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
         .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
 }
 
-fn extract_parent_id(carrier: &dyn Extractor) -> Option<u64> {
-    carrier.get(DATADOG_PARENT_ID_KEY)?.parse::<u64>().ok()
+fn extract_parent_id(carrier: &dyn Extractor) -> Result<u64, Error> {
+    carrier
+        .get(DATADOG_PARENT_ID_KEY)
+        .ok_or(Error::extract("`trace_id` not found", "datadog"))?
+        .parse::<u64>()
+        .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
 }
 
 fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<SamplingPriority, Error> {
@@ -471,9 +482,13 @@ mod test {
 
         let propagator = TracePropagationStyle::Datadog;
 
-        let context = propagator.extract(&headers);
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
 
-        assert!(context.is_none());
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(context.sampling, None);
     }
 
     #[test]
