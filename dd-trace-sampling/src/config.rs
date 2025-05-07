@@ -5,6 +5,7 @@ use crate::datadog_sampler::{DatadogSampler, SamplingRule};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use opentelemetry_sdk::Resource;
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +81,12 @@ pub struct DatadogSamplerConfig {
     /// Rate limit for sampling (samples/second)
     #[serde(default)]
     pub rate_limit: Option<i32>,
+
+    /// Optional OpenTelemetry Resource to be used by the sampler.
+    /// If not provided, a default empty resource will be created.
+    /// This field is not part of the JSON configuration and must be set programmatically.
+    #[serde(skip)]
+    pub resource: Option<Arc<RwLock<Resource>>>,
 }
 
 impl Default for DatadogSamplerConfig {
@@ -94,6 +101,7 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules: Vec::new(),
             rate_limit: None,
+            resource: None,
         }
     }
 
@@ -102,12 +110,17 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules,
             rate_limit: None,
+            resource: None,
         }
     }
 
     /// Create a new sampling configuration with all parameters
     pub fn with_config(rules: Vec<SamplingRuleConfig>, rate_limit: Option<i32>) -> Self {
-        DatadogSamplerConfig { rules, rate_limit }
+        DatadogSamplerConfig {
+            rules,
+            rate_limit,
+            resource: None,
+        }
     }
 
     /// Parse from JSON string
@@ -118,6 +131,16 @@ impl DatadogSamplerConfig {
     /// Serialize to JSON string
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
+    }
+
+    /// Parse from JSON string and associate a resource
+    pub fn from_json_with_resource(
+        json_str: &str,
+        resource: Arc<RwLock<Resource>>,
+    ) -> Result<Self, serde_json::Error> {
+        let mut config: Self = serde_json::from_str(json_str)?;
+        config.resource = Some(resource);
+        Ok(config)
     }
 
     /// Create a DatadogSampler from this configuration
@@ -140,12 +163,15 @@ impl DatadogSamplerConfig {
 
         // Create an empty resource by default
         // The resource is updated later
-        let empty_resource = opentelemetry_sdk::Resource::builder().build();
+        let resource_to_use = self.resource.clone().unwrap_or_else(|| {
+            let empty_resource = opentelemetry_sdk::Resource::builder().build();
+            Arc::new(RwLock::new(empty_resource))
+        });
 
         DatadogSampler::new(
             Some(rules),
             self.rate_limit,
-            Arc::new(RwLock::new(empty_resource)),
+            resource_to_use,
         )
     }
 }

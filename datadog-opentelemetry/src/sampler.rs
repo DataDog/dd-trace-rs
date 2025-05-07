@@ -1,7 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+
 use dd_trace::dd_warn;
+
+use dd_trace_sampling::config::DatadogSamplerConfig;
 use dd_trace_sampling::DatadogSampler;
 use opentelemetry_sdk::Resource;
 use std::sync::{Arc, RwLock};
@@ -19,11 +22,9 @@ pub fn create_sampler_from_config(
 ) -> DatadogSampler {
     if let Some(rules_json) = cfg.trace_sampling_rules() {
         // If we have JSON rules, try to create a sampler from them
-        match DatadogSampler::from_json(rules_json) {
-            Ok(mut sampler) => {
-                // Set the resource on the sampler after it's created
-                sampler.update_resource(resource.clone());
-                sampler
+        match DatadogSamplerConfig::from_json_with_resource(rules_json, resource.clone()) {
+            Ok(config) => {
+                config.build_sampler()
             }
             Err(e) => {
                 // Log error and fall back to default sampler
@@ -42,20 +43,12 @@ fn create_default_sampler(
     cfg: &dd_trace::Config,
     resource: Arc<RwLock<Resource>>,
 ) -> DatadogSampler {
-    // Create a default resource to initialize the sampler
-    let default_resource = Arc::new(RwLock::new(Resource::builder().build()));
-
-    // Create the sampler with a default resource
-    let mut sampler = DatadogSampler::new(
-        None,
+    // Directly create the sampler with the provided resource and config options
+    DatadogSampler::new(
+        None, // No specific rules, so default behavior of DatadogSampler applies
         cfg.trace_rate_limit().map(|r| r as i32),
-        default_resource,
-    );
-
-    // Update with the shared resource Arc
-    sampler.update_resource(resource);
-
-    sampler
+        resource, // Use the passed-in resource directly
+    )
 }
 
 #[cfg(test)]
