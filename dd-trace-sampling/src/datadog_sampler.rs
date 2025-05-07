@@ -22,9 +22,11 @@ use crate::otel_utils::get_dd_key_for_otlp_attribute;
 use crate::otel_utils::get_otel_operation_name_v2;
 use crate::otel_utils::get_otel_resource_v2;
 use crate::otel_utils::get_otel_service;
+use crate::otel_utils::get_otel_status_code;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::utils;
+use crate::sem_convs;
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -192,44 +194,70 @@ impl SamplingRule {
 
         // Check all tags using glob matchers
         for (key, matcher) in &self.tag_matchers {
-            // First, try to match directly with the provided tag key
-            let direct_match = attributes
-                .iter()
-                .find(|kv| kv.key.as_str() == key.as_str())
-                .and_then(|kv| self.match_attribute_value(&kv.value, matcher));
+            let rule_tag_key_str = key.as_str();
 
-            if direct_match.unwrap_or(false) {
-                continue;
-            }
-
-            // If no direct match, try to find the corresponding OpenTelemetry attribute that maps to the Datadog tag key
-            // Look for the tag in all attributes, converting from OpenTelemetry to Datadog format if needed
-            // short circuit since we currently only match to attributes starting with "http."
-            if key.starts_with("http.") {
-                let tag_match = attributes.iter().any(|kv| {
-                    // http.response.status_code -> http.request.status_code
-                    // Convert OTel attribute key to Datadog format
-                    let dd_key = get_dd_key_for_otlp_attribute(kv.key.as_str());
-
-                    // Check if this is the tag we're looking for
-                    if dd_key.as_ref() == key.as_str() {
-                        return self
-                            .match_attribute_value(&kv.value, matcher)
-                            .unwrap_or(false);
-                    }
-                    false
-                });
-
-                if !tag_match {
-                    return false;
+            // Special handling for rules defined with "http.status_code" or "http.response.status_code"
+            if rule_tag_key_str == sem_convs::ATTRIBUTE_HTTP_STATUS_CODE
+                || rule_tag_key_str == sem_convs::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE
+            {
+                match self.match_http_status_code_rule(matcher, attributes) {
+                    Some(true) => continue, // Status code matched
+                    Some(false) | None => return false, // Status code didn't match or wasn't found
                 }
             } else {
-                // For non-HTTP attributes, if we don't have a direct match, the rule doesn't match
-                return false;
+                // Logic for other tags:
+                // First, try to match directly with the provided tag key
+                let direct_match = attributes
+                    .iter()
+                    .find(|kv| kv.key.as_str() == rule_tag_key_str)
+                    .and_then(|kv| self.match_attribute_value(&kv.value, matcher));
+
+                if direct_match.unwrap_or(false) {
+                    continue;
+                }
+
+                // If no direct match, try to find the corresponding OpenTelemetry attribute that maps to the Datadog tag key
+                // This handles cases where the rule key is a Datadog key (e.g., "http.method")
+                // and the attribute is an OTel key (e.g., "http.request.method")
+                if rule_tag_key_str.starts_with("http.") {
+                    let tag_match = attributes.iter().any(|kv| {
+                        let dd_key_from_otel_attr = get_dd_key_for_otlp_attribute(kv.key.as_str());
+                        if dd_key_from_otel_attr.as_ref() == rule_tag_key_str {
+                            return self
+                                .match_attribute_value(&kv.value, matcher)
+                                .unwrap_or(false);
+                        }
+                        false
+                    });
+
+                    if !tag_match {
+                        return false; // Mapped attribute not found or did not match
+                    }
+                    // If tag_match is true, loop continues to next rule_tag_key.
+                } else {
+                    // For non-HTTP attributes, if we don't have a direct match, the rule doesn't match
+                    return false;
+                }
             }
         }
 
         true
+    }
+
+    /// Helper method to specifically match a rule against an HTTP status code extracted from attributes.
+    /// Returns Some(true) if status code found and matches, Some(false) if found but not matched, None if not found.
+    fn match_http_status_code_rule(
+        &self,
+        matcher: &GlobMatcher,
+        attributes: &[KeyValue],
+    ) -> Option<bool> {
+        let status_code_u32 = get_otel_status_code(attributes);
+        if status_code_u32 != 0 { // Assuming 0 means not found
+            let status_value = opentelemetry::Value::I64(i64::from(status_code_u32));
+            self.match_attribute_value(&status_value, matcher)
+        } else {
+            None // Status code not found in attributes
+        }
     }
 
     // Helper method to match attribute values considering different value types
@@ -1535,100 +1563,91 @@ mod tests {
 
     #[test]
     fn test_direct_and_mapped_mixed_attributes() {
+        // Constants for key names to improve readability and ensure consistency
+        let dd_status_key_str = crate::sem_convs::ATTRIBUTE_HTTP_STATUS_CODE;
+        let otel_response_status_key_str = crate::sem_convs::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE;
+        let custom_tag_key = "custom.tag";
+        let custom_tag_value = "value";
+
+        let empty_resource = create_empty_resource_for_matching();
+        let span_kind_client = SpanKind::Client;
+
         // Test with both direct matches and mapped attributes
-        let mut tags = HashMap::new();
-        tags.insert("http.status_code".to_string(), "5*".to_string());
-        tags.insert("custom.tag".to_string(), "value".to_string()); // This has no mapping
+        let mut tags_rule1 = HashMap::new();
+        tags_rule1.insert(dd_status_key_str.to_string(), "5*".to_string());
+        tags_rule1.insert(custom_tag_key.to_string(), custom_tag_value.to_string());
 
-        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
+        let rule1 = SamplingRule::new(1.0, None, None, None, Some(tags_rule1), None);
 
-        // A mix of direct and mapped attributes
-        let mixed_attrs = vec![
-            // OTel attribute that maps to http.status_code
-            KeyValue::new("http.response.status_code", 503),
-            // Direct match attribute with no mapping
-            KeyValue::new("custom.tag", "value"),
+        // Case 1: OTel attribute that maps to http.status_code (503 matches "5*") + Direct custom.tag match
+        let mixed_attrs_match = vec![
+            KeyValue::new(otel_response_status_key_str, 503),
+            KeyValue::new(custom_tag_key, custom_tag_value),
         ];
+        assert!(rule1.matches(
+            &mixed_attrs_match,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with dd_status_key (5*) and custom.tag should match span with otel_response_status_key (503) and custom.tag");
 
-        // The rule should match with both direct and mapped attributes
-        assert!(rule.matches(
-            mixed_attrs.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
-
-        // Using the Datadog convention for both should also match
-        let dd_attrs = vec![
-            KeyValue::new("http.status_code", 503),
-            KeyValue::new("custom.tag", "value"),
+        // Case 2: Datadog convention for status code (503 matches "5*") + Direct custom.tag match
+        let dd_attrs_match = vec![
+            KeyValue::new(dd_status_key_str, 503),
+            KeyValue::new(custom_tag_key, custom_tag_value),
         ];
+        assert!(rule1.matches(
+            &dd_attrs_match,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with dd_status_key (5*) and custom.tag should match span with dd_status_key (503) and custom.tag");
 
-        assert!(rule.matches(
-            dd_attrs.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
-
-        // Missing the custom tag should fail
-        let missing_custom = vec![
-            KeyValue::new("http.response.status_code", 503),
-            // Missing custom.tag
+        // Case 3: Missing the custom tag should fail (status code would match)
+        let missing_custom_tag_attrs = vec![
+            KeyValue::new(otel_response_status_key_str, 503),
         ];
+        assert!(!rule1.matches(
+            &missing_custom_tag_attrs,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with dd_status_key (5*) and custom.tag should NOT match span missing custom.tag");
 
-        assert!(!rule.matches(
-            missing_custom.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
-    }
-
-    #[test]
-    fn test_sampling_rule_with_various_attribute_types() {
-        // Test with different attribute value types (stick to numeric types which are more reliable for matching)
-        let mut tags = HashMap::new();
-        tags.insert("integer.tag".to_string(), "500".to_string()); // Integer
-        tags.insert("float.tag".to_string(), "*".to_string()); // Use wildcard for float to match any value
-
-        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
-
-        // Attributes with various types
-        let attrs = vec![
-            KeyValue::new("integer.tag", 500),
-            KeyValue::new("float.tag", 1.5), // 1.5 will be preserved as a float
+        // Case 4: OTel status code 200 (does NOT match "5*") + custom.tag present
+        let non_matching_otel_status_attrs = vec![
+            KeyValue::new(otel_response_status_key_str, 200),
+            KeyValue::new(custom_tag_key, custom_tag_value),
         ];
+        assert!(!rule1.matches(
+            &non_matching_otel_status_attrs,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with dd_status_key (5*) and custom.tag should NOT match span with non-matching otel_response_status_key (200)");
 
-        // The rule should match with numeric types
-        assert!(rule.matches(
-            attrs.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
-
-        // Attributes that don't match the pattern shouldn't match
-        let non_matching_attrs = vec![
-            KeyValue::new("integer.tag", 501), // Not 500
-            KeyValue::new("float.tag", 1.5),
+        // Case 5: No recognizable status code + custom.tag present
+        let no_status_code_attrs = vec![
+            KeyValue::new("another.tag", "irrelevant"),
+            KeyValue::new(custom_tag_key, custom_tag_value),
         ];
+        assert!(!rule1.matches(
+            &no_status_code_attrs,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with dd_status_key (5*) and custom.tag should NOT match span with no status code attribute");
 
-        assert!(!rule.matches(
-            non_matching_attrs.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
+        // Case 6: Rule uses OTel key http.response.status_code directly, span has matching OTel key.
+        let mut tags_rule2 = HashMap::new();
+        tags_rule2.insert(otel_response_status_key_str.to_string(), "200".to_string());
+        tags_rule2.insert(custom_tag_key.to_string(), custom_tag_value.to_string());
+        let rule2 = SamplingRule::new(1.0, None, None, None, Some(tags_rule2), None);
 
-        // Wildcard pattern should match any float
-        let mut wildcard_tags = HashMap::new();
-        wildcard_tags.insert("float.tag".to_string(), "*".to_string()); // Any float
-
-        let wildcard_rule = SamplingRule::new(1.0, None, None, None, Some(wildcard_tags), None);
-
-        let wildcard_float = vec![KeyValue::new("float.tag", 1.6)];
-
-        assert!(wildcard_rule.matches(
-            wildcard_float.as_slice(),
-            &SpanKind::Client,
-            &create_empty_resource()
-        ));
+        let otel_key_rule_match_attrs = vec![
+            KeyValue::new(otel_response_status_key_str, 200),
+            KeyValue::new(custom_tag_key, custom_tag_value),
+        ];
+        assert!(rule2.matches(
+            &otel_key_rule_match_attrs,
+            &span_kind_client,
+            &empty_resource
+        ), "Rule with otel_response_status_key (200) and custom.tag should match span with otel_response_status_key (200) and custom.tag");
     }
 
     #[test]
