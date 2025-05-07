@@ -740,6 +740,7 @@ dependencies = [
 name = "datadog-opentelemetry"
 version = "0.0.1"
 dependencies = [
+ "assert_unordered",
  "data-pipeline",
  "datadog-opentelemetry",
  "datadog-trace-utils",

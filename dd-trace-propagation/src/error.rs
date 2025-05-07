@@ -4,7 +4,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug, Copy, Clone)]
-#[error("Cannot {} from {}, {}", operation, message, propagator_name)]
+#[error("Cannot {} from {}, {}", operation, propagator_name, message)]
 pub struct Error {
     pub message: &'static str,
     // which propagator this error comes from

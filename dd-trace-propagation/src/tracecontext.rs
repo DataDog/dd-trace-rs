@@ -76,7 +76,6 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let mut tracestate_parts = vec![];
 
-    // TODO: is that UserKeep(2) correct as default value?
     let priority = context
         .sampling
         .and_then(|sampling| sampling.priority)
@@ -138,7 +137,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         })
         .unwrap_or_default();
 
-    let parts = vec![format!("dd={dd}")];
+    let parts = vec![("dd".to_string(), dd)];
 
     let additional_parts = context
         .tracestate
@@ -152,7 +151,14 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         None => parts,
     };
 
-    carrier.set(TRACESTATE_KEY, all_parts.join(TRACESTATE_VALUES_SEPARATOR));
+    carrier.set(
+        TRACESTATE_KEY,
+        all_parts
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(TRACESTATE_VALUES_SEPARATOR),
+    );
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
@@ -531,11 +537,11 @@ mod test {
         let headers = HashMap::from([
             (
                 "traceparent".to_string(),
-                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-00".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
             ),
             (
                 "tracestate".to_string(),
-                "dd= \t p:00f067aa0ba902b7;s:1, \tfoo=1, bar= \t 2".to_string(),
+                "dd= \t p:00f067aa0ba902b7;s:1,foo=1,bar= \t 2".to_string(),
             ),
         ]);
 
@@ -547,10 +553,18 @@ mod test {
             .tracestate
             .expect("tracestate should be extracted");
 
+        assert_eq!(
+            tracestate.sampling.unwrap().priority.unwrap(),
+            SamplingPriority::AutoKeep
+        );
+
         assert!(tracestate.additional_values.is_some());
         assert_eq!(
             tracestate.additional_values.unwrap(),
-            vec!["foo=1", "bar=2"]
+            vec![
+                ("foo".to_string(), "1".to_string()),
+                ("bar".to_string(), " \t 2".to_string()),
+            ]
         );
     }
 

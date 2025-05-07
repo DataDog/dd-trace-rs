@@ -184,31 +184,75 @@ pub struct Tracestate {
     pub origin: Option<String>,
     pub lower_order_trace_id: Option<String>,
     pub propagation_tags: Option<HashMap<String, String>>,
-    pub additional_values: Option<Vec<String>>,
+    pub additional_values: Option<Vec<(String, String)>>,
+}
+
+/// Code inspired, and copied, by OpenTelemetry Rust project.
+/// <https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry/src/trace/span_context.rs>
+impl Tracestate {
+    fn valid_key(key: &str) -> bool {
+        if key.len() > 256 {
+            return false;
+        }
+
+        let allowed_special = |b: u8| (b == b'_' || b == b'-' || b == b'*' || b == b'/');
+        let mut vendor_start = None;
+        for (i, &b) in key.as_bytes().iter().enumerate() {
+            if !(b.is_ascii_lowercase() || b.is_ascii_digit() || allowed_special(b) || b == b'@') {
+                return false;
+            }
+
+            if i == 0 && (!b.is_ascii_lowercase() && !b.is_ascii_digit()) {
+                return false;
+            } else if b == b'@' {
+                if vendor_start.is_some() || i + 14 < key.len() {
+                    return false;
+                }
+                vendor_start = Some(i);
+            } else if let Some(start) = vendor_start {
+                if i == start + 1 && !(b.is_ascii_lowercase() || b.is_ascii_digit()) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn valid_value(value: &str) -> bool {
+        if value.len() > 256 {
+            return false;
+        }
+
+        !(value.contains(',') || value.contains('='))
+    }
 }
 
 impl FromStr for Tracestate {
     type Err = String;
     fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
-        let ts_v = tracestate.split(',').map(str::trim);
+        let ts_v = tracestate.split(',');
 
         let mut dd: Option<HashMap<String, String>> = None;
         let mut additional_values = vec![];
-        let mut valid_header = true;
+
         for v in ts_v {
-            if let Some(stripped) = v.strip_prefix("dd=") {
+            let mut parts = v.splitn(2, '=');
+            let key = parts.next().unwrap_or_default();
+            let value = parts.next().unwrap_or_default();
+
+            if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
+                dd_debug!("Received invalid tracestate header value: {v}");
+                return Err(String::from("Invalid tracestate"));
+            }
+
+            if key == "dd" {
                 dd = Some(
-                    stripped
+                    value
                         .trim()
                         .split(';')
                         .filter_map(|item| {
-                            if !valid_header {
-                                return None;
-                            }
-
                             if INVALID_ASCII_CHARACTERS_REGEX.is_match(item) {
-                                dd_debug!("Received invalid tracestate header value: {item}");
-                                valid_header = false;
                                 None
                             } else {
                                 let mut parts = item.splitn(2, ':');
@@ -217,28 +261,9 @@ impl FromStr for Tracestate {
                         })
                         .collect(),
                 );
-            } else if !v.is_empty() {
-                let mut parts = v.splitn(2, '=');
-                let key = parts.next().map(str::trim).unwrap_or_default().to_string();
-
-                let additional = if let Some(value) = parts.next() {
-                    let value = value.trim().to_string();
-                    format!("{key}={value}")
-                } else {
-                    key
-                };
-
-                if INVALID_ASCII_CHARACTERS_REGEX.is_match(&additional) {
-                    dd_debug!("Received invalid tracestate header value: {additional}");
-                    valid_header = false;
-                } else {
-                    additional_values.push(additional)
-                }
+            } else {
+                additional_values.push((key.to_string(), value.to_string()));
             }
-        }
-
-        if !valid_header {
-            return Err(String::from("Invalid tracestate"));
         }
 
         let mut tracestate = Tracestate {
@@ -266,7 +291,7 @@ impl FromStr for Tracestate {
                             priority = Some(p_sp);
                         }
                     }
-                    "o" => tracestate.origin = Some(decode_tag_value(&v)),
+                    "o" => tracestate.origin = Some(v),
                     "p" => tracestate.lower_order_trace_id = Some(v.to_string()),
                     "t.dm" => {
                         if let Ok(p_sm) = SamplingMechanism::from_str(&v) {
@@ -350,43 +375,47 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_tracestate_no_key() {
-        let tracestate = Tracestate::from_str("foo=1,=2").expect("parsed tracesate");
+    fn test_valid_tracestate_no_key() {
+        let tracestate = Tracestate::from_str("foo=1,=2,=4").expect("parsed tracesate");
 
         assert_eq!(
             tracestate.additional_values,
-            Some(vec!["foo=1".to_string(), "=2".to_string()])
+            Some(vec![
+                ("foo".to_string(), "1".to_string()),
+                ("".to_string(), "2".to_string()),
+                ("".to_string(), "4".to_string())
+            ])
         )
     }
 
     #[test]
     fn test_invalid_tracestate_no_value() {
-        let tracestate = Tracestate::from_str("foo=1,2").expect("parsed tracesate");
+        assert!(Tracestate::from_str("foo=1,2").is_err());
+    }
 
-        assert_eq!(
-            tracestate.additional_values,
-            Some(vec!["foo=1".to_string(), "2".to_string()])
-        )
+    #[test]
+    fn test_invalid_tracestate_empty_kvp() {
+        assert!(Tracestate::from_str("foo=1,,,").is_err());
     }
 
     #[test]
     fn test_invalid_tracestate_multiple_eq_value() {
-        let tracestate = Tracestate::from_str("foo=1,bar=2=2").expect("parsed tracesate");
-
-        assert_eq!(
-            tracestate.additional_values,
-            Some(vec!["foo=1".to_string(), "bar=2=2".to_string()])
-        )
+        assert!(Tracestate::from_str("foo=1,bar=2=2").is_err());
     }
 
     #[test]
-    fn test_invalid_tracestate_non_ascii_char() {
-        assert!(Tracestate::from_str("foo=öï,bar=2=2").is_err())
+    fn test_valid_tracestate_non_ascii_char_in_value() {
+        assert!(Tracestate::from_str("foo=öï,bar=2").is_ok())
+    }
+
+    #[test]
+    fn test_invalid_tracestate_non_ascii_char_in_key() {
+        assert!(Tracestate::from_str("föö=oi,bar=2").is_err())
     }
 
     #[test]
     fn test_invalid_tracestate_non_ascii_char_with_tabs() {
-        assert!(Tracestate::from_str("foo=\t öï  \t\t ").is_err())
+        assert!(Tracestate::from_str("foo=\t öï  \t\t ").is_ok())
     }
 
     #[test]
@@ -395,7 +424,7 @@ mod test {
 
         assert_eq!(
             tracestate.additional_values,
-            Some(vec!["foo=valid".to_string()])
+            Some(vec![("foo".to_string(), "\t valid  \t\t ".to_string()),])
         )
     }
 
@@ -407,8 +436,8 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_tracestate_dd_non_ascii_char_with_tabs() {
-        assert!(Tracestate::from_str("dd=o:ïnvälïd  \t\t ").is_err())
+    fn test_valid_tracestate_dd_non_ascii_char_with_tabs() {
+        assert!(Tracestate::from_str("dd=o:välïd  \t\t ").is_ok())
     }
 
     #[test]

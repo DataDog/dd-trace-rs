@@ -754,7 +754,7 @@ pub mod tests {
                     origin: Some("rum".to_string()),
                     lower_order_trace_id: None,
                     propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
-                    additional_values: Some(vec!["congo=t61rcWkgMz".to_string()])
+                    additional_values: Some(vec![("congo".to_string(), "t61rcWkgMz".to_string())])
                 }),
             }
         ),

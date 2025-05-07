@@ -12,7 +12,6 @@ use opentelemetry::{
 use dd_trace_propagation::{
     carrier::{Extractor, Injector},
     context::{Sampling, SamplingPriority, SpanContext, Tracestate},
-    tracecontext::TRACESTATE_KEY,
     DatadogCompositePropagator, Propagator,
 };
 
@@ -140,7 +139,7 @@ impl TextMapPropagator for DatadogPropagator {
             .extract(&ExtractorWrapper { extractor })
             .map(|dd_span_context| {
                 let trace_flags = extract_trace_flags(&dd_span_context);
-                let trace_state = extract_trace_state(extractor);
+                let trace_state = extract_trace_state_from_context(&dd_span_context);
 
                 let otel_span_context = opentelemetry::trace::SpanContext::new(
                     opentelemetry::TraceId::from(dd_span_context.trace_id),
@@ -177,21 +176,25 @@ fn extract_trace_flags(sc: &SpanContext) -> opentelemetry::TraceFlags {
     }
 }
 
-fn extract_trace_state(
-    extractor: &dyn opentelemetry::propagation::Extractor,
-) -> opentelemetry::trace::TraceState {
-    // TODO: should we remove dd vendor part if tracecontext propagation is not enabled?
-    match extractor.get(TRACESTATE_KEY) {
-        Some(trace_state) => opentelemetry::trace::TraceState::from_str(trace_state)
-            .unwrap_or_else(|_| opentelemetry::trace::TraceState::default()),
-        None => opentelemetry::trace::TraceState::default(),
-    }
+fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::TraceState {
+    let tracestate = match &sc.tracestate {
+        Some(tracestate) => match &tracestate.additional_values {
+            Some(additional) => {
+                opentelemetry::trace::TraceState::from_key_value(additional.clone()).ok()
+            }
+            None => None,
+        },
+        None => None,
+    };
+
+    tracestate.unwrap_or_default()
 }
 
 #[cfg(test)]
 pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
+    use assert_unordered::assert_eq_unordered;
     use dd_trace::{configuration::TracePropagationStyle, Config};
     use opentelemetry::{
         propagation::{Extractor, TextMapPropagator},
@@ -199,9 +202,15 @@ pub mod tests {
         Context, KeyValue, SpanId, TraceFlags, TraceId,
     };
 
-    use dd_trace_propagation::tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY};
+    use dd_trace_propagation::{
+        context::Tracestate,
+        tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
+    };
 
     use super::DatadogPropagator;
+
+    const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
+    const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
 
     fn get_propagator(styles: Option<Vec<TracePropagationStyle>>) -> DatadogPropagator {
         let mut builder = Config::builder();
@@ -300,6 +309,34 @@ pub mod tests {
         ]
     }
 
+    #[rustfmt::skip]
+    fn extract_inject_data() -> Vec<(&'static str, &'static str, TraceState)> {
+        vec![
+            ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "foo=bar", TraceState::from_str("dd=s:1;p:00f067aa0ba902b7;t.dm:-0;t.tid:4bf92f3577b34da6,foo=bar").unwrap()),
+            ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "foo=bar,dd=o:rum;t.pfoo:bar", TraceState::from_str("dd=s:1;o:rum;p:00f067aa0ba902b7;t.pfoo:bar;t.dm:-0;t.tid:4bf92f3577b34da6,foo=bar").unwrap()),
+        ]
+    }
+
+    #[rustfmt::skip]
+    fn tracestate() -> Vec<(&'static str, bool)> {
+        vec![
+            ("foo=1,=2,=4", true),
+            ("foo=1,2", false),
+            ("foo=1,,,", false),
+            ("foo=1,bar=2=2", false),
+            ("foo=öï,bar=2", true),
+            ("föö=oi,bar=2", false),
+            ("foo=\t öï  \t\t ", true),
+            ("foo=\t valid  \t\t ", true),
+            ("\t\t  foo=valid", false),
+            ("   foo=valid", false),
+            ("dd=\t  o:valid  \t\t ", true),
+            ("dd=o:välïd  \t\t ", true),
+            ("dd=\t  o:valid;;s:1; \t", true),
+            ("dd=\t  o:valid;;s:1; \t,foo=1", true),
+        ]
+    }
+
     #[test]
     fn extract_w3c() {
         let propagator = get_propagator(None);
@@ -358,6 +395,88 @@ pub mod tests {
     }
 
     #[test]
+    fn extract_w3c_but_hide_dd_part_to_otel() {
+        let propagator = get_propagator(None);
+
+        let state = "foo=1,dd=s:1;o:rum,bar=2".to_string();
+        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let span = context.span();
+        let trace_state = span.span_context().trace_state();
+
+        assert_eq!(trace_state.get("dd"), None);
+        assert_eq!(trace_state.get("foo").unwrap(), "1");
+        assert_eq!(trace_state.get("bar").unwrap(), "2");
+    }
+
+    #[test]
+    fn extract_w3c_but_hide_dd_part_with_no_additional_to_otel() {
+        let propagator = get_propagator(None);
+
+        let state = "dd=s:1;o:rum".to_string();
+        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let span = context.span();
+        let trace_state = span.span_context().trace_state();
+
+        assert_eq!(*trace_state, opentelemetry::trace::TraceState::default());
+    }
+
+    #[test]
+    fn extract_w3c_but_hide_invalid_dd_part_to_otel() {
+        let propagator = get_propagator(None);
+
+        let state = "foo=1,dd=s:1;o:rüm,bar=2".to_string();
+        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let span = context.span();
+        let trace_state = span.span_context().trace_state();
+
+        assert_eq!(trace_state.get("dd"), None);
+        assert_eq!(trace_state.get("foo").unwrap(), "1");
+        assert_eq!(trace_state.get("bar").unwrap(), "2");
+    }
+
+    #[test]
+    fn extract_datadog_does_not_propagate_tracecontext_data_to_otel() {
+        let propagator = get_propagator(Some(vec![TracePropagationStyle::Datadog]));
+
+        let state = "foo=1,dd=s:1;o:rüm,bar=2".to_string();
+        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(DATADOG_TRACE_ID_KEY.to_string(), "1234".to_string());
+        extractor.insert(DATADOG_PARENT_ID_KEY.to_string(), "5678".to_string());
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let span = context.span();
+        let trace_state = span.span_context().trace_state();
+
+        assert_eq!(*trace_state, opentelemetry::trace::TraceState::default());
+    }
+
+    #[test]
     fn inject_w3c() {
         let propagator = get_propagator(None);
 
@@ -381,25 +500,80 @@ pub mod tests {
     }
 
     #[test]
-    fn inject_dd_tracestate() {
-        let propagator = get_propagator(Some(vec![TracePropagationStyle::TraceContext]));
-        for (_, _, context) in inject_data() {
-            if context == opentelemetry::trace::SpanContext::NONE {
-                continue;
-            }
+    fn extract_inject_w3c() {
+        let propagator = get_propagator(None);
 
-            let sampled = if context.is_sampled() { 1 } else { 0 };
+        for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
+            let mut extractor = HashMap::new();
+            extractor.insert(TRACEPARENT_KEY.to_string(), trace_parent.to_string());
+            extractor.insert(TRACESTATE_KEY.to_string(), trace_state.to_string());
+
+            let extracted_context = propagator.extract(&extractor);
+
             let mut injector = HashMap::new();
-            propagator.inject_context(
-                &Context::current_with_span(TestSpan(context)),
-                &mut injector,
+            propagator.inject_context(&extracted_context, &mut injector);
+
+            let injected_trace_state =
+                TraceState::from_str(Extractor::get(&injector, TRACESTATE_KEY).unwrap_or(""))
+                    .unwrap();
+
+            assert_eq_unordered!(
+                expected_trace_state
+                    .get("dd")
+                    .unwrap_or_default()
+                    .split(';')
+                    .collect::<Vec<_>>(),
+                injected_trace_state
+                    .get("dd")
+                    .unwrap_or_default()
+                    .split(';')
+                    .collect::<Vec<_>>()
             );
 
-            let expected_trace_state = format!("dd=s:{sampled};p:00f067aa0ba902b7,foo=bar");
             assert_eq!(
-                Extractor::get(&injector, TRACESTATE_KEY).unwrap_or(""),
-                expected_trace_state
-            );
+                expected_trace_state.get("foo").unwrap_or_default(),
+                injected_trace_state.get("foo").unwrap_or_default()
+            )
+        }
+    }
+
+    #[test]
+    fn tracestate_parse_check() {
+        for (tracestate, success) in tracestate() {
+            let otel_trace_state = TraceState::from_str(tracestate);
+            let dd_trace_state = Tracestate::from_str(tracestate);
+            if success {
+                assert!(
+                    otel_trace_state.is_ok(),
+                    "otel `{tracestate}` should be correct"
+                );
+                assert!(
+                    dd_trace_state.is_ok(),
+                    "dd `{tracestate}` should be correct"
+                );
+
+                let otel = otel_trace_state.unwrap();
+                let dd = dd_trace_state.unwrap();
+
+                if let Some(additional_values) = dd.additional_values {
+                    let dd_header = additional_values
+                        .into_iter()
+                        .map(|(key, value)| format!("{key}={value}"))
+                        .collect::<Vec<String>>()
+                        .join(",");
+
+                    assert!(otel.header().to_string().contains(&dd_header));
+                }
+            } else {
+                assert!(
+                    otel_trace_state.is_err(),
+                    "otel `{tracestate}` should be incorrect"
+                );
+                assert!(
+                    dd_trace_state.is_err(),
+                    "dd `{tracestate}` should be incorrect"
+                );
+            }
         }
     }
 }
