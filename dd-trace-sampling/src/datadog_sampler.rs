@@ -315,20 +315,15 @@ impl DatadogSampler {
         rate_limit: Option<i32>,
         resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
     ) -> Self {
-        // Sort rules by provenance if provided
-        // rule order: customer, dynamic, default
-        let sorted_rules = if let Some(mut r) = rules {
-            r.sort_by_key(|rule| RuleProvenance::from(rule.provenance.as_str()));
-            r
-        } else {
-            Vec::new()
-        };
+        // Rules are now taken as provided, no internal sorting by provenance.
+        // The caller is responsible for the order if it matters.
+        let effective_rules = rules.unwrap_or_else(Vec::new);
 
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
 
         DatadogSampler {
-            rules: sorted_rules,
+            rules: effective_rules,
             service_samplers: HashMap::new(),
             rate_limiter: limiter,
             resource,
