@@ -10,7 +10,6 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 extern crate opentelemetry_semantic_conventions as semconv;
 
-
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
 pub trait OtelSpan {
@@ -241,10 +240,12 @@ pub fn get_otel_resource_v2(
         return res_name;
     }
 
-    let graphql_operation_type = get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_TYPE]);
+    let graphql_operation_type =
+        get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_TYPE]);
     if !graphql_operation_type.is_empty() {
         let mut res_name = graphql_operation_type;
-        let graphql_operation_name = get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_NAME]);
+        let graphql_operation_name =
+            get_res_span_attributes(span_attributes, res, &[GRAPHQL_OPERATION_NAME]);
         if !graphql_operation_name.is_empty() {
             res_name = Cow::Owned(format!("{} {}", res_name, graphql_operation_name));
         }
@@ -276,12 +277,13 @@ fn get_res_span_attributes(
         if !res_attr.is_empty() {
             return res_attr;
         }
-        
+
         // Then check the span attributes
         if let Some(attr) = span_attributes
             .iter()
             .find(|kv| kv.key.as_str() == attr_key.key())
-            .and_then(|kv| utils::extract_string_value(&kv.value)) {
+            .and_then(|kv| utils::extract_string_value(&kv.value))
+        {
             return Cow::Owned(attr);
         }
     }
@@ -296,7 +298,6 @@ fn get_res_attribute(res: &Resource, attr: &AttributeKey) -> Cow<'static, str> {
 }
 
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
-
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service(res: &Resource) -> Cow<'static, str> {
@@ -317,18 +318,20 @@ pub fn get_otel_status_code(span_attributes: &[KeyValue]) -> u32 {
     if let Some(code) = span_attributes
         .iter()
         .find(|kv| kv.key.as_str() == HTTP_RESPONSE_STATUS_CODE.key())
-        .and_then(|kv| extract_numeric_value(&kv.value)) {
+        .and_then(|kv| extract_numeric_value(&kv.value))
+    {
         return code;
     }
-    
+
     // Try to get HTTP_STATUS_CODE
     if let Some(code) = span_attributes
         .iter()
         .find(|kv| kv.key.as_str() == HTTP_STATUS_CODE.key())
-        .and_then(|kv| extract_numeric_value(&kv.value)) {
+        .and_then(|kv| extract_numeric_value(&kv.value))
+    {
         return code;
     }
-    
+
     0
 }
 

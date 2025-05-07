@@ -1,9 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use dd_trace::dd_warn;
 use dd_trace_sampling::DatadogSampler;
-use std::sync::{Arc, RwLock};
 use opentelemetry_sdk::Resource;
+use std::sync::{Arc, RwLock};
 
 /// Creates a DatadogSampler based on the given configuration
 ///
@@ -12,7 +13,10 @@ use opentelemetry_sdk::Resource;
 /// - Otherwise, a default sampler will be created using the rate limit configuration
 ///
 /// This is exported as a utility function but typically users should not need to call it directly.
-pub fn create_sampler_from_config(cfg: &dd_trace::Config, resource: Arc<RwLock<Resource>>) -> DatadogSampler {
+pub fn create_sampler_from_config(
+    cfg: &dd_trace::Config,
+    resource: Arc<RwLock<Resource>>,
+) -> DatadogSampler {
     if let Some(rules_json) = cfg.trace_sampling_rules() {
         // If we have JSON rules, try to create a sampler from them
         match DatadogSampler::from_json(rules_json) {
@@ -20,7 +24,7 @@ pub fn create_sampler_from_config(cfg: &dd_trace::Config, resource: Arc<RwLock<R
                 // Set the resource on the sampler after it's created
                 sampler.update_resource(resource.clone());
                 sampler
-            },
+            }
             Err(e) => {
                 // Log error and fall back to default sampler
                 dd_warn!("Error parsing sampling rules configuration: {}", e);
@@ -34,16 +38,23 @@ pub fn create_sampler_from_config(cfg: &dd_trace::Config, resource: Arc<RwLock<R
 }
 
 // Helper function to create a sampler with default rules but with config rate limit
-fn create_default_sampler(cfg: &dd_trace::Config, resource: Arc<RwLock<Resource>>) -> DatadogSampler {
+fn create_default_sampler(
+    cfg: &dd_trace::Config,
+    resource: Arc<RwLock<Resource>>,
+) -> DatadogSampler {
     // Create a default resource to initialize the sampler
-    let default_resource = Resource::builder().build();
-    
-    // Create the sampler with a default resource and then update it with the shared Arc
-    let mut sampler = DatadogSampler::new(None, cfg.trace_rate_limit().map(|r| r as i32), default_resource);
-    
+    let default_resource = Arc::new(RwLock::new(Resource::builder().build()));
+
+    // Create the sampler with a default resource
+    let mut sampler = DatadogSampler::new(
+        None,
+        cfg.trace_rate_limit().map(|r| r as i32),
+        default_resource,
+    );
+
     // Update with the shared resource Arc
     sampler.update_resource(resource);
-    
+
     sampler
 }
 
@@ -64,7 +75,7 @@ mod tests {
                 .to_string(),
         );
         let config = config_builder.build();
-        
+
         // Create a resource for testing
         let resource = Resource::builder().build();
 
@@ -90,7 +101,7 @@ mod tests {
     fn test_create_default_sampler() {
         // Create a config with no sampling configuration
         let config = Config::builder().build();
-        
+
         // Create a resource for testing
         let resource = Resource::builder().build();
 

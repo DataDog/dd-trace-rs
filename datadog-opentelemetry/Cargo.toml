@@ -30,6 +30,7 @@ tokio = { workspace = true }
 
 # Libdatadog dependencies - change to a stable version once we release
 datadog-trace-utils = { workspace = true, features = ["test-utils"] }
+dd-trace-sampling = { path = "../dd-trace-sampling" }
 
 # Depend on ourselves to have APIs exposed only during tests
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }

@@ -4,6 +4,7 @@
 use crate::datadog_sampler::{DatadogSampler, SamplingRule};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,9 +139,14 @@ impl DatadogSamplerConfig {
             .collect();
 
         // Create an empty resource by default
+        // The resource is updated later
         let empty_resource = opentelemetry_sdk::Resource::builder().build();
-        
-        DatadogSampler::new(Some(rules), self.rate_limit, empty_resource)
+
+        DatadogSampler::new(
+            Some(rules),
+            self.rate_limit,
+            Arc::new(RwLock::new(empty_resource)),
+        )
     }
 }
 

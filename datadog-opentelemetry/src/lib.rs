@@ -1,19 +1,19 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-mod sampler;
 mod ddtrace_transform;
+mod sampler;
 mod span_exporter;
 mod span_processor;
 mod trace_id;
 mod transform;
 
-use std::sync::{Arc, RwLock};
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::{SdkTracerProvider, SpanProcessor};
 pub use sampler::create_sampler_from_config;
 pub use span_exporter::DatadogExporter;
 use span_processor::DatadogSpanProcessor;
+use std::sync::{Arc, RwLock};
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -50,18 +50,12 @@ pub fn init_datadog(
     // Create a shared resource for both the sampler and span processor
     let resource = Resource::builder().build();
     let resource_arc = Arc::new(RwLock::new(resource));
-    
+
     // Create the sampler with the shared resource (now passing the Arc directly)
     let sampler = sampler::create_sampler_from_config(&config, resource_arc.clone());
-    
+
     // Create the span processor and share the resource
-    let mut span_processor = DatadogSpanProcessor::new(config);
-    
-    // Use the SpanProcessor trait to set the resource on the span processor
-    // We need to get a reference to the resource to pass to set_resource
-    if let Ok(resource_guard) = resource_arc.read() {
-        SpanProcessor::set_resource(&mut span_processor, &resource_guard.clone());
-    }
+    let span_processor = DatadogSpanProcessor::new(config, resource_arc.clone());
 
     let tracer_provider = tracer_provider_builder
         .with_span_processor(span_processor)
@@ -84,15 +78,18 @@ pub fn make_tracer(
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
+    let resource_arc = Arc::new(RwLock::new(Resource::builder().build()));
+    let sampler = sampler::create_sampler_from_config(&config, resource_arc.clone());
+
     tracer_provider_builder
         .with_resource(
             Resource::builder()
                 .with_attribute(KeyValue::new("service.name", config.service().to_string()))
                 .build(),
         )
-        .with_span_processor(DatadogSpanProcessor::new(config))
+        // Pass owned config to span_processor, then use the created sampler
+        .with_span_processor(DatadogSpanProcessor::new(config, resource_arc.clone()))
+        .with_sampler(sampler) // Use the sampler created above
         .with_id_generator(trace_id::TraceidGenerator)
-        // TODO: hookup additional components
-        // .with_sampler(sampler)
         .build()
 }

@@ -8,6 +8,7 @@ use std::{
 
 use opentelemetry::global::ObjectSafeSpan;
 use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::Resource;
 
 use crate::span_exporter::DatadogExporter;
 
@@ -151,6 +152,7 @@ impl TraceRegistry {
 pub(crate) struct DatadogSpanProcessor {
     registry: TraceRegistry,
     span_exporter: DatadogExporter,
+    resource: Arc<RwLock<Resource>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -160,10 +162,11 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 }
 
 impl DatadogSpanProcessor {
-    pub(crate) fn new(config: dd_trace::Config) -> Self {
+    pub(crate) fn new(config: dd_trace::Config, resource: Arc<RwLock<Resource>>) -> Self {
         Self {
             registry: TraceRegistry::new(),
             span_exporter: DatadogExporter::new(config),
+            resource,
         }
     }
 }
@@ -209,5 +212,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
             );
         }
+        // set the shared resource in the DatadogSpanProcessor
+        *self.resource.write().unwrap() = resource.clone();
     }
 }
