@@ -287,18 +287,8 @@ impl SamplingRule {
 
     /// Samples a trace ID using this rule's sample rate
     pub fn sample(&self, trace_id: TraceId) -> bool {
-        // Delegate to the internal rate sampler
-        self.rate_sampler
-            .should_sample(
-                None,
-                trace_id,
-                "",                                      // name not needed for rate sampler
-                &opentelemetry::trace::SpanKind::Client, // We don't care about span kind, just using default
-                &[],
-                &[],
-            )
-            .decision
-            == SamplingDecision::RecordAndSample
+        // Delegate to the internal rate sampler's new sample method
+        self.rate_sampler.sample(trace_id)
     }
 }
 
@@ -571,9 +561,8 @@ impl ShouldSample for DatadogSampler {
             // First check if the span should be sampled according to the rule
             if !rule.sample(trace_id) {
                 decision = SamplingDecision::Drop;
-            }
             // If the span should be sampled, then apply rate limiting
-            else if !self.rate_limiter.is_allowed() {
+            } else if !self.rate_limiter.is_allowed() {
                 decision = SamplingDecision::Drop;
                 rate_limit = Some(self.rate_limiter.effective_rate() as i32);
             }
@@ -583,22 +572,14 @@ impl ShouldSample for DatadogSampler {
             if let Some(sampler) = self.service_samplers.get(&service_key) {
                 // Use the service-based sampler
                 used_agent_sampler = true;
-                sample_rate = sampler.sample_rate();
-
-                // For service-based sampling, don't apply rate limiting
-                let result = sampler.should_sample(
-                    None,
-                    trace_id,
-                    "",                                      // Empty name, since we don't use it
-                    &opentelemetry::trace::SpanKind::Client, // We don't care about span kind, just using default
-                    &[],
-                    &[],
-                );
-                if result.decision == SamplingDecision::Drop {
+                sample_rate = sampler.sample_rate(); // Get rate for reporting
+                
+                // Check if the service sampler decides to drop
+                if !sampler.sample(trace_id) {
                     decision = SamplingDecision::Drop;
                 }
             } else {
-                // Default sample rate, should never happen
+                // Default sample rate, should never happen in practice if agent provides rates
                 sample_rate = 1.0;
                 // Keep the default decision (RecordAndSample)
             }
