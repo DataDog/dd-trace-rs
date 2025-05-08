@@ -10,20 +10,6 @@ use opentelemetry::KeyValue;
 use opentelemetry_sdk::Resource;
 extern crate opentelemetry_semantic_conventions as semconv;
 
-/// The Span trait is used to implement utils function is a way that is generic
-/// and could be ported to multiple Span models
-pub trait OtelSpan {
-    fn name(&self) -> Cow<'static, str>;
-    fn span_kind(&self) -> SpanKind;
-    fn has_attr(&self, attr_key: AttributeKey) -> bool;
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'static, str>>;
-    fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T>;
-
-    fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'static, str> {
-        self.get_attr_str_opt(attr_key).unwrap_or_default()
-    }
-}
-
 /// Returns the datadog operation name based on the span kind and attributes
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
 pub fn get_otel_operation_name_v2(
@@ -380,4 +366,347 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'static, str> {
         return Cow::Owned(k.to_owned());
     }
     Cow::Owned(k.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Imports everything from the parent module (otel_utils.rs)
+    use opentelemetry::{KeyValue, Value};
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry_sdk::Resource; // Added import for Resource SDK type
+    use super::semconv; // Added import for the aliased semconv crate
+
+    #[test]
+    fn test_get_otel_operation_name_v2_explicit_operation_name() {
+        let attributes = vec![KeyValue::new(OPERATION_NAME.key(), "custom.op")];
+        let span_kind = SpanKind::Internal;
+        assert_eq!(get_otel_operation_name_v2(&attributes, &span_kind), "custom.op");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_http() {
+        let client_attrs = vec![KeyValue::new(HTTP_METHOD.key(), "GET")];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs, &SpanKind::Client), "http.client.request");
+
+        let server_attrs = vec![KeyValue::new(HTTP_REQUEST_METHOD.key(), "POST")];
+        assert_eq!(get_otel_operation_name_v2(&server_attrs, &SpanKind::Server), "http.server.request");
+        
+        // Test without client/server span kind, should not produce http op name
+        let internal_attrs = vec![KeyValue::new(HTTP_METHOD.key(), "PUT")];
+        assert_ne!(get_otel_operation_name_v2(&internal_attrs, &SpanKind::Internal), "http.internal.request"); // Fallback to Internal
+        assert_eq!(get_otel_operation_name_v2(&internal_attrs, &SpanKind::Internal), "Internal");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_db() {
+        let attributes = vec![KeyValue::new(DB_SYSTEM.key(), "postgresql")];
+        let span_kind = SpanKind::Client;
+        assert_eq!(get_otel_operation_name_v2(&attributes, &span_kind), "postgresql.query");
+
+        // Should only work for client spans
+        let server_span_kind = SpanKind::Server;
+        assert_ne!(get_otel_operation_name_v2(&attributes, &server_span_kind), "postgresql.query");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &server_span_kind), "server.request");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_messaging() {
+        let attributes = vec![
+            KeyValue::new(MESSAGING_SYSTEM.key(), "kafka"),
+            KeyValue::new(MESSAGING_OPERATION.key(), "receive"),
+        ];
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Consumer), "kafka.receive");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Producer), "kafka.receive"); // function uses MESSAGING_OPERATION for both
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Client), "kafka.receive");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Server), "kafka.receive");
+
+        let attributes_no_op = vec![KeyValue::new(MESSAGING_SYSTEM.key(), "rabbitmq")];
+        assert_eq!(get_otel_operation_name_v2(&attributes_no_op, &SpanKind::Consumer), "Consumer"); // Fallback, missing operation
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_rpc_general() {
+        let client_attrs = vec![KeyValue::new(RPC_SYSTEM.key(), "grpc")];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs, &SpanKind::Client), "grpc.client.request");
+
+        let server_attrs = vec![KeyValue::new(RPC_SYSTEM.key(), "jsonrpc")];
+        assert_eq!(get_otel_operation_name_v2(&server_attrs, &SpanKind::Server), "jsonrpc.server.request");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_rpc_aws() {
+        let client_attrs_aws_with_service = vec![
+            KeyValue::new(RPC_SYSTEM.key(), "aws-api"),
+            KeyValue::new(RPC_SERVICE.key(), "s3"),
+        ];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs_aws_with_service, &SpanKind::Client), "aws.s3.request");
+
+        let client_attrs_aws_no_service = vec![KeyValue::new(RPC_SYSTEM.key(), "aws-api")];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs_aws_no_service, &SpanKind::Client), "aws.client.request");
+        
+        // Non-client span kind for AWS RPC
+        assert_ne!(get_otel_operation_name_v2(&client_attrs_aws_with_service, &SpanKind::Server), "aws.s3.request");
+        assert_eq!(get_otel_operation_name_v2(&client_attrs_aws_with_service, &SpanKind::Server), "aws-api.server.request"); // general rpc.server
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_faas() {
+        let client_attrs = vec![
+            KeyValue::new(FAAS_INVOKED_PROVIDER.key(), "aws"),
+            KeyValue::new(FAAS_INVOKED_NAME.key(), "myLambda"),
+        ];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs, &SpanKind::Client), "aws.myLambda.invoke");
+
+        let server_attrs = vec![KeyValue::new(FAAS_TRIGGER.key(), "http")];
+        assert_eq!(get_otel_operation_name_v2(&server_attrs, &SpanKind::Server), "http.invoke");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_graphql() {
+        let attributes = vec![KeyValue::new(GRAPHQL_OPERATION_TYPE.key(), "query")];
+        // GraphQL operation name is generic, not dependent on span kind as per current logic
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Server), "graphql.server.request");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Client), "graphql.server.request"); // Still graphql.server.request
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_generic_protocol() {
+        let client_attrs = vec![KeyValue::new(NETWORK_PROTOCOL_NAME.key(), "amqp")];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs, &SpanKind::Client), "amqp.client.request");
+        
+        let server_attrs = vec![KeyValue::new(NETWORK_PROTOCOL_NAME.key(), "ftp")];
+        assert_eq!(get_otel_operation_name_v2(&server_attrs, &SpanKind::Server), "ftp.server.request");
+
+        let server_attrs_no_protocol = vec![];
+        assert_eq!(get_otel_operation_name_v2(&server_attrs_no_protocol, &SpanKind::Server), "server.request");
+
+        let client_attrs_no_protocol = vec![];
+        assert_eq!(get_otel_operation_name_v2(&client_attrs_no_protocol, &SpanKind::Client), "client.request");
+    }
+
+    #[test]
+    fn test_get_otel_operation_name_v2_fallback_to_span_kind() {
+        let attributes = vec![];
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Internal), "Internal");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Producer), "Producer");
+        assert_eq!(get_otel_operation_name_v2(&attributes, &SpanKind::Consumer), "Consumer");
+    }
+
+    #[test]
+    fn test_get_otel_status_code() {
+        // Case 1: HTTP_RESPONSE_STATUS_CODE present
+        let attrs1 = vec![KeyValue::new(HTTP_RESPONSE_STATUS_CODE.key(), 200)];
+        assert_eq!(get_otel_status_code(&attrs1), 200);
+
+        // Case 2: HTTP_STATUS_CODE present (when HTTP_RESPONSE_STATUS_CODE is not)
+        let attrs2 = vec![KeyValue::new(HTTP_STATUS_CODE.key(), 404)];
+        assert_eq!(get_otel_status_code(&attrs2), 404);
+
+        // Case 3: Both present (HTTP_RESPONSE_STATUS_CODE takes precedence)
+        let attrs3 = vec![
+            KeyValue::new(HTTP_RESPONSE_STATUS_CODE.key(), 201),
+            KeyValue::new(HTTP_STATUS_CODE.key(), 500),
+        ];
+        assert_eq!(get_otel_status_code(&attrs3), 201);
+
+        // Case 4: Neither present
+        let attrs4 = vec![KeyValue::new("other.key", "value")];
+        assert_eq!(get_otel_status_code(&attrs4), 0);
+
+        // Case 5: Value is non-numeric string
+        let attrs5 = vec![KeyValue::new(HTTP_RESPONSE_STATUS_CODE.key(), "OK")];
+        assert_eq!(get_otel_status_code(&attrs5), 0);
+
+        // Case 6: Value is float (should be rounded)
+        let attrs6 = vec![KeyValue::new(HTTP_RESPONSE_STATUS_CODE.key(), Value::F64(200.7))];
+        assert_eq!(get_otel_status_code(&attrs6), 201); // .7 rounds up
+        let attrs7 = vec![KeyValue::new(HTTP_RESPONSE_STATUS_CODE.key(), Value::F64(404.3))];
+        assert_eq!(get_otel_status_code(&attrs7), 404); // .3 rounds down
+
+        // Case 7: Value is I64
+        let attrs8 = vec![KeyValue::new(HTTP_STATUS_CODE.key(), Value::I64(302))];
+        assert_eq!(get_otel_status_code(&attrs8), 302);
+    }
+
+    #[test]
+    fn test_get_dd_key_for_otlp_attribute() {
+        // Case 1: Known HTTP mapping (http.response.status_code -> http.status_code)
+        assert_eq!(get_dd_key_for_otlp_attribute(sem_convs::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE), "http.status_code");
+        // Case 1.1: Another known HTTP mapping (http.request.method -> http.method)
+        assert_eq!(get_dd_key_for_otlp_attribute(sem_convs::ATTRIBUTE_HTTP_REQUEST_METHOD), "http.method");
+
+        // Case 2: HTTP request header mapping
+        assert_eq!(get_dd_key_for_otlp_attribute("http.request.header.user-agent"), "http.request.headers.user-agent");
+        assert_eq!(get_dd_key_for_otlp_attribute("http.request.header.x-custom"), "http.request.headers.x-custom");
+
+        // Case 3: Datadog convention key (e.g., "service.name")
+        assert_eq!(get_dd_key_for_otlp_attribute("service.name"), "service.name");
+        assert_eq!(get_dd_key_for_otlp_attribute("span.type"), "span.type");
+        assert_eq!(get_dd_key_for_otlp_attribute("datadog.custom.tag"), "datadog.custom.tag");
+
+        // Case 4: Unmapped key (should return the original key)
+        assert_eq!(get_dd_key_for_otlp_attribute("my.custom.attribute"), "my.custom.attribute");
+        assert_eq!(get_dd_key_for_otlp_attribute("http.other.thing"), "http.other.thing"); // Not a mapped http prefix
+    }
+
+    #[test]
+    fn test_get_otel_service() {
+        // Case 1: SERVICE_NAME present in resource
+        let res1_attrs = vec![KeyValue::new(semconv::resource::SERVICE_NAME, "my-app")];
+        let res1 = Resource::builder().with_attributes(res1_attrs).build();
+        assert_eq!(get_otel_service(&res1), "my-app");
+
+        // Case 2: SERVICE_NAME present but empty string in resource
+        let res2_attrs = vec![KeyValue::new(semconv::resource::SERVICE_NAME, "")];
+        let res2 = Resource::builder().with_attributes(res2_attrs).build();
+        assert_eq!(get_otel_service(&res2), DEFAULT_OTLP_SERVICE_NAME); // falls back to default
+
+        // Case 3: SERVICE_NAME not present in resource
+        let res3_attrs = vec![KeyValue::new("other.attr", "value")];
+        let res3 = Resource::builder().with_attributes(res3_attrs).build();
+        assert_eq!(get_otel_service(&res3), "unknown_service");
+
+        // Case 4: Empty resource
+        let res4 = Resource::builder().build();
+        assert_eq!(get_otel_service(&res4), "unknown_service");
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_fallback_to_name() {
+        let attributes = vec![];
+        let resource = Resource::builder().build(); // Corrected
+        let name_arg = Cow::Borrowed("default.name.arg");
+        assert_eq!(get_otel_resource_v2(&attributes, name_arg.clone(), SpanKind::Internal, &resource), name_arg);
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_resource_name_attr() {
+        let span_attrs1 = vec![KeyValue::new(RESOURCE_NAME.key(), "span_resource_op")];
+        let resource1 = Resource::builder().build(); // Corrected
+        assert_eq!(get_otel_resource_v2(&span_attrs1, Cow::Borrowed("name"), SpanKind::Internal, &resource1), "span_resource_op");
+
+        let res_attrs2 = vec![KeyValue::new(RESOURCE_NAME.key(), "actual_resource_op")];
+        let resource2 = Resource::builder().with_attributes(res_attrs2).build(); // Corrected
+        let span_attrs2 = vec![KeyValue::new(RESOURCE_NAME.key(), "ignored_span_resource_op")]; 
+        assert_eq!(get_otel_resource_v2(&span_attrs2, Cow::Borrowed("name"), SpanKind::Internal, &resource2), "actual_resource_op");
+    
+        let resource3 = Resource::builder().build(); // Corrected
+        let span_attrs3 = vec![KeyValue::new(RESOURCE_NAME.key(), "span_res_only")];
+        assert_eq!(get_otel_resource_v2(&span_attrs3, Cow::Borrowed("name"), SpanKind::Internal, &resource3), "span_res_only");
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_http() {
+        let resource = Resource::builder().build(); // Corrected
+        let name_arg = Cow::Borrowed("fallback.name");
+
+        // HTTP method in span_attributes, server, with route
+        let attrs1 = vec![
+            KeyValue::new(HTTP_METHOD.key(), "GET"),
+            KeyValue::new(HTTP_ROUTE.key(), "/users/:id"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs1, name_arg.clone(), SpanKind::Server, &resource), "GET /users/:id");
+
+        // HTTP method in span_attributes, server, no route
+        let attrs2 = vec![KeyValue::new(HTTP_REQUEST_METHOD.key(), "POST")];
+        assert_eq!(get_otel_resource_v2(&attrs2, name_arg.clone(), SpanKind::Server, &resource), "POST");
+
+        // HTTP method in span_attributes, client
+        let attrs3 = vec![KeyValue::new(HTTP_METHOD.key(), "PUT")];
+        assert_eq!(get_otel_resource_v2(&attrs3, name_arg.clone(), SpanKind::Client, &resource), "PUT");
+
+        // HTTP method as _OTHER
+        let attrs4 = vec![KeyValue::new(HTTP_METHOD.key(), "_OTHER")];
+        assert_eq!(get_otel_resource_v2(&attrs4, name_arg.clone(), SpanKind::Server, &resource), "HTTP"); // _OTHER becomes HTTP
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_messaging() {
+        let resource = Resource::builder().build();
+        let name_arg = Cow::Borrowed("fallback.name");
+        let span_kind = SpanKind::Producer;
+
+        let attrs1 = vec![KeyValue::new(MESSAGING_OPERATION.key(), "send")];
+        assert_eq!(get_otel_resource_v2(&attrs1, name_arg.clone(), span_kind.clone(), &resource), "send");
+
+        let attrs2 = vec![
+            KeyValue::new(MESSAGING_OPERATION.key(), "process"),
+            KeyValue::new(MESSAGING_DESTINATION.key(), "myQueue"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs2, name_arg.clone(), span_kind.clone(), &resource), "process myQueue");
+
+        let attrs3 = vec![
+            KeyValue::new(MESSAGING_OPERATION.key(), "receive"),
+            KeyValue::new(MESSAGING_DESTINATION_NAME.key(), "anotherQueue"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs3, name_arg.clone(), span_kind.clone(), &resource), "receive anotherQueue");
+
+        let attrs4 = vec![
+            KeyValue::new(MESSAGING_OPERATION.key(), "publish"),
+            KeyValue::new(MESSAGING_DESTINATION.key(), "topicA"),
+            KeyValue::new(MESSAGING_DESTINATION_NAME.key(), "ignoredTopic"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs4, name_arg.clone(), span_kind.clone(), &resource), "publish topicA");
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_rpc() {
+        let resource = Resource::builder().build();
+        let name_arg = Cow::Borrowed("fallback.name");
+        let span_kind = SpanKind::Client;
+
+        let attrs1 = vec![KeyValue::new(RPC_METHOD.key(), "getUser")];
+        assert_eq!(get_otel_resource_v2(&attrs1, name_arg.clone(), span_kind.clone(), &resource), "getUser");
+
+        let attrs2 = vec![
+            KeyValue::new(RPC_METHOD.key(), "updateOrder"),
+            KeyValue::new(RPC_SERVICE.key(), "OrderService"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs2, name_arg.clone(), span_kind.clone(), &resource), "updateOrder OrderService");
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_graphql() {
+        let resource = Resource::builder().build();
+        let name_arg = Cow::Borrowed("fallback.name");
+        let span_kind = SpanKind::Server;
+
+        let attrs1 = vec![KeyValue::new(GRAPHQL_OPERATION_TYPE.key(), "query")];
+        assert_eq!(get_otel_resource_v2(&attrs1, name_arg.clone(), span_kind.clone(), &resource), "query");
+
+        let attrs2 = vec![
+            KeyValue::new(GRAPHQL_OPERATION_TYPE.key(), "mutation"),
+            KeyValue::new(GRAPHQL_OPERATION_NAME.key(), "createPost"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs2, name_arg.clone(), span_kind.clone(), &resource), "mutation createPost");
+    }
+
+    #[test]
+    fn test_get_otel_resource_v2_db() {
+        let resource = Resource::builder().build();
+        let name_arg = Cow::Borrowed("fallback.name");
+        let span_kind = SpanKind::Client;
+
+        let attrs1 = vec![
+            KeyValue::new(DB_SYSTEM.key(), "mysql"),
+            KeyValue::new(DB_STATEMENT.key(), "SELECT * FROM users"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs1, name_arg.clone(), span_kind.clone(), &resource), "SELECT * FROM users");
+
+        let attrs2 = vec![
+            KeyValue::new(DB_SYSTEM.key(), "postgresql"),
+            KeyValue::new(DB_QUERY_TEXT.key(), "INSERT INTO products ..."),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs2, name_arg.clone(), span_kind.clone(), &resource), "INSERT INTO products ...");
+
+        let attrs3 = vec![
+            KeyValue::new(DB_SYSTEM.key(), "mssql"),
+            KeyValue::new(DB_STATEMENT.key(), "EXEC get_report"),
+            KeyValue::new(DB_QUERY_TEXT.key(), "ignored query text"),
+        ];
+        assert_eq!(get_otel_resource_v2(&attrs3, name_arg.clone(), span_kind.clone(), &resource), "EXEC get_report");
+
+        let attrs4 = vec![KeyValue::new(DB_SYSTEM.key(), "sqlite")];
+        assert_eq!(get_otel_resource_v2(&attrs4, name_arg.clone(), span_kind.clone(), &resource), name_arg);
+    }
 }
