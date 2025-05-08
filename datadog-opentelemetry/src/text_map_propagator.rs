@@ -108,7 +108,8 @@ impl TextMapPropagator for DatadogPropagator {
         let span = cx.span();
         let otel_span_context = span.span_context();
 
-        // FIXME: obtaining sampling data from otel trace_flags is not completely correct. To decide where we store that info
+        // FIXME: obtaining sampling data from otel trace_flags is not completely correct. To decide
+        // where we store that info
         let sampling = Some(Sampling {
             priority: Some(SamplingPriority::from_flags(
                 otel_span_context.trace_flags().to_u8(),
@@ -116,7 +117,8 @@ impl TextMapPropagator for DatadogPropagator {
             mechanism: None,
         });
 
-        // this data is obtained in the extraction phase it is related with the root span of the trace
+        // this data is obtained in the extraction phase it is related with the root span of the
+        // trace
         let DatadogExtractData {
             origin,
             propagation_tags,
