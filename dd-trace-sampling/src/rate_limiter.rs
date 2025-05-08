@@ -21,10 +21,10 @@ struct RateLimiterState {
     time_window_ns: u64,
 
     /// Current number of tokens available
-    tokens: f64,
+    tokens: i64,
 
     /// Maximum number of tokens that can be stored
-    max_tokens: f64,
+    max_tokens: i64,
 
     /// Last time tokens were replenished
     last_update: Instant,
@@ -67,8 +67,8 @@ impl RateLimiter {
 
         let state = RateLimiterState {
             time_window_ns: window_ns,
-            tokens: rate_limit as f64,
-            max_tokens: rate_limit as f64,
+            tokens: rate_limit as i64,
+            max_tokens: rate_limit as i64,
             last_update: Instant::now(),
             current_window_start: None,
             tokens_allowed: 0,
@@ -95,28 +95,29 @@ impl RateLimiter {
 
     /// Internal method to check if a request is allowed at the given time
     fn is_allowed_at(&self, timestamp: Instant) -> bool {
-        // Rate limit of 0 blocks everything - check without acquiring the lock
         if self.rate_limit == 0 {
             return false;
         }
-
-        // Negative rate limit disables rate limiting - check without acquiring the lock
         if self.rate_limit < 0 {
             return true;
         }
 
-        // Only acquire the lock if we need to check/modify token state
         let mut state = self.inner.lock().unwrap();
 
-        // Replenish tokens based on elapsed time
-        self.replenish(&mut state, timestamp);
-
-        // Check if we have enough tokens and consume one if we do
-        if state.tokens >= 1.0 {
-            state.tokens -= 1.0;
-            true
+        if state.tokens >= 1 {
+            state.tokens -= 1;
+            return true; // Allowed without replenishing
         } else {
-            false
+            // Not enough tokens, replenish
+            self.replenish(&mut state, timestamp);
+
+            // Check again after replenish
+            if state.tokens >= 1 {
+                state.tokens -= 1;
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
@@ -149,21 +150,22 @@ impl RateLimiter {
 
     /// Replenish tokens based on elapsed time
     fn replenish(&self, state: &mut RateLimiterState, timestamp: Instant) {
-        // If we are at the max, we do not need to add any more
-        if state.tokens == state.max_tokens {
-            state.last_update = timestamp;
-            return;
-        }
 
-        // Add more available tokens based on how much time has passed
         let elapsed = timestamp.duration_since(state.last_update);
-        let elapsed_seconds = elapsed.as_nanos() as f64 / state.time_window_ns as f64;
+        
+        // Calculate new tokens to add
+        let tokens_to_add_precise: f64 = (elapsed.as_nanos() as f64 / state.time_window_ns as f64) * self.rate_limit as f64;
+        let tokens_to_add: i64 = tokens_to_add_precise as i64; // Truncates fractional tokens
 
-        // Update the number of available tokens, but ensure we do not exceed the max
-        let new_tokens = state.tokens + (elapsed_seconds * self.rate_limit as f64);
-        state.tokens = new_tokens.min(state.max_tokens);
-
-        // Update the last update time
+        if tokens_to_add > 0 {
+            state.tokens += tokens_to_add;
+            // Cap tokens at max_tokens. Since state.tokens started < 1 and max_tokens > 0,
+            // state.tokens was definitely < max_tokens before adding.
+            if state.tokens > state.max_tokens {
+                state.tokens = state.max_tokens;
+            }
+        }
+        // Always update last_update, even if no tokens were added (e.g., very short elapsed time yielding tokens_to_add = 0)
         state.last_update = timestamp;
     }
 
