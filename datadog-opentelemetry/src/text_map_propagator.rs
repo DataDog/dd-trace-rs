@@ -11,7 +11,7 @@ use opentelemetry::{
 
 use dd_trace_propagation::{
     carrier::{Extractor, Injector},
-    context::{Sampling, SamplingPriority, SpanContext, Tracestate},
+    context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
 
@@ -42,13 +42,21 @@ impl Injector for InjectorWrapper<'_> {
 }
 
 #[derive(Clone, Default)]
-struct DatadogExtractData {
-    origin: Option<String>,
-    propagation_tags: HashMap<String, String>,
+pub struct DatadogExtractData {
+    pub origin: Option<String>,
+    pub propagation_tags: HashMap<String, String>,
+    pub links: Vec<SpanLink>,
 }
 
 impl DatadogExtractData {
-    fn from(SpanContext { origin, tags, .. }: SpanContext) -> Self {
+    fn from(
+        SpanContext {
+            origin,
+            tags,
+            links,
+            ..
+        }: SpanContext,
+    ) -> Self {
         let propagation_tags = tags
             .iter()
             .filter_map(|tag| {
@@ -63,6 +71,7 @@ impl DatadogExtractData {
         DatadogExtractData {
             origin,
             propagation_tags,
+            links,
         }
     }
 }
@@ -99,6 +108,7 @@ impl TextMapPropagator for DatadogPropagator {
         let span = cx.span();
         let otel_span_context = span.span_context();
 
+        // FIXME: obtaining sampling data from otel trace_flags is not completely correct. To decide where we store that info
         let sampling = Some(Sampling {
             priority: Some(SamplingPriority::from_flags(
                 otel_span_context.trace_flags().to_u8(),
@@ -106,19 +116,21 @@ impl TextMapPropagator for DatadogPropagator {
             mechanism: None,
         });
 
+        // this data is obtained in the extraction phase it is related with the root span of the trace
         let DatadogExtractData {
             origin,
             propagation_tags,
+            ..
         } = cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
 
-        // TODO: is there a more efficient way?
+        // otel tracestate only contains 'additional_values'
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let dd_span_context = &mut SpanContext {
             trace_id: u128::from_be_bytes(otel_span_context.trace_id().to_bytes()),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
             is_remote: otel_span_context.is_remote(),
-            links: vec![],
+            links: vec![], // links don't affect injection
             sampling,
             origin,
             tags: propagation_tags, // FIXME: this should get DD Span tags

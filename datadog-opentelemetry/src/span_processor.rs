@@ -3,13 +3,18 @@
 
 use std::{
     collections::{hash_map, HashMap},
+    str::FromStr,
     sync::{Arc, RwLock},
 };
 
-use opentelemetry::global::ObjectSafeSpan;
+use opentelemetry::{
+    global::ObjectSafeSpan,
+    trace::{SpanContext, TraceContextExt, TraceState},
+    KeyValue, SpanId, TraceFlags, TraceId,
+};
 use opentelemetry_sdk::trace::SpanData;
 
-use crate::span_exporter::DatadogExporter;
+use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
 
 struct Trace {
     root_span_id: [u8; 8],
@@ -166,17 +171,68 @@ impl DatadogSpanProcessor {
             span_exporter: DatadogExporter::new(config),
         }
     }
+
+    fn add_propagation_data_if_remote(
+        &self,
+        span: &mut opentelemetry_sdk::trace::Span,
+        parent_ctx: &opentelemetry::Context,
+    ) {
+        if !parent_ctx.span().span_context().is_remote() {
+            return;
+        }
+
+        if let Some(DatadogExtractData {
+            links,
+            propagation_tags,
+            origin,
+        }) = parent_ctx.get::<DatadogExtractData>().cloned()
+        {
+            links.iter().for_each(|link| {
+                let link_ctx = SpanContext::new(
+                    TraceId::from(link.trace_id as u128),
+                    SpanId::from(link.span_id),
+                    TraceFlags::new(link.flags.unwrap_or_default() as u8),
+                    false, // TODO: dd SpanLink doesn't have the remote field...
+                    link.tracestate
+                        .as_ref()
+                        .map(|ts| TraceState::from_str(ts).unwrap_or_default())
+                        .unwrap_or_default(),
+                );
+
+                let attributes = match &link.attributes {
+                    Some(attributes) => attributes
+                        .iter()
+                        .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
+                        .collect(),
+                    None => vec![],
+                };
+
+                span.add_link(link_ctx, attributes);
+            });
+
+            propagation_tags.iter().for_each(|(key, value)| {
+                span.set_attribute(KeyValue::new(key.clone(), value.clone()))
+            });
+
+            // TODO: where it comes from? not sure if this is its place
+            if let Some(origin) = origin {
+                span.set_attribute(KeyValue::new("_dd.origin", origin));
+            }
+        }
+    }
 }
 
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_start(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
-        _parent_ctx: &opentelemetry::Context,
+        parent_ctx: &opentelemetry::Context,
     ) {
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
         self.registry.register_span(trace_id, span_id, None);
+
+        self.add_propagation_data_if_remote(span, parent_ctx);
     }
 
     fn on_end(&self, span: SpanData) {

@@ -132,22 +132,30 @@ pub struct SpanLink {
 
 impl SpanLink {
     pub fn terminated_context(context: &SpanContext, style: TracePropagationStyle) -> Self {
-        let flags = context
-            .sampling
-            .and_then(|sampling| sampling.priority)
-            .map(|priority| u32::from(priority.is_keep()));
+        let attributes = Some(HashMap::from([
+            ("reason".to_string(), "terminated_context".to_string()),
+            ("context_headers".to_string(), style.to_string()),
+        ]));
+
+        SpanLink::new(context, style, attributes)
+    }
+
+    pub fn new(
+        context: &SpanContext,
+        style: TracePropagationStyle,
+        attributes: Option<HashMap<String, String>>,
+    ) -> Self {
+        let (trace_id_high, trace_id) = split_trace_id(context.trace_id);
 
         let tracestate: Option<String> = match style {
             TracePropagationStyle::TraceContext => context.tags.get(TRACESTATE_KEY).cloned(),
             _ => None,
         };
 
-        let attributes = Some(HashMap::from([
-            ("reason".to_string(), "terminated_context".to_string()),
-            ("context_headers".to_string(), style.to_string()),
-        ]));
-
-        let (trace_id_high, trace_id) = split_trace_id(context.trace_id);
+        let flags = context
+            .sampling
+            .and_then(|sampling| sampling.priority)
+            .map(|priority| u32::from(priority.is_keep()));
 
         SpanLink {
             trace_id,
