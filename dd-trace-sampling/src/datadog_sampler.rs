@@ -25,8 +25,8 @@ use crate::otel_utils::get_otel_service;
 use crate::otel_utils::get_otel_status_code;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
-use crate::utils;
 use crate::sem_convs;
+use crate::utils;
 
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
@@ -201,7 +201,7 @@ impl SamplingRule {
                 || rule_tag_key_str == sem_convs::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE
             {
                 match self.match_http_status_code_rule(matcher, attributes) {
-                    Some(true) => continue, // Status code matched
+                    Some(true) => continue,             // Status code matched
                     Some(false) | None => return false, // Status code didn't match or wasn't found
                 }
             } else {
@@ -252,7 +252,8 @@ impl SamplingRule {
         attributes: &[KeyValue],
     ) -> Option<bool> {
         let status_code_u32 = get_otel_status_code(attributes);
-        if status_code_u32 != 0 { // Assuming 0 means not found
+        if status_code_u32 != 0 {
+            // Assuming 0 means not found
             let status_value = opentelemetry::Value::I64(i64::from(status_code_u32));
             self.match_attribute_value(&status_value, matcher)
         } else {
@@ -335,7 +336,7 @@ impl DatadogSampler {
     ) -> Self {
         // Rules are now taken as provided, no internal sorting by provenance.
         // The caller is responsible for the order if it matters.
-        let effective_rules = rules.unwrap_or_else(Vec::new);
+        let effective_rules = rules.unwrap_or_default();
 
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
@@ -573,7 +574,7 @@ impl ShouldSample for DatadogSampler {
                 // Use the service-based sampler
                 used_agent_sampler = true;
                 sample_rate = sampler.sample_rate(); // Get rate for reporting
-                
+
                 // Check if the service sampler decides to drop
                 if !sampler.sample(trace_id) {
                     decision = SamplingDecision::Drop;
@@ -1583,14 +1584,15 @@ mod tests {
         ), "Rule with dd_status_key (5*) and custom.tag should match span with dd_status_key (503) and custom.tag");
 
         // Case 3: Missing the custom tag should fail (status code would match)
-        let missing_custom_tag_attrs = vec![
-            KeyValue::new(otel_response_status_key_str, 503),
-        ];
-        assert!(!rule1.matches(
-            &missing_custom_tag_attrs,
-            &span_kind_client,
-            &empty_resource
-        ), "Rule with dd_status_key (5*) and custom.tag should NOT match span missing custom.tag");
+        let missing_custom_tag_attrs = vec![KeyValue::new(otel_response_status_key_str, 503)];
+        assert!(
+            !rule1.matches(
+                &missing_custom_tag_attrs,
+                &span_kind_client,
+                &empty_resource
+            ),
+            "Rule with dd_status_key (5*) and custom.tag should NOT match span missing custom.tag"
+        );
 
         // Case 4: OTel status code 200 (does NOT match "5*") + custom.tag present
         let non_matching_otel_status_attrs = vec![

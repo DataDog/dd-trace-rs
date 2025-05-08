@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::datadog_sampler::{DatadogSampler, SamplingRule};
+use opentelemetry_sdk::Resource;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use opentelemetry_sdk::Resource;
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,11 +168,7 @@ impl DatadogSamplerConfig {
             Arc::new(RwLock::new(empty_resource))
         });
 
-        DatadogSampler::new(
-            Some(rules),
-            self.rate_limit,
-            resource_to_use,
-        )
+        DatadogSampler::new(Some(rules), self.rate_limit, resource_to_use)
     }
 }
 

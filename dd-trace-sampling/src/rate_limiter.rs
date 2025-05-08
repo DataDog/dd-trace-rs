@@ -104,9 +104,10 @@ impl RateLimiter {
 
         let mut state = self.inner.lock().unwrap();
 
+        // Phase 2: Optimization - try to consume first
         if state.tokens >= 1 {
             state.tokens -= 1;
-            return true; // Allowed without replenishing
+            true
         } else {
             // Not enough tokens, replenish
             self.replenish(&mut state, timestamp);
@@ -114,9 +115,9 @@ impl RateLimiter {
             // Check again after replenish
             if state.tokens >= 1 {
                 state.tokens -= 1;
-                return true;
+                true
             } else {
-                return false;
+                false
             }
         }
     }
@@ -150,11 +151,11 @@ impl RateLimiter {
 
     /// Replenish tokens based on elapsed time
     fn replenish(&self, state: &mut RateLimiterState, timestamp: Instant) {
-
         let elapsed = timestamp.duration_since(state.last_update);
-        
+
         // Calculate new tokens to add
-        let tokens_to_add_precise: f64 = (elapsed.as_nanos() as f64 / state.time_window_ns as f64) * self.rate_limit as f64;
+        let tokens_to_add_precise: f64 =
+            (elapsed.as_nanos() as f64 / state.time_window_ns as f64) * self.rate_limit as f64;
         let tokens_to_add: i64 = tokens_to_add_precise as i64; // Truncates fractional tokens
 
         if tokens_to_add > 0 {

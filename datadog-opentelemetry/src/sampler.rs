@@ -1,7 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-
 use dd_trace::dd_warn;
 
 use dd_trace_sampling::config::DatadogSamplerConfig;
@@ -23,9 +22,7 @@ pub fn create_sampler_from_config(
     if let Some(rules_json) = cfg.trace_sampling_rules() {
         // If we have JSON rules, try to create a sampler from them
         match DatadogSamplerConfig::from_json_with_resource(rules_json, resource.clone()) {
-            Ok(config) => {
-                config.build_sampler()
-            }
+            Ok(config) => config.build_sampler(),
             Err(e) => {
                 // Log error and fall back to default sampler
                 dd_warn!("Error parsing sampling rules configuration: {}", e);
@@ -81,13 +78,10 @@ mod tests {
 
         // Verify the sampler was created (we can't directly check the rules)
         // In a real test environment, we could verify behavior by checking sampling decisions
-        assert!(
-            sampler
-                .should_sample(None, trace_id, "test", &SpanKind::Client, &[], &[])
-                .attributes
-                .len()
-                > 0
-        );
+        assert!(!sampler
+            .should_sample(None, trace_id, "test", &SpanKind::Client, &[], &[])
+            .attributes
+            .is_empty());
     }
 
     #[test]

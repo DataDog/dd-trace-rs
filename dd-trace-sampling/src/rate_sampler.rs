@@ -150,15 +150,23 @@ mod tests {
     fn test_rate_sampler_should_sample() {
         // Sample Rate 0.0: Should always return false
         let sampler_zero = RateSampler::new(0.0);
-        let mut bytes_zero = [0u8; 16]; bytes_zero[15] = 1; // Example ID
+        let mut bytes_zero = [0u8; 16];
+        bytes_zero[15] = 1; // Example ID
         let trace_id_zero = TraceId::from_bytes(bytes_zero);
-        assert!(!sampler_zero.sample(trace_id_zero), "sampler_zero should return false");
+        assert!(
+            !sampler_zero.sample(trace_id_zero),
+            "sampler_zero should return false"
+        );
 
         // Sample Rate 1.0: Should always return true
         let sampler_one = RateSampler::new(1.0);
-        let mut bytes_one = [0u8; 16]; bytes_one[15] = 2; // Example ID
+        let mut bytes_one = [0u8; 16];
+        bytes_one[15] = 2; // Example ID
         let trace_id_one = TraceId::from_bytes(bytes_one);
-        assert!(sampler_one.sample(trace_id_one), "sampler_one should return true");
+        assert!(
+            sampler_one.sample(trace_id_one),
+            "sampler_one should return true"
+        );
 
         // Sample Rate 0.5: Use deterministic cases
         let sampler_half = RateSampler::new(0.5);
@@ -170,16 +178,28 @@ mod tests {
         let sample_u64 = u128::from_be_bytes(trace_id_sample.to_bytes()) as u64;
         let sample_hash = sample_u64.wrapping_mul(KNUTH_FACTOR);
         assert!(sample_hash <= threshold);
-        assert!(sampler_half.sample(trace_id_sample), "sampler_half should sample trace_id_sample");
+        assert!(
+            sampler_half.sample(trace_id_sample),
+            "sampler_half should sample trace_id_sample"
+        );
 
         // Trace ID that should be dropped (hashed value > threshold)
-        let mut bytes_drop = [0u8; 16]; bytes_drop[8..16].copy_from_slice(&u64::MAX.to_be_bytes()); // High lower 64 bits
+        let mut bytes_drop = [0u8; 16];
+        bytes_drop[8..16].copy_from_slice(&u64::MAX.to_be_bytes()); // High lower 64 bits
         let trace_id_drop = TraceId::from_bytes(bytes_drop);
         let drop_u64 = u128::from_be_bytes(trace_id_drop.to_bytes()) as u64;
         let drop_hash = drop_u64.wrapping_mul(KNUTH_FACTOR);
         // For rate 0.5, threshold is MAX/2. Hashing MAX should result in something > MAX/2
-        assert!(drop_hash > threshold, "Drop hash {} should be > threshold {}", drop_hash, threshold); 
-        assert!(!sampler_half.sample(trace_id_drop), "sampler_half should drop trace_id_drop");
+        assert!(
+            drop_hash > threshold,
+            "Drop hash {} should be > threshold {}",
+            drop_hash,
+            threshold
+        );
+        assert!(
+            !sampler_half.sample(trace_id_drop),
+            "sampler_half should drop trace_id_drop"
+        );
     }
 
     #[test]
@@ -188,6 +208,9 @@ mod tests {
         // Trace ID with all zeros hashes to 0, which is always <= threshold for rate > 0
         let bytes_to_sample = [0u8; 16];
         let trace_id_to_sample = TraceId::from_bytes(bytes_to_sample);
-        assert!(sampler_half.sample(trace_id_to_sample), "Sampler with 0.5 rate should sample trace ID 0");
+        assert!(
+            sampler_half.sample(trace_id_to_sample),
+            "Sampler with 0.5 rate should sample trace ID 0"
+        );
     }
 }
