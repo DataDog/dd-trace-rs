@@ -45,10 +45,16 @@ struct RateLimiterState {
 impl fmt::Debug for RateLimiter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.inner.lock().unwrap();
+        
+        let current_rate_val = self.current_window_rate(&state);
+        let effective_rate_val = self._calculate_internal_effective_rate(current_rate_val, state.prev_window_rate);
+
         f.debug_struct("RateLimiter")
             .field("rate_limit", &self.rate_limit)
             .field("tokens", &state.tokens)
-            .field("effective_rate", &self.effective_rate())
+            .field("max_tokens", &state.max_tokens)
+            .field("last_update", &state.last_update)
+            .field("effective_rate", &effective_rate_val)
             .finish()
     }
 }
@@ -140,6 +146,7 @@ impl RateLimiter {
                 state.tokens_total = 0;
                 state.current_window_start = Some(timestamp);
             }
+
         }
 
         // Keep track of total tokens seen vs allowed
@@ -181,16 +188,25 @@ impl RateLimiter {
         state.tokens_allowed as f64 / state.tokens_total as f64
     }
 
+    /// Helper function to calculate the effective rate based on current and optional previous rate.
+    fn _calculate_internal_effective_rate(
+        &self, // Takes &self to be a method, though it doesn't use self directly
+        current_rate: f64,
+        prev_window_rate_opt: Option<f64>,
+    ) -> f64 {
+        if let Some(prev_rate) = prev_window_rate_opt {
+            (current_rate + prev_rate) / 2.0
+        } else {
+            current_rate
+        }
+    }
+
     /// Returns the effective sample rate of this rate limiter (between 0.0 and 1.0)
     pub fn effective_rate(&self) -> f64 {
         let state = self.inner.lock().unwrap();
-
-        // If we have not had a previous window yet, return current rate
-        if let Some(prev_rate) = state.prev_window_rate {
-            (self.current_window_rate(&state) + prev_rate) / 2.0
-        } else {
-            self.current_window_rate(&state)
-        }
+        let current_rate = self.current_window_rate(&state);
+        // Use the new helper
+        self._calculate_internal_effective_rate(current_rate, state.prev_window_rate)
     }
 }
 

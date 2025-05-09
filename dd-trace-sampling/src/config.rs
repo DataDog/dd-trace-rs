@@ -81,12 +81,6 @@ pub struct DatadogSamplerConfig {
     /// Rate limit for sampling (samples/second)
     #[serde(default)]
     pub rate_limit: Option<i32>,
-
-    /// Optional OpenTelemetry Resource to be used by the sampler.
-    /// If not provided, a default empty resource will be created.
-    /// This field is not part of the JSON configuration and must be set programmatically.
-    #[serde(skip)]
-    pub resource: Option<Arc<RwLock<Resource>>>,
 }
 
 impl Default for DatadogSamplerConfig {
@@ -101,7 +95,6 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules: Vec::new(),
             rate_limit: None,
-            resource: None,
         }
     }
 
@@ -110,7 +103,6 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules,
             rate_limit: None,
-            resource: None,
         }
     }
 
@@ -119,13 +111,12 @@ impl DatadogSamplerConfig {
         DatadogSamplerConfig {
             rules,
             rate_limit,
-            resource: None,
         }
     }
 
     /// Parse from JSON string
-    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(json)
+    pub fn from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json_str)
     }
 
     /// Serialize to JSON string
@@ -133,18 +124,8 @@ impl DatadogSamplerConfig {
         serde_json::to_string(self)
     }
 
-    /// Parse from JSON string and associate a resource
-    pub fn from_json_with_resource(
-        json_str: &str,
-        resource: Arc<RwLock<Resource>>,
-    ) -> Result<Self, serde_json::Error> {
-        let mut config: Self = serde_json::from_str(json_str)?;
-        config.resource = Some(resource);
-        Ok(config)
-    }
-
     /// Create a DatadogSampler from this configuration
-    pub fn build_sampler(&self) -> DatadogSampler {
+    pub fn build_sampler(&self, resource: Arc<RwLock<Resource>>) -> DatadogSampler {
         // Convert rule configs to actual SamplingRules
         let rules: Vec<SamplingRule> = self
             .rules
@@ -161,14 +142,7 @@ impl DatadogSamplerConfig {
             })
             .collect();
 
-        // Create an empty resource by default
-        // The resource is updated later
-        let resource_to_use = self.resource.clone().unwrap_or_else(|| {
-            let empty_resource = opentelemetry_sdk::Resource::builder().build();
-            Arc::new(RwLock::new(empty_resource))
-        });
-
-        DatadogSampler::new(Some(rules), self.rate_limit, resource_to_use)
+        DatadogSampler::new(Some(rules), self.rate_limit, resource)
     }
 }
 
@@ -209,5 +183,9 @@ mod tests {
             Some(&"production".to_string())
         );
         assert_eq!(config.rate_limit, Some(100));
+
+        let empty_resource_for_test = opentelemetry_sdk::Resource::builder().build();
+        let sampler = config.build_sampler(Arc::new(RwLock::new(empty_resource_for_test)));
+        assert!(format!("{:?}", sampler).contains("DatadogSampler"));
     }
 }

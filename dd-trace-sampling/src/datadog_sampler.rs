@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::constants::{
     SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, SAMPLING_AGENT_RATE_TAG_KEY,
-    SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_LIMIT_DECISION, SAMPLING_MECHANISM_TO_PRIORITIES,
+    SAMPLING_DECISION_MAKER_TAG_KEY, RL_EFFECTIVE_RATE, SAMPLING_MECHANISM_TO_PRIORITIES,
     SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
 
@@ -336,7 +336,7 @@ impl DatadogSampler {
     ) -> Self {
         // Rules are now taken as provided, no internal sorting by provenance.
         // The caller is responsible for the order if it matters.
-        let effective_rules = rules.unwrap_or_default();
+        let effective_rules = rules.unwrap_or_else(Vec::new);
 
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
@@ -363,12 +363,12 @@ impl DatadogSampler {
         // Parse the JSON config
         let config = crate::config::DatadogSamplerConfig::from_json(config_json)?;
 
-        // Build the sampler from the config with a default empty resource
-        let mut sampler = config.build_sampler();
-
-        // Ensure the resource is properly wrapped in Arc<RwLock<>>
+        // Create a default empty resource for the sampler
         let default_resource = opentelemetry_sdk::Resource::builder().build();
-        sampler.resource = Arc::new(RwLock::new(default_resource));
+        let resource_arc = Arc::new(RwLock::new(default_resource));
+
+        // Build the sampler using the parsed config and the default resource
+        let sampler = config.build_sampler(resource_arc);
 
         Ok(sampler)
     }
@@ -449,7 +449,7 @@ impl DatadogSampler {
     /// * `decision` - The sampling decision (RecordAndSample or Drop)
     /// * `mechanism` - The sampling mechanism used to make the decision
     /// * `sample_rate` - The sample rate to use for the decision
-    /// * `rate_limit` - The rate limit if rate limiting was applied
+    /// * `rl_effective_rate` - The effective rate limit if rate limiting was applied
     ///
     /// # Returns
     /// A vector of attributes to add to the sampling result
@@ -458,13 +458,13 @@ impl DatadogSampler {
         decision: &SamplingDecision,
         mechanism: SamplingMechanism,
         sample_rate: f64,
-        rate_limit: Option<i32>,
+        rl_effective_rate: Option<i32>,
     ) -> Vec<KeyValue> {
         let mut result = Vec::new();
 
         // Add rate limiting tag if applicable
-        if let Some(limit) = rate_limit {
-            result.push(KeyValue::new(SAMPLING_LIMIT_DECISION, limit as i64));
+        if let Some(limit) = rl_effective_rate {
+            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit as i64));
         }
 
         // Add the sampling decision trace tag with the mechanism
@@ -552,7 +552,7 @@ impl ShouldSample for DatadogSampler {
         let sample_rate;
 
         // Store rate limit information if applicable
-        let mut rate_limit: Option<i32> = None;
+        let mut rl_effective_rate: Option<i32> = None;
 
         // Apply sampling logic
         if let Some(rule) = matching_rule {
@@ -565,7 +565,7 @@ impl ShouldSample for DatadogSampler {
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
                 decision = SamplingDecision::Drop;
-                rate_limit = Some(self.rate_limiter.effective_rate() as i32);
+                rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
             }
         } else {
             // Try service-based sampling from Agent
@@ -591,7 +591,7 @@ impl ShouldSample for DatadogSampler {
 
         // Add Datadog-specific sampling tags
         let result_attributes =
-            self.add_dd_sampling_tags(&decision, mechanism, sample_rate, rate_limit);
+            self.add_dd_sampling_tags(&decision, mechanism, sample_rate, rl_effective_rate);
 
         SamplingResult {
             decision,
@@ -1125,7 +1125,7 @@ mod tests {
         // Check for rate limit attribute
         let mut found_limit = false;
         for attr in &attrs_with_limit {
-            if attr.key.as_str() == SAMPLING_LIMIT_DECISION {
+            if attr.key.as_str() == RL_EFFECTIVE_RATE {
                 let value_int = match attr.value {
                     opentelemetry::Value::I64(i) => i,
                     _ => panic!("Expected integer value for rate limit tag"),
