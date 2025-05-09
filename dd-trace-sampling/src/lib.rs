@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod attribute_keys;
-pub mod config;
 pub mod constants;
 pub mod datadog_sampler;
 pub mod glob_matcher;
@@ -12,7 +11,7 @@ pub mod rate_sampler;
 pub mod sem_convs;
 pub mod utils;
 
-// Re-exports for convenient usage
-pub use config::DatadogSamplerConfig;
-pub use datadog_sampler::DatadogSampler;
+// Re-export key public types
+pub use datadog_sampler::{DatadogSampler, RuleProvenance, SamplingRule};
 pub use rate_limiter::RateLimiter;
+pub use rate_sampler::RateSampler;

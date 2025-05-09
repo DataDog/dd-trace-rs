@@ -14,7 +14,10 @@ description.workspace = true
 [dependencies]
 uuid = {version = "1.11.0", features = ["v4"] }
 anyhow = "1.0.97"
-
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dd-trace-sampling = { path = "../dd-trace-sampling" }
+opentelemetry_sdk = { workspace = true, features = ["trace"] }
 [dev-dependencies]
 serde = {version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"

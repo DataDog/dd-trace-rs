@@ -45,9 +45,10 @@ struct RateLimiterState {
 impl fmt::Debug for RateLimiter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = self.inner.lock().unwrap();
-        
+
         let current_rate_val = self.current_window_rate(&state);
-        let effective_rate_val = self._calculate_internal_effective_rate(current_rate_val, state.prev_window_rate);
+        let effective_rate_val =
+            self._calculate_internal_effective_rate(current_rate_val, state.prev_window_rate);
 
         f.debug_struct("RateLimiter")
             .field("rate_limit", &self.rate_limit)
@@ -146,7 +147,6 @@ impl RateLimiter {
                 state.tokens_total = 0;
                 state.current_window_start = Some(timestamp);
             }
-
         }
 
         // Keep track of total tokens seen vs allowed

@@ -5,13 +5,12 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::trace::{SamplingDecision, SamplingResult, TraceContextExt};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::ShouldSample;
-use serde_json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::constants::{
-    SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, SAMPLING_AGENT_RATE_TAG_KEY,
-    SAMPLING_DECISION_MAKER_TAG_KEY, RL_EFFECTIVE_RATE, SAMPLING_MECHANISM_TO_PRIORITIES,
+    SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE,
+    SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_MECHANISM_TO_PRIORITIES,
     SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
 
@@ -334,9 +333,7 @@ impl DatadogSampler {
         rate_limit: Option<i32>,
         resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
     ) -> Self {
-        // Rules are now taken as provided, no internal sorting by provenance.
-        // The caller is responsible for the order if it matters.
-        let effective_rules = rules.unwrap_or_else(Vec::new);
+        let effective_rules = rules.unwrap_or_default();
 
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
@@ -356,21 +353,6 @@ impl DatadogSampler {
     pub fn update_resource(&mut self, resource_arc: Arc<RwLock<opentelemetry_sdk::Resource>>) {
         // Simply replace the current resource Arc with the new one
         self.resource = resource_arc;
-    }
-
-    /// Creates a new DatadogSampler from a JSON configuration string
-    pub fn from_json(config_json: &str) -> Result<Self, serde_json::Error> {
-        // Parse the JSON config
-        let config = crate::config::DatadogSamplerConfig::from_json(config_json)?;
-
-        // Create a default empty resource for the sampler
-        let default_resource = opentelemetry_sdk::Resource::builder().build();
-        let resource_arc = Arc::new(RwLock::new(default_resource));
-
-        // Build the sampler using the parsed config and the default resource
-        let sampler = config.build_sampler(resource_arc);
-
-        Ok(sampler)
     }
 
     /// Computes a key for service-based sampling
@@ -1313,34 +1295,6 @@ mod tests {
             SamplingDecision::Drop,
             "Span for other-service/prod should be dropped"
         );
-    }
-
-    #[test]
-    fn test_from_json() {
-        // Create a JSON configuration string
-        let config_json = r#"
-        {
-            "rules": [
-                {
-                    "sample_rate": 0.5,
-                    "service": "test-service",
-                    "name": "test-span",
-                    "provenance": "customer"
-                }
-            ],
-            "rate_limit": 200
-        }
-        "#;
-
-        // Create a sampler from the JSON
-        let sampler = DatadogSampler::from_json(config_json).unwrap();
-
-        // Verify the configuration was applied
-        assert_eq!(sampler.rules.len(), 1);
-        assert_eq!(sampler.rules[0].sample_rate, 0.5);
-        assert_eq!(sampler.rules[0].service, Some("test-service".to_string()));
-        assert_eq!(sampler.rules[0].name, Some("test-span".to_string()));
-        assert_eq!(sampler.rules[0].provenance, "customer");
     }
 
     #[test]

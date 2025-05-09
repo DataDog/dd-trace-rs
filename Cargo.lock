@@ -821,6 +821,8 @@ name = "dd-trace"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "dd-trace-sampling",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "uuid",

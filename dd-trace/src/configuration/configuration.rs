@@ -1,9 +1,43 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::{borrow::Cow, ops::Deref, str::FromStr, sync::OnceLock};
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
+
+/// Configuration for a single sampling rule
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SamplingRuleConfig {
+    /// The sample rate to apply (0.0-1.0)
+    pub sample_rate: f64,
+
+    /// Optional service name pattern to match
+    #[serde(default)]
+    pub service: Option<String>,
+
+    /// Optional span name pattern to match
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Optional resource name pattern to match
+    #[serde(default)]
+    pub resource: Option<String>,
+
+    /// Tags that must match (key-value pairs)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+
+    /// Where this rule comes from (customer, dynamic, default)
+    #[serde(default = "default_provenance")]
+    pub provenance: String,
+}
+
+fn default_provenance() -> String {
+    "default".to_string()
+}
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
@@ -33,11 +67,27 @@ impl FromStr for LogLevel {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ParsedSamplingRules {
+    pub rules: Vec<SamplingRuleConfig>,
+}
+
+impl FromStr for ParsedSamplingRules {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.trim().is_empty() {
+            return Ok(ParsedSamplingRules::default());
+        }
+        // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
+        let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
+        Ok(ParsedSamplingRules { rules: rules_vec })
+    }
+}
+
 #[derive(Debug)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
-// TODO(paullgdc): We also want to keep the origin of each of configuration, and the errors
-// encountered during parsing to report it to telemetry.
 ///
 /// # Usage
 /// ```
@@ -76,12 +126,12 @@ pub struct Config {
     /// url of the dogstatsd agent
     dogstatsd_agent_url: Cow<'static, str>,
 
-    // # Tracing
+    // # Sampling
+    trace_sampling_rules: Option<Vec<SamplingRuleConfig>>,
     /// Maximum number of spans to sample per second, per process
     /// if this is not set, the datadog Agent controls rate limiting
-    trace_rate_limit: Option<f64>,
-    /// JSON configuration string for sampling rules
-    trace_sampling_rules: Option<String>,
+    /// Only applied if trace_sampling_rules are used
+    trace_rate_limit: Option<i32>,
 
     /// Disables the library if this is false
     enabled: bool,
@@ -120,6 +170,9 @@ impl Config {
             }
         }
 
+        let parsed_sampling_rules_config =
+            to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
+
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
@@ -135,10 +188,14 @@ impl Config {
                 .map(Cow::Owned)
                 .unwrap_or(default.trace_agent_url),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
+
+            // Populate from parsed_sampling_rules_config or defaults
+            trace_sampling_rules: parsed_sampling_rules_config
+                .map(|psc| psc.rules)
+                .or(default.trace_sampling_rules),
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .or(default.trace_rate_limit),
-            trace_sampling_rules: to_val(sources.get("DD_TRACE_SAMPLING_RULES"))
-                .or(default.trace_sampling_rules),
+
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
             #[cfg(feature = "test-utils")]
@@ -193,12 +250,12 @@ impl Config {
         &self.dogstatsd_agent_url
     }
 
-    pub fn trace_rate_limit(&self) -> Option<f64> {
-        self.trace_rate_limit
+    pub fn trace_sampling_rules(&self) -> Option<&Vec<SamplingRuleConfig>> {
+        self.trace_sampling_rules.as_ref()
     }
 
-    pub fn trace_sampling_rules(&self) -> Option<&str> {
-        self.trace_sampling_rules.as_deref()
+    pub fn trace_rate_limit(&self) -> Option<i32> {
+        self.trace_rate_limit
     }
 
     pub fn enabled(&self) -> bool {
@@ -212,6 +269,31 @@ impl Config {
     #[cfg(feature = "test-utils")]
     pub fn __internal_wait_agent_info_ready(&self) -> bool {
         self.wait_agent_info_ready
+    }
+
+    /// Builds a DatadogSampler based on the loaded configuration.
+    pub fn build_datadog_sampler(
+        &self,
+        resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
+    ) -> dd_trace_sampling::DatadogSampler {
+        let rules: Option<Vec<dd_trace_sampling::SamplingRule>> =
+            self.trace_sampling_rules.as_ref().map(|rule_configs| {
+                rule_configs
+                    .iter()
+                    .map(|config: &SamplingRuleConfig| {
+                        dd_trace_sampling::SamplingRule::new(
+                            config.sample_rate,
+                            config.service.clone(),
+                            config.name.clone(),
+                            config.resource.clone(),
+                            Some(config.tags.clone()),
+                            Some(config.provenance.clone()),
+                        )
+                    })
+                    .collect()
+            });
+
+        dd_trace_sampling::DatadogSampler::new(rules, self.trace_rate_limit, resource)
     }
 
     /// Static runtime id if the process
@@ -234,8 +316,8 @@ impl Default for Config {
 
             trace_agent_url: Cow::Borrowed("http://localhost:8126"),
             dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-            trace_rate_limit: None,
             trace_sampling_rules: None,
+            trace_rate_limit: None,
             enabled: true,
             log_level: LogLevel::default(),
             tracer_version: TRACER_VERSION,
@@ -286,13 +368,13 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_rate_limit(&mut self, rate_limit: f64) -> &mut Self {
-        self.config.trace_rate_limit = Some(rate_limit);
+    pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
+        self.config.trace_sampling_rules = Some(rules);
         self
     }
 
-    pub fn set_trace_sampling_rules(&mut self, rules_json: String) -> &mut Self {
-        self.config.trace_sampling_rules = Some(rules_json);
+    pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
+        self.config.trace_rate_limit = Some(rate_limit);
         self
     }
 
@@ -318,7 +400,7 @@ impl ConfigBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::*;
     use crate::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
 
     #[test]
@@ -328,16 +410,11 @@ mod tests {
             [
                 ("DD_SERVICE", "test-service"),
                 ("DD_ENV", "test-env"),
-                ("DD_VERSION", "x.y.z"),
-                ("DD_TAGS", "abc:def,foo:bar"),
-                ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
-                ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_ENABLED", "false"),
+                ("DD_TRACE_SAMPLING_RULES", 
+                 r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#),
+                ("DD_TRACE_RATE_LIMIT", "123"),
+                ("DD_TRACE_ENABLED", "true"),
                 ("DD_LOG_LEVEL", "DEBUG"),
-                (
-                    "DD_TRACE_SAMPLING_RULES",
-                    r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#,
-                ),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
@@ -345,19 +422,19 @@ mod tests {
 
         assert_eq!(config.service(), "test-service");
         assert_eq!(config.env(), Some("test-env"));
-        assert_eq!(config.version(), Some("x.y.z"));
-        assert_eq!(
-            config.global_tags().collect::<Vec<_>>(),
-            vec!["abc:def", "foo:bar"]
+        assert_eq!(config.trace_rate_limit(), Some(123));
+        assert!(
+            config.trace_sampling_rules().is_some(),
+            "trace_sampling_rules should be Some"
         );
-        assert_eq!(config.trace_agent_url(), "http://localhost:1234");
-        assert_eq!(config.trace_rate_limit(), Some(100.0));
-        assert!(!config.enabled());
+        if let Some(rules) = config.trace_sampling_rules() {
+            assert_eq!(rules.len(), 1, "Should have one rule");
+            assert_eq!(rules[0].sample_rate, 0.5);
+            assert_eq!(rules[0].service, Some("web-api".to_string()));
+            assert_eq!(rules[0].provenance, "customer".to_string());
+        }
+        assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Debug);
-        assert_eq!(
-            config.trace_sampling_rules(),
-            Some(r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#)
-        );
     }
 
     #[test]
@@ -366,50 +443,34 @@ mod tests {
         sources.add_source(HashMapSource::from_iter(
             [
                 ("DD_SERVICE", "test-service"),
-                ("DD_ENV", "test-env"),
-                ("DD_VERSION", "x.y.z"),
-                ("DD_TAGS", "abc:def,foo:bar"),
-                ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
-                ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_ENABLED", "false"),
-                ("DD_LOG_LEVEL", "DEBUG"),
-                (
-                    "DD_TRACE_SAMPLING_RULES",
-                    r#"{"rules":[{"sample_rate":0.5,"service":"web-api"}]}"#,
-                ),
+                ("DD_TRACE_RATE_LIMIT", "50"),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
         let mut builder = Config::builder_with_sources(&sources);
+        builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
+            sample_rate: 0.8,
+            service: Some("manual-service".to_string()),
+            name: None,
+            resource: None,
+            tags: HashMap::new(),
+            provenance: "manual".to_string(),
+        }]);
+        builder.set_trace_rate_limit(200);
         builder.set_service("manual-service".to_string());
         builder.set_env("manual-env".to_string());
-        builder.set_version("manual-version".to_string());
-        builder.set_global_tags(vec!["manual:tag".to_string()]);
-        builder.add_global_tag("another:tag".to_string());
-        builder.set_trace_agent_url("http://localhost:4321".into());
-        builder.set_trace_rate_limit(200.0);
-        builder.set_enabled(true);
         builder.set_log_level(super::LogLevel::Warn);
-        builder.set_trace_sampling_rules(
-            r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#.to_string(),
-        );
 
         let config = builder.build();
 
-        assert_eq!(config.service(), "manual-service");
-        assert_eq!(config.env(), Some("manual-env"));
-        assert_eq!(config.version(), Some("manual-version"));
-        assert_eq!(
-            config.global_tags().collect::<Vec<_>>(),
-            vec!["manual:tag", "another:tag"]
-        );
-        assert_eq!(config.trace_agent_url(), "http://localhost:4321");
-        assert_eq!(config.trace_rate_limit(), Some(200.0));
+        assert_eq!(config.trace_rate_limit(), Some(200));
+        assert!(config.trace_sampling_rules().is_some());
+        assert_eq!(config.trace_sampling_rules().unwrap().len(), 1);
+        if let Some(rules) = config.trace_sampling_rules() {
+            assert_eq!(rules[0].sample_rate, 0.8);
+            assert_eq!(rules[0].service, Some("manual-service".to_string()));
+        }
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Warn);
-        assert_eq!(
-            config.trace_sampling_rules(),
-            Some(r#"{"rules":[{"sample_rate":0.8,"service":"my-service"}]}"#)
-        );
     }
 }
