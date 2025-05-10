@@ -30,7 +30,8 @@ use crate::utils;
 /// Constant to represent "no rule" for a field
 pub const NO_RULE: &str = "";
 
-/// A trait to handle access to a Resource, whether it's a direct reference or wrapped in Arc<RwLock<>>
+/// A trait to handle access to a Resource, whether it's a direct reference or wrapped in
+/// Arc<RwLock<>>
 pub trait ResourceAccess {
     fn get_resource(&self) -> opentelemetry_sdk::Resource;
 }
@@ -195,7 +196,8 @@ impl SamplingRule {
         for (key, matcher) in &self.tag_matchers {
             let rule_tag_key_str = key.as_str();
 
-            // Special handling for rules defined with "http.status_code" or "http.response.status_code"
+            // Special handling for rules defined with "http.status_code" or
+            // "http.response.status_code"
             if rule_tag_key_str == sem_convs::ATTRIBUTE_HTTP_STATUS_CODE
                 || rule_tag_key_str == sem_convs::ATTRIBUTE_HTTP_RESPONSE_STATUS_CODE
             {
@@ -215,9 +217,10 @@ impl SamplingRule {
                     continue;
                 }
 
-                // If no direct match, try to find the corresponding OpenTelemetry attribute that maps to the Datadog tag key
-                // This handles cases where the rule key is a Datadog key (e.g., "http.method")
-                // and the attribute is an OTel key (e.g., "http.request.method")
+                // If no direct match, try to find the corresponding OpenTelemetry attribute that
+                // maps to the Datadog tag key This handles cases where the rule key
+                // is a Datadog key (e.g., "http.method") and the attribute is an
+                // OTel key (e.g., "http.request.method")
                 if rule_tag_key_str.starts_with("http.") {
                     let tag_match = attributes.iter().any(|kv| {
                         let dd_key_from_otel_attr = get_dd_key_for_otlp_attribute(kv.key.as_str());
@@ -234,7 +237,8 @@ impl SamplingRule {
                     }
                     // If tag_match is true, loop continues to next rule_tag_key.
                 } else {
-                    // For non-HTTP attributes, if we don't have a direct match, the rule doesn't match
+                    // For non-HTTP attributes, if we don't have a direct match, the rule doesn't
+                    // match
                     return false;
                 }
             }
@@ -243,8 +247,9 @@ impl SamplingRule {
         true
     }
 
-    /// Helper method to specifically match a rule against an HTTP status code extracted from attributes.
-    /// Returns Some(true) if status code found and matches, Some(false) if found but not matched, None if not found.
+    /// Helper method to specifically match a rule against an HTTP status code extracted from
+    /// attributes. Returns Some(true) if status code found and matches, Some(false) if found
+    /// but not matched, None if not found.
     fn match_http_status_code_rule(
         &self,
         matcher: &GlobMatcher,
@@ -1270,7 +1275,8 @@ mod tests {
             attrs_sample.as_slice(),
             empty_links,
         );
-        // Expect RecordAndSample because service_key will be "service:test-service,env:prod" -> rate 1.0
+        // Expect RecordAndSample because service_key will be "service:test-service,env:prod" ->
+        // rate 1.0
         assert_eq!(
             result_sample.decision,
             SamplingDecision::RecordAndSample,
@@ -1380,7 +1386,8 @@ mod tests {
             None,
         );
 
-        // Should NOT match decimal values as we don't do partial pattern matching for non-integer floats
+        // Should NOT match decimal values as we don't do partial pattern matching for non-integer
+        // floats
         assert!(!rule_prefix.matches(
             decimal_float_attrs.as_slice(),
             &SpanKind::Client,
@@ -1515,7 +1522,8 @@ mod tests {
 
         let rule1 = SamplingRule::new(1.0, None, None, None, Some(tags_rule1), None);
 
-        // Case 1: OTel attribute that maps to http.status_code (503 matches "5*") + Direct custom.tag match
+        // Case 1: OTel attribute that maps to http.status_code (503 matches "5*") + Direct
+        // custom.tag match
         let mixed_attrs_match = vec![
             KeyValue::new(otel_response_status_key_str, 503),
             KeyValue::new(custom_tag_key, custom_tag_value),
@@ -1570,7 +1578,8 @@ mod tests {
             &empty_resource
         ), "Rule with dd_status_key (5*) and custom.tag should NOT match span with no status code attribute");
 
-        // Case 6: Rule uses OTel key http.response.status_code directly, span has matching OTel key.
+        // Case 6: Rule uses OTel key http.response.status_code directly, span has matching OTel
+        // key.
         let mut tags_rule2 = HashMap::new();
         tags_rule2.insert(otel_response_status_key_str.to_string(), "200".to_string());
         tags_rule2.insert(custom_tag_key.to_string(), custom_tag_value.to_string());

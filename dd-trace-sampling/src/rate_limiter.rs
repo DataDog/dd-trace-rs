@@ -173,7 +173,8 @@ impl RateLimiter {
                 state.tokens = state.max_tokens;
             }
         }
-        // Always update last_update, even if no tokens were added (e.g., very short elapsed time yielding tokens_to_add = 0)
+        // Always update last_update, even if no tokens were added (e.g., very short elapsed time
+        // yielding tokens_to_add = 0)
         state.last_update = timestamp;
     }
 
