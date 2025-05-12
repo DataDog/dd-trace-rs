@@ -228,7 +228,7 @@ pub mod tests {
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };
 
-    use crate::TraceRegistry;
+    use crate::{span_processor::TracePropagationData, TraceRegistry};
 
     use super::DatadogPropagator;
 
@@ -549,7 +549,15 @@ pub mod tests {
             }
 
             // fake span register
-            registry.register_span(trace_id, span_id, None, origin, Some(tags));
+            registry.register_span(
+                trace_id,
+                span_id,
+                TracePropagationData {
+                    origin,
+                    sampling_decision: None,
+                    tags: Some(tags),
+                },
+            );
 
             let mut injector = HashMap::new();
             propagator.inject_context(&extracted_context, &mut injector);

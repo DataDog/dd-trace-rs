@@ -1,3 +1,6 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::{body::Incoming, service::service_fn, HeaderMap, Request, Response, StatusCode};
 use hyper_util::{

@@ -22,14 +22,13 @@ struct Trace {
     /// Root span will always be the first span in this vector if it is present
     finished_spans: Vec<SpanData>,
     open_span_count: usize,
-    #[allow(dead_code)]
+
     sampling_decision: Option<SamplingDecision>,
     origin: Option<String>,
     tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub struct SamplingDecision {
     pub decision: i8,
     pub decision_maker: i8,
@@ -40,6 +39,12 @@ pub(crate) struct TracePropagationData {
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
 }
+
+const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
+    origin: None,
+    sampling_decision: None,
+    tags: None,
+};
 
 #[derive(Debug)]
 struct InnerTraceRegistry {
@@ -54,9 +59,11 @@ impl InnerTraceRegistry {
         &mut self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-        sampling_decision: Option<SamplingDecision>,
-        origin: Option<String>,
-        tags: Option<HashMap<String, String>>,
+        TracePropagationData {
+            origin,
+            sampling_decision,
+            tags,
+        }: TracePropagationData,
     ) {
         self.registry
             .entry(trace_id)
@@ -163,15 +170,13 @@ impl TraceRegistry {
         &self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-        sampling_decision: Option<SamplingDecision>,
-        origin: Option<String>,
-        tags: Option<HashMap<String, String>>,
+        propagation_data: TracePropagationData,
     ) {
         let mut inner = self
             .inner
             .write()
             .expect("Failed to acquire lock on trace registry");
-        inner.register_span(trace_id, span_id, sampling_decision, origin, tags);
+        inner.register_span(trace_id, span_id, propagation_data);
     }
 
     /// Finish a span with the given trace ID and span data.
@@ -218,13 +223,9 @@ impl DatadogSpanProcessor {
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
-    ) -> (
-        Option<String>,
-        Option<HashMap<String, String>>,
-        Option<SamplingDecision>,
-    ) {
+    ) -> TracePropagationData {
         if !parent_ctx.span().span_context().is_remote() {
-            return (None, None, None);
+            return EMPTY_PROPAGATION_DATA;
         }
 
         if let Some(DatadogExtractData {
@@ -261,10 +262,14 @@ impl DatadogSpanProcessor {
                 decision: sampling.priority.unwrap_or_default() as i8,
                 decision_maker: sampling.mechanism.unwrap_or_default() as i8,
             });
-            return (origin, Some(propagation_tags), sampling_decision);
+            return TracePropagationData {
+                origin,
+                sampling_decision,
+                tags: Some(propagation_tags),
+            };
         }
 
-        (None, None, None)
+        EMPTY_PROPAGATION_DATA
     }
 }
 
@@ -277,9 +282,9 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
 
-        let (origin, tags, sampling) = self.add_links_and_get_propagation_data(span, parent_ctx);
+        let propagation_data = self.add_links_and_get_propagation_data(span, parent_ctx);
         self.registry
-            .register_span(trace_id, span_id, sampling, origin, tags);
+            .register_span(trace_id, span_id, propagation_data);
     }
 
     fn on_end(&self, span: SpanData) {
