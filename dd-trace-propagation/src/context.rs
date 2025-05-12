@@ -70,6 +70,22 @@ impl FromStr for SamplingMechanism {
     }
 }
 
+impl From<i8> for SamplingMechanism {
+    fn from(value: i8) -> Self {
+        match value {
+            -0 => Self::Default,
+            -1 => Self::Agent,
+            -3 => Self::Rule,
+            -4 => Self::Manual,
+            -5 => Self::Appsec,
+            -8 => Self::Span,
+            -11 => Self::User,
+            -12 => Self::Dynamic,
+            _ => Self::Default,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub enum SamplingPriority {
     UserReject = -1,
@@ -89,6 +105,18 @@ impl SamplingPriority {
         match flags {
             0 => Self::AutoReject,
             1 => Self::AutoKeep,
+            _ => Self::default(),
+        }
+    }
+}
+
+impl From<i8> for SamplingPriority {
+    fn from(value: i8) -> Self {
+        match value {
+            -1 => Self::UserReject,
+            0 => Self::AutoReject,
+            1 => Self::AutoKeep,
+            2 => Self::UserKeep,
             _ => Self::default(),
         }
     }

@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, vec};
+use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
 use dd_trace::Config;
 use opentelemetry::{
@@ -14,6 +14,8 @@ use dd_trace_propagation::{
     context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
+
+use crate::TraceRegistry;
 
 const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags::new(0x02);
 
@@ -43,9 +45,10 @@ impl Injector for InjectorWrapper<'_> {
 
 #[derive(Clone, Default)]
 pub struct DatadogExtractData {
+    pub links: Vec<SpanLink>,
     pub origin: Option<String>,
     pub propagation_tags: HashMap<String, String>,
-    pub links: Vec<SpanLink>,
+    pub sampling: Option<Sampling>,
 }
 
 impl DatadogExtractData {
@@ -54,6 +57,7 @@ impl DatadogExtractData {
             origin,
             tags,
             links,
+            sampling,
             ..
         }: SpanContext,
     ) -> Self {
@@ -69,9 +73,10 @@ impl DatadogExtractData {
             .collect();
 
         DatadogExtractData {
+            links,
             origin,
             propagation_tags,
-            links,
+            sampling,
         }
     }
 }
@@ -89,12 +94,14 @@ impl std::fmt::Display for DatadogExtractData {
 #[derive(Debug)]
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator,
+    registry: Arc<TraceRegistry>,
 }
 
 impl DatadogPropagator {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
+            registry,
         }
     }
 }
@@ -108,22 +115,22 @@ impl TextMapPropagator for DatadogPropagator {
         let span = cx.span();
         let otel_span_context = span.span_context();
 
-        // FIXME: obtaining sampling data from otel trace_flags is not completely correct. To decide
-        // where we store that info
-        let sampling = Some(Sampling {
-            priority: Some(SamplingPriority::from_flags(
-                otel_span_context.trace_flags().to_u8(),
-            )),
-            mechanism: None,
-        });
+        let trace_id = span.span_context().trace_id().to_bytes();
+        let propagation_data = self.registry.get_trace_propagation_data(trace_id);
 
-        // this data is obtained in the extraction phase it is related with the root span of the
-        // trace
-        let DatadogExtractData {
-            origin,
-            propagation_tags,
-            ..
-        } = cx.get::<DatadogExtractData>().cloned().unwrap_or_default();
+        let sampling = if let Some(sampling) = propagation_data.sampling_decision {
+            Some(Sampling {
+                priority: Some(sampling.decision.into()),
+                mechanism: Some(sampling.decision_maker.into()),
+            })
+        } else {
+            Some(Sampling {
+                priority: Some(SamplingPriority::from_flags(
+                    otel_span_context.trace_flags().to_u8(),
+                )),
+                mechanism: None,
+            })
+        };
 
         // otel tracestate only contains 'additional_values'
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
@@ -134,8 +141,8 @@ impl TextMapPropagator for DatadogPropagator {
             is_remote: otel_span_context.is_remote(),
             links: vec![], // links don't affect injection
             sampling,
-            origin,
-            tags: propagation_tags, // FIXME: this should get DD Span tags
+            origin: propagation_data.origin,
+            tags: propagation_data.tags.unwrap_or_default(),
             tracestate,
         };
 
@@ -206,7 +213,7 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 
 #[cfg(test)]
 pub mod tests {
-    use std::{borrow::Cow, collections::HashMap, str::FromStr};
+    use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
     use assert_unordered::assert_eq_unordered;
     use dd_trace::{configuration::TracePropagationStyle, Config};
@@ -220,6 +227,8 @@ pub mod tests {
         context::Tracestate,
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };
+
+    use crate::TraceRegistry;
 
     use super::DatadogPropagator;
 
@@ -238,7 +247,7 @@ pub mod tests {
             ]);
         }
 
-        DatadogPropagator::new(&builder.build())
+        DatadogPropagator::new(&builder.build(), Arc::new(TraceRegistry::new()))
     }
 
     #[derive(Debug)]
@@ -515,14 +524,32 @@ pub mod tests {
 
     #[test]
     fn extract_inject_w3c() {
-        let propagator = get_propagator(None);
-
         for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
+            let builder = Config::builder();
+            let registry = Arc::new(TraceRegistry::new());
+            let propagator = DatadogPropagator::new(&builder.build(), registry.clone());
+
             let mut extractor = HashMap::new();
             extractor.insert(TRACEPARENT_KEY.to_string(), trace_parent.to_string());
             extractor.insert(TRACESTATE_KEY.to_string(), trace_state.to_string());
 
             let extracted_context = propagator.extract(&extractor);
+
+            let span = extracted_context.span();
+            let span_context = span.span_context();
+            let trace_id = span_context.trace_id().to_bytes();
+            let span_id = span_context.span_id().to_bytes();
+
+            let mut origin = None;
+            let mut tags = HashMap::from([("_dd.p.dm".to_string(), "-0".to_string())]);
+
+            if trace_state.contains("dd=") {
+                origin = Some("rum".to_string());
+                tags.insert("_dd.p.pfoo".to_string(), "bar".to_string());
+            }
+
+            // fake span register
+            registry.register_span(trace_id, span_id, None, origin, Some(tags));
 
             let mut injector = HashMap::new();
             propagator.inject_context(&extracted_context, &mut injector);
