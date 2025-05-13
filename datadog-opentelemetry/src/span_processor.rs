@@ -271,6 +271,41 @@ impl DatadogSpanProcessor {
 
         EMPTY_PROPAGATION_DATA
     }
+
+    fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
+        let origin = trace.origin.unwrap_or_default();
+
+        for span in trace.finished_spans.iter_mut() {
+            if span.span_context.span_id().to_bytes() == trace.root_span_id {
+                if let Some(ref tags) = trace.tags {
+                    tags.iter().for_each(|(key, value)| {
+                        span.attributes
+                            .push(KeyValue::new(key.clone(), value.clone()))
+                    });
+                }
+            }
+
+            if !origin.is_empty() {
+                span.attributes
+                    .push(KeyValue::new("_dd.origin", origin.clone()));
+            }
+
+            // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted? they shouldn't be overrided
+            if let Some(sampling_decision) = trace.sampling_decision {
+                span.attributes.push(KeyValue::new(
+                    "_sampling_priority_v1",
+                    sampling_decision.decision.clone() as i64,
+                ));
+
+                span.attributes.push(KeyValue::new(
+                    "_dd.p.dm",
+                    format!("-{}", sampling_decision.decision_maker.clone()),
+                ));
+            }
+        }
+
+        trace.finished_spans
+    }
 }
 
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
@@ -289,13 +324,11 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
-        let Some(Trace {
-            finished_spans: trace_chunk,
-            ..
-        }) = self.registry.finish_span(trace_id, span)
-        else {
+        let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
+
+        let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
             dd_trace::dd_error!(
                 "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
