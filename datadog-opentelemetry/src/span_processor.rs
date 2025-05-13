@@ -290,7 +290,8 @@ impl DatadogSpanProcessor {
                     .push(KeyValue::new("_dd.origin", origin.clone()));
             }
 
-            // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted? they shouldn't be overrided
+            // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted?
+            // they shouldn't be overrided
             if let Some(sampling_decision) = trace.sampling_decision {
                 span.attributes.push(KeyValue::new(
                     "_sampling_priority_v1",

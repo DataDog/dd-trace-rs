@@ -352,7 +352,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -371,7 +371,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -406,7 +406,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -490,7 +490,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -521,7 +521,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -553,7 +553,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -580,7 +580,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -605,7 +605,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -628,7 +628,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -671,7 +671,7 @@ pub mod tests {
                 span_id: 10,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: None,
                 tags: HashMap::from([
@@ -692,7 +692,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Manual),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -726,7 +726,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Manual),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -767,7 +767,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1045,7 +1045,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1065,7 +1065,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1085,7 +1085,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([

@@ -170,18 +170,22 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
         }
     };
 
+    let origin = extract_origin(carrier);
+    let tags = extract_tags(carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
+
     let sampling = match extract_sampling_priority(carrier) {
         Ok(sampling_priority) => Some(Sampling {
             priority: Some(sampling_priority),
-            mechanism: None,
+            mechanism: tags
+                .get(DATADOG_SAMPLING_DECISION_KEY)
+                .map(|sm| SamplingMechanism::from_str(sm).ok())
+                .unwrap_or_default(),
         }),
         Err(e) => {
             dd_debug!("{e}");
             None
         }
     };
-    let origin = extract_origin(carrier);
-    let tags = extract_tags(carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
 
     let trace_id = combine_trace_id(
         lower_trace_id,

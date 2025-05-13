@@ -171,7 +171,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
-
+            let mut mechanism = None;
             let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
                 if let Ok(tracestate) = Tracestate::from_str(ts) {
                     tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
@@ -200,6 +200,11 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                         &mut tags,
                     );
 
+                    mechanism = tags
+                        .get(DATADOG_SAMPLING_DECISION_KEY)
+                        .map(|sm| SamplingMechanism::from_str(sm).ok())
+                        .unwrap_or_default();
+
                     Some(tracestate)
                 } else {
                     None
@@ -213,7 +218,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 span_id: traceparent.span_id,
                 sampling: Some(Sampling {
                     priority: Some(sampling_priority),
-                    mechanism: None,
+                    mechanism,
                 }),
                 origin,
                 tags,

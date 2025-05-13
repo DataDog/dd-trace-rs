@@ -73,14 +73,14 @@ impl FromStr for SamplingMechanism {
 impl From<i8> for SamplingMechanism {
     fn from(value: i8) -> Self {
         match value {
-            -0 => Self::Default,
-            -1 => Self::Agent,
-            -3 => Self::Rule,
-            -4 => Self::Manual,
-            -5 => Self::Appsec,
-            -8 => Self::Span,
-            -11 => Self::User,
-            -12 => Self::Dynamic,
+            0 => Self::Default,
+            1 => Self::Agent,
+            3 => Self::Rule,
+            4 => Self::Manual,
+            5 => Self::Appsec,
+            8 => Self::Span,
+            11 => Self::User,
+            12 => Self::Dynamic,
             _ => Self::Default,
         }
     }
