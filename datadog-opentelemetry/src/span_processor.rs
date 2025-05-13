@@ -294,12 +294,12 @@ impl DatadogSpanProcessor {
             if let Some(sampling_decision) = trace.sampling_decision {
                 span.attributes.push(KeyValue::new(
                     "_sampling_priority_v1",
-                    sampling_decision.decision.clone() as i64,
+                    sampling_decision.decision as i64,
                 ));
 
                 span.attributes.push(KeyValue::new(
                     "_dd.p.dm",
-                    format!("-{}", sampling_decision.decision_maker.clone()),
+                    format!("-{}", sampling_decision.decision_maker),
                 ));
             }
         }
