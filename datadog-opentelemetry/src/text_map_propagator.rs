@@ -82,6 +82,9 @@ impl DatadogPropagator {
 }
 
 impl TextMapPropagator for DatadogPropagator {
+    /// Injects otel context delegating into [`DatadogCompositePropagator`]
+    /// Before delegating, it converts otel SpanContext into a DD SpanContext obtaining propagation data from
+    /// [`TraceRegistry`]
     fn inject_context(
         &self,
         cx: &opentelemetry::Context,
@@ -97,6 +100,7 @@ impl TextMapPropagator for DatadogPropagator {
         let trace_id = otel_span_context.trace_id().to_bytes();
         let propagation_data = self.registry.get_trace_propagation_data(trace_id);
 
+        // get Trace's sampling decision and if it is not present obtain it from otel's SpanContext flags
         let sampling = if let Some(sampling) = propagation_data.sampling_decision {
             Some(Sampling {
                 priority: Some(sampling.decision.into()),
@@ -129,6 +133,12 @@ impl TextMapPropagator for DatadogPropagator {
         self.inner.inject(dd_span_context, &mut injector)
     }
 
+    /// Extracts otel remote context delegating into [`DatadogCompositePropagator`]
+    /// Specific DD's propagation data is stored as a [`DatadogExtractData`] value in the otel Context to be later used
+    /// by [`DatadogSpanProcessor`] at the start of the root span
+    ///
+    /// [`DatadogCompositePropagator`]: dd_trace_propagation::DatadogCompositePropagator
+    /// [`DatadogSpanProcessor`]: crate::span_processor::DatadogSpanProcessor
     fn extract_with_context(
         &self,
         cx: &opentelemetry::Context,

@@ -219,6 +219,9 @@ impl DatadogSpanProcessor {
         }
     }
 
+    /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
+    /// - links generated during extraction are added to the root span as span links.
+    /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
     fn add_links_and_get_propagation_data(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
@@ -272,6 +275,7 @@ impl DatadogSpanProcessor {
         EMPTY_PROPAGATION_DATA
     }
 
+    /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root span
     fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
         let origin = trace.origin.unwrap_or_default();
 
@@ -329,6 +333,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             return;
         };
 
+        // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
             dd_trace::dd_error!(
