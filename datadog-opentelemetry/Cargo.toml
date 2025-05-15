@@ -11,7 +11,7 @@ description.workspace = true
 [dependencies]
 # Workspace dependencies
 dd-trace = { path = "../dd-trace" }
-dd-trace-propagation = { path = "../dd-trace-propagation" }
+dd-trace-propagation = { path = "../dd-trace-propagation", features = ["opentelemetry"] }
 
 # External dependencies
 futures = { workspace = true }

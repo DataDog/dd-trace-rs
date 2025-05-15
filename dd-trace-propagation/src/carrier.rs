@@ -39,6 +39,24 @@ impl<S: std::hash::BuildHasher> Extractor for HashMap<String, String, S> {
     }
 }
 
+#[cfg(feature = "opentelemetry")]
+impl Extractor for &dyn opentelemetry::propagation::Extractor {
+    fn get(&self, key: &str) -> Option<&str> {
+        opentelemetry::propagation::Extractor::get(*self, key)
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        opentelemetry::propagation::Extractor::keys(*self)
+    }
+}
+
+#[cfg(feature = "opentelemetry")]
+impl Injector for &mut dyn opentelemetry::propagation::Injector {
+    fn set(&mut self, key: &str, value: String) {
+        opentelemetry::propagation::Injector::set(*self, key, value);
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

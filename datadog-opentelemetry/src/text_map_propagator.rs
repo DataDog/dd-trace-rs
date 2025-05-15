@@ -10,7 +10,6 @@ use opentelemetry::{
 };
 
 use dd_trace_propagation::{
-    carrier::{Extractor as DdExtractor, Injector as DdInjector},
     context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
@@ -18,30 +17,6 @@ use dd_trace_propagation::{
 use crate::TraceRegistry;
 
 const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags::new(0x02);
-
-struct ExtractorWrapper<'a> {
-    extractor: &'a dyn opentelemetry::propagation::Extractor,
-}
-
-impl DdExtractor for ExtractorWrapper<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.extractor.get(key)
-    }
-
-    fn keys(&self) -> Vec<&str> {
-        self.extractor.keys()
-    }
-}
-
-struct InjectorWrapper<'a> {
-    injector: &'a mut dyn opentelemetry::propagation::Injector,
-}
-
-impl DdInjector for InjectorWrapper<'_> {
-    fn set(&mut self, key: &str, value: String) {
-        self.injector.set(key, value);
-    }
-}
 
 #[derive(Clone, Default)]
 pub struct DatadogExtractData {
@@ -110,7 +85,7 @@ impl TextMapPropagator for DatadogPropagator {
     fn inject_context(
         &self,
         cx: &opentelemetry::Context,
-        injector: &mut dyn opentelemetry::propagation::Injector,
+        mut injector: &mut dyn opentelemetry::propagation::Injector,
     ) {
         let span = cx.span();
         let otel_span_context = span.span_context();
@@ -137,6 +112,7 @@ impl TextMapPropagator for DatadogPropagator {
         };
 
         // otel tracestate only contains 'additional_values'
+        // TODO: optimize Tracestate conversion
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let dd_span_context = &mut SpanContext {
@@ -150,8 +126,7 @@ impl TextMapPropagator for DatadogPropagator {
             tracestate,
         };
 
-        self.inner
-            .inject(dd_span_context, &mut InjectorWrapper { injector })
+        self.inner.inject(dd_span_context, &mut injector)
     }
 
     fn extract_with_context(
@@ -160,7 +135,7 @@ impl TextMapPropagator for DatadogPropagator {
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
         self.inner
-            .extract(&ExtractorWrapper { extractor })
+            .extract(&extractor)
             .map(|dd_span_context| {
                 let trace_flags = extract_trace_flags(&dd_span_context);
                 let trace_state = extract_trace_state_from_context(&dd_span_context);

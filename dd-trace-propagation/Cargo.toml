@@ -19,10 +19,13 @@ serde = { version = "1.0", default-features = false, optional = true, features =
 serde_json = { version = "1.0", default-features = false, optional = true, features = ["alloc"] }
 thiserror = { version = "1.0", default-features = false}
 
+opentelemetry = { workspace = true, optional = true }
+
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 assert_unordered = "0.3"
 
 [features]
-default = []
+default = ["opentelemetry"]
 serde_config = ["serde", "serde_json"]
+opentelemetry = ["dep:opentelemetry"]
