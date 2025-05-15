@@ -1,21 +1,24 @@
-name: Required checks pass
-permissions:
-  actions: read
-  checks: read
+name: Check Pull Request CI Status
+
 on:
-    pull_request:
-    push:
-      branches:
-        - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  checks: read
+  statuses: read
+  actions: read
+
 jobs:
-    allchecks:
-        runs-on: ubuntu-latest
-        permissions:
-            checks: read
-            contents: read
-        steps:
-          - uses: wechuli/allcheckspassed@f4669eca31dbad8fea1a0eb91c419d02c5b42200 # v1.1.1
-            with:
-                delay: '3'
-                retries: '30'
-                polling_interval: '1'
+  ensure-ci-success:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Ensure CI Success
+        uses: DataDog/ensure-ci-success@727e7fe39ae2e1ce7ea336ec85a7369ab0731754 # v2.1.1
+        with:
+          # Checks for 15mn (30 * 30s)
+          max-retries: 30
+          polling-interval-seconds: 30
