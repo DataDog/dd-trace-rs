@@ -10,7 +10,7 @@ use opentelemetry::{
 };
 
 use dd_trace_propagation::{
-    carrier::{Extractor, Injector},
+    carrier::{Extractor as DdExtractor, Injector as DdInjector},
     context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
@@ -23,7 +23,7 @@ struct ExtractorWrapper<'a> {
     extractor: &'a dyn opentelemetry::propagation::Extractor,
 }
 
-impl Extractor for ExtractorWrapper<'_> {
+impl DdExtractor for ExtractorWrapper<'_> {
     fn get(&self, key: &str) -> Option<&str> {
         self.extractor.get(key)
     }
@@ -37,7 +37,7 @@ struct InjectorWrapper<'a> {
     injector: &'a mut dyn opentelemetry::propagation::Injector,
 }
 
-impl Injector for InjectorWrapper<'_> {
+impl DdInjector for InjectorWrapper<'_> {
     fn set(&mut self, key: &str, value: String) {
         self.injector.set(key, value);
     }
@@ -115,7 +115,11 @@ impl TextMapPropagator for DatadogPropagator {
         let span = cx.span();
         let otel_span_context = span.span_context();
 
-        let trace_id = span.span_context().trace_id().to_bytes();
+        if !otel_span_context.is_valid() {
+            return;
+        }
+
+        let trace_id = otel_span_context.trace_id().to_bytes();
         let propagation_data = self.registry.get_trace_propagation_data(trace_id);
 
         let sampling = if let Some(sampling) = propagation_data.sampling_decision {
@@ -136,7 +140,7 @@ impl TextMapPropagator for DatadogPropagator {
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let dd_span_context = &mut SpanContext {
-            trace_id: u128::from_be_bytes(otel_span_context.trace_id().to_bytes()),
+            trace_id: u128::from_be_bytes(trace_id),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
             is_remote: otel_span_context.is_remote(),
             links: vec![], // links don't affect injection
@@ -146,9 +150,8 @@ impl TextMapPropagator for DatadogPropagator {
             tracestate,
         };
 
-        let _ = &self
-            .inner
-            .inject(dd_span_context, &mut InjectorWrapper { injector });
+        self.inner
+            .inject(dd_span_context, &mut InjectorWrapper { injector })
     }
 
     fn extract_with_context(
