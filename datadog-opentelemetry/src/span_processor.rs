@@ -275,7 +275,8 @@ impl DatadogSpanProcessor {
         EMPTY_PROPAGATION_DATA
     }
 
-    /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root span
+    /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root
+    /// span
     fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
         let origin = trace.origin.unwrap_or_default();
 
