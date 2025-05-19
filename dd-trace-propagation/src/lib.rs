@@ -818,6 +818,15 @@ pub mod tests {
     }
 
     #[test]
+    fn test_new_filter_empty_list_propagators() {
+        let extract = Some(vec![]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        assert_eq!(propagator.extractors.len(), 0);
+    }
+
+    #[test]
     fn test_new_no_propagators() {
         let extract = Some(vec![TracePropagationStyle::None]);
         let config = get_config(extract, None);

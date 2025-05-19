@@ -56,16 +56,6 @@ impl DatadogExtractData {
     }
 }
 
-impl std::fmt::Display for DatadogExtractData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "origin: {:?}, tags: {:?}",
-            self.origin, self.propagation_tags
-        )
-    }
-}
-
 #[derive(Debug)]
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator,

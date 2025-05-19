@@ -45,9 +45,8 @@ pub enum TracePropagationStyle {
 impl TracePropagationStyle {
     fn from_tags(tags: Option<Vec<String>>) -> Option<Vec<TracePropagationStyle>> {
         match tags {
-            Some(tags) if !tags.is_empty() => {
-                let styles = tags
-                    .iter()
+            Some(tags) if !tags.is_empty() => Some(
+                tags.iter()
                     .filter_map(|value| match TracePropagationStyle::from_str(value) {
                         Ok(style) => Some(style),
                         Err(err) => {
@@ -55,14 +54,8 @@ impl TracePropagationStyle {
                             None
                         }
                     })
-                    .collect::<Vec<TracePropagationStyle>>();
-
-                if styles.is_empty() {
-                    None
-                } else {
-                    Some(styles)
-                }
-            }
+                    .collect::<Vec<TracePropagationStyle>>(),
+            ),
             Some(_) => None,
             None => None,
         }
@@ -550,7 +543,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), None);
+        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
@@ -612,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn test_propagation_config_empty_extract() {
+    fn test_propagation_config_incorrect_extract() {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
@@ -633,6 +626,55 @@ mod tests {
             ])
             .as_deref()
         );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![]).as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+        assert!(config.trace_propagation_extract_first());
+    }
+    #[test]
+    fn test_propagation_config_empty_extract() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", ""),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", ""),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "tracecontext"),
+                ("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![]).as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+        assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_config_not_present_extract() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "tracecontext"),
+                ("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_propagation_style(), None);
         assert_eq!(config.trace_propagation_style_extract(), None);
         assert_eq!(
             config.trace_propagation_style_inject(),
