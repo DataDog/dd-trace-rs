@@ -98,3 +98,27 @@ jobs:
       - run: cargo install cross || true
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
       - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "datadog_test_agent::"
+
+  build-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dd-trace-rs
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Pack dd-trace-rs
+        run: mkdir -p ./binaries/dd-trace-rs && cp -r dd-trace dd-trace-sampling dd-trace-propagation datadog-opentelemetry Cargo.toml ./binaries/dd-trace-rs/
+      - name: Upload artifact
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: system_tests_binaries
+          path: ./binaries/**/*
+
+  parametric:
+    needs:
+      - build-artifacts
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@igor/rust-the-germ
+    secrets: inherit
+    with:
+      library: rust
+      binaries_artifact: system_tests_binaries
+      job_count: 2
+      job_matrix: '[1,2]'
