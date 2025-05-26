@@ -122,4 +122,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
+      ref: igor/rust-the-germ
       _experimental_runs_on: '{ "group": "Large Runner Shared Public" }'
