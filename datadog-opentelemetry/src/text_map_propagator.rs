@@ -39,7 +39,7 @@ impl DatadogExtractData {
         let propagation_tags = tags
             .iter()
             .filter_map(|tag| {
-                if tag.0.starts_with("_dd.p.") {
+                if tag.0.starts_with("_dd.") {
                     Some((tag.0.clone(), tag.1.clone()))
                 } else {
                     None
@@ -110,6 +110,15 @@ impl TextMapPropagator for DatadogPropagator {
         // TODO: optimize Tracestate conversion
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
+        let mut tags = HashMap::new();
+        if let Some(propagation_tags) = propagation_data.tags {
+            propagation_tags.iter().for_each(|(key, value)| {
+                if key.starts_with("_dd.p.") {
+                    tags.insert(key.clone(), value.clone());
+                }
+            });
+        }
+
         let dd_span_context = &mut SpanContext {
             trace_id: u128::from_be_bytes(trace_id),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
@@ -117,7 +126,7 @@ impl TextMapPropagator for DatadogPropagator {
             links: vec![], // links don't affect injection
             sampling,
             origin: propagation_data.origin,
-            tags: propagation_data.tags.unwrap_or_default(),
+            tags,
             tracestate,
         };
 
@@ -207,7 +216,10 @@ pub mod tests {
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };
 
-    use crate::{span_processor::TracePropagationData, TraceRegistry};
+    use crate::{
+        span_processor::TracePropagationData, text_map_propagator::DatadogExtractData,
+        TraceRegistry,
+    };
 
     use super::DatadogPropagator;
 
@@ -455,6 +467,26 @@ pub mod tests {
         assert_eq!(trace_state.get("dd"), None);
         assert_eq!(trace_state.get("foo").unwrap(), "1");
         assert_eq!(trace_state.get("bar").unwrap(), "2");
+    }
+
+    #[test]
+    fn extract_w3c_adds_dd_propagation_tags() {
+        let propagator = get_propagator(None);
+
+        let parent = "00-12345678901234567890123456789012-1234567890123456-01".to_string();
+        let state = "dd=s:2;o:rum;p:0123456789abcdef;t.dm:-4;".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let extract_data = context.get::<DatadogExtractData>().unwrap();
+
+        assert!(extract_data.propagation_tags.contains_key("_dd.parent_id"));
+        assert!(extract_data.propagation_tags.contains_key("_dd.p.dm"));
+        assert!(!extract_data.propagation_tags.contains_key("tracestate"));
     }
 
     #[test]
