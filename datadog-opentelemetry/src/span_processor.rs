@@ -320,6 +320,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) {
+        if !span.is_recording() || !span.span_context().is_valid() {
+            return;
+        }
+
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
 
