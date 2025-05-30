@@ -233,7 +233,7 @@ impl DatadogSpanProcessor {
 
         if let Some(DatadogExtractData {
             links,
-            propagation_tags,
+            internal_tags,
             origin,
             sampling,
         }) = parent_ctx.get::<DatadogExtractData>().cloned()
@@ -268,7 +268,7 @@ impl DatadogSpanProcessor {
             return TracePropagationData {
                 origin,
                 sampling_decision,
-                tags: Some(propagation_tags),
+                tags: Some(internal_tags),
             };
         }
 
