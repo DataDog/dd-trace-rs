@@ -22,7 +22,7 @@ const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags
 pub struct DatadogExtractData {
     pub links: Vec<SpanLink>,
     pub origin: Option<String>,
-    pub propagation_tags: HashMap<String, String>,
+    pub internal_tags: HashMap<String, String>,
     pub sampling: Option<Sampling>,
 }
 
@@ -36,7 +36,7 @@ impl DatadogExtractData {
             ..
         }: SpanContext,
     ) -> Self {
-        let propagation_tags = tags
+        let internal_tags = tags
             .iter()
             .filter_map(|tag| {
                 if tag.0.starts_with("_dd.") {
@@ -50,7 +50,7 @@ impl DatadogExtractData {
         DatadogExtractData {
             links,
             origin,
-            propagation_tags,
+            internal_tags,
             sampling,
         }
     }
@@ -484,9 +484,9 @@ pub mod tests {
 
         let extract_data = context.get::<DatadogExtractData>().unwrap();
 
-        assert!(extract_data.propagation_tags.contains_key("_dd.parent_id"));
-        assert!(extract_data.propagation_tags.contains_key("_dd.p.dm"));
-        assert!(!extract_data.propagation_tags.contains_key("tracestate"));
+        assert!(extract_data.internal_tags.contains_key("_dd.parent_id"));
+        assert!(extract_data.internal_tags.contains_key("_dd.p.dm"));
+        assert!(!extract_data.internal_tags.contains_key("tracestate"));
     }
 
     #[test]

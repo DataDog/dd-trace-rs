@@ -367,7 +367,7 @@ mod test {
             Some(SamplingPriority::AutoKeep)
         );
         assert_eq!(context.origin, Some("synthetics".to_string()));
-        println!("{:?}", context.tags);
+
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "0000000000004321");
         assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
