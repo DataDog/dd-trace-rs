@@ -485,7 +485,7 @@ impl ShouldSample for DatadogSampler {
             let decision = if parent_span_context.is_sampled() {
                 SamplingDecision::RecordAndSample
             } else {
-                SamplingDecision::Drop
+                SamplingDecision::RecordOnly
             };
 
             return SamplingResult {
@@ -518,10 +518,10 @@ impl ShouldSample for DatadogSampler {
 
             // First check if the span should be sampled according to the rule
             if !rule.sample(trace_id) {
-                decision = SamplingDecision::Drop;
+                decision = SamplingDecision::RecordOnly;
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
-                decision = SamplingDecision::Drop;
+                decision = SamplingDecision::RecordOnly;
                 rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
             }
         } else {
@@ -534,7 +534,7 @@ impl ShouldSample for DatadogSampler {
 
                 // Check if the service sampler decides to drop
                 if !sampler.sample(trace_id) {
-                    decision = SamplingDecision::Drop;
+                    decision = SamplingDecision::RecordOnly;
                 }
             } else {
                 // Default sample rate, should never happen in practice if agent provides rates
@@ -1170,7 +1170,7 @@ mod tests {
         );
 
         // Should inherit the sampling decision from parent
-        assert_eq!(result_not_sampled.decision, SamplingDecision::Drop);
+        assert_eq!(result_not_sampled.decision, SamplingDecision::RecordOnly);
         assert!(result_not_sampled.attributes.is_empty());
     }
 
@@ -1272,7 +1272,7 @@ mod tests {
         // Expect Drop because service_key will be "service:other-service,env:prod" -> rate 0.0
         assert_eq!(
             result_no_sample.decision,
-            SamplingDecision::Drop,
+            SamplingDecision::RecordOnly,
             "Span for other-service/prod should be dropped"
         );
     }
