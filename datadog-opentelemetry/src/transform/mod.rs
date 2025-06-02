@@ -269,7 +269,7 @@ fn otel_span_id_to_dd_id(span_id: opentelemetry::SpanId) -> u64 {
 }
 
 // Returns (low, high)
-fn otel_trace_id_to_dd_id(trace_id: opentelemetry::TraceId) -> (u64, u64) {
+pub(crate) fn otel_trace_id_to_dd_id(trace_id: opentelemetry::TraceId) -> (u64, u64) {
     let trace_id: [u8; 16] = trace_id.to_bytes();
     // Unwrap ok, we take the lower 8 bytes and upper 8 bytes of a 16 byte array
     let lower_half = u64::from_be_bytes(trace_id[8..16].try_into().unwrap());

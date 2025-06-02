@@ -14,7 +14,10 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::trace::SpanData;
 
-use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
+use crate::{
+    span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
+    transform::otel_trace_id_to_dd_id,
+};
 
 #[derive(Debug)]
 struct Trace {
@@ -287,6 +290,15 @@ impl DatadogSpanProcessor {
                         span.attributes
                             .push(KeyValue::new(key.clone(), value.clone()))
                     });
+                }
+
+                // remote span_context should have _dd.p.tid tag added in the extraction phase
+                if !span.span_context.is_remote() {
+                    let (_, higher) = otel_trace_id_to_dd_id(span.span_context.trace_id());
+                    if higher > 0 {
+                        span.attributes
+                            .push(KeyValue::new("_dd.p.tid", format!("{:016x}", higher)));
+                    }
                 }
             }
 
