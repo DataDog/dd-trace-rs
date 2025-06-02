@@ -292,7 +292,7 @@ impl DatadogSpanProcessor {
                     });
                 }
 
-                // remote span_context should have _dd.p.tid tag added in the extraction phase
+                // _dd.p.tid is handled by propagation logic if span_context is remote
                 if !span.span_context.is_remote() {
                     let (_, higher) = otel_trace_id_to_dd_id(span.span_context.trace_id());
                     if higher > 0 {
