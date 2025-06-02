@@ -3,31 +3,51 @@
 
 use std::{
     collections::{hash_map, HashMap},
+    str::FromStr,
     sync::{Arc, RwLock},
 };
 
-use opentelemetry::global::ObjectSafeSpan;
+use opentelemetry::{
+    global::ObjectSafeSpan,
+    trace::{SpanContext, TraceContextExt, TraceState},
+    KeyValue, SpanId, TraceFlags, TraceId,
+};
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 
-use crate::span_exporter::DatadogExporter;
+use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
 
+#[derive(Debug)]
 struct Trace {
     root_span_id: [u8; 8],
     /// Root span will always be the first span in this vector if it is present
     finished_spans: Vec<SpanData>,
     open_span_count: usize,
-    #[allow(dead_code)]
+
     sampling_decision: Option<SamplingDecision>,
+    origin: Option<String>,
+    tags: Option<HashMap<String, String>>,
 }
 
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-struct SamplingDecision {
-    decision: i8,
-    decision_maker: i8,
+#[derive(Clone, Copy, Debug)]
+pub struct SamplingDecision {
+    pub decision: i8,
+    pub decision_maker: i8,
 }
 
+pub(crate) struct TracePropagationData {
+    pub sampling_decision: Option<SamplingDecision>,
+    pub origin: Option<String>,
+    pub tags: Option<HashMap<String, String>>,
+}
+
+const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
+    origin: None,
+    sampling_decision: None,
+    tags: None,
+};
+
+#[derive(Debug)]
 struct InnerTraceRegistry {
     registry: HashMap<[u8; 16], Trace>,
 }
@@ -40,7 +60,11 @@ impl InnerTraceRegistry {
         &mut self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-        sampling_decision: Option<SamplingDecision>,
+        TracePropagationData {
+            origin,
+            sampling_decision,
+            tags,
+        }: TracePropagationData,
     ) {
         self.registry
             .entry(trace_id)
@@ -49,6 +73,8 @@ impl InnerTraceRegistry {
                 finished_spans: Vec::new(),
                 open_span_count: 0,
                 sampling_decision,
+                origin,
+                tags,
             })
             .open_span_count += 1;
     }
@@ -92,12 +118,29 @@ impl InnerTraceRegistry {
                 finished_spans: vec![span_data],
                 open_span_count: 0,
                 sampling_decision: None,
+                origin: None,
+                tags: None,
             })
+        }
+    }
+
+    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
+        match self.registry.get(&trace_id) {
+            Some(trace) => TracePropagationData {
+                sampling_decision: trace.sampling_decision,
+                origin: trace.origin.clone(),
+                tags: trace.tags.clone(),
+            },
+            None => TracePropagationData {
+                sampling_decision: None,
+                origin: None,
+                tags: None,
+            },
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// A registry of traces that are currently running
 ///
 /// This registry maintains the following information:
@@ -115,7 +158,7 @@ pub(crate) struct TraceRegistry {
 }
 
 impl TraceRegistry {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(InnerTraceRegistry {
                 registry: HashMap::new(),
@@ -124,17 +167,17 @@ impl TraceRegistry {
     }
 
     /// Register a new span with the given trace ID and span ID.
-    fn register_span(
+    pub fn register_span(
         &self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-        sampling_decision: Option<SamplingDecision>,
+        propagation_data: TracePropagationData,
     ) {
         let mut inner = self
             .inner
             .write()
             .expect("Failed to acquire lock on trace registry");
-        inner.register_span(trace_id, span_id, sampling_decision);
+        inner.register_span(trace_id, span_id, propagation_data);
     }
 
     /// Finish a span with the given trace ID and span data.
@@ -147,10 +190,19 @@ impl TraceRegistry {
             .expect("Failed to acquire lock on trace registry");
         inner.finish_span(trace_id, span_data)
     }
+
+    pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
+        let inner = self
+            .inner
+            .read()
+            .expect("Failed to acquire lock on trace registry");
+
+        inner.get_trace_propagation_data(trace_id)
+    }
 }
 
 pub(crate) struct DatadogSpanProcessor {
-    registry: TraceRegistry,
+    registry: Arc<TraceRegistry>,
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
 }
@@ -162,12 +214,110 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 }
 
 impl DatadogSpanProcessor {
-    pub(crate) fn new(config: dd_trace::Config, resource: Arc<RwLock<Resource>>) -> Self {
+    pub(crate) fn new(
+        config: dd_trace::Config,
+        registry: Arc<TraceRegistry>,
+        resource: Arc<RwLock<Resource>>,
+    ) -> Self {
         Self {
-            registry: TraceRegistry::new(),
+            registry,
             span_exporter: DatadogExporter::new(config),
             resource,
         }
+    }
+
+    /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
+    /// - links generated during extraction are added to the root span as span links.
+    /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
+    fn add_links_and_get_propagation_data(
+        &self,
+        span: &mut opentelemetry_sdk::trace::Span,
+        parent_ctx: &opentelemetry::Context,
+    ) -> TracePropagationData {
+        if !parent_ctx.span().span_context().is_remote() {
+            return EMPTY_PROPAGATION_DATA;
+        }
+
+        if let Some(DatadogExtractData {
+            links,
+            internal_tags,
+            origin,
+            sampling,
+        }) = parent_ctx.get::<DatadogExtractData>().cloned()
+        {
+            links.iter().for_each(|link| {
+                let link_ctx = SpanContext::new(
+                    TraceId::from(link.trace_id as u128),
+                    SpanId::from(link.span_id),
+                    TraceFlags::new(link.flags.unwrap_or_default() as u8),
+                    false, // TODO: dd SpanLink doesn't have the remote field...
+                    link.tracestate
+                        .as_ref()
+                        .map(|ts| TraceState::from_str(ts).unwrap_or_default())
+                        .unwrap_or_default(),
+                );
+
+                let attributes = match &link.attributes {
+                    Some(attributes) => attributes
+                        .iter()
+                        .map(|(key, value)| KeyValue::new(key.clone(), value.clone()))
+                        .collect(),
+                    None => vec![],
+                };
+
+                span.add_link(link_ctx, attributes);
+            });
+
+            let sampling_decision = sampling.map(|sampling| SamplingDecision {
+                decision: sampling.priority.unwrap_or_default() as i8,
+                decision_maker: sampling.mechanism.unwrap_or_default() as i8,
+            });
+            return TracePropagationData {
+                origin,
+                sampling_decision,
+                tags: Some(internal_tags),
+            };
+        }
+
+        EMPTY_PROPAGATION_DATA
+    }
+
+    /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root
+    /// span
+    fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
+        let origin = trace.origin.unwrap_or_default();
+
+        for span in trace.finished_spans.iter_mut() {
+            if span.span_context.span_id().to_bytes() == trace.root_span_id {
+                if let Some(ref tags) = trace.tags {
+                    tags.iter().for_each(|(key, value)| {
+                        span.attributes
+                            .push(KeyValue::new(key.clone(), value.clone()))
+                    });
+                }
+            }
+
+            if !origin.is_empty() {
+                span.attributes
+                    .push(KeyValue::new("_dd.origin", origin.clone()));
+            }
+
+            // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted?
+            // they shouldn't be overrided
+            if let Some(sampling_decision) = trace.sampling_decision {
+                span.attributes.push(KeyValue::new(
+                    "_sampling_priority_v1",
+                    sampling_decision.decision as i64,
+                ));
+
+                span.attributes.push(KeyValue::new(
+                    "_dd.p.dm",
+                    format!("-{}", sampling_decision.decision_maker),
+                ));
+            }
+        }
+
+        trace.finished_spans
     }
 }
 
@@ -175,22 +325,28 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_start(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
-        _parent_ctx: &opentelemetry::Context,
+        parent_ctx: &opentelemetry::Context,
     ) {
+        if !span.is_recording() || !span.span_context().is_valid() {
+            return;
+        }
+
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
-        self.registry.register_span(trace_id, span_id, None);
+
+        let propagation_data = self.add_links_and_get_propagation_data(span, parent_ctx);
+        self.registry
+            .register_span(trace_id, span_id, propagation_data);
     }
 
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
-        let Some(Trace {
-            finished_spans: trace_chunk,
-            ..
-        }) = self.registry.finish_span(trace_id, span)
-        else {
+        let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
+
+        // Add propagation data before exporting the trace
+        let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
             dd_trace::dd_error!(
                 "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",

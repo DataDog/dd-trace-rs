@@ -3,7 +3,7 @@
 
 #[cfg(not(windows))]
 mod datadog_test_agent {
-    use datadog_opentelemetry::make_tracer;
+    use datadog_opentelemetry::make_test_tracer;
     use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
     use opentelemetry::trace::{
         SamplingDecision, SamplingResult, SpanBuilder, TraceState, TracerProvider,
@@ -34,7 +34,7 @@ mod datadog_test_agent {
         let mut config = dd_trace::Config::builder();
         config.set_trace_agent_url(url.to_string().into());
 
-        let tracer_provider = make_tracer(
+        let tracer_provider = make_test_tracer(
             config.build(),
             opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         );

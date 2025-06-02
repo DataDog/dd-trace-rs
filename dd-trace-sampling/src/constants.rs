@@ -25,6 +25,7 @@ pub mod numeric {
     pub const MAX_UINT_64BITS: u64 = u64::MAX;
 }
 
+#[allow(unused)]
 /// Attribute keys used in tracing
 pub mod attr {
     /// Service name attribute key
@@ -35,6 +36,7 @@ pub mod attr {
     pub const RESOURCE_TAG: &str = "resource.name";
 }
 
+#[allow(unused)]
 /// Rule provenance categories
 pub mod provenance {
     /// Customer-defined rules

@@ -1,33 +1,33 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
-
 use crate::context::{SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
+use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
-use trace_propagation_style::TracePropagationStyle;
+use dd_trace::{configuration::TracePropagationStyle, Config};
 use tracecontext::TRACESTATE_KEY;
 
-mod carrier;
-mod config;
-mod context;
+pub mod carrier;
+pub mod config;
+pub mod context;
 mod datadog;
 mod error;
-mod trace_propagation_style;
-mod tracecontext;
+pub mod trace_propagation_style;
+pub mod tracecontext;
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
     fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector);
+    fn keys(&self) -> &[String];
 }
 
+#[derive(Debug)]
 pub struct DatadogCompositePropagator {
+    #[allow(dead_code)]
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
-
-    #[allow(dead_code)]
-    config: Arc<config::Config>,
+    keys: Vec<String>,
 }
 
 #[allow(clippy::never_loop)]
@@ -48,41 +48,46 @@ impl Propagator for DatadogCompositePropagator {
             .iter()
             .for_each(|propagator| propagator.inject(context, carrier));
     }
+
+    fn keys(&self) -> &[String] {
+        &self.keys
+    }
 }
 
 impl DatadogCompositePropagator {
     #[must_use]
-    pub fn new(config: Arc<config::Config>) -> Self {
-        let mut num_propagators = config.get_extractors().len();
-        if config.trace_propagation_extract_first {
+    pub fn new(config: &Config) -> Self {
+        let extractors = get_extractors(config);
+        let mut num_propagators = extractors.len();
+        if config.trace_propagation_extract_first() {
             num_propagators = 1;
         };
 
-        let extractors: Vec<TracePropagationStyle> = config
-            .get_extractors()
+        let extractors: Vec<TracePropagationStyle> = extractors
             .iter()
             .take(num_propagators)
-            .filter_map(|style| match style {
-                TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
-                TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
-                _ => None,
-            })
+            .filter(|style| **style != TracePropagationStyle::None)
+            .copied()
             .collect();
 
-        let injectors: Vec<TracePropagationStyle> = config
-            .get_injectors()
+        let injectors: Vec<TracePropagationStyle> = get_injectors(config)
             .iter()
-            .filter_map(|style| match style {
-                TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
-                TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
-                _ => None,
-            })
+            .filter(|style| **style != TracePropagationStyle::None)
+            .copied()
             .collect();
+
+        let keys = extractors.iter().fold(Vec::new(), |mut keys, extractor| {
+            extractor
+                .keys()
+                .iter()
+                .for_each(|key| keys.push(key.clone()));
+            keys
+        });
 
         Self {
             extractors,
             injectors,
-            config,
+            keys,
         }
     }
 
@@ -304,11 +309,12 @@ pub mod tests {
                 #[test]
                 fn $name() {
                     let (styles, carrier, expected) = $value;
-                    let mut config = config::Config::default();
-                    config.trace_propagation_style_extract = Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]);
-                    config.trace_propagation_style_extract.clone_from(&styles);
+                    let mut builder = Config::builder();
+                    if let Some(styles) = styles {
+                        builder.set_trace_propagation_style_extract(styles.to_vec());
+                    }
 
-                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
+                    let propagator = DatadogCompositePropagator::new(&builder.build());
 
                     let context = propagator.extract(&carrier).unwrap_or_default();
 
@@ -339,14 +345,14 @@ pub mod tests {
     test_propagation_extract! {
         // Datadog Headers
         valid_datadog_default: (
-            None,
+            None::<Vec<TracePropagationStyle>>,
             VALID_DATADOG_HEADERS.clone(),
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -358,14 +364,14 @@ pub mod tests {
             }
         ),
         valid_datadog_no_priority: (
-            None,
+            None::<Vec<TracePropagationStyle>>,
             VALID_DATADOG_HEADERS_NO_PRIORITY.clone(),
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -379,7 +385,18 @@ pub mod tests {
         invalid_datadog: (
             Some(vec![TracePropagationStyle::Datadog]),
             INVALID_DATADOG_HEADERS.clone(),
-            SpanContext::default(),
+            SpanContext {
+                trace_id: 13_088_165_645_273_925_489,
+                span_id: 0,
+                sampling: None,
+                origin: None,
+                tags: HashMap::from([
+                    ("_dd.p.dm".to_string(), "-3".to_string())
+                ]),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
         ),
         valid_datadog_explicit_style: (
             Some(vec![TracePropagationStyle::Datadog]),
@@ -389,7 +406,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -466,14 +483,14 @@ pub mod tests {
         // todo: all of them
         // All Headers
         valid_all_headers: (
-            None,
+            None::<Vec<TracePropagationStyle>>,
             ALL_VALID_HEADERS.clone(),
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -504,7 +521,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -536,7 +553,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -563,7 +580,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -588,7 +605,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -611,7 +628,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -654,7 +671,7 @@ pub mod tests {
                 span_id: 10,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: None,
                 tags: HashMap::from([
@@ -675,7 +692,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Manual),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -709,7 +726,7 @@ pub mod tests {
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::UserKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Manual),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -737,7 +754,7 @@ pub mod tests {
                     origin: Some("rum".to_string()),
                     lower_order_trace_id: None,
                     propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
-                    additional_values: Some(vec!["congo=t61rcWkgMz".to_string()])
+                    additional_values: Some(vec![("congo".to_string(), "t61rcWkgMz".to_string())])
                 }),
             }
         ),
@@ -750,7 +767,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -776,43 +793,57 @@ pub mod tests {
         // todo: datadog_primary_match_tracecontext_dif_from_b3_b3multi_invalid
     }
 
+    fn get_config(
+        extract: Option<Vec<TracePropagationStyle>>,
+        _: Option<Vec<TracePropagationStyle>>,
+    ) -> Config {
+        let mut builder = Config::builder();
+        if let Some(extract) = extract {
+            builder.set_trace_propagation_style_extract(extract);
+        }
+
+        builder.build()
+    }
+
     #[test]
     fn test_new_filter_propagators() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ]),
-            ..Default::default()
-        };
-
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let extract = Some(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(&config);
 
         assert_eq!(propagator.extractors.len(), 2);
     }
 
     #[test]
+    fn test_new_filter_empty_list_propagators() {
+        let extract = Some(vec![]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        assert_eq!(propagator.extractors.len(), 0);
+    }
+
+    #[test]
     fn test_new_no_propagators() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![TracePropagationStyle::None]),
-            ..Default::default()
-        };
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let extract = Some(vec![TracePropagationStyle::None]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(&config);
 
         assert_eq!(propagator.extractors.len(), 0);
     }
 
     #[test]
     fn test_extract_available_contexts() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ]),
-            ..Default::default()
-        };
+        let extract = Some(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+        let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let propagator = DatadogCompositePropagator::new(&config);
 
         let carrier = HashMap::from([
             (
@@ -845,12 +876,10 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts_no_contexts() {
-        let config = config::Config {
-            trace_propagation_style_extract: Some(vec![TracePropagationStyle::Datadog]),
-            ..Default::default()
-        };
+        let extract = Some(vec![TracePropagationStyle::Datadog]);
+        let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let propagator = DatadogCompositePropagator::new(&config);
 
         let carrier = HashMap::from([
             (
@@ -865,6 +894,43 @@ pub mod tests {
         let contexts = propagator.extract_available_contexts(&carrier);
 
         assert_eq!(contexts.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_first_datadog() {
+        let extract = vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ];
+
+        let mut builder = Config::builder();
+        builder.set_trace_propagation_style_extract(extract);
+        builder.set_trace_propagation_extract_first(true);
+
+        let config = builder.build();
+
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        let carrier = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-11111111111111110000000000000001-000000000000000f-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=s:2;p:0123456789abcdef,foo=1".to_string(),
+            ),
+            ("x-datadog-trace-id".to_string(), "1".to_string()),
+            ("x-datadog-parent-id".to_string(), "987654320".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.tid=1111111111111111".to_string(),
+            ),
+        ]);
+        let context = propagator.extract(&carrier).expect("context is extracted");
+
+        assert_eq!(context.span_id, 987654320);
+        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
     }
 
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
@@ -898,11 +964,13 @@ pub mod tests {
                 #[test]
                 fn $name() {
                     let (styles, context, expected) = $value;
-                    let mut config = config::Config::default();
 
-                    config.trace_propagation_style_inject.clone_from(&styles);
+                    let mut builder = Config::builder();
+                    if let Some(styles) = styles {
+                        builder.set_trace_propagation_style_inject(styles.to_vec());
+                    }
 
-                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
+                    let propagator = DatadogCompositePropagator::new(&builder.build());
 
                     let mut carrier = HashMap::new();
                     propagator.inject(context, &mut carrier);
@@ -980,13 +1048,13 @@ pub mod tests {
 
     test_propagation_inject! {
         inject_default_64bit_trace_id: (
-            None,
+            None::<Vec<TracePropagationStyle>>,
             &mut SpanContext {
                 trace_id: *TRACE_ID_LOWER_ORDER_BITS as u128,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1000,13 +1068,13 @@ pub mod tests {
         ),
 
         inject_default_128bit_trace_id: (
-            None,
+            None::<Vec<TracePropagationStyle>>,
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1026,7 +1094,7 @@ pub mod tests {
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: None,
+                    mechanism: Some(SamplingMechanism::Rule),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1118,5 +1186,58 @@ pub mod tests {
             },
             HashMap::<String,String>::new()
         ),
+    }
+
+    #[test]
+    fn test_default_keys() {
+        let extract = Some(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+        let config = get_config(extract, None);
+
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        assert_eq!(
+            vec![
+                "x-datadog-trace-id",
+                "x-datadog-origin",
+                "x-datadog-parent-id",
+                "x-datadog-sampling-priority",
+                "x-datadog-tags",
+                "traceparent",
+                "tracestate"
+            ],
+            propagator.keys()
+        )
+    }
+
+    #[test]
+    fn test_tracecontext_keys() {
+        let extract = Some(vec![TracePropagationStyle::TraceContext]);
+        let config = get_config(extract, None);
+
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        assert_eq!(vec!["traceparent", "tracestate"], propagator.keys())
+    }
+
+    #[test]
+    fn test_datadog_keys() {
+        let extract = Some(vec![TracePropagationStyle::Datadog]);
+        let config = get_config(extract, None);
+
+        let propagator = DatadogCompositePropagator::new(&config);
+
+        assert_eq!(
+            vec![
+                "x-datadog-trace-id",
+                "x-datadog-origin",
+                "x-datadog-parent-id",
+                "x-datadog-sampling-priority",
+                "x-datadog-tags",
+            ],
+            propagator.keys()
+        )
     }
 }

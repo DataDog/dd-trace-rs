@@ -15,10 +15,10 @@ use crate::{
     error::Error,
 };
 
-use dd_trace::{dd_debug, dd_error, dd_warn};
+use dd_trace::{dd_error, dd_warn};
 
 // Traceparent Keys
-const TRACEPARENT_KEY: &str = "traceparent";
+pub const TRACEPARENT_KEY: &str = "traceparent";
 pub const TRACESTATE_KEY: &str = "tracestate";
 
 const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
@@ -32,7 +32,7 @@ const INVALID_CHAR_REPLACEMENT: &str = "_";
 
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
-        Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
+        Regex::new(r"^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
             .expect("failed creating regex");
 
     // Origin value in tracestate replaces '~', ',' and ';' with '_"
@@ -44,6 +44,8 @@ lazy_static! {
 
     static ref TRACESTATE_TAG_VALUE_FILTER_REGEX: Regex =
         Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
+
+    static ref TRACECONTEXT_HEADER_KEYS: [String; 2] = [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()];
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -74,7 +76,6 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let mut tracestate_parts = vec![];
 
-    // TODO: is that UserKeep(2) correct as default value?
     let priority = context
         .sampling
         .and_then(|sampling| sampling.priority)
@@ -121,7 +122,9 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         .collect::<Vec<String>>()
         .join(TRACESTATE_DD_PAIR_SEPARATOR);
 
-    tracestate_parts.push(tags);
+    if !tags.is_empty() {
+        tracestate_parts.push(tags);
+    }
 
     let dd = tracestate_parts
         .into_iter()
@@ -134,7 +137,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         })
         .unwrap_or_default();
 
-    let parts = vec![format!("dd={dd}")];
+    let parts = vec![("dd".to_string(), dd)];
 
     let additional_parts = context
         .tracestate
@@ -148,7 +151,14 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         None => parts,
     };
 
-    carrier.set(TRACESTATE_KEY, all_parts.join(TRACESTATE_VALUES_SEPARATOR));
+    carrier.set(
+        TRACESTATE_KEY,
+        all_parts
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(TRACESTATE_VALUES_SEPARATOR),
+    );
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
@@ -161,7 +171,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
-
+            let mut mechanism = None;
             let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
                 if let Ok(tracestate) = Tracestate::from_str(ts) {
                     tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
@@ -190,9 +200,13 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                         &mut tags,
                     );
 
+                    mechanism = tags
+                        .get(DATADOG_SAMPLING_DECISION_KEY)
+                        .map(|sm| SamplingMechanism::from_str(sm).ok())
+                        .unwrap_or_default();
+
                     Some(tracestate)
                 } else {
-                    dd_debug!("No `dd` value found in tracestate");
                     None
                 }
             } else {
@@ -204,7 +218,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 span_id: traceparent.span_id,
                 sampling: Some(Sampling {
                     priority: Some(sampling_priority),
-                    mechanism: None,
+                    mechanism,
                 }),
                 origin,
                 tags,
@@ -256,14 +270,14 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     let flags = &captures[4];
     let tail = captures.get(5).map_or("", |m| m.as_str());
 
-    extract_version(version, tail)?;
-
     let trace_id = extract_trace_id(trace_id)?;
 
     let span_id = extract_span_id(span_id)?;
-
     let trace_flags = extract_trace_flags(flags)?;
-    let sampling_priority = SamplingPriority::from_flag(trace_flags as i8);
+
+    extract_version(version, tail, trace_flags)?;
+
+    let sampling_priority = SamplingPriority::from_flags(trace_flags & 0x1);
 
     Ok(Traceparent {
         sampling_priority,
@@ -272,7 +286,7 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     })
 }
 
-fn extract_version(version: &str, tail: &str) -> Result<(), Error> {
+fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Error> {
     match version {
         "ff" => {
             return Err(Error::extract(
@@ -281,9 +295,15 @@ fn extract_version(version: &str, tail: &str) -> Result<(), Error> {
             ))
         }
         "00" => {
-            if !tail.is_empty() {
+            if !tail.is_empty() && tail != "-" {
                 return Err(Error::extract(
                     "Traceparent with version `00` should contain only 4 values delimited by `-`",
+                    "traceparent",
+                ));
+            }
+            if trace_flags > 2 {
+                return Err(Error::extract(
+                    "invalid trace flags for version 00",
                     "traceparent",
                 ));
             }
@@ -329,12 +349,18 @@ fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
         .map_err(|_| Error::extract("Failed to decode trace_flags", "traceparent"))
 }
 
+pub fn keys() -> &'static [String] {
+    TRACECONTEXT_HEADER_KEYS.as_slice()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
+    use dd_trace::configuration::TracePropagationStyle;
+
     use crate::{
         context::{SamplingMechanism, SamplingPriority},
-        trace_propagation_style::TracePropagationStyle,
+        Propagator,
     };
 
     use super::*;
@@ -468,6 +494,83 @@ mod test {
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
+
+    #[test]
+    fn test_extract_traceparent_incorrect_trace_flags() {
+        let headers = HashMap::from([(
+            "traceparent".to_string(),
+            "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-1x".to_string(),
+        )]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator.extract(&headers);
+
+        assert!(context.is_none());
+    }
+
+    #[test]
+    fn test_extract_tracestate_incorrect_priority() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "01-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-02".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;s:incorrect".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
+
+        assert!(context.sampling.is_some());
+        assert!(context.sampling.unwrap().priority.is_some());
+        assert_eq!(
+            context.sampling.unwrap().priority.unwrap(),
+            SamplingPriority::AutoReject
+        );
+    }
+
+    #[test]
+    fn test_extract_tracestate_ows_handling() {
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd= \t p:00f067aa0ba902b7;s:1,foo=1,bar= \t 2".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let tracestate = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context")
+            .tracestate
+            .expect("tracestate should be extracted");
+
+        assert_eq!(
+            tracestate.sampling.unwrap().priority.unwrap(),
+            SamplingPriority::AutoKeep
+        );
+
+        assert!(tracestate.additional_values.is_some());
+        assert_eq!(
+            tracestate.additional_values.unwrap(),
+            vec![
+                ("foo".to_string(), "1".to_string()),
+                ("bar".to_string(), " \t 2".to_string()),
+            ]
+        );
     }
 
     #[test]

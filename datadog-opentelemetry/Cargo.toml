@@ -12,6 +12,7 @@ description.workspace = true
 # Workspace dependencies
 dd-trace = { path = "../dd-trace" }
 dd-trace-sampling = { path = "../dd-trace-sampling" }
+dd-trace-propagation = { path = "../dd-trace-propagation", features = ["opentelemetry"] }
 
 # External dependencies
 futures = { workspace = true }
@@ -27,6 +28,7 @@ tinybytes = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+assert_unordered = "0.3"
 
 # Libdatadog dependencies - change to a stable version once we release
 datadog-trace-utils = { workspace = true, features = ["test-utils"] }

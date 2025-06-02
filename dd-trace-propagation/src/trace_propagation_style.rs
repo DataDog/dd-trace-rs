@@ -1,63 +1,41 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt::Display, str::FromStr};
-
+use dd_trace::configuration::TracePropagationStyle;
 #[cfg(feature = "serde_config")]
 use serde::{Deserialize, Deserializer};
 
 use crate::{
     carrier::{Extractor, Injector},
     context::SpanContext,
-    datadog, tracecontext,
+    datadog, tracecontext, Propagator,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TracePropagationStyle {
-    Datadog,
-    TraceContext,
-    None,
-}
+const NONE_KEYS: [String; 0] = [];
 
-impl TracePropagationStyle {
-    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+impl Propagator for TracePropagationStyle {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         match self {
             Self::Datadog => datadog::extract(carrier),
             Self::TraceContext => tracecontext::extract(carrier),
-            _ => todo!(),
+            _ => None,
         }
     }
 
-    pub fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
+    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
         match self {
             Self::Datadog => datadog::inject(context, carrier),
             Self::TraceContext => tracecontext::inject(context, carrier),
-            _ => todo!(),
+            _ => {}
         }
     }
-}
 
-impl FromStr for TracePropagationStyle {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "datadog" => Ok(TracePropagationStyle::Datadog),
-            "tracecontext" => Ok(TracePropagationStyle::TraceContext),
-            "none" => Ok(TracePropagationStyle::None),
-            _ => Err(format!("Unknown trace propagation style: {s}")),
+    fn keys(&self) -> &[String] {
+        match self {
+            Self::Datadog => datadog::keys(),
+            Self::TraceContext => tracecontext::keys(),
+            _ => &NONE_KEYS,
         }
-    }
-}
-
-impl Display for TracePropagationStyle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let style = match self {
-            TracePropagationStyle::Datadog => "datadog",
-            TracePropagationStyle::TraceContext => "tracecontext",
-            TracePropagationStyle::None => "none",
-        };
-        write!(f, "{style}")
     }
 }
 
@@ -69,6 +47,8 @@ pub fn deserialize_trace_propagation_style<'de, D>(
 where
     D: Deserializer<'de>,
 {
+    use std::str::FromStr;
+
     let s: String = String::deserialize(deserializer)?;
 
     if s.is_empty() {

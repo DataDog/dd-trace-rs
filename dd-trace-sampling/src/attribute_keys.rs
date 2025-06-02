@@ -122,6 +122,7 @@ impl AttributeIndices {
         self.0[key.idx] = val as u32;
     }
 
+    #[allow(unused)]
     pub fn get(&self, key: AttributeKey) -> Option<usize> {
         let val = self.0[key.idx];
         if val == u32::MAX {
@@ -133,6 +134,7 @@ impl AttributeIndices {
 }
 
 impl AttributeIndices {
+    #[allow(unused)]
     pub fn from_attribute_slice(attributes: &[opentelemetry::KeyValue]) -> Self {
         let mut s = Self::default();
         for (i, KeyValue { key, .. }) in attributes.iter().enumerate() {
