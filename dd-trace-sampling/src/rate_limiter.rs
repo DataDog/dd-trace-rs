@@ -7,7 +7,7 @@ use std::time::Instant;
 
 /// A token bucket rate limiter implementation
 #[derive(Clone)]
-pub struct RateLimiter {
+pub(crate) struct RateLimiter {
     /// Rate limit value that doesn't need to be protected by mutex
     rate_limit: i32,
 

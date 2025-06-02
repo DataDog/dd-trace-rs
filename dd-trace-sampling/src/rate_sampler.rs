@@ -9,7 +9,7 @@ use numeric::{KNUTH_FACTOR, MAX_UINT_64BITS};
 
 /// Keeps (100 * `sample_rate`)% of the traces randomly.
 #[derive(Clone)]
-pub struct RateSampler {
+pub(crate) struct RateSampler {
     sample_rate: f64,
     sampling_id_threshold: u64,
 }

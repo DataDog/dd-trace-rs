@@ -12,6 +12,4 @@ pub(crate) mod sem_convs;
 pub(crate) mod utils;
 
 // Re-export key public types
-pub use datadog_sampler::{DatadogSampler, RuleProvenance, SamplingRule};
-pub use rate_limiter::RateLimiter;
-pub use rate_sampler::RateSampler;
+pub use datadog_sampler::{DatadogSampler, SamplingRule};
