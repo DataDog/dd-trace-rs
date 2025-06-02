@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::constants::{
-    self, sampling_mechanism_to_priorities, SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY
+    self, sampling_mechanism_to_priorities, SamplingMechanism, KEEP_PRIORITY_INDEX,
+    REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY,
+    SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
 
 // Import the attr constants
@@ -656,7 +658,10 @@ mod tests {
             Some(pattern::NO_RULE.to_string()), // Empty service string
             Some(pattern::NO_RULE.to_string()), // Empty name string
             Some(pattern::NO_RULE.to_string()), // Empty resource string
-            Some(HashMap::from([(pattern::NO_RULE.to_string(), pattern::NO_RULE.to_string())])), // Empty tag
+            Some(HashMap::from([(
+                pattern::NO_RULE.to_string(),
+                pattern::NO_RULE.to_string(),
+            )])), // Empty tag
             None,
         );
 
