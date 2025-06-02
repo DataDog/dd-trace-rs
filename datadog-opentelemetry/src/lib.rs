@@ -48,7 +48,7 @@ pub fn init_datadog(
     );
 
     // Create a shared resource for both the sampler and span processor
-    let resource = Resource::builder().build();
+    let resource = Resource::builder_empty().build();
     let resource_arc = Arc::new(RwLock::new(resource));
 
     // Create the sampler with the shared resource (now passing the Arc directly)
@@ -60,10 +60,7 @@ pub fn init_datadog(
     let tracer_provider = tracer_provider_builder
         .with_span_processor(span_processor)
         .with_sampler(sampler)
-        // TODO: hookup additional components
-        // .with_id_generator(id_generator)
         .with_id_generator(trace_id::TraceidGenerator)
-        // TODO: hookup additional components
         .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     tracer_provider

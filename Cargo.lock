@@ -821,8 +821,6 @@ name = "dd-trace"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "dd-trace-sampling",
- "opentelemetry_sdk",
  "serde",
  "serde_json",
  "uuid",
@@ -846,14 +844,11 @@ dependencies = [
 name = "dd-trace-sampling"
 version = "0.0.1"
 dependencies = [
- "lazy_static",
  "lru",
  "opentelemetry",
  "opentelemetry-semantic-conventions 0.15.0",
  "opentelemetry_sdk",
  "regex",
- "serde",
- "serde_json",
 ]
 
 [[package]]

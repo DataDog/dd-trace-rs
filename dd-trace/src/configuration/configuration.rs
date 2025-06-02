@@ -3,7 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::{borrow::Cow, ops::Deref, str::FromStr, sync::OnceLock};
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
@@ -127,7 +126,8 @@ pub struct Config {
     dogstatsd_agent_url: Cow<'static, str>,
 
     // # Sampling
-    trace_sampling_rules: Option<Vec<SamplingRuleConfig>>,
+    trace_sampling_rules: Vec<SamplingRuleConfig>,
+
     /// Maximum number of spans to sample per second, per process
     /// if this is not set, the datadog Agent controls rate limiting
     /// Only applied if trace_sampling_rules are used
@@ -192,7 +192,7 @@ impl Config {
             // Populate from parsed_sampling_rules_config or defaults
             trace_sampling_rules: parsed_sampling_rules_config
                 .map(|psc| psc.rules)
-                .or(default.trace_sampling_rules),
+                .unwrap_or(default.trace_sampling_rules),
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .or(default.trace_rate_limit),
 
@@ -250,7 +250,7 @@ impl Config {
         &self.dogstatsd_agent_url
     }
 
-    pub fn trace_sampling_rules(&self) -> Option<&Vec<SamplingRuleConfig>> {
+    pub fn trace_sampling_rules(&self) -> &[SamplingRuleConfig] {
         self.trace_sampling_rules.as_ref()
     }
 
@@ -269,31 +269,6 @@ impl Config {
     #[cfg(feature = "test-utils")]
     pub fn __internal_wait_agent_info_ready(&self) -> bool {
         self.wait_agent_info_ready
-    }
-
-    /// Builds a DatadogSampler based on the loaded configuration.
-    pub fn build_datadog_sampler(
-        &self,
-        resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
-    ) -> dd_trace_sampling::DatadogSampler {
-        let rules: Option<Vec<dd_trace_sampling::SamplingRule>> =
-            self.trace_sampling_rules.as_ref().map(|rule_configs| {
-                rule_configs
-                    .iter()
-                    .map(|config: &SamplingRuleConfig| {
-                        dd_trace_sampling::SamplingRule::new(
-                            config.sample_rate,
-                            config.service.clone(),
-                            config.name.clone(),
-                            config.resource.clone(),
-                            Some(config.tags.clone()),
-                            Some(config.provenance.clone()),
-                        )
-                    })
-                    .collect()
-            });
-
-        dd_trace_sampling::DatadogSampler::new(rules, self.trace_rate_limit, resource)
     }
 
     /// Static runtime id if the process
@@ -316,7 +291,7 @@ impl Default for Config {
 
             trace_agent_url: Cow::Borrowed("http://localhost:8126"),
             dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-            trace_sampling_rules: None,
+            trace_sampling_rules: Vec::new(),
             trace_rate_limit: None,
             enabled: true,
             log_level: LogLevel::default(),
@@ -369,7 +344,7 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
-        self.config.trace_sampling_rules = Some(rules);
+        self.config.trace_sampling_rules = rules;
         self
     }
 
@@ -423,16 +398,12 @@ mod tests {
         assert_eq!(config.service(), "test-service");
         assert_eq!(config.env(), Some("test-env"));
         assert_eq!(config.trace_rate_limit(), Some(123));
-        assert!(
-            config.trace_sampling_rules().is_some(),
-            "trace_sampling_rules should be Some"
-        );
-        if let Some(rules) = config.trace_sampling_rules() {
-            assert_eq!(rules.len(), 1, "Should have one rule");
-            assert_eq!(rules[0].sample_rate, 0.5);
-            assert_eq!(rules[0].service, Some("web-api".to_string()));
-            assert_eq!(rules[0].provenance, "customer".to_string());
-        }
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1, "Should have one rule");
+        assert_eq!(rules[0].sample_rate, 0.5);
+        assert_eq!(rules[0].service, Some("web-api".to_string()));
+        assert_eq!(rules[0].provenance, "customer".to_string());
+
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Debug);
     }
@@ -464,12 +435,11 @@ mod tests {
         let config = builder.build();
 
         assert_eq!(config.trace_rate_limit(), Some(200));
-        assert!(config.trace_sampling_rules().is_some());
-        assert_eq!(config.trace_sampling_rules().unwrap().len(), 1);
-        if let Some(rules) = config.trace_sampling_rules() {
-            assert_eq!(rules[0].sample_rate, 0.8);
-            assert_eq!(rules[0].service, Some("manual-service".to_string()));
-        }
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.8);
+        assert_eq!(rules[0].service, Some("manual-service".to_string()));
+
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Warn);
     }

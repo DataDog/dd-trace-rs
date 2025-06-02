@@ -9,9 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::constants::{
-    SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE,
-    SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_MECHANISM_TO_PRIORITIES,
-    SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+    self, sampling_mechanism_to_priorities, SamplingMechanism, KEEP_PRIORITY_INDEX, REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY
 };
 
 // Import the attr constants
@@ -26,9 +24,6 @@ use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::sem_convs;
 use crate::utils;
-
-/// Constant to represent "no rule" for a field
-pub const NO_RULE: &str = "";
 
 /// A trait to handle access to a Resource, whether it's a direct reference or wrapped in
 /// Arc<RwLock<>>
@@ -52,6 +47,10 @@ impl ResourceAccess for Arc<RwLock<opentelemetry_sdk::Resource>> {
             opentelemetry_sdk::Resource::builder().build()
         }
     }
+}
+
+fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
+    (rule != constants::pattern::NO_RULE).then(|| GlobMatcher::new(rule))
 }
 
 /// Represents a sampling rule with criteria for matching spans
@@ -96,36 +95,16 @@ impl SamplingRule {
         provenance: Option<String>,
     ) -> Self {
         // Create glob matchers for the patterns
-        let name_matcher = name.as_ref().and_then(|n| {
-            if n != NO_RULE {
-                Some(GlobMatcher::new(n))
-            } else {
-                None
-            }
-        });
-
-        let service_matcher = service.as_ref().and_then(|s| {
-            if s != NO_RULE {
-                Some(GlobMatcher::new(s))
-            } else {
-                None
-            }
-        });
-
-        let resource_matcher = resource.as_ref().and_then(|r| {
-            if r != NO_RULE {
-                Some(GlobMatcher::new(r))
-            } else {
-                None
-            }
-        });
+        let name_matcher = name.as_deref().and_then(matcher_from_rule);
+        let service_matcher = service.as_deref().and_then(matcher_from_rule);
+        let resource_matcher = resource.as_deref().and_then(matcher_from_rule);
 
         // Create matchers for tag values
         let tag_map = tags.clone().unwrap_or_default();
         let mut tag_matchers = HashMap::with_capacity(tag_map.len());
         for (key, value) in &tag_map {
-            if value != NO_RULE {
-                tag_matchers.insert(key.clone(), GlobMatcher::new(value));
+            if let Some(matcher) = matcher_from_rule(value) {
+                tag_matchers.insert(key.clone(), matcher);
             }
         }
 
@@ -334,30 +313,19 @@ pub struct DatadogSampler {
 impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
     pub fn new(
-        rules: Option<Vec<SamplingRule>>,
+        rules: Vec<SamplingRule>,
         rate_limit: Option<i32>,
         resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
     ) -> Self {
-        let effective_rules = rules.unwrap_or_default();
-
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
 
         DatadogSampler {
-            rules: effective_rules,
+            rules,
             service_samplers: HashMap::new(),
             rate_limiter: limiter,
             resource,
         }
-    }
-
-    /// Updates the Resource information in the sampler
-    ///
-    /// This method takes a thread-safe reference to a resource that can be shared
-    /// between different components of the tracing system
-    pub fn update_resource(&mut self, resource_arc: Arc<RwLock<opentelemetry_sdk::Resource>>) {
-        // Simply replace the current resource Arc with the new one
-        self.resource = resource_arc;
     }
 
     /// Computes a key for service-based sampling
@@ -468,7 +436,7 @@ impl DatadogSampler {
         };
 
         // Get the appropriate sampling priority value based on the mechanism and priority index
-        let priority_pair = SAMPLING_MECHANISM_TO_PRIORITIES.get(&mechanism).unwrap();
+        let priority_pair = sampling_mechanism_to_priorities(mechanism);
         let priority = if priority_index == KEEP_PRIORITY_INDEX {
             priority_pair.0
         } else {
@@ -595,6 +563,7 @@ mod tests {
         DB_SYSTEM, HTTP_METHOD, MESSAGING_OPERATION, MESSAGING_SYSTEM, NETWORK_PROTOCOL_NAME,
     };
     use crate::constants::attr::{ENV_TAG, RESOURCE_TAG};
+    use crate::constants::pattern;
     use opentelemetry::trace::{Span, SpanContext, SpanId, SpanKind};
     use opentelemetry::trace::{Status, TraceFlags, TraceState};
     use opentelemetry::Context as OtelContext;
@@ -684,10 +653,10 @@ mod tests {
         // Test that a rule with NO_RULE constants behaves the same as None
         let rule_with_empty_strings = SamplingRule::new(
             0.5,
-            Some(NO_RULE.to_string()), // Empty service string
-            Some(NO_RULE.to_string()), // Empty name string
-            Some(NO_RULE.to_string()), // Empty resource string
-            Some(HashMap::from([(NO_RULE.to_string(), NO_RULE.to_string())])), // Empty tag
+            Some(pattern::NO_RULE.to_string()), // Empty service string
+            Some(pattern::NO_RULE.to_string()), // Empty name string
+            Some(pattern::NO_RULE.to_string()), // Empty resource string
+            Some(HashMap::from([(pattern::NO_RULE.to_string(), pattern::NO_RULE.to_string())])), // Empty tag
             None,
         );
 
@@ -825,14 +794,14 @@ mod tests {
     #[test]
     fn test_datadog_sampler_creation() {
         // Create a sampler with default config
-        let sampler = DatadogSampler::new(None, None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
         assert!(sampler.rules.is_empty());
         assert!(sampler.service_samplers.is_empty());
 
         // Create a sampler with rules
         let rule = SamplingRule::new(0.5, None, None, None, None, None);
         let sampler_with_rules =
-            DatadogSampler::new(Some(vec![rule]), Some(200), create_empty_resource());
+            DatadogSampler::new(vec![rule], Some(200), create_empty_resource());
         assert_eq!(sampler_with_rules.rules.len(), 1);
         assert_eq!(sampler_with_rules.rules[0].sample_rate, 0.5);
     }
@@ -842,7 +811,7 @@ mod tests {
         // Use create_resource to initialize the sampler with a service name in its resource
         let test_service_name = "test-service".to_string();
         let sampler_resource = create_resource(test_service_name.clone());
-        let sampler = DatadogSampler::new(None, None, sampler_resource);
+        let sampler = DatadogSampler::new(vec![], None, sampler_resource);
 
         // Test with service and env
         // The 'service' in create_attributes is not used for the service part of the key,
@@ -866,7 +835,7 @@ mod tests {
 
     #[test]
     fn test_update_service_rates() {
-        let mut sampler = DatadogSampler::new(None, None, create_empty_resource());
+        let mut sampler = DatadogSampler::new(vec![], None, create_empty_resource());
 
         // Update with service rates
         let mut rates = HashMap::new();
@@ -932,13 +901,13 @@ mod tests {
 
         // Sampler is mutable to allow resource updates
         let mut sampler = DatadogSampler::new(
-            Some(vec![rule1.clone(), rule2.clone(), rule3.clone()]),
+            vec![rule1.clone(), rule2.clone(), rule3.clone()],
             None,
             create_empty_resource(), // Initial resource, will be updated before each check
         );
 
         // Test with a specific service that should match the first rule (rule1)
-        sampler.update_resource(create_resource("service1".to_string()));
+        sampler.resource = create_resource("service1".to_string());
         let attrs1 = create_attributes("resource_val_for_attr1", "prod");
         let matching_rule_for_attrs1 =
             sampler.find_matching_rule(attrs1.as_slice(), &SpanKind::Client);
@@ -958,7 +927,7 @@ mod tests {
         );
 
         // Test with a specific service that should match the second rule (rule2)
-        sampler.update_resource(create_resource("service2".to_string()));
+        sampler.resource = create_resource("service2".to_string());
         let attrs2 = create_attributes("resource_val_for_attr2", "prod");
         let matching_rule_for_attrs2 =
             sampler.find_matching_rule(attrs2.as_slice(), &SpanKind::Client);
@@ -978,7 +947,7 @@ mod tests {
         );
 
         // Test with a service that matches the wildcard rule (rule3)
-        sampler.update_resource(create_resource("service3".to_string()));
+        sampler.resource = create_resource("service3".to_string());
         let attrs3 = create_attributes("resource_val_for_attr3", "prod");
         let matching_rule_for_attrs3 =
             sampler.find_matching_rule(attrs3.as_slice(), &SpanKind::Client);
@@ -998,7 +967,7 @@ mod tests {
         );
 
         // Test with a service that doesn't match any rule's service pattern
-        sampler.update_resource(create_resource("other_sampler_service".to_string()));
+        sampler.resource = create_resource("other_sampler_service".to_string());
         let attrs4 = create_attributes("resource_val_for_attr4", "prod");
         let matching_rule_for_attrs4 =
             sampler.find_matching_rule(attrs4.as_slice(), &SpanKind::Client);
@@ -1010,7 +979,7 @@ mod tests {
 
     #[test]
     fn test_get_sampling_mechanism() {
-        let sampler = DatadogSampler::new(None, None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
 
         // Create rules with different provenances
         let rule_customer =
@@ -1046,7 +1015,7 @@ mod tests {
 
     #[test]
     fn test_add_dd_sampling_tags() {
-        let sampler = DatadogSampler::new(None, None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
 
         // Test with RecordAndSample decision and LocalUserTraceSamplingRule mechanism
         let decision = SamplingDecision::RecordAndSample;
@@ -1075,7 +1044,7 @@ mod tests {
                 }
                 SAMPLING_PRIORITY_TAG_KEY => {
                     // For LocalUserTraceSamplingRule with KEEP, it should be USER_KEEP
-                    let priority_pair = SAMPLING_MECHANISM_TO_PRIORITIES.get(&mechanism).unwrap();
+                    let priority_pair = sampling_mechanism_to_priorities(mechanism);
                     let expected_priority = priority_pair.0.value() as i64;
 
                     let value_int = match attr.value {
@@ -1163,7 +1132,7 @@ mod tests {
 
     #[test]
     fn test_should_sample_parent_context() {
-        let sampler = DatadogSampler::new(None, None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
 
         // Create empty slices for attributes and links
         let empty_attrs: &[KeyValue] = &[];
@@ -1212,7 +1181,7 @@ mod tests {
             None,
         );
 
-        let sampler = DatadogSampler::new(Some(vec![rule]), None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![rule], None, create_empty_resource());
 
         // Create an empty slice for links
         let empty_links: &[opentelemetry::trace::Link] = &[];
@@ -1253,7 +1222,7 @@ mod tests {
         // Initialize sampler with a default service, e.g., "test-service"
         // The sampler's own service name will be used for the 'service:' part of the service_key
         let mut sampler =
-            DatadogSampler::new(None, None, create_resource("test-service".to_string()));
+            DatadogSampler::new(vec![], None, create_resource("test-service".to_string()));
 
         // Add service rates for different service+env combinations
         let mut rates = HashMap::new();
@@ -1285,7 +1254,7 @@ mod tests {
 
         // Test with attributes that should lead to "service:other-service,env:prod" key
         // Update sampler's resource to be "other-service"
-        sampler.update_resource(create_resource("other-service".to_string()));
+        sampler.resource = create_resource("other-service".to_string());
         let attrs_no_sample = create_attributes("any_resource_name_matching_env", "prod");
         let result_no_sample = sampler.should_sample(
             None,
@@ -1628,7 +1597,7 @@ mod tests {
 
         // Create a sampler with these rules
         let sampler = DatadogSampler::new(
-            Some(vec![http_rule, db_rule, messaging_rule]),
+            vec![http_rule, db_rule, messaging_rule],
             None,
             create_empty_resource(),
         );

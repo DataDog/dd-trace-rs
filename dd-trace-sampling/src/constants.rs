@@ -3,8 +3,6 @@
 
 //! Shared constants for the dd-trace-sampling crate
 
-use std::collections::HashMap;
-
 /// Sampling rate limits
 pub mod rate {
     /// Maximum sampling rate
@@ -100,6 +98,7 @@ impl SamplingMechanism {
     }
 
     /// Creates a SamplingMechanism from a numeric value
+    #[allow(dead_code)]
     pub fn from_value(value: u8) -> Option<Self> {
         match value {
             0 => Some(Self::Default),
@@ -170,17 +169,26 @@ pub const KEEP_PRIORITY_INDEX: usize = 0;
 /// Index for the reject priority in the sampling mechanism priority tuples
 pub const REJECT_PRIORITY_INDEX: usize = 1;
 
-lazy_static::lazy_static! {
-    /// HashMap mapping sampling mechanisms to priority pairs (keep, reject)
-    pub static ref SAMPLING_MECHANISM_TO_PRIORITIES: HashMap<SamplingMechanism, (SamplingPriority, SamplingPriority)> = {
-        let mut map = HashMap::new();
-        // TODO: Update mapping to include single span sampling and appsec sampling mechanisms when they are implemented
-        map.insert(SamplingMechanism::AgentRateByService, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
-        map.insert(SamplingMechanism::Default, (SamplingPriority::AutoKeep, SamplingPriority::AutoReject));
-        map.insert(SamplingMechanism::Manual, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
-        map.insert(SamplingMechanism::LocalUserTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
-        map.insert(SamplingMechanism::RemoteUserTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
-        map.insert(SamplingMechanism::RemoteDynamicTraceSamplingRule, (SamplingPriority::UserKeep, SamplingPriority::UserReject));
-        map
-    };
+pub fn sampling_mechanism_to_priorities(
+    mechanism: SamplingMechanism,
+) -> (SamplingPriority, SamplingPriority) {
+    use SamplingMechanism::*;
+    use SamplingPriority::*;
+    match mechanism {
+        AgentRateByService => (AutoKeep, AutoReject),
+        Default => (AutoKeep, AutoReject),
+        Manual => (UserKeep, UserReject),
+        LocalUserTraceSamplingRule => (UserKeep, UserReject),
+        RemoteUserTraceSamplingRule => (UserKeep, UserReject),
+        RemoteDynamicTraceSamplingRule => (UserKeep, UserReject),
+        AppSec => (UserKeep, UserKeep),
+        SpanSamplingRule => (UserKeep, UserReject),
+        DataJobsMonitoring => (UserKeep, UserKeep),
+
+        // Unused - assign auto keep and reject in order to not crash
+        OtlpIngestProbabilisticSampling => (AutoKeep, AutoReject),
+        RemoteRate => (AutoKeep, AutoReject),
+        RemoteRateUser => (AutoKeep, AutoReject),
+        RemoteRateDatadog => (AutoKeep, AutoReject),
+    }
 }

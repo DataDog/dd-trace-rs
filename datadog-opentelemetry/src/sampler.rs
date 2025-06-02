@@ -9,7 +9,21 @@ use std::sync::{Arc, RwLock};
 /// Creates a DatadogSampler based on the given configuration
 /// This function handles all the logic for creating a properly configured sampler:
 pub fn create_sampler_from_config(cfg: &Config, resource: Arc<RwLock<Resource>>) -> DatadogSampler {
-    cfg.build_datadog_sampler(resource)
+    let rules = cfg
+        .trace_sampling_rules()
+        .iter()
+        .map(|r| {
+            dd_trace_sampling::SamplingRule::new(
+                r.sample_rate,
+                r.service.clone(),
+                r.name.clone(),
+                r.resource.clone(),
+                Some(r.tags.clone()),
+                Some(r.provenance.clone()),
+            )
+        })
+        .collect::<Vec<_>>();
+    dd_trace_sampling::DatadogSampler::new(rules, cfg.trace_rate_limit(), resource)
 }
 
 #[cfg(test)]
