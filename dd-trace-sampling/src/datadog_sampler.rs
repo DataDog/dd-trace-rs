@@ -59,22 +59,10 @@ fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
 #[derive(Clone, Debug)]
 pub struct SamplingRule {
     /// The sample rate to apply when this rule matches (0.0-1.0)
-    pub sample_rate: f64,
-
-    /// Optional service name to match
-    pub service: Option<String>,
-
-    /// Optional span name to match
-    pub name: Option<String>,
-
-    /// Optional resource name to match
-    pub resource: Option<String>,
-
-    /// Key-value pairs that must all match in the span's attributes
-    pub tags: HashMap<String, String>,
+    sample_rate: f64,
 
     /// Where this rule comes from (customer, dynamic, default)
-    pub provenance: String,
+    provenance: String,
 
     /// Internal rate sampler used when this rule matches
     rate_sampler: RateSampler,
@@ -112,10 +100,6 @@ impl SamplingRule {
 
         SamplingRule {
             sample_rate,
-            service,
-            name,
-            resource,
-            tags: tag_map,
             provenance: provenance.unwrap_or_else(|| "default".to_string()),
             rate_sampler: RateSampler::new(sample_rate),
             name_matcher,
@@ -499,9 +483,6 @@ impl ShouldSample for DatadogSampler {
         // Apply rules-based sampling
         let mut decision = SamplingDecision::RecordAndSample;
 
-        // Find a matching rule
-        let matching_rule = self.find_matching_rule(attributes, span_kind);
-
         // Track which sampling mechanism was used
         let mut used_agent_sampler = false;
 
@@ -510,6 +491,9 @@ impl ShouldSample for DatadogSampler {
 
         // Store rate limit information if applicable
         let mut rl_effective_rate: Option<i32> = None;
+
+        // Find a matching rule
+        let matching_rule = self.find_matching_rule(attributes, span_kind);
 
         // Apply sampling logic
         if let Some(rule) = matching_rule {
@@ -620,10 +604,16 @@ mod tests {
         );
 
         assert_eq!(rule.sample_rate, 0.5);
-        assert_eq!(rule.service, Some("test-service".to_string()));
-        assert_eq!(rule.name, Some("test-name".to_string()));
-        assert_eq!(rule.resource, Some("test-resource".to_string()));
-        assert_eq!(rule.tags.get("custom-tag"), Some(&"tag-value".to_string()));
+        assert_eq!(rule.service_matcher.unwrap().pattern(), "test-service");
+        assert_eq!(rule.name_matcher.unwrap().pattern(), "test-name");
+        assert_eq!(
+            rule.resource_matcher.unwrap().pattern(),
+            "test-resource".to_string()
+        );
+        assert_eq!(
+            rule.tag_matchers.get("custom-tag").unwrap().pattern(),
+            "tag-value"
+        );
         assert_eq!(rule.provenance, "customer");
     }
 
@@ -640,10 +630,10 @@ mod tests {
 
         // Verify fields are set to None or empty
         assert_eq!(rule.sample_rate, 0.5);
-        assert_eq!(rule.service, None);
-        assert_eq!(rule.name, None);
-        assert_eq!(rule.resource, None);
-        assert!(rule.tags.is_empty());
+        assert!(rule.service_matcher.is_none());
+        assert!(rule.name_matcher.is_none());
+        assert!(rule.resource_matcher.is_none());
+        assert!(rule.tag_matchers.is_empty());
         assert_eq!(rule.provenance, "default");
 
         // Verify no matchers were created

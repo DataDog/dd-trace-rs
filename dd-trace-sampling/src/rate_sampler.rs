@@ -48,14 +48,6 @@ impl RateSampler {
         self.sample_rate
     }
 
-    /// Sets a new sample rate for the sampler.
-    /// `sample_rate` is clamped between 0.0 and 1.0 inclusive.
-    pub fn set_sample_rate(&mut self, sample_rate: f64) {
-        let clamped_rate = sample_rate.clamp(rate::MIN_SAMPLE_RATE, rate::MAX_SAMPLE_RATE);
-        self.sample_rate = clamped_rate;
-        self.sampling_id_threshold = Self::calculate_threshold(clamped_rate);
-    }
-
     /// Determines if a trace should be sampled based on its trace_id and the configured rate.
     /// Returns true if the trace should be kept, false otherwise.
     pub fn sample(&self, trace_id: TraceId) -> bool {
@@ -122,28 +114,6 @@ mod tests {
 
         let sampler_over_one = RateSampler::new(1.1);
         assert_eq!(sampler_over_one.sample_rate, 1.0);
-    }
-
-    #[test]
-    fn test_rate_sampler_set_rate() {
-        let mut sampler = RateSampler::new(0.25);
-        assert_eq!(sampler.sample_rate, 0.25);
-
-        sampler.set_sample_rate(0.75);
-        assert_eq!(sampler.sample_rate, 0.75);
-        assert_eq!(
-            sampler.sampling_id_threshold,
-            (0.75 * (MAX_UINT_64BITS as f64)) as u64
-        );
-
-        // Test clamping
-        sampler.set_sample_rate(-1.0);
-        assert_eq!(sampler.sample_rate, 0.0);
-        assert_eq!(sampler.sampling_id_threshold, 0);
-
-        sampler.set_sample_rate(1.5);
-        assert_eq!(sampler.sample_rate, 1.0);
-        assert_eq!(sampler.sampling_id_threshold, MAX_UINT_64BITS);
     }
 
     #[test]
