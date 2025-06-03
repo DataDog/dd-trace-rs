@@ -86,6 +86,7 @@ impl From<i8> for SamplingMechanism {
     }
 }
 
+#[repr(i8)]
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub enum SamplingPriority {
     UserReject = -1,
@@ -94,11 +95,18 @@ pub enum SamplingPriority {
     #[default]
     AutoKeep = 1,
     UserKeep = 2,
+
+    Unknown(i8) = 3,
 }
 
 impl SamplingPriority {
     pub fn is_keep(&self) -> bool {
-        *self == Self::AutoKeep || *self == Self::UserKeep
+        match self {
+            Self::AutoKeep => true,
+            Self::UserKeep => true,
+            Self::Unknown(value) => *value > 0,
+            _ => false,
+        }
     }
 
     pub fn from_flags(flags: u8) -> Self {
@@ -117,7 +125,19 @@ impl From<i8> for SamplingPriority {
             0 => Self::AutoReject,
             1 => Self::AutoKeep,
             2 => Self::UserKeep,
-            _ => Self::default(),
+            rest => Self::Unknown(rest),
+        }
+    }
+}
+
+impl From<SamplingPriority> for i8 {
+    fn from(val: SamplingPriority) -> Self {
+        match val {
+            SamplingPriority::UserReject => -1,
+            SamplingPriority::AutoReject => 0,
+            SamplingPriority::AutoKeep => 1,
+            SamplingPriority::UserKeep => 2,
+            SamplingPriority::Unknown(value) => value,
         }
     }
 }
@@ -129,6 +149,7 @@ impl Display for SamplingPriority {
             Self::AutoReject => "0",
             Self::AutoKeep => "1",
             Self::UserKeep => "2",
+            Self::Unknown(value) => &value.to_string(),
         };
         write!(f, "{prio}")
     }
@@ -143,7 +164,10 @@ impl FromStr for SamplingPriority {
             "0" => Ok(Self::AutoReject),
             "1" => Ok(Self::AutoKeep),
             "2" => Ok(Self::UserKeep),
-            _ => Err(format!("Unknown Sampling priority: {s}")),
+            _ => s
+                .parse()
+                .map(Self::Unknown)
+                .map_err(|_| format!("Unknown Sampling priority: {s}")),
         }
     }
 }
@@ -393,7 +417,7 @@ pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128
 mod test {
     use std::str::FromStr;
 
-    use crate::context::{combine_trace_id, split_trace_id};
+    use crate::context::{combine_trace_id, split_trace_id, SamplingPriority};
 
     use super::Tracestate;
 
@@ -482,5 +506,35 @@ mod test {
             Tracestate::from_str("dd=\t  o:valid;;s:1; \t").expect("parsed tracestate");
 
         assert_eq!(tracestate.origin, Some("valid".to_string()))
+    }
+
+    #[test]
+    fn test_sampling_priority() {
+        assert_eq!(
+            SamplingPriority::from_str("-5").unwrap(),
+            SamplingPriority::Unknown(-5)
+        );
+
+        assert_eq!(
+            SamplingPriority::from_str("-1").unwrap(),
+            SamplingPriority::UserReject
+        );
+
+        assert_eq!(
+            SamplingPriority::from_str("1").unwrap(),
+            SamplingPriority::AutoKeep
+        );
+
+        assert!(SamplingPriority::from_str("-12345678901234567890").is_err());
+
+        assert!(!SamplingPriority::Unknown(-42).is_keep());
+
+        assert!(SamplingPriority::Unknown(42).is_keep());
+
+        let prio: i8 = SamplingPriority::Unknown(42).into();
+        assert_eq!(prio, 42);
+
+        let prio: i8 = SamplingPriority::UserKeep.into();
+        assert_eq!(prio, 2);
     }
 }

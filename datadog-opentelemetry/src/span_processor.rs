@@ -262,7 +262,7 @@ impl DatadogSpanProcessor {
             });
 
             let sampling_decision = sampling.map(|sampling| SamplingDecision {
-                decision: sampling.priority.unwrap_or_default() as i8,
+                decision: sampling.priority.unwrap_or_default().into(),
                 decision_maker: sampling.mechanism.unwrap_or_default() as i8,
             });
             return TracePropagationData {
