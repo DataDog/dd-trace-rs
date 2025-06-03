@@ -102,8 +102,8 @@ pub enum SamplingPriority {
 impl SamplingPriority {
     pub fn is_keep(&self) -> bool {
         match self {
-            Self::AutoKeep => true,
-            Self::UserKeep => true,
+            Self::AutoKeep | Self::UserKeep => true,
+            Self::AutoReject | Self::UserReject => false,
             Self::Unknown(value) => *value > 0,
             _ => false,
         }
