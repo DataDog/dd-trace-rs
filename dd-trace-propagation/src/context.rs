@@ -105,7 +105,6 @@ impl SamplingPriority {
             Self::AutoKeep | Self::UserKeep => true,
             Self::AutoReject | Self::UserReject => false,
             Self::Unknown(value) => *value > 0,
-            _ => false,
         }
     }
 
@@ -144,14 +143,7 @@ impl From<SamplingPriority> for i8 {
 
 impl Display for SamplingPriority {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prio = match self {
-            Self::UserReject => "-1",
-            Self::AutoReject => "0",
-            Self::AutoKeep => "1",
-            Self::UserKeep => "2",
-            Self::Unknown(value) => &value.to_string(),
-        };
-        write!(f, "{prio}")
+        write!(f, "{}", i8::from(*self))
     }
 }
 
