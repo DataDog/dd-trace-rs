@@ -124,3 +124,48 @@ jobs:
           name: LICENSE-3rdparty.yml
           path: /tmp/CI.yaml
           overwrite: true
+
+  license-3rdparty-csv:
+    runs-on: ubuntu-latest
+    name: "Valid LICENSE-3rdparty.csv"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: stat LICENSE-3rdparty.csv
+      - name: Cache
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/
+            ~/.cargo/.crates.toml
+          # cache key contains current version of dd-rust-license-tool
+          # when upstream version is updated we can bump the cache key version,
+          # to cache the latest version of the tool
+          key: "v1-dd-rust-license-tool"
+      - name: Cache
+        uses: ./.github/actions/cache
+      - name: Install dd-rust-license-tool
+        run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
+      - name: "Generate new LICENSE-3rdparty.csv and check against the previous" 
+        run: |
+          # Run dd-rust-license-tool write to generate CSV
+          dd-rust-license-tool write > /tmp/CI.csv
+
+          # Compare the generated CSV with the current one
+          if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
+            echo "Differences detected in LICENSE-3rdparty.csv."
+            echo "Please run 'dd-rust-license-tool write > LICENSE-3rdparty.csv' to update the file."
+            exit 1
+          fi
+
+          echo "No differences found."
+
+      - name: export the generated license file on failure
+        if: failure()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: LICENSE-3rdparty.csv
+          path: /tmp/CI.csv
+          overwrite: true
