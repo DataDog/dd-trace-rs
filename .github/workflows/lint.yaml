@@ -150,8 +150,28 @@ jobs:
         run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       - name: "Generate new LICENSE-3rdparty.csv and check against the previous" 
         run: |
-          # Run dd-rust-license-tool write to generate CSV
-          dd-rust-license-tool write > /tmp/CI.csv
+          # Debug: Check if config file exists
+          echo "Checking for license-tool.toml..."
+          ls -la license-tool.toml || echo "license-tool.toml not found"
+          
+          # Debug: Run dd-rust-license-tool write with error capture
+          echo "Running dd-rust-license-tool write..."
+          if ! dd-rust-license-tool write > /tmp/CI.csv 2> /tmp/CI.error; then
+            echo "ERROR: dd-rust-license-tool write failed!"
+            echo "Exit code: $?"
+            echo "Error output:"
+            cat /tmp/CI.error
+            echo "Generated file contents:"
+            ls -la /tmp/CI.csv || echo "File not created"
+            cat /tmp/CI.csv || echo "File empty or unreadable"
+            exit 1
+          fi
+
+          # Debug: Check what was generated
+          echo "Generated CSV file info:"
+          ls -la /tmp/CI.csv
+          echo "First 10 lines of generated CSV:"
+          head -10 /tmp/CI.csv
 
           # Compare the generated CSV with the current one
           if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
