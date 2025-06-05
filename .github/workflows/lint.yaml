@@ -162,9 +162,39 @@ jobs:
           echo "Cargo.toml exists:"
           ls -la Cargo.toml || echo "Cargo.toml not found"
           
+          # Debug: Check if there are any dependencies
+          echo "Checking dependencies in Cargo.toml:"
+          grep -A 20 "\[dependencies\]" Cargo.toml || echo "No dependencies section found"
+          echo "Checking workspace members:"
+          grep -A 10 "\[workspace\]" Cargo.toml || echo "No workspace section found"
+          
+          # Debug: Try to run cargo metadata to see what the tool should see
+          echo "Running cargo metadata to check project structure:"
+          cargo metadata --format-version 1 --no-deps | jq '.packages[].name' 2>/dev/null | head -10 || echo "cargo metadata failed or jq not available"
+          
           # Debug: Try to understand what the tool sees
           echo "Running dd-rust-license-tool --help to see available options..."
           dd-rust-license-tool --help || echo "Help command failed"
+          
+          # Debug: Try dump command first to see if it produces any output
+          echo "Testing dd-rust-license-tool dump to see if any license data is generated..."
+          dd-rust-license-tool dump > /tmp/CI_dump.txt 2> /tmp/CI_dump.error
+          dump_exit_code=$?
+          echo "Dump exit code: $dump_exit_code"
+          echo "Dump output size: $(wc -c < /tmp/CI_dump.txt) bytes"
+          echo "First 10 lines of dump output:"
+          head -10 /tmp/CI_dump.txt || echo "No dump output"
+          echo "Dump error output:"
+          cat /tmp/CI_dump.error || echo "No dump error output"
+          
+          # Debug: Try write with explicit output file
+          echo "Testing dd-rust-license-tool write with explicit file argument..."
+          dd-rust-license-tool write /tmp/CI_explicit.csv > /tmp/CI_explicit.log 2> /tmp/CI_explicit.error || true
+          echo "Explicit write log:"
+          cat /tmp/CI_explicit.log || echo "No explicit write log"
+          echo "Explicit write error:"
+          cat /tmp/CI_explicit.error || echo "No explicit write error"
+          echo "Explicit write file size: $([ -f /tmp/CI_explicit.csv ] && wc -c < /tmp/CI_explicit.csv || echo 'file not created') bytes"
           
           # Debug: Run dd-rust-license-tool write with error capture
           echo "Running dd-rust-license-tool write..."
