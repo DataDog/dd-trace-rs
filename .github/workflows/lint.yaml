@@ -150,81 +150,26 @@ jobs:
         run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       - name: "Generate new LICENSE-3rdparty.csv and check against the previous" 
         run: |
-          # Debug: Check if config file exists and show its contents
-          echo "Checking for license-tool.toml..."
-          ls -la license-tool.toml || echo "license-tool.toml not found"
-          echo "Contents of license-tool.toml:"
-          cat license-tool.toml || echo "Could not read license-tool.toml"
-          
-          # Debug: Check current working directory and Cargo.toml
-          echo "Current working directory:"
-          pwd
-          echo "Cargo.toml exists:"
-          ls -la Cargo.toml || echo "Cargo.toml not found"
-          
-          # Debug: Check if there are any dependencies
-          echo "Checking dependencies in Cargo.toml:"
-          grep -A 20 "\[dependencies\]" Cargo.toml || echo "No dependencies section found"
-          echo "Checking workspace members:"
-          grep -A 10 "\[workspace\]" Cargo.toml || echo "No workspace section found"
-          
-          # Debug: Try to run cargo metadata to see what the tool should see
-          echo "Running cargo metadata to check project structure:"
-          cargo metadata --format-version 1 --no-deps | jq '.packages[].name' 2>/dev/null | head -10 || echo "cargo metadata failed or jq not available"
-          
-          # Debug: Try to understand what the tool sees
-          echo "Running dd-rust-license-tool --help to see available options..."
-          dd-rust-license-tool --help || echo "Help command failed"
-          
-          # Debug: Try dump command first to see if it produces any output
-          echo "Testing dd-rust-license-tool dump to see if any license data is generated..."
-          dd-rust-license-tool dump > /tmp/CI_dump.txt 2> /tmp/CI_dump.error
-          dump_exit_code=$?
-          echo "Dump exit code: $dump_exit_code"
-          echo "Dump output size: $(wc -c < /tmp/CI_dump.txt) bytes"
-          echo "First 10 lines of dump output:"
-          head -10 /tmp/CI_dump.txt || echo "No dump output"
-          echo "Dump error output:"
-          cat /tmp/CI_dump.error || echo "No dump error output"
-          
-          # Debug: Try write with explicit output file
-          echo "Testing dd-rust-license-tool write with explicit file argument..."
-          dd-rust-license-tool write /tmp/CI_explicit.csv > /tmp/CI_explicit.log 2> /tmp/CI_explicit.error || true
-          echo "Explicit write log:"
-          cat /tmp/CI_explicit.log || echo "No explicit write log"
-          echo "Explicit write error:"
-          cat /tmp/CI_explicit.error || echo "No explicit write error"
-          echo "Explicit write file size: $([ -f /tmp/CI_explicit.csv ] && wc -c < /tmp/CI_explicit.csv || echo 'file not created') bytes"
-          
-          # Debug: Run dd-rust-license-tool write with error capture
-          echo "Running dd-rust-license-tool write..."
-          dd-rust-license-tool write > /tmp/CI.csv 2> /tmp/CI.error
+          # Generate CSV using dump command (write command produces empty output)
+          echo "Running dd-rust-license-tool dump to generate CSV..."
+          dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error
           exit_code=$?
           
-          echo "Tool exit code: $exit_code"
-          echo "Error output (if any):"
-          cat /tmp/CI.error || echo "No error output"
-          
           if [ $exit_code -ne 0 ]; then
-            echo "ERROR: dd-rust-license-tool write failed!"
+            echo "ERROR: dd-rust-license-tool dump failed!"
             echo "Exit code: $exit_code"
+            echo "Error output:"
+            cat /tmp/CI.error
             echo "Generated file contents:"
             ls -la /tmp/CI.csv || echo "File not created"
             cat /tmp/CI.csv || echo "File empty or unreadable"
             exit 1
           fi
 
-          # Debug: Check what was generated
-          echo "Generated CSV file info:"
-          ls -la /tmp/CI.csv
-          echo "Generated CSV file size: $(wc -c < /tmp/CI.csv) bytes"
-          echo "First 10 lines of generated CSV:"
-          head -10 /tmp/CI.csv
-
           # Compare the generated CSV with the current one
           if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
             echo "Differences detected in LICENSE-3rdparty.csv."
-            echo "Please run 'dd-rust-license-tool write > LICENSE-3rdparty.csv' to update the file."
+            echo "Please run 'dd-rust-license-tool dump > LICENSE-3rdparty.csv' to update the file."
             exit 1
           fi
 
