@@ -22,8 +22,9 @@ thiserror = { version = "1.0", default-features = false}
 opentelemetry = { workspace = true, optional = true }
 
 [dev-dependencies]
-pretty_assertions = "1.4.1"
 assert_unordered = "0.3"
+multimap = "0.10.1"
+pretty_assertions = "1.4.1"
 
 [features]
 default = ["opentelemetry"]

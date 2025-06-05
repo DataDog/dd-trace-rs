@@ -6,7 +6,10 @@ use regex::Regex;
 use std::{collections::HashMap, str::FromStr};
 
 use crate::{
-    carrier::{Extractor, Injector},
+    carrier::{
+        get_comma_separated_value_from_extractor, get_single_value_from_extractor, Extractor,
+        Injector,
+    },
     context::{
         encode_tag_value, Sampling, SpanContext, Traceparent, Tracestate,
         DATADOG_PROPAGATION_TAG_PREFIX,
@@ -167,7 +170,9 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
-    let tp = carrier.get(TRACEPARENT_KEY)?.trim();
+    let tp = get_single_value_from_extractor(carrier, TRACEPARENT_KEY)
+        .ok()?
+        .map(str::trim)?;
 
     match extract_traceparent(tp) {
         Ok(traceparent) => {
@@ -177,8 +182,10 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
             let mut mechanism = None;
-            let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
-                if let Ok(tracestate) = Tracestate::from_str(ts) {
+            let tracestate: Option<Tracestate> = if let Some(ts) =
+                get_comma_separated_value_from_extractor(carrier, TRACESTATE_KEY)
+            {
+                if let Ok(tracestate) = Tracestate::from_str(&ts) {
                     tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
 
                     // Convert from `t.` to `_dd.p.`
@@ -371,9 +378,9 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use dd_trace::{configuration::TracePropagationStyle, sampling::priority};
-
     use crate::Propagator;
+    use dd_trace::{configuration::TracePropagationStyle, sampling::priority};
+    use multimap::MultiMap;
 
     use super::*;
 
@@ -583,6 +590,103 @@ mod test {
                 ("bar".to_string(), " \t 2".to_string()),
             ]
         );
+    }
+
+    impl<S: std::hash::BuildHasher> Extractor for MultiMap<String, String, S> {
+        fn get(&self, key: &str) -> Option<&str> {
+            self.get(&key.to_lowercase()).map(String::as_str)
+        }
+
+        fn get_all(&self, key: &str) -> Option<Vec<&str>> {
+            self.get_vec(key)
+                .map(|vec| vec.iter().map(String::as_str).collect())
+        }
+
+        fn keys(&self) -> Vec<&str> {
+            self.keys().map(String::as_str).collect::<Vec<_>>()
+        }
+    }
+
+    #[test]
+    fn test_extract_traceparent_duplicated() {
+        let mut headers = MultiMap::new();
+        headers.insert(
+            "traceparent".to_string(),
+            "00-12345678901234567890123456789011-1234567890123456-01".to_string(),
+        );
+        headers.insert(
+            "traceparent".to_string(),
+            "00-12345678901234567890123456789012-1234567890123456-01".to_string(),
+        );
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        assert!(propagator.extract(&headers).is_none());
+    }
+
+    #[test]
+    fn test_extract_tracestate_duplicated() {
+        let mut headers = MultiMap::new();
+        headers.insert(
+            "traceparent".to_string(),
+            "00-12345678901234567890123456789011-1234567890123456-01".to_string(),
+        );
+        headers.insert(
+            "tracestate".to_string(),
+            "dd=p:00f067aa0ba902b7;t.dm:-5,foo=bar".to_string(),
+        );
+        headers.insert(
+            "tracestate".to_string(),
+            "key=test,dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
+        );
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let tracestate = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context")
+            .tracestate
+            .expect("could't extract tracestate");
+
+        assert_eq!(tracestate.origin, Some("rum".to_string()));
+        assert_eq!(
+            tracestate.sampling,
+            Some(Sampling {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::APPSEC)
+            })
+        );
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec![
+                ("foo".to_string(), "bar".to_string()),
+                ("key".to_string(), "test".to_string())
+            ])
+        )
+    }
+
+    #[test]
+    fn test_extract_tracestate_empty_and_duplicated() {
+        let mut headers = MultiMap::new();
+        headers.insert(
+            "traceparent".to_string(),
+            "00-12345678901234567890123456789011-1234567890123456-01".to_string(),
+        );
+        headers.insert("tracestate".to_string(), "".to_string());
+        headers.insert("tracestate".to_string(), "foo=bar".to_string());
+
+        let propagator = TracePropagationStyle::TraceContext;
+
+        let tracestate = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context")
+            .tracestate
+            .expect("could't extract tracestate");
+
+        assert_eq!(
+            tracestate.additional_values,
+            Some(vec![("foo".to_string(), "bar".to_string()),])
+        )
     }
 
     #[test]
