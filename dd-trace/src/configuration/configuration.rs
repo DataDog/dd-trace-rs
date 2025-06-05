@@ -32,6 +32,7 @@ pub struct SamplingRuleConfig {
     pub tags: HashMap<String, String>,
 
     /// Where this rule comes from (customer, dynamic, default)
+    // TODO(paullgdc): this value should not be definable by customers
     #[serde(default = "default_provenance")]
     pub provenance: String,
 }
@@ -527,12 +528,42 @@ mod tests {
         assert_eq!(config.trace_rate_limit(), 123);
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1, "Should have one rule");
-        assert_eq!(rules[0].sample_rate, 0.5);
-        assert_eq!(rules[0].service, Some("web-api".to_string()));
-        assert_eq!(rules[0].provenance, "customer".to_string());
+        assert_eq!(
+            &rules[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("web-api".to_string()),
+                provenance: "customer".to_string(),
+                ..SamplingRuleConfig::default()
+            }
+        );
 
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Debug);
+    }
+
+    #[test]
+    fn test_sampling_rules() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "DD_TRACE_SAMPLING_RULES",
+                r#"[{"sample_rate":0.5,"service":"test-service","provenance":"customer"}]"#,
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(
+            &config.trace_sampling_rules()[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("test-service".to_string()),
+                provenance: "customer".to_string(),
+                ..SamplingRuleConfig::default()
+            }
+        );
     }
 
     #[test]
@@ -564,8 +595,15 @@ mod tests {
         assert_eq!(config.trace_rate_limit(), 200);
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].sample_rate, 0.8);
-        assert_eq!(rules[0].service, Some("manual-service".to_string()));
+        assert_eq!(
+            &config.trace_sampling_rules()[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.8,
+                service: Some("manual-service".to_string()),
+                provenance: "manual".to_string(),
+                ..SamplingRuleConfig::default()
+            }
+        );
 
         assert!(config.enabled());
         assert_eq!(config.log_level(), &super::LogLevel::Warn);

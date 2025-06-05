@@ -100,19 +100,24 @@ impl ShouldSample for Sampler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dd_trace::configuration::SamplingRuleConfig;
     use opentelemetry::trace::{SamplingDecision, SpanKind, TraceId};
     use opentelemetry_sdk::trace::ShouldSample;
     use std::env;
 
     #[test]
     fn test_create_sampler_with_sampling_rules() {
-        // Set sampling rules through environment variable
-        let sampling_rules_json =
-            r#"[{"sample_rate":0.5,"service":"test-service","provenance":"customer"}]"#;
-        env::set_var("DD_TRACE_SAMPLING_RULES", sampling_rules_json);
-
         // Build a fresh config to pick up the env var
-        let config = Config::builder().build();
+        let mut config = Config::builder();
+        config.set_trace_sampling_rules(vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            service: Some("test-service".to_string()),
+            name: None,
+            resource: None,
+            tags: HashMap::new(),
+            provenance: "customer".to_string(),
+        }]);
+        let config = config.build();
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
         let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
