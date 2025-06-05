@@ -61,7 +61,9 @@ impl ShouldSample for Sampler {
         _links: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
         let result = self.sampler.sample(
-            parent_context.map(|c| c.has_active_span() && c.span().span_context().is_sampled()),
+            parent_context
+                .filter(|c| c.has_active_span())
+                .map(|c| c.span().span_context().is_sampled()),
             trace_id,
             name,
             span_kind,

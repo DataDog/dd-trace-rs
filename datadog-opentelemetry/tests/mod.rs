@@ -1,16 +1,13 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{
-    collections::HashSet,
-    fmt::{self},
-    hash::{Hash, RandomState},
-};
-
 #[cfg(not(windows))]
 mod datadog_test_agent {
-    use std::collections::HashMap;
-    use std::hash::RandomState;
+    use std::{
+        collections::{HashMap, HashSet},
+        fmt,
+        hash::{Hash, RandomState},
+    };
 
     use datadog_opentelemetry::make_test_tracer;
     use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
@@ -128,7 +125,7 @@ mod datadog_test_agent {
             }
         }
 
-        super::assert_subset(
+        assert_subset(
             injected.iter().map(|(k, v_)| (k.as_str(), v_.as_str())),
             [
                 ("x-datadog-origin", "rum"),
@@ -137,12 +134,12 @@ mod datadog_test_agent {
             ],
         );
 
-        super::assert_subset(
+        assert_subset(
             injected.get("x-datadog-tags").unwrap().split(','),
             ["_dd.p.dm=-0"],
         );
 
-        super::assert_subset(
+        assert_subset(
             injected
                 .get("tracestate")
                 .unwrap()
@@ -151,7 +148,7 @@ mod datadog_test_agent {
                 .split(';'),
             ["s:2", "o:rum", "t.tid:80f198ee56343ba8", "t.dm:-0"],
         );
-        super::assert_subset(
+        assert_subset(
             injected
                 .get("traceparent")
                 .unwrap()
@@ -210,7 +207,7 @@ mod datadog_test_agent {
         tracer_provider.shutdown().expect("failed to shutdown");
         test_agent.assert_snapshot(SESSION_NAME).await;
 
-        super::assert_subset(
+        assert_subset(
             injected
                 .get("tracestate")
                 .unwrap()
@@ -225,7 +222,7 @@ mod datadog_test_agent {
             ],
         );
 
-        super::assert_subset(
+        assert_subset(
             injected.into_iter(),
             [(
                 "traceparent".to_string(),
@@ -233,17 +230,17 @@ mod datadog_test_agent {
             )],
         );
     }
-}
 
-#[track_caller]
-fn assert_subset<I, S: IntoIterator<Item = I>, SS: IntoIterator<Item = I>>(set: S, subset: SS)
-where
-    I: Hash + Eq + fmt::Debug,
-{
-    let set: HashSet<_, RandomState> = HashSet::from_iter(set);
-    for item in subset {
-        if !set.contains(&item) {
-            panic!("Set {:?} does not contain subset item {:?}", set, item);
+    #[track_caller]
+    fn assert_subset<I, S: IntoIterator<Item = I>, SS: IntoIterator<Item = I>>(set: S, subset: SS)
+    where
+        I: Hash + Eq + fmt::Debug,
+    {
+        let set: HashSet<_, RandomState> = HashSet::from_iter(set);
+        for item in subset {
+            if !set.contains(&item) {
+                panic!("Set {:?} does not contain subset item {:?}", set, item);
+            }
         }
     }
 }
