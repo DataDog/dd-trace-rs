@@ -150,9 +150,10 @@ jobs:
         run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       # Force git protocol to avoid sparse vs git index differences
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
-      - name: "Generate new LICENSE-3rdparty.csv and check against the previous" 
+      - name: "Generate new LICENSE-3rdparty.csv and check against the previous"
         run: |
-          # Generate CSV using dump command (write command produces empty output)
+          # The LICENSE-3rdparty.csv file must match the output of the tool in the Linux CI environment.
+          # To update the file locally, run the './scripts/generate-licenses.sh' script.
           echo "Running dd-rust-license-tool dump to generate CSV..."
           dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error
           exit_code=$?
@@ -162,16 +163,13 @@ jobs:
             echo "Exit code: $exit_code"
             echo "Error output:"
             cat /tmp/CI.error
-            echo "Generated file contents:"
-            ls -la /tmp/CI.csv || echo "File not created"
-            cat /tmp/CI.csv || echo "File empty or unreadable"
             exit 1
           fi
 
           # Compare the generated CSV with the current one
           if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
             echo "Differences detected in LICENSE-3rdparty.csv."
-            echo "Please run 'dd-rust-license-tool dump > LICENSE-3rdparty.csv' to update the file."
+            echo "Please run './scripts/generate-licenses.sh' to update the file and commit the changes."
             exit 1
           fi
 
