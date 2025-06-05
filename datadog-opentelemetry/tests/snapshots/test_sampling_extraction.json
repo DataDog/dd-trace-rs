@@ -1,0 +1,52 @@
+[[
+  {
+    "name": "server.request",
+    "service": "my_service_name",
+    "resource": "test_parent",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-3",
+      "otel.library.name": "test",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.version": "0.28.0"
+    },
+    "metrics": {
+      "_dd.rule.psr": 1.0,
+      "_sampling_priority_v1": 2.0,
+      "_top_level": 1.0
+    },
+    "duration": 1076000,
+    "start": 1749051591242949000
+  },
+     {
+       "name": "client.request",
+       "service": "my_service_name",
+       "resource": "test_child",
+       "trace_id": 0,
+       "span_id": 2,
+       "parent_id": 1,
+       "type": "http",
+       "meta": {
+         "_dd.p.dm": "-3",
+         "otel.library.name": "test",
+         "otel.status_code": "Unset",
+         "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
+         "span.kind": "client",
+         "telemetry.sdk.language": "rust",
+         "telemetry.sdk.name": "opentelemetry",
+         "telemetry.sdk.version": "0.28.0"
+       },
+       "metrics": {
+         "_dd.measured": 1.0,
+         "_sampling_priority_v1": 2.0
+       },
+       "duration": 1051000,
+       "start": 1749051591242971000
+     }]]

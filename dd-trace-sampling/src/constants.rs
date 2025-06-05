@@ -165,32 +165,36 @@ pub const SAMPLING_AGENT_RATE_TAG_KEY: &str = "_dd.agent_psr";
 
 pub const RL_EFFECTIVE_RATE: &str = "_dd.limit_psr";
 
-/// Index for the keep priority in the sampling mechanism priority tuples
-pub const KEEP_PRIORITY_INDEX: usize = 0;
+pub struct PriorityPair {
+    pub keep: SamplingPriority,
+    pub reject: SamplingPriority,
+}
 
-/// Index for the reject priority in the sampling mechanism priority tuples
-pub const REJECT_PRIORITY_INDEX: usize = 1;
-
-pub fn sampling_mechanism_to_priorities(
-    mechanism: SamplingMechanism,
-) -> (SamplingPriority, SamplingPriority) {
+pub fn sampling_mechanism_to_priorities(mechanism: SamplingMechanism) -> PriorityPair {
     use SamplingMechanism::*;
     use SamplingPriority::*;
     match mechanism {
-        AgentRateByService => (AutoKeep, AutoReject),
-        Default => (AutoKeep, AutoReject),
-        Manual => (UserKeep, UserReject),
-        LocalUserTraceSamplingRule => (UserKeep, UserReject),
-        RemoteUserTraceSamplingRule => (UserKeep, UserReject),
-        RemoteDynamicTraceSamplingRule => (UserKeep, UserReject),
-        AppSec => (UserKeep, UserKeep),
-        SpanSamplingRule => (UserKeep, UserReject),
-        DataJobsMonitoring => (UserKeep, UserKeep),
+        AgentRateByService | Default => PriorityPair {
+            keep: AutoKeep,
+            reject: AutoReject,
+        },
+        Manual
+        | LocalUserTraceSamplingRule
+        | RemoteUserTraceSamplingRule
+        | RemoteDynamicTraceSamplingRule
+        | AppSec
+        | SpanSamplingRule
+        | DataJobsMonitoring => PriorityPair {
+            keep: UserKeep,
+            reject: UserReject,
+        },
 
         // Unused - assign auto keep and reject in order to not crash
-        OtlpIngestProbabilisticSampling => (AutoKeep, AutoReject),
-        RemoteRate => (AutoKeep, AutoReject),
-        RemoteRateUser => (AutoKeep, AutoReject),
-        RemoteRateDatadog => (AutoKeep, AutoReject),
+        OtlpIngestProbabilisticSampling | RemoteRate | RemoteRateUser | RemoteRateDatadog => {
+            PriorityPair {
+                keep: AutoKeep,
+                reject: AutoReject,
+            }
+        }
     }
 }

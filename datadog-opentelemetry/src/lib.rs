@@ -12,6 +12,7 @@ mod transform;
 use std::sync::{Arc, RwLock};
 
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
+use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
 
@@ -57,7 +58,7 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     let registry = Arc::new(TraceRegistry::new());
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
-    let sampler = sampler::create_sampler_from_config(&config, resource_slot.clone());
+    let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
 
     if let Some(resource) = resource {
         tracer_provider_builder = tracer_provider_builder.with_resource(resource)
@@ -79,12 +80,12 @@ fn make_tracer(
 pub fn make_test_tracer(
     config: dd_trace::Config,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
-) -> SdkTracerProvider {
+) -> (SdkTracerProvider, DatadogPropagator) {
     let resource = Resource::builder()
         .with_attribute(opentelemetry::KeyValue::new(
             "service.name",
             config.service().to_string(),
         ))
         .build();
-    make_tracer(config, tracer_provider_builder, Some(resource)).0
+    make_tracer(config, tracer_provider_builder, Some(resource))
 }

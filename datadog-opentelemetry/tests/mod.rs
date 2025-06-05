@@ -1,20 +1,37 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::{
+    collections::HashSet,
+    fmt::{self},
+    hash::{Hash, RandomState},
+};
+
 #[cfg(not(windows))]
 mod datadog_test_agent {
+    use std::collections::HashMap;
+    use std::hash::RandomState;
+
     use datadog_opentelemetry::make_test_tracer;
     use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
+    use dd_trace::configuration::{SamplingRuleConfig, TracePropagationStyle};
+    use opentelemetry::global::ObjectSafeSpan;
     use opentelemetry::trace::{
-        SamplingDecision, SamplingResult, SpanBuilder, TraceState, TracerProvider,
+        SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, TracerProvider,
     };
-    use opentelemetry::Context;
+    use opentelemetry::{propagation::Extractor, propagation::TextMapPropagator, Context};
 
-    #[tokio::test]
-    // #[cfg_attr(miri, ignore)]
-    async fn test_received_traces() {
-        const SESSION_NAME: &str = "test_received_traces";
+    fn make_extractor<I: IntoIterator<Item = (&'static str, &'static str)>>(
+        headers: I,
+    ) -> impl Extractor + Send + Sync {
+        HashMap::<_, _, RandomState>::from_iter(
+            headers
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string())),
+        )
+    }
 
+    async fn make_test_agent(session_name: &'static str) -> DatadogTestAgent {
         let relative_snapshot_path = "datadog-opentelemetry/tests/snapshots/";
         let test_agent = DatadogTestAgent::new(
             Some(relative_snapshot_path),
@@ -28,16 +45,24 @@ mod datadog_test_agent {
             ],
         )
         .await;
-        let url = test_agent.get_base_uri().await;
-        test_agent.start_session(SESSION_NAME, None).await;
+        test_agent.start_session(session_name, None).await;
+        test_agent
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn test_received_traces() {
+        const SESSION_NAME: &str = "test_received_traces";
+        let test_agent = make_test_agent(SESSION_NAME).await;
 
         let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(url.to_string().into());
+        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
 
         let tracer_provider = make_test_tracer(
             config.build(),
             opentelemetry_sdk::trace::TracerProviderBuilder::default(),
-        );
+        )
+        .0;
         let tracer = tracer_provider.tracer("test");
         for decision in [
             SamplingDecision::RecordOnly,
@@ -60,5 +85,165 @@ mod datadog_test_agent {
         tracer_provider.shutdown().expect("failed to shutdown");
 
         test_agent.assert_snapshot(SESSION_NAME).await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn test_injection_extraction() {
+        const SESSION_NAME: &str = "test_injection_extraction";
+        let test_agent = make_test_agent(SESSION_NAME).await;
+
+        let mut config = dd_trace::Config::builder();
+        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+
+        let (tracer_provider, propagator) = make_test_tracer(
+            config.build(),
+            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        );
+
+        let parent_ctx = propagator.extract(&make_extractor([
+            (
+                "traceparent",
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01",
+            ),
+            ("tracestate", "dd=p:00f067aa0ba902b7;s:2;o:rum"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let mut injected = HashMap::new();
+
+        let tracer = tracer_provider.tracer("test");
+        {
+            let span = SpanBuilder::from_name("test_parent")
+                .with_kind(opentelemetry::trace::SpanKind::Server)
+                .start(&tracer);
+            let _ctx = Context::current_with_span(span).attach();
+            {
+                let child_span = SpanBuilder::from_name("test_child")
+                    .with_kind(opentelemetry::trace::SpanKind::Client)
+                    .start(&tracer);
+                let _child_ctx = Context::current_with_span(child_span).attach();
+
+                propagator.inject(&mut injected);
+            }
+        }
+
+        super::assert_subset(
+            injected.iter().map(|(k, v_)| (k.as_str(), v_.as_str())),
+            [
+                ("x-datadog-origin", "rum"),
+                ("x-datadog-sampling-priority", "2"),
+                ("x-datadog-trace-id", "7277407061855694839"),
+            ],
+        );
+
+        super::assert_subset(
+            injected.get("x-datadog-tags").unwrap().split(','),
+            ["_dd.p.dm=-0"],
+        );
+
+        super::assert_subset(
+            injected
+                .get("tracestate")
+                .unwrap()
+                .strip_prefix("dd=")
+                .unwrap()
+                .split(';'),
+            ["s:2", "o:rum", "t.tid:80f198ee56343ba8", "t.dm:-0"],
+        );
+        super::assert_subset(
+            injected
+                .get("traceparent")
+                .unwrap()
+                .strip_prefix("00-")
+                .unwrap()
+                .splitn(3, '-'),
+            ["01", "80f198ee56343ba864fe8b2a57d3eff7"],
+        );
+
+        tracer_provider.shutdown().expect("failed to shutdown");
+        test_agent.assert_snapshot(SESSION_NAME).await;
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn test_sampling_extraction() {
+        const SESSION_NAME: &str = "test_sampling_extraction";
+        let test_agent = make_test_agent(SESSION_NAME).await;
+
+        let mut config = dd_trace::Config::builder();
+        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        config.set_service("my_service_name".to_string());
+        config.set_trace_sampling_rules(vec![SamplingRuleConfig {
+            service: Some("my_service_name".to_string()),
+            sample_rate: 1.0,
+            ..SamplingRuleConfig::default()
+        }]);
+        config.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
+
+        let (tracer_provider, propagator) = make_test_tracer(
+            config.build(),
+            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        );
+
+        let mut injected = HashMap::new();
+        let trace_id;
+        let span_id;
+        let tracer = tracer_provider.tracer("test");
+        {
+            let span = SpanBuilder::from_name("test_parent")
+                .with_kind(opentelemetry::trace::SpanKind::Server)
+                .start(&tracer);
+            let _ctx = Context::current_with_span(span).attach();
+            {
+                let child_span = SpanBuilder::from_name("test_child")
+                    .with_kind(opentelemetry::trace::SpanKind::Client)
+                    .start(&tracer);
+                trace_id = child_span.span_context().trace_id();
+                span_id = child_span.span_context().span_id();
+
+                let _child_ctx = Context::current_with_span(child_span).attach();
+
+                propagator.inject(&mut injected);
+            }
+        }
+        tracer_provider.shutdown().expect("failed to shutdown");
+        test_agent.assert_snapshot(SESSION_NAME).await;
+
+        super::assert_subset(
+            injected
+                .get("tracestate")
+                .unwrap()
+                .strip_prefix("dd=")
+                .unwrap()
+                .split(';')
+                .map(String::from),
+            [
+                "s:2".to_string(),
+                "t.dm:-3".to_string(),
+                format!("p:{:016x}", span_id),
+            ],
+        );
+
+        super::assert_subset(
+            injected.into_iter(),
+            [(
+                "traceparent".to_string(),
+                format!("00-{:032x}-{:016x}-01", trace_id, span_id),
+            )],
+        );
+    }
+}
+
+#[track_caller]
+fn assert_subset<I, S: IntoIterator<Item = I>, SS: IntoIterator<Item = I>>(set: S, subset: SS)
+where
+    I: Hash + Eq + fmt::Debug,
+{
+    let set: HashSet<_, RandomState> = HashSet::from_iter(set);
+    for item in subset {
+        if !set.contains(&item) {
+            panic!("Set {:?} does not contain subset item {:?}", set, item);
+        }
     }
 }

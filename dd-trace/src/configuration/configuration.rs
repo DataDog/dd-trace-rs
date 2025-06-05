@@ -10,7 +10,7 @@ use crate::dd_warn;
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
 /// Configuration for a single sampling rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SamplingRuleConfig {
     /// The sample rate to apply (0.0-1.0)
     pub sample_rate: f64,
@@ -69,8 +69,8 @@ impl FromStr for LogLevel {
 }
 
 #[derive(Debug, Default)]
-pub struct ParsedSamplingRules {
-    pub rules: Vec<SamplingRuleConfig>,
+struct ParsedSamplingRules {
+    rules: Vec<SamplingRuleConfig>,
 }
 
 impl FromStr for ParsedSamplingRules {

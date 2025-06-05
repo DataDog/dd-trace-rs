@@ -1,17 +1,16 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use opentelemetry::trace::SamplingDecision;
 use opentelemetry::trace::TraceId;
-use opentelemetry::trace::{SamplingDecision, SamplingResult, TraceContextExt};
-use opentelemetry::{Context, KeyValue};
-use opentelemetry_sdk::trace::ShouldSample;
+use opentelemetry::KeyValue;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::constants::{
-    self, sampling_mechanism_to_priorities, SamplingMechanism, KEEP_PRIORITY_INDEX,
-    REJECT_PRIORITY_INDEX, RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY,
-    SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+    self, sampling_mechanism_to_priorities, SamplingMechanism, RL_EFFECTIVE_RATE,
+    SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY,
+    SAMPLING_RULE_RATE_TAG_KEY,
 };
 
 // Import the attr constants
@@ -384,112 +383,38 @@ impl DatadogSampler {
         }
     }
 
-    /// Adds Datadog-specific sampling tags to the attributes
-    ///
-    /// # Parameters
-    /// * `decision` - The sampling decision (RecordAndSample or Drop)
-    /// * `mechanism` - The sampling mechanism used to make the decision
-    /// * `sample_rate` - The sample rate to use for the decision
-    /// * `rl_effective_rate` - The effective rate limit if rate limiting was applied
-    ///
-    /// # Returns
-    /// A vector of attributes to add to the sampling result
-    fn add_dd_sampling_tags(
+    /// Sample an incoming span based on the parent context and attributes
+    pub fn sample(
         &self,
-        decision: &SamplingDecision,
-        mechanism: SamplingMechanism,
-        sample_rate: f64,
-        rl_effective_rate: Option<i32>,
-    ) -> Vec<KeyValue> {
-        let mut result = Vec::new();
-
-        // Add rate limiting tag if applicable
-        if let Some(limit) = rl_effective_rate {
-            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit as i64));
-        }
-
-        // Add the sampling decision trace tag with the mechanism
-        result.push(KeyValue::new(
-            SAMPLING_DECISION_MAKER_TAG_KEY,
-            format!("-{}", mechanism.value()),
-        ));
-
-        // Determine which priority index to use based on the decision
-        let priority_index = if *decision == SamplingDecision::RecordAndSample {
-            KEEP_PRIORITY_INDEX
-        } else {
-            REJECT_PRIORITY_INDEX
-        };
-
-        // Get the appropriate sampling priority value based on the mechanism and priority index
-        let priority_pair = sampling_mechanism_to_priorities(mechanism);
-        let priority = if priority_index == KEEP_PRIORITY_INDEX {
-            priority_pair.0
-        } else {
-            priority_pair.1
-        };
-
-        result.push(KeyValue::new(
-            SAMPLING_PRIORITY_TAG_KEY,
-            priority.value() as i64,
-        ));
-
-        // Add the sample rate tag with the correct key based on the mechanism
-        match mechanism {
-            SamplingMechanism::AgentRateByService => {
-                result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, sample_rate));
-            }
-            SamplingMechanism::RemoteUserTraceSamplingRule
-            | SamplingMechanism::RemoteDynamicTraceSamplingRule
-            | SamplingMechanism::LocalUserTraceSamplingRule => {
-                result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, sample_rate));
-            }
-            _ => {}
-        }
-
-        result
-    }
-}
-
-impl ShouldSample for DatadogSampler {
-    fn should_sample(
-        &self,
-        parent_context: Option<&Context>,
+        is_parent_sampled: Option<bool>,
         trace_id: TraceId,
         _name: &str,
         span_kind: &opentelemetry::trace::SpanKind,
         attributes: &[KeyValue],
-        _links: &[opentelemetry::trace::Link],
-    ) -> SamplingResult {
-        // Check if there is a parent span context and if it has an active span
-        if let Some(parent_ctx) = parent_context.filter(|cx| cx.has_active_span()) {
+    ) -> DdSamplingResult {
+        if let Some(is_parent_sampled) = is_parent_sampled {
             // If a parent exists, inherit its sampling decision and trace state
-            let span = parent_ctx.span();
-            let parent_span_context = span.span_context();
-            let decision = if parent_span_context.is_sampled() {
-                SamplingDecision::RecordAndSample
-            } else {
-                SamplingDecision::RecordOnly
-            };
-
-            return SamplingResult {
-                decision,
-                attributes: Vec::new(), /* Attributes are not modified by this sampler for
-                                         * inherited decisions */
-                trace_state: parent_span_context.trace_state().clone(),
+            return DdSamplingResult {
+                is_sampled: is_parent_sampled,
+                trace_root_info: None,
             };
         }
 
         // Apply rules-based sampling
-        let mut decision = SamplingDecision::RecordAndSample;
+        self.sample_root(trace_id, _name, span_kind, attributes)
+    }
 
-        // Track which sampling mechanism was used
+    /// Sample the root span of a trace
+    fn sample_root(
+        &self,
+        trace_id: TraceId,
+        _name: &str,
+        span_kind: &opentelemetry::trace::SpanKind,
+        attributes: &[KeyValue],
+    ) -> DdSamplingResult {
+        let mut decision = true;
         let mut used_agent_sampler = false;
-
-        // Store the sample rate to use
         let sample_rate;
-
-        // Store rate limit information if applicable
         let mut rl_effective_rate: Option<i32> = None;
 
         // Find a matching rule
@@ -502,10 +427,10 @@ impl ShouldSample for DatadogSampler {
 
             // First check if the span should be sampled according to the rule
             if !rule.sample(trace_id) {
-                decision = SamplingDecision::RecordOnly;
+                decision = false;
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
-                decision = SamplingDecision::RecordOnly;
+                decision = false;
                 rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
             }
         } else {
@@ -518,7 +443,7 @@ impl ShouldSample for DatadogSampler {
 
                 // Check if the service sampler decides to drop
                 if !sampler.sample(trace_id) {
-                    decision = SamplingDecision::RecordOnly;
+                    decision = false;
                 }
             } else {
                 // Default sample rate, should never happen in practice if agent provides rates
@@ -530,18 +455,99 @@ impl ShouldSample for DatadogSampler {
         // Determine the sampling mechanism
         let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
 
-        // Add Datadog-specific sampling tags
-        let result_attributes =
-            self.add_dd_sampling_tags(&decision, mechanism, sample_rate, rl_effective_rate);
-
-        SamplingResult {
-            decision,
-            attributes: result_attributes,
-            trace_state: Default::default(),
+        DdSamplingResult {
+            is_sampled: decision,
+            trace_root_info: Some(TraceRootSamplingInfo {
+                mechanism,
+                rate: sample_rate,
+                rl_effective_rate,
+            }),
         }
     }
 }
 
+pub struct DdSamplingResult {
+    pub is_sampled: bool,
+    pub trace_root_info: Option<TraceRootSamplingInfo>,
+}
+
+pub struct TraceRootSamplingInfo {
+    pub mechanism: SamplingMechanism,
+    pub rate: f64,
+    pub rl_effective_rate: Option<i32>,
+}
+
+impl DdSamplingResult {
+    /// Returns Datadog-specific sampling tags to be added as attributes
+    ///
+    /// # Parameters
+    /// * `decision` - The sampling decision (RecordAndSample or Drop)
+    /// * `mechanism` - The sampling mechanism used to make the decision
+    /// * `sample_rate` - The sample rate to use for the decision
+    /// * `rl_effective_rate` - The effective rate limit if rate limiting was applied
+    ///
+    /// # Returns
+    /// A vector of attributes to add to the sampling result
+    pub fn to_dd_sampling_tags(&self) -> Vec<KeyValue> {
+        let mut result = Vec::new();
+        let Some(root_info) = &self.trace_root_info else {
+            return result; // No root info, return empty attributes
+        };
+
+        // Add rate limiting tag if applicable
+        if let Some(limit) = root_info.rl_effective_rate {
+            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit as i64));
+        }
+
+        // Add the sampling decision trace tag with the mechanism
+        result.push(KeyValue::new(
+            SAMPLING_DECISION_MAKER_TAG_KEY,
+            format!("-{}", root_info.mechanism.value()),
+        ));
+
+        let priority = root_info.sampling_priority(self.is_sampled);
+        result.push(KeyValue::new(
+            SAMPLING_PRIORITY_TAG_KEY,
+            priority.value() as i64,
+        ));
+
+        // Add the sample rate tag with the correct key based on the mechanism
+        match root_info.mechanism {
+            SamplingMechanism::AgentRateByService => {
+                result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
+            }
+            SamplingMechanism::RemoteUserTraceSamplingRule
+            | SamplingMechanism::RemoteDynamicTraceSamplingRule
+            | SamplingMechanism::LocalUserTraceSamplingRule => {
+                result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate));
+            }
+            _ => {}
+        }
+
+        result
+    }
+
+    /// Converts the sampling result to a SamplingResult for OpenTelemetry
+    pub fn to_otel_decision(&self) -> SamplingDecision {
+        if self.is_sampled {
+            SamplingDecision::RecordAndSample
+        } else {
+            SamplingDecision::RecordOnly
+        }
+    }
+}
+
+impl TraceRootSamplingInfo {
+    pub fn sampling_priority(&self, is_sampled: bool) -> constants::SamplingPriority {
+        let priority_pair = sampling_mechanism_to_priorities(self.mechanism);
+
+        if is_sampled {
+            priority_pair.keep
+        } else {
+            priority_pair.reject
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -550,13 +556,10 @@ mod tests {
     };
     use crate::constants::attr::{ENV_TAG, RESOURCE_TAG};
     use crate::constants::pattern;
-    use opentelemetry::trace::{Span, SpanContext, SpanId, SpanKind};
-    use opentelemetry::trace::{Status, TraceFlags, TraceState};
-    use opentelemetry::Context as OtelContext;
+    use opentelemetry::trace::SpanKind;
     use opentelemetry::{Key, KeyValue, Value};
     use opentelemetry_sdk::Resource as SdkResource;
     use opentelemetry_semantic_conventions as semconv;
-    use std::borrow::Cow;
 
     fn create_empty_resource_for_matching() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder().build()
@@ -674,85 +677,6 @@ mod tests {
             &SpanKind::Client,
             &empty_resource
         ));
-    }
-
-    // Helper function to create a parent context
-    fn create_parent_context(sampled: bool) -> OtelContext {
-        let span_context = SpanContext::new(
-            create_trace_id(),
-            SpanId::from(42u64),
-            if sampled {
-                TraceFlags::SAMPLED
-            } else {
-                TraceFlags::default()
-            },
-            false,
-            TraceState::default(),
-        );
-
-        // Create an implementation of Span for testing
-        #[derive(Debug)]
-        struct TestSpan {
-            ctx: SpanContext,
-        }
-
-        impl Span for TestSpan {
-            fn span_context(&self) -> &SpanContext {
-                &self.ctx
-            }
-
-            fn is_recording(&self) -> bool {
-                true
-            }
-
-            fn add_event<T>(&mut self, _name: T, _attributes: Vec<KeyValue>)
-            where
-                T: Into<Cow<'static, str>>,
-            {
-                // Not implemented for test
-            }
-
-            fn add_event_with_timestamp<T>(
-                &mut self,
-                _name: T,
-                _timestamp: std::time::SystemTime,
-                _attributes: Vec<KeyValue>,
-            ) where
-                T: Into<Cow<'static, str>>,
-            {
-                // Not implemented for test
-            }
-
-            fn set_attributes(&mut self, _attributes: impl IntoIterator<Item = KeyValue>) {
-                // Not implemented for test
-            }
-
-            fn set_status(&mut self, _status: Status) {
-                // Not implemented for test
-            }
-
-            fn update_name<T>(&mut self, _new_name: T)
-            where
-                T: Into<Cow<'static, str>>,
-            {
-                // Not implemented for test
-            }
-
-            fn end_with_timestamp(&mut self, _timestamp: std::time::SystemTime) {
-                // Not implemented for test
-            }
-
-            fn set_attribute(&mut self, _attribute: KeyValue) {
-                // Not implemented for test
-            }
-
-            fn add_link(&mut self, _span_context: SpanContext, _attributes: Vec<KeyValue>) {
-                // Not implemented for test
-            }
-        }
-
-        let span = TestSpan { ctx: span_context };
-        OtelContext::current_with_span(span)
     }
 
     #[test]
@@ -1010,14 +934,20 @@ mod tests {
 
     #[test]
     fn test_add_dd_sampling_tags() {
-        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
-
         // Test with RecordAndSample decision and LocalUserTraceSamplingRule mechanism
-        let decision = SamplingDecision::RecordAndSample;
         let mechanism = SamplingMechanism::LocalUserTraceSamplingRule;
         let sample_rate = 0.5;
 
-        let attrs = sampler.add_dd_sampling_tags(&decision, mechanism, sample_rate, None);
+        let sampling_result = DdSamplingResult {
+            is_sampled: true,
+            trace_root_info: Some(TraceRootSamplingInfo {
+                mechanism: SamplingMechanism::LocalUserTraceSamplingRule,
+                rate: 0.5,
+                rl_effective_rate: None,
+            }),
+        };
+
+        let attrs = sampling_result.to_dd_sampling_tags();
 
         // Verify the number of attributes
         assert_eq!(attrs.len(), 3);
@@ -1040,7 +970,7 @@ mod tests {
                 SAMPLING_PRIORITY_TAG_KEY => {
                     // For LocalUserTraceSamplingRule with KEEP, it should be USER_KEEP
                     let priority_pair = sampling_mechanism_to_priorities(mechanism);
-                    let expected_priority = priority_pair.0.value() as i64;
+                    let expected_priority = priority_pair.keep.value() as i64;
 
                     let value_int = match attr.value {
                         opentelemetry::Value::I64(i) => i,
@@ -1067,8 +997,16 @@ mod tests {
 
         // Test with rate limiting
         let rate_limit = 100;
-        let attrs_with_limit =
-            sampler.add_dd_sampling_tags(&decision, mechanism, sample_rate, Some(rate_limit));
+
+        let sampling_result = DdSamplingResult {
+            is_sampled: false,
+            trace_root_info: Some(TraceRootSamplingInfo {
+                mechanism: SamplingMechanism::LocalUserTraceSamplingRule,
+                rate: 0.5,
+                rl_effective_rate: Some(rate_limit),
+            }),
+        };
+        let attrs_with_limit = sampling_result.to_dd_sampling_tags();
 
         // With rate limiting, there should be one more attribute
         assert_eq!(attrs_with_limit.len(), 4);
@@ -1090,11 +1028,18 @@ mod tests {
         assert!(found_limit, "Missing rate limit tag");
 
         // Test with AgentRateByService mechanism to check for SAMPLING_AGENT_RATE_TAG_KEY
-        let agent_mechanism = SamplingMechanism::AgentRateByService;
-        let agent_rate = 0.75;
 
-        let agent_attrs =
-            sampler.add_dd_sampling_tags(&decision, agent_mechanism, agent_rate, None);
+        let agent_rate = 0.75;
+        let sampling_result = DdSamplingResult {
+            is_sampled: false,
+            trace_root_info: Some(TraceRootSamplingInfo {
+                mechanism: SamplingMechanism::AgentRateByService,
+                rate: agent_rate,
+                rl_effective_rate: None,
+            }),
+        };
+
+        let agent_attrs = sampling_result.to_dd_sampling_tags();
 
         // Verify the number of attributes (should be 3)
         assert_eq!(agent_attrs.len(), 3);
@@ -1131,37 +1076,39 @@ mod tests {
 
         // Create empty slices for attributes and links
         let empty_attrs: &[KeyValue] = &[];
-        let empty_links: &[opentelemetry::trace::Link] = &[];
 
         // Test with sampled parent context
-        let parent_sampled = create_parent_context(true);
-        let result_sampled = sampler.should_sample(
-            Some(&parent_sampled),
+        // let parent_sampled = create_parent_context(true);
+        let result_sampled = sampler.sample(
+            Some(true),
             create_trace_id(),
             "span",
             &SpanKind::Client,
             empty_attrs,
-            empty_links,
         );
 
         // Should inherit the sampling decision from parent
-        assert_eq!(result_sampled.decision, SamplingDecision::RecordAndSample);
-        assert!(result_sampled.attributes.is_empty());
+        assert_eq!(
+            result_sampled.to_otel_decision(),
+            SamplingDecision::RecordAndSample
+        );
+        assert!(result_sampled.to_dd_sampling_tags().is_empty());
 
         // Test with non-sampled parent context
-        let parent_not_sampled = create_parent_context(false);
-        let result_not_sampled = sampler.should_sample(
-            Some(&parent_not_sampled),
+        let result_not_sampled = sampler.sample(
+            Some(false),
             create_trace_id(),
             "span",
             &SpanKind::Client,
             empty_attrs,
-            empty_links,
         );
 
         // Should inherit the sampling decision from parent
-        assert_eq!(result_not_sampled.decision, SamplingDecision::RecordOnly);
-        assert!(result_not_sampled.attributes.is_empty());
+        assert_eq!(
+            result_not_sampled.to_otel_decision(),
+            SamplingDecision::RecordOnly
+        );
+        assert!(result_not_sampled.to_dd_sampling_tags().is_empty());
     }
 
     #[test]
@@ -1178,38 +1125,36 @@ mod tests {
 
         let sampler = DatadogSampler::new(vec![rule], None, create_empty_resource());
 
-        // Create an empty slice for links
-        let empty_links: &[opentelemetry::trace::Link] = &[];
-
         // Test with matching attributes
         let attrs = create_attributes("resource", "prod");
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             create_trace_id(),
             "span",
             &SpanKind::Client,
             attrs.as_slice(),
-            empty_links,
         );
 
         // Should sample and add attributes
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
-        assert!(!result.attributes.is_empty());
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
+        assert!(!result.to_dd_sampling_tags().is_empty());
 
         // Test with non-matching attributes
         let attrs_no_match = create_attributes("other-resource", "prod");
-        let result_no_match = sampler.should_sample(
+        let result_no_match = sampler.sample(
             None,
             create_trace_id(),
             "span",
             &SpanKind::Client,
             attrs_no_match.as_slice(),
-            empty_links,
         );
 
         // Should still sample (default behavior when no rules match) and add attributes
-        assert_eq!(result_no_match.decision, SamplingDecision::RecordAndSample);
-        assert!(!result_no_match.attributes.is_empty());
+        assert_eq!(
+            result_no_match.to_otel_decision(),
+            SamplingDecision::RecordAndSample
+        );
+        assert!(!result_no_match.to_dd_sampling_tags().is_empty());
     }
 
     #[test]
@@ -1226,23 +1171,20 @@ mod tests {
 
         sampler.update_service_rates(rates);
 
-        let empty_links: &[opentelemetry::trace::Link] = &[];
-
         // Test with attributes that should lead to "service:test-service,env:prod" key
         // Sampler's resource is already for "test-service"
         let attrs_sample = create_attributes("any_resource_name_matching_env", "prod");
-        let result_sample = sampler.should_sample(
+        let result_sample = sampler.sample(
             None,
             create_trace_id(),
             "span_for_test_service",
             &SpanKind::Client,
             attrs_sample.as_slice(),
-            empty_links,
         );
         // Expect RecordAndSample because service_key will be "service:test-service,env:prod" ->
         // rate 1.0
         assert_eq!(
-            result_sample.decision,
+            result_sample.to_otel_decision(),
             SamplingDecision::RecordAndSample,
             "Span for test-service/prod should be sampled"
         );
@@ -1251,17 +1193,16 @@ mod tests {
         // Update sampler's resource to be "other-service"
         sampler.resource = create_resource("other-service".to_string());
         let attrs_no_sample = create_attributes("any_resource_name_matching_env", "prod");
-        let result_no_sample = sampler.should_sample(
+        let result_no_sample = sampler.sample(
             None,
             create_trace_id(),
             "span_for_other_service",
             &SpanKind::Client,
             attrs_no_sample.as_slice(),
-            empty_links,
         );
         // Expect Drop because service_key will be "service:other-service,env:prod" -> rate 0.0
         assert_eq!(
-            result_no_sample.decision,
+            result_no_sample.to_otel_decision(),
             SamplingDecision::RecordOnly,
             "Span for other-service/prod should be dropped"
         );
@@ -1615,17 +1556,16 @@ mod tests {
             "HTTP client operation name should be correct"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Client,
             &http_client_attrs,
-            &[],
         );
 
         // Should be sampled due to matching the http_rule
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
 
         // 2. HTTP server request
         let http_server_attrs = vec![KeyValue::new(
@@ -1640,17 +1580,16 @@ mod tests {
             "HTTP server operation name should be correct"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Server,
             &http_server_attrs,
-            &[],
         );
 
         // Should be sampled due to matching the http_rule
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
 
         // 3. Database query
         let db_attrs = vec![KeyValue::new(
@@ -1665,17 +1604,16 @@ mod tests {
             "Database operation name should be correct"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Client, // DB queries use client span kind
             &db_attrs,
-            &[],
         );
 
         // Should be sampled due to matching the db_rule
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
 
         // 4. Messaging operation
         let messaging_attrs = vec![
@@ -1696,17 +1634,16 @@ mod tests {
             "Messaging operation name should be correct"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Consumer, // Messaging uses consumer span kind
             &messaging_attrs,
-            &[],
         );
 
         // Should be sampled due to matching the messaging_rule
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
 
         // 5. Generic internal span (should not match any rules)
         let internal_attrs = vec![KeyValue::new("custom.tag", "value")];
@@ -1718,17 +1655,16 @@ mod tests {
             "Internal operation name should be the span kind"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Internal,
             &internal_attrs,
-            &[],
         );
 
         // Should still be sampled (default behavior when no rules match)
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
 
         // 6. Server with protocol but no HTTP method
         let server_protocol_attrs = vec![KeyValue::new(
@@ -1744,17 +1680,16 @@ mod tests {
             "Server with protocol operation name should use protocol"
         );
 
-        let result = sampler.should_sample(
+        let result = sampler.sample(
             None,
             trace_id,
             "test-span",
             &SpanKind::Server,
             &server_protocol_attrs,
-            &[],
         );
 
         // Should not match our http rule since operation name would be "http.server.request"
         // But should still be sampled (default behavior)
-        assert_eq!(result.decision, SamplingDecision::RecordAndSample);
+        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
     }
 }
