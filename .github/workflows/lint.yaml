@@ -148,25 +148,24 @@ jobs:
         uses: ./.github/actions/cache
       - name: Install dd-rust-license-tool
         run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
-      # Force git protocol to avoid sparse vs git index differences
+      # To ensure the dependency tree is identical between the CI runner and the
+      # local license generation script (which also forces the 'git' protocol),
+      # we explicitly set the crates.io protocol. Cargo's default can vary
+      # between 'git' and 'sparse' depending on the environment, which can lead
+      # to different dependency resolutions. This guarantees consistency.
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
       - name: "Generate new LICENSE-3rdparty.csv and check against the previous"
         run: |
           # The LICENSE-3rdparty.csv file must match the output of the tool in the Linux CI environment.
           # To update the file locally, run the './scripts/generate-licenses.sh' script.
           echo "Running dd-rust-license-tool dump to generate CSV..."
-          dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error
-          exit_code=$?
-          
-          if [ $exit_code -ne 0 ]; then
-            echo "ERROR: dd-rust-license-tool dump failed!"
-            echo "Exit code: $exit_code"
-            echo "Error output:"
+          if ! dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error; then
+            echo "ERROR: dd-rust-license-tool dump failed! See error output below:"
             cat /tmp/CI.error
             exit 1
           fi
 
-          # Compare the generated CSV with the current one
+          # Compare the generated CSV with the current one. If they differ, diff will have a non-zero exit code.
           if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
             echo "Differences detected in LICENSE-3rdparty.csv."
             echo "Please run './scripts/generate-licenses.sh' to update the file and commit the changes."
