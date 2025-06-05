@@ -299,11 +299,11 @@ impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
     pub fn new(
         rules: Vec<SamplingRule>,
-        rate_limit: Option<i32>,
+        rate_limit: i32,
         resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
     ) -> Self {
         // Create rate limiter with default value of 100 if not provided
-        let limiter = RateLimiter::new(rate_limit.unwrap_or(100), None);
+        let limiter = RateLimiter::new(rate_limit, None);
 
         DatadogSampler {
             rules,
@@ -713,14 +713,13 @@ mod tests {
     #[test]
     fn test_datadog_sampler_creation() {
         // Create a sampler with default config
-        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource());
         assert!(sampler.rules.is_empty());
         assert!(sampler.service_samplers.is_empty());
 
         // Create a sampler with rules
         let rule = SamplingRule::new(0.5, None, None, None, None, None);
-        let sampler_with_rules =
-            DatadogSampler::new(vec![rule], Some(200), create_empty_resource());
+        let sampler_with_rules = DatadogSampler::new(vec![rule], 200, create_empty_resource());
         assert_eq!(sampler_with_rules.rules.len(), 1);
         assert_eq!(sampler_with_rules.rules[0].sample_rate, 0.5);
     }
@@ -730,7 +729,7 @@ mod tests {
         // Use create_resource to initialize the sampler with a service name in its resource
         let test_service_name = "test-service".to_string();
         let sampler_resource = create_resource(test_service_name.clone());
-        let sampler = DatadogSampler::new(vec![], None, sampler_resource);
+        let sampler = DatadogSampler::new(vec![], 100, sampler_resource);
 
         // Test with service and env
         // The 'service' in create_attributes is not used for the service part of the key,
@@ -754,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_update_service_rates() {
-        let mut sampler = DatadogSampler::new(vec![], None, create_empty_resource());
+        let mut sampler = DatadogSampler::new(vec![], 100, create_empty_resource());
 
         // Update with service rates
         let mut rates = HashMap::new();
@@ -821,7 +820,7 @@ mod tests {
         // Sampler is mutable to allow resource updates
         let mut sampler = DatadogSampler::new(
             vec![rule1.clone(), rule2.clone(), rule3.clone()],
-            None,
+            100,
             create_empty_resource(), // Initial resource, will be updated before each check
         );
 
@@ -898,7 +897,7 @@ mod tests {
 
     #[test]
     fn test_get_sampling_mechanism() {
-        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource());
 
         // Create rules with different provenances
         let rule_customer =
@@ -1072,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_should_sample_parent_context() {
-        let sampler = DatadogSampler::new(vec![], None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource());
 
         // Create empty slices for attributes and links
         let empty_attrs: &[KeyValue] = &[];
@@ -1123,7 +1122,7 @@ mod tests {
             None,
         );
 
-        let sampler = DatadogSampler::new(vec![rule], None, create_empty_resource());
+        let sampler = DatadogSampler::new(vec![rule], 100, create_empty_resource());
 
         // Test with matching attributes
         let attrs = create_attributes("resource", "prod");
@@ -1162,7 +1161,7 @@ mod tests {
         // Initialize sampler with a default service, e.g., "test-service"
         // The sampler's own service name will be used for the 'service:' part of the service_key
         let mut sampler =
-            DatadogSampler::new(vec![], None, create_resource("test-service".to_string()));
+            DatadogSampler::new(vec![], 100, create_resource("test-service".to_string()));
 
         // Add service rates for different service+env combinations
         let mut rates = HashMap::new();
@@ -1534,7 +1533,7 @@ mod tests {
         // Create a sampler with these rules
         let sampler = DatadogSampler::new(
             vec![http_rule, db_rule, messaging_rule],
-            None,
+            100,
             create_empty_resource(),
         );
 

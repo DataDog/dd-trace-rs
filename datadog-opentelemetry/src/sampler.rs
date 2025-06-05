@@ -78,9 +78,9 @@ impl ShouldSample for Sampler {
                         decision_maker: trace_root_info.mechanism.value() as i8,
                     }),
                     origin: None,
-                    // TODO(paullgdc): This is here so the injector adds the t.dm tag to tracecontext.
-                    // The injector should probably inject it from the trace propagation data
-                    // instead of tags.
+                    // TODO(paullgdc): This is here so the injector adds the t.dm tag to
+                    // tracecontext. The injector should probably inject it from
+                    // the trace propagation data instead of tags.
                     tags: Some(HashMap::from_iter([(
                         "_dd.p.dm".to_string(),
                         format!("{}", -(trace_root_info.mechanism.value() as i32)),

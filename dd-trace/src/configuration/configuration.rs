@@ -179,12 +179,13 @@ pub struct Config {
     dogstatsd_agent_url: Cow<'static, str>,
 
     // # Sampling
+    ///  A list of sampling rules. Each rule is matched against the root span of a trace
+    /// If a rule matches, the trace is sampled with the associated sample rate.
     trace_sampling_rules: Vec<SamplingRuleConfig>,
 
-    /// Maximum number of spans to sample per second, per process
-    /// if this is not set, the datadog Agent controls rate limiting
-    /// Only applied if trace_sampling_rules are used
-    trace_rate_limit: Option<i32>,
+    /// Maximum number of spans to sample per second
+    /// Only applied if trace_sampling_rules are matched
+    trace_rate_limit: i32,
 
     /// Disables the library if this is false
     enabled: bool,
@@ -253,7 +254,7 @@ impl Config {
                 .map(|psc| psc.rules)
                 .unwrap_or(default.trace_sampling_rules),
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
-                .or(default.trace_rate_limit),
+                .unwrap_or(default.trace_rate_limit),
 
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
@@ -332,7 +333,7 @@ impl Config {
         self.trace_sampling_rules.as_ref()
     }
 
-    pub fn trace_rate_limit(&self) -> Option<i32> {
+    pub fn trace_rate_limit(&self) -> i32 {
         self.trace_rate_limit
     }
 
@@ -386,7 +387,7 @@ impl Default for Config {
             trace_agent_url: Cow::Borrowed("http://localhost:8126"),
             dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
             trace_sampling_rules: Vec::new(),
-            trace_rate_limit: None,
+            trace_rate_limit: 100,
             enabled: true,
             log_level: LogLevel::default(),
             tracer_version: TRACER_VERSION,
@@ -448,7 +449,7 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
-        self.config.trace_rate_limit = Some(rate_limit);
+        self.config.trace_rate_limit = rate_limit;
         self
     }
 
@@ -523,7 +524,7 @@ mod tests {
 
         assert_eq!(config.service(), "test-service");
         assert_eq!(config.env(), Some("test-env"));
-        assert_eq!(config.trace_rate_limit(), Some(123));
+        assert_eq!(config.trace_rate_limit(), 123);
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1, "Should have one rule");
         assert_eq!(rules[0].sample_rate, 0.5);
@@ -560,7 +561,7 @@ mod tests {
 
         let config = builder.build();
 
-        assert_eq!(config.trace_rate_limit(), Some(200));
+        assert_eq!(config.trace_rate_limit(), 200);
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.8);
