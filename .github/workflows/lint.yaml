@@ -150,19 +150,34 @@ jobs:
         run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       - name: "Generate new LICENSE-3rdparty.csv and check against the previous" 
         run: |
-          # Debug: Check if config file exists
+          # Debug: Check if config file exists and show its contents
           echo "Checking for license-tool.toml..."
           ls -la license-tool.toml || echo "license-tool.toml not found"
+          echo "Contents of license-tool.toml:"
+          cat license-tool.toml || echo "Could not read license-tool.toml"
+          
+          # Debug: Check current working directory and Cargo.toml
+          echo "Current working directory:"
+          pwd
+          echo "Cargo.toml exists:"
+          ls -la Cargo.toml || echo "Cargo.toml not found"
+          
+          # Debug: Try to understand what the tool sees
+          echo "Running dd-rust-license-tool --help to see available options..."
+          dd-rust-license-tool --help || echo "Help command failed"
           
           # Debug: Run dd-rust-license-tool write with error capture
           echo "Running dd-rust-license-tool write..."
           dd-rust-license-tool write > /tmp/CI.csv 2> /tmp/CI.error
           exit_code=$?
+          
+          echo "Tool exit code: $exit_code"
+          echo "Error output (if any):"
+          cat /tmp/CI.error || echo "No error output"
+          
           if [ $exit_code -ne 0 ]; then
             echo "ERROR: dd-rust-license-tool write failed!"
             echo "Exit code: $exit_code"
-            echo "Error output:"
-            cat /tmp/CI.error
             echo "Generated file contents:"
             ls -la /tmp/CI.csv || echo "File not created"
             cat /tmp/CI.csv || echo "File empty or unreadable"
@@ -172,6 +187,7 @@ jobs:
           # Debug: Check what was generated
           echo "Generated CSV file info:"
           ls -la /tmp/CI.csv
+          echo "Generated CSV file size: $(wc -c < /tmp/CI.csv) bytes"
           echo "First 10 lines of generated CSV:"
           head -10 /tmp/CI.csv
 
