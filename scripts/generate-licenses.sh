@@ -16,32 +16,28 @@ if ! command -v docker &> /dev/null || ! docker info &> /dev/null; then
     exit 1
 fi
 
-echo "Ensuring the 'scripts' directory exists for our .cargo/config.toml..."
-mkdir -p scripts
+# 2. Ensure BuildKit is enabled for efficient caching
+export DOCKER_BUILDKIT=1
 
-echo "Creating a temporary cargo config to force git protocol..."
-printf "[registries.crates-io]\nprotocol = \"git\"\n" > scripts/config.toml
+echo "Creating temporary cargo config..."
+mkdir -p .cargo
+printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
 
-echo "Generating LICENSE-3rdparty.csv inside a Docker container..."
+echo "Building license tool container with caching..."
+docker build \
+    --progress=plain \
+    -t dd-license-tool \
+    -f scripts/Dockerfile.license \
+    .
 
-# 2. Use a specific Rust Docker image to ensure a consistent environment.
-# We mount the project directory into the container and execute the commands.
+echo "Generating LICENSE-3rdparty.csv..."
 docker run --rm \
     -v "$(pwd)":/usr/src/app \
-    -v "$(pwd)/scripts/config.toml":/usr/src/app/.cargo/config.toml \
-    -w /usr/src/app \
-    rust:1.82-slim \
-    bash -c "
-        set -e
-        echo '--> Installing license tool...'
-        cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
-        
-        echo '--> Generating license file...'
-        dd-rust-license-tool dump > LICENSE-3rdparty.csv
-    "
+    -u "$(id -u):$(id -g)" \
+    dd-license-tool > LICENSE-3rdparty.csv
 
-# 3. Clean up the temporary config file.
-rm scripts/config.toml
+echo "Cleaning up..."
+rm -rf .cargo/config.toml
 
 echo ""
 echo "✅ Successfully generated LICENSE-3rdparty.csv."
