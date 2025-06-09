@@ -7,10 +7,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use crate::{
     carrier::{Extractor, Injector},
-    context::{
-        encode_tag_value, Sampling, SpanContext, Traceparent, Tracestate,
-        DATADOG_PROPAGATION_TAG_PREFIX,
-    },
+    context::{Sampling, SpanContext, Traceparent, Tracestate, DATADOG_PROPAGATION_TAG_PREFIX},
     datadog::{DATADOG_LAST_PARENT_ID_KEY, INVALID_SEGMENT_REGEX},
     error::Error,
 };
@@ -26,31 +23,15 @@ use dd_trace::{dd_error, dd_warn};
 pub const TRACEPARENT_KEY: &str = "traceparent";
 pub const TRACESTATE_KEY: &str = "tracestate";
 
-const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
 const TRACESTATE_VALUES_SEPARATOR: &str = ",";
-const TRACESTATE_DD_PAIR_SEPARATOR: &str = ";";
-const TRACESTATE_SAMPLING_PRIORITY_KEY: &str = "s";
-const TRACESTATE_ORIGIN_KEY: &str = "o";
-const TRACESTATE_LAST_PARENT_KEY: &str = "p";
-const TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX: &str = "t.";
-const INVALID_CHAR_REPLACEMENT: &str = "_";
+pub const TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX: &str = "t.";
 
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
         Regex::new(r"^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
             .expect("failed creating regex");
-
-    // Origin value in tracestate replaces '~', ',' and ';' with '_"
-    static ref TRACESTATE_ORIGIN_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
-
-    static ref TRACESTATE_TAG_KEY_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x21-\x2b\x2d-\x3c\x3e-\x7e]").expect("failed creating regex");
-
-    static ref TRACESTATE_TAG_VALUE_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
-
-    static ref TRACECONTEXT_HEADER_KEYS: [String; 2] = [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()];
+    static ref TRACECONTEXT_HEADER_KEYS: [String; 2] =
+        [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()];
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -79,82 +60,7 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 }
 
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
-    let mut tracestate_parts = vec![];
-
-    let priority = context
-        .sampling
-        .and_then(|sampling| sampling.priority)
-        .unwrap_or(priority::USER_KEEP);
-
-    tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{}", priority));
-
-    if let Some(origin) = context.origin.as_ref().map(|origin| {
-        encode_tag_value(
-            TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT),
-        )
-    }) {
-        tracestate_parts.push(format!("{TRACESTATE_ORIGIN_KEY}:{origin}"));
-    };
-
-    let last_parent_id = if context.is_remote {
-        match context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
-            Some(id) => id.to_string(),
-            None => format!("{:016x}", context.span_id), // TODO: is this correct?
-        }
-    } else {
-        format!("{:016x}", context.span_id)
-    };
-
-    tracestate_parts.push(format!("{TRACESTATE_LAST_PARENT_KEY}:{last_parent_id}"));
-
-    let tags = context
-        .tags
-        .keys()
-        .filter(|key| key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
-        .map(|key| {
-            let t_key = format!(
-                "{TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX}{}",
-                TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT)
-            );
-
-            let value = encode_tag_value(
-                TRACESTATE_TAG_VALUE_FILTER_REGEX
-                    .replace_all(&context.tags[key], INVALID_CHAR_REPLACEMENT),
-            );
-
-            format!("{t_key}:{value}")
-        })
-        .collect::<Vec<String>>()
-        .join(TRACESTATE_DD_PAIR_SEPARATOR);
-
-    if !tags.is_empty() {
-        tracestate_parts.push(tags);
-    }
-
-    let dd = tracestate_parts
-        .into_iter()
-        .reduce(|dd, part| {
-            if dd.len() + part.len() + 1 < TRACESTATE_DD_KEY_MAX_LENGTH {
-                format!("{dd}{TRACESTATE_DD_PAIR_SEPARATOR}{part}")
-            } else {
-                dd
-            }
-        })
-        .unwrap_or_default();
-
-    let parts = vec![("dd".to_string(), dd)];
-
-    let additional_parts = context
-        .tracestate
-        .as_ref()
-        .map(|tracestate| tracestate.additional_values.clone())
-        .unwrap_or_default();
-
-    // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
-    let all_parts = match additional_parts {
-        Some(additional) => [parts, additional.into_iter().take(31).collect()].concat(),
-        None => parts,
-    };
+    let all_parts = Tracestate::from_context(context);
 
     carrier.set(
         TRACESTATE_KEY,
