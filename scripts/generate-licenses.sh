@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Copyright 2024-present Datadog, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # This script generates the LICENSE-3rdparty.csv file using a Docker container
 # to ensure the environment matches the CI runner (Linux). This avoids
 # platform-specific differences in the dependency tree.
