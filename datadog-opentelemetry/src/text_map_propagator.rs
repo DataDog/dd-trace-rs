@@ -93,8 +93,11 @@ impl TextMapPropagator for DatadogPropagator {
         let trace_id = otel_span_context.trace_id().to_bytes();
         let propagation_data = self.registry.get_trace_propagation_data(trace_id);
 
+        // TODO: optimize Tracestate conversion
+        let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
+
         let (ts_sampling, ts_origin, ts_tags) =
-            get_trace_propagation_data_from_tracestate(otel_span_context);
+            get_trace_propagation_data_from_tracestate(&tracestate);
 
         // get Trace's sampling decision and if it is not present obtain it from otel's SpanContext
         // flags
@@ -115,10 +118,6 @@ impl TextMapPropagator for DatadogPropagator {
                 mechanism: None,
             })
         };
-
-        // otel tracestate only contains 'additional_values'
-        // TODO: optimize Tracestate conversion
-        let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
         let mut tags = HashMap::new();
         if let Some(propagation_tags) = propagation_data.tags.or(ts_tags) {
@@ -181,7 +180,7 @@ impl TextMapPropagator for DatadogPropagator {
 }
 
 fn get_trace_propagation_data_from_tracestate(
-    otel_span_context: &opentelemetry::trace::SpanContext,
+    tracestate: &Option<Tracestate>,
 ) -> (
     Option<Sampling>,
     Option<String>,
@@ -191,12 +190,10 @@ fn get_trace_propagation_data_from_tracestate(
     let mut origin = None;
     let mut tags = None;
 
-    if let Some(dd) = otel_span_context.trace_state().get("dd") {
-        if let Ok(ts) = Tracestate::from_str(&format!("dd={dd}")) {
-            sampling = ts.sampling;
-            origin = ts.origin;
-            tags = ts.propagation_tags;
-        }
+    if let Some(ts) = tracestate {
+        sampling = ts.sampling;
+        origin = ts.origin.clone();
+        tags = ts.propagation_tags.clone();
     }
 
     (sampling, origin, tags)
@@ -223,10 +220,10 @@ fn extract_trace_state_from_context(
     sampling_priority: Option<SamplingPriority>,
 ) -> opentelemetry::trace::TraceState {
     let tracestate = match &sc.tracestate {
-        Some(_) => {
-            // TODO: Tracestate should return kv pairs
-            opentelemetry::trace::TraceState::from_key_value(Tracestate::from_context(sc)).ok()
-        }
+        Some(ts) => match ts.get_all() {
+            Some(kvp) => opentelemetry::trace::TraceState::from_key_value(kvp.clone()).ok(),
+            None => None,
+        },
 
         None => match sampling_priority {
             Some(sampling_priority) => {
@@ -372,7 +369,7 @@ pub mod tests {
     fn extract_inject_data() -> Vec<(&'static str, &'static str, TraceState)> {
         vec![
             ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "foo=bar", TraceState::from_str("dd=s:1;p:00f067aa0ba902b7;t.dm:-0;t.tid:4bf92f3577b34da6,foo=bar").unwrap()),
-            ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "foo=bar,dd=o:rum;t.pfoo:bar", TraceState::from_str("dd=s:1;o:rum;p:00f067aa0ba902b7;t.pfoo:bar;t.dm:-0;t.tid:4bf92f3577b34da6,foo=bar").unwrap()),
+            ("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "foo=bar,dd=s:2;o:rum;t.pfoo:bar", TraceState::from_str("dd=s:2;o:rum;p:00f067aa0ba902b7;t.pfoo:bar;t.dm:-0;t.tid:4bf92f3577b34da6,foo=bar").unwrap()),
         ]
     }
 
@@ -454,7 +451,7 @@ pub mod tests {
     }
 
     #[test]
-    fn extract_w3c_but_hide_dd_part_to_otel() {
+    fn extract_w3c_tracestate_with_dd_and_additional() {
         let propagator = get_propagator(None);
 
         let state = "foo=1,dd=s:1;o:rum,bar=2".to_string();
@@ -469,32 +466,13 @@ pub mod tests {
         let span = context.span();
         let trace_state = span.span_context().trace_state();
 
-        assert_eq!(trace_state.get("dd"), None);
+        assert_eq!(trace_state.get("dd").unwrap(), "s:1;o:rum");
         assert_eq!(trace_state.get("foo").unwrap(), "1");
         assert_eq!(trace_state.get("bar").unwrap(), "2");
     }
 
     #[test]
-    fn extract_w3c_but_hide_dd_part_with_no_additional_to_otel() {
-        let propagator = get_propagator(None);
-
-        let state = "dd=s:1;o:rum".to_string();
-        let parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".to_string();
-
-        let mut extractor = HashMap::new();
-        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
-        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
-
-        let context = propagator.extract(&extractor);
-
-        let span = context.span();
-        let trace_state = span.span_context().trace_state();
-
-        assert_eq!(*trace_state, opentelemetry::trace::TraceState::default());
-    }
-
-    #[test]
-    fn extract_w3c_but_hide_invalid_dd_part_to_otel() {
+    fn extract_w3c_but_do_not_hide_invalid_dd_part_to_otel() {
         let propagator = get_propagator(None);
 
         let state = "foo=1,dd=s:1;o:rüm,bar=2".to_string();
@@ -509,7 +487,7 @@ pub mod tests {
         let span = context.span();
         let trace_state = span.span_context().trace_state();
 
-        assert_eq!(trace_state.get("dd"), None);
+        assert_eq!(trace_state.get("dd").unwrap(), "s:1;o:rüm");
         assert_eq!(trace_state.get("foo").unwrap(), "1");
         assert_eq!(trace_state.get("bar").unwrap(), "2");
     }
@@ -659,7 +637,7 @@ pub mod tests {
                 let otel = otel_trace_state.unwrap();
                 let dd = dd_trace_state.unwrap();
 
-                if let Some(additional_values) = dd.additional_values {
+                if let Some(additional_values) = dd.get_additional() {
                     let dd_header = additional_values
                         .into_iter()
                         .map(|(key, value)| format!("{key}={value}"))

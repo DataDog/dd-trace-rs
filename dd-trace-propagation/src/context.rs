@@ -118,7 +118,7 @@ pub struct Tracestate {
     pub origin: Option<String>,
     pub lower_order_trace_id: Option<String>,
     pub propagation_tags: Option<HashMap<String, String>>,
-    pub additional_values: Option<Vec<(String, String)>>,
+    kvp: Option<Vec<(String, String)>>,
 }
 
 /// Code inspired, and copied, by OpenTelemetry Rust project.
@@ -161,7 +161,7 @@ impl Tracestate {
         !(value.contains(',') || value.contains('='))
     }
 
-    pub fn get_dd_part(context: &SpanContext) -> Vec<(String, String)> {
+    pub fn get_dd_key_value(context: &SpanContext) -> Vec<(String, String)> {
         let mut tracestate_parts = vec![];
 
         let priority = context
@@ -231,12 +231,12 @@ impl Tracestate {
     }
 
     pub fn from_context(context: &SpanContext) -> Vec<(String, String)> {
-        let dd_part = Tracestate::get_dd_part(context);
+        let dd_part = Tracestate::get_dd_key_value(context);
 
         let additional_parts = context
             .tracestate
             .as_ref()
-            .map(|tracestate| tracestate.additional_values.clone())
+            .map(|tracestate| tracestate.get_additional())
             .unwrap_or_default();
 
         // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
@@ -244,6 +244,16 @@ impl Tracestate {
             Some(additional) => [dd_part, additional.into_iter().take(31).collect()].concat(),
             None => dd_part,
         }
+    }
+
+    pub fn get_additional(&self) -> Option<Vec<(String, String)>> {
+        self.kvp
+            .as_ref()
+            .map(|kvp| kvp.iter().filter(|(key, _)| key != "dd").cloned().collect())
+    }
+
+    pub fn get_all(&self) -> Option<&Vec<(String, String)>> {
+        self.kvp.as_ref()
     }
 }
 
@@ -253,7 +263,7 @@ impl FromStr for Tracestate {
         let ts_v = tracestate.split(',');
 
         let mut dd_values = vec![];
-        let mut additional_values = vec![];
+        let mut kvp = vec![];
 
         for v in ts_v {
             let mut parts = v.splitn(2, '=');
@@ -278,9 +288,9 @@ impl FromStr for Tracestate {
                             }
                         }
                     });
-            } else {
-                additional_values.push((key.to_string(), value.to_string()));
             }
+
+            kvp.push((key.to_string(), value.to_string()));
         }
 
         let mut tracestate = Tracestate {
@@ -288,12 +298,12 @@ impl FromStr for Tracestate {
             origin: None,
             lower_order_trace_id: None,
             propagation_tags: None,
-            additional_values: None,
+            kvp: None,
         };
 
         // the original order must be maintained
-        if !additional_values.is_empty() {
-            tracestate.additional_values = Some(additional_values);
+        if !kvp.is_empty() {
+            tracestate.kvp = Some(kvp);
         }
 
         let propagation_tags = if !dd_values.is_empty() {
@@ -398,7 +408,7 @@ mod test {
         let tracestate = Tracestate::from_str("foo=1,=2,=4").expect("parsed tracesate");
 
         assert_eq!(
-            tracestate.additional_values,
+            tracestate.kvp,
             Some(vec![
                 ("foo".to_string(), "1".to_string()),
                 ("".to_string(), "2".to_string()),
@@ -442,7 +452,7 @@ mod test {
         let tracestate = Tracestate::from_str("foo=\t valid  \t\t ").expect("parsed tracestate");
 
         assert_eq!(
-            tracestate.additional_values,
+            tracestate.kvp,
             Some(vec![("foo".to_string(), "\t valid  \t\t ".to_string()),])
         )
     }

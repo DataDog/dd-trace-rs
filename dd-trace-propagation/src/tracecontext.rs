@@ -481,9 +481,9 @@ mod test {
             priority::AUTO_KEEP
         );
 
-        assert!(tracestate.additional_values.is_some());
+        assert!(tracestate.get_additional().is_some());
         assert_eq!(
-            tracestate.additional_values.unwrap(),
+            tracestate.get_additional().unwrap(),
             vec![
                 ("foo".to_string(), "1".to_string()),
                 ("bar".to_string(), " \t 2".to_string()),
