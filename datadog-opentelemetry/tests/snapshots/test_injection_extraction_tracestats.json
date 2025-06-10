@@ -1,0 +1,36 @@
+[
+  {
+    "Start": 0,
+    "Duration": 10000000000,
+    "Stats": [
+      {
+        "Name": "client.request",
+        "Resource": "test_child",
+        "Service": "unnamed-rust-service",
+        "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 0,
+        "Duration": 2155000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "server.request",
+        "Resource": "test_parent",
+        "Service": "unnamed-rust-service",
+        "Type": "web",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 2191000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      }
+    ]
+  }
+]

@@ -63,7 +63,7 @@ pub struct DatadogPropagator {
 }
 
 impl DatadogPropagator {
-    pub fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
+    pub(crate) fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
             registry,

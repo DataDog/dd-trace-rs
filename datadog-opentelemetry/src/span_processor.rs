@@ -13,6 +13,7 @@ use opentelemetry::{
     KeyValue, SpanId, TraceFlags, TraceId,
 };
 use opentelemetry_sdk::trace::SpanData;
+use opentelemetry_sdk::Resource;
 
 use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
 
@@ -51,7 +52,67 @@ struct InnerTraceRegistry {
     registry: HashMap<[u8; 16], Trace>,
 }
 
+pub enum RegisterTracePropagationResult {
+    Existing(SamplingDecision),
+    New,
+}
+
 impl InnerTraceRegistry {
+    fn register_trace_propagation_data(
+        &mut self,
+        trace_id: [u8; 16],
+        sampling_decision: SamplingDecision,
+        origin: Option<String>,
+        tags: Option<HashMap<String, String>>,
+    ) -> RegisterTracePropagationResult {
+        match self.registry.entry(trace_id) {
+            hash_map::Entry::Occupied(mut occupied_entry) => {
+                if let Some(existing_sampling_decision) = occupied_entry.get().sampling_decision {
+                    RegisterTracePropagationResult::Existing(existing_sampling_decision)
+                } else {
+                    let trace = occupied_entry.get_mut();
+                    trace.sampling_decision = Some(sampling_decision);
+                    trace.origin = origin;
+                    trace.tags = tags;
+                    RegisterTracePropagationResult::New
+                }
+            }
+            hash_map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(Trace {
+                    root_span_id: [0; 8], // This will be set when the first span is registered
+                    finished_spans: Vec::new(),
+                    open_span_count: 0,
+                    sampling_decision: Some(sampling_decision),
+                    origin,
+                    tags,
+                });
+                RegisterTracePropagationResult::New
+            }
+        }
+    }
+
+    fn register_root_span(&mut self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
+        let trace = self.registry.entry(trace_id).or_insert_with(|| Trace {
+            root_span_id: [0; 8], // This will be set when the first span is registered
+            finished_spans: Vec::new(),
+            open_span_count: 0,
+            sampling_decision: None,
+            origin: None,
+            tags: None,
+        });
+        if trace.root_span_id == [0; 8] {
+            trace.root_span_id = root_span_id;
+            trace.open_span_count = 1;
+        } else {
+            dd_trace::dd_debug!(
+                "trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Ignoring the new root_span_id={:?}",
+                trace_id,
+                trace.root_span_id,
+                root_span_id
+            );
+        }
+    }
+
     /// Register a new trace with the given trace ID and span ID.
     /// If the trace is already registered, increment the open span count.
     /// If the trace is not registered, create a new entry with the given trace ID
@@ -165,6 +226,36 @@ impl TraceRegistry {
         }
     }
 
+    /// Register trace propagation data for a given trace ID.
+    /// This does not set the root span ID or increment the open span count.
+    ///
+    /// If the trace is already registered with a non None sampling decision,
+    /// it will return the existing sampling decision instead
+    pub fn register_trace_propagation_data(
+        &self,
+        trace_id: [u8; 16],
+        sampling_decision: SamplingDecision,
+        origin: Option<String>,
+        tags: Option<HashMap<String, String>>,
+    ) -> RegisterTracePropagationResult {
+        let mut inner = self
+            .inner
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.register_trace_propagation_data(trace_id, sampling_decision, origin, tags)
+    }
+
+    /// Set the root span ID for a given trace ID.
+    /// This will also increment the open span count for the trace.
+    /// If the trace is already registered, it will ignore the new root span ID and log a warning.
+    pub fn register_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
+        let mut inner = self
+            .inner
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        inner.register_root_span(trace_id, root_span_id);
+    }
+
     /// Register a new span with the given trace ID and span ID.
     pub fn register_span(
         &self,
@@ -203,6 +294,7 @@ impl TraceRegistry {
 pub(crate) struct DatadogSpanProcessor {
     registry: Arc<TraceRegistry>,
     span_exporter: DatadogExporter,
+    resource: Arc<RwLock<Resource>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -212,25 +304,26 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 }
 
 impl DatadogSpanProcessor {
-    pub(crate) fn new(config: dd_trace::Config, registry: Arc<TraceRegistry>) -> Self {
+    pub(crate) fn new(
+        config: dd_trace::Config,
+        registry: Arc<TraceRegistry>,
+        resource: Arc<RwLock<Resource>>,
+    ) -> Self {
         Self {
             registry,
             span_exporter: DatadogExporter::new(config),
+            resource,
         }
     }
 
     /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
     /// - links generated during extraction are added to the root span as span links.
     /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
-    fn add_links_and_get_propagation_data(
+    fn get_remote_propagation_data(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) -> TracePropagationData {
-        if !parent_ctx.span().span_context().is_remote() {
-            return EMPTY_PROPAGATION_DATA;
-        }
-
         if let Some(DatadogExtractData {
             links,
             internal_tags,
@@ -327,9 +420,16 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
 
-        let propagation_data = self.add_links_and_get_propagation_data(span, parent_ctx);
-        self.registry
-            .register_span(trace_id, span_id, propagation_data);
+        if parent_ctx.span().span_context().is_remote() {
+            let propagation_data = self.get_remote_propagation_data(span, parent_ctx);
+            self.registry
+                .register_span(trace_id, span_id, propagation_data);
+        } else if !parent_ctx.has_active_span() {
+            self.registry.register_root_span(trace_id, span_id);
+        } else {
+            self.registry
+                .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
+        }
     }
 
     fn on_end(&self, span: SpanData) {
@@ -361,5 +461,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
             );
         }
+        // set the shared resource in the DatadogSpanProcessor
+        *self.resource.write().unwrap() = resource.clone();
     }
 }
