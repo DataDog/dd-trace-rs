@@ -52,24 +52,43 @@ struct InnerTraceRegistry {
     registry: HashMap<[u8; 16], Trace>,
 }
 
+pub enum RegisterTracePropagationResult {
+    Existing(SamplingDecision),
+    New,
+}
+
 impl InnerTraceRegistry {
     fn register_trace_propagation_data(
         &mut self,
         trace_id: [u8; 16],
-        TracePropagationData {
-            origin,
-            sampling_decision,
-            tags,
-        }: TracePropagationData,
-    ) {
-        self.registry.entry(trace_id).or_insert(Trace {
-            root_span_id: [0; 8], // This will be set when the first span is registered
-            finished_spans: Vec::new(),
-            open_span_count: 0,
-            sampling_decision,
-            origin,
-            tags,
-        });
+        sampling_decision: SamplingDecision,
+        origin: Option<String>,
+        tags: Option<HashMap<String, String>>,
+    ) -> RegisterTracePropagationResult {
+        match self.registry.entry(trace_id) {
+            hash_map::Entry::Occupied(mut occupied_entry) => {
+                if let Some(existing_sampling_decision) = occupied_entry.get().sampling_decision {
+                    RegisterTracePropagationResult::Existing(existing_sampling_decision)
+                } else {
+                    let trace = occupied_entry.get_mut();
+                    trace.sampling_decision = Some(sampling_decision);
+                    trace.origin = origin;
+                    trace.tags = tags;
+                    RegisterTracePropagationResult::New
+                }
+            }
+            hash_map::Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(Trace {
+                    root_span_id: [0; 8], // This will be set when the first span is registered
+                    finished_spans: Vec::new(),
+                    open_span_count: 0,
+                    sampling_decision: Some(sampling_decision),
+                    origin,
+                    tags,
+                });
+                RegisterTracePropagationResult::New
+            }
+        }
     }
 
     fn register_root_span(&mut self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
@@ -209,16 +228,21 @@ impl TraceRegistry {
 
     /// Register trace propagation data for a given trace ID.
     /// This does not set the root span ID or increment the open span count.
+    ///
+    /// If the trace is already registered with a non None sampling decision,
+    /// it will return the existing sampling decision instead
     pub fn register_trace_propagation_data(
         &self,
         trace_id: [u8; 16],
-        propagation_data: TracePropagationData,
-    ) {
+        sampling_decision: SamplingDecision,
+        origin: Option<String>,
+        tags: Option<HashMap<String, String>>,
+    ) -> RegisterTracePropagationResult {
         let mut inner = self
             .inner
             .write()
             .expect("Failed to acquire lock on trace registry");
-        inner.register_trace_propagation_data(trace_id, propagation_data);
+        inner.register_trace_propagation_data(trace_id, sampling_decision, origin, tags)
     }
 
     /// Set the root span ID for a given trace ID.

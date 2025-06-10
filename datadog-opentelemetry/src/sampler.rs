@@ -3,7 +3,7 @@
 
 use dd_trace::Config;
 use dd_trace_sampling::DatadogSampler;
-use opentelemetry::trace::{TraceContextExt, TraceState};
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::{
     collections::HashMap,
@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::{
-    span_processor::{SamplingDecision, TracePropagationData},
+    span_processor::{RegisterTracePropagationResult, SamplingDecision},
     TraceRegistry,
 };
 
@@ -70,31 +70,46 @@ impl ShouldSample for Sampler {
             attributes,
         );
         if let Some(trace_root_info) = &result.trace_root_info {
-            self.trace_registry.register_trace_propagation_data(
+            match self.trace_registry.register_trace_propagation_data(
                 trace_id.to_bytes(),
-                TracePropagationData {
-                    sampling_decision: Some(SamplingDecision {
-                        decision: trace_root_info.sampling_priority(result.is_sampled).value(),
-                        // TODO: unify these types with decision maker with the one in the span
-                        // processor
-                        decision_maker: trace_root_info.mechanism.value() as i8,
-                    }),
-                    origin: None,
-                    // TODO(paullgdc): This is here so the injector adds the t.dm tag to
-                    // tracecontext. The injector should probably inject it from
-                    // the trace propagation data instead of tags.
-                    tags: Some(HashMap::from_iter([(
-                        "_dd.p.dm".to_string(),
-                        format!("{}", -(trace_root_info.mechanism.value() as i32)),
-                    )])),
+                SamplingDecision {
+                    decision: trace_root_info.sampling_priority(result.is_sampled).value(),
+                    // TODO: unify these types with decision maker with the one in the span
+                    // processor
+                    decision_maker: trace_root_info.mechanism.value() as i8,
                 },
-            );
+                None,
+                // TODO(paullgdc): This is here so the injector adds the t.dm tag to
+                // tracecontext. The injector should probably inject it from
+                // the trace propagation data instead of tags.
+                Some(HashMap::from_iter([(
+                    "_dd.p.dm".to_string(),
+                    format!("{}", -(trace_root_info.mechanism.value() as i32)),
+                )])),
+            ) {
+                RegisterTracePropagationResult::Existing(sampling_decision) => {
+                    return opentelemetry::trace::SamplingResult {
+                        decision: if sampling_decision.decision > 0 {
+                            opentelemetry::trace::SamplingDecision::RecordAndSample
+                        } else {
+                            opentelemetry::trace::SamplingDecision::RecordOnly
+                        },
+                        attributes: Vec::new(),
+                        trace_state: parent_context
+                            .map(|c| c.span().span_context().trace_state().clone())
+                            .unwrap_or_default(),
+                    }
+                }
+                RegisterTracePropagationResult::New => {}
+            }
         }
 
         opentelemetry::trace::SamplingResult {
             decision: result.to_otel_decision(),
             attributes: result.to_dd_sampling_tags(),
-            trace_state: TraceState::default(),
+            trace_state: parent_context
+                .map(|c| c.span().span_context().trace_state().clone())
+                .unwrap_or_default(),
         }
     }
 }
@@ -103,7 +118,10 @@ impl ShouldSample for Sampler {
 mod tests {
     use super::*;
     use dd_trace::configuration::SamplingRuleConfig;
-    use opentelemetry::trace::{SamplingDecision, SpanKind, TraceId};
+    use opentelemetry::{
+        trace::{SamplingDecision, SpanContext, SpanKind, TraceId, TraceState},
+        Context, SpanId, TraceFlags,
+    };
     use opentelemetry_sdk::trace::ShouldSample;
     use std::env;
 
@@ -159,5 +177,53 @@ mod tests {
             SamplingDecision::RecordAndSample,
             "Default sampler should record and sample by default"
         );
+    }
+
+    #[test]
+    fn test_trace_state_propagation() {
+        let config = Config::builder().build();
+
+        let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
+
+        let trace_id = TraceId::from_bytes([2; 16]);
+        let span_id = SpanId::from_bytes([3; 8]);
+
+        for is_sampled in [true, false] {
+            let trace_state = TraceState::from_key_value([("test_key", "test_value")]).unwrap();
+            let span_context = SpanContext::new(
+                trace_id,
+                span_id,
+                is_sampled
+                    .then_some(TraceFlags::SAMPLED)
+                    .unwrap_or_default(),
+                true,
+                trace_state.clone(),
+            );
+
+            // Verify the sampler with a parent context
+            let result = sampler.should_sample(
+                Some(&Context::new().with_remote_span_context(span_context)),
+                trace_id,
+                "test",
+                &SpanKind::Client,
+                &[],
+                &[],
+            );
+            assert_eq!(
+                result.decision,
+                if is_sampled {
+                    SamplingDecision::RecordAndSample
+                } else {
+                    SamplingDecision::RecordOnly
+                },
+                "Sampler should respect parent context sampling decision"
+            );
+            assert_eq!(
+                result.trace_state.header(),
+                "test_key=test_value",
+                "Sampler should propagate trace state from parent context"
+            );
+        }
     }
 }
