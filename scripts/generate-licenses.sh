@@ -31,10 +31,7 @@ docker build \
     .
 
 echo "Generating LICENSE-3rdparty.csv..."
-docker run --rm \
-    -v "$(pwd)":/usr/src/app \
-    -u "$(id -u):$(id -g)" \
-    dd-license-tool > LICENSE-3rdparty.csv
+docker run --rm dd-license-tool > LICENSE-3rdparty.csv
 
 echo "Cleaning up..."
 rm -rf .cargo/config.toml

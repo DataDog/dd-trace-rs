@@ -1,8 +1,5 @@
 FROM rust:1.82-slim
 
-# Create a non-root user to run cargo
-RUN useradd -m -u 1000 rust
-
 # Set up the workspace directory
 WORKDIR /usr/src/app
 
@@ -14,9 +11,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
 
-# Switch to non-root user for running the tool
-USER rust
+# Copy the rest of the project files
+COPY . .
 
-# The actual project files will be mounted at runtime
-ENTRYPOINT ["dd-rust-license-tool"]
-CMD ["dump"] 
+# Generate the license file during build, with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    dd-rust-license-tool dump > LICENSE-3rdparty.csv
+
+# Simply output the pre-generated file at runtime
+ENTRYPOINT ["cat"]
+CMD ["./LICENSE-3rdparty.csv"] 
