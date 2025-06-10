@@ -225,6 +225,10 @@ fn extract_trace_state_from_context(
             None => None,
         },
 
+        // if a trace has drop priority otel marks the span as not recording.
+        // Not recording spans, are not handled by DatadogSpanProcessor and therefore
+        // extracted propagation data is lost. To avoid that case, a TraceState is generated
+        // from SpanContext to use it later if needed in the injection phase.
         None => match sampling_priority {
             Some(sampling_priority) => {
                 if !sampling_priority.is_keep() {
