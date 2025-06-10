@@ -1,20 +1,20 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use dd_trace::constants::{
+    RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
+    SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+};
+use dd_trace::sampling::{mechanism, SamplingDecision as DdSamplingDecision, SamplingMechanism};
+
 use opentelemetry::trace::SamplingDecision;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::constants::{
-    self, sampling_mechanism_to_priorities, SamplingMechanism, RL_EFFECTIVE_RATE,
-    SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY,
-    SAMPLING_RULE_RATE_TAG_KEY,
-};
-
 // Import the attr constants
-use crate::constants::attr::ENV_TAG;
+use crate::constants::{attr::ENV_TAG, pattern::NO_RULE};
 use crate::glob_matcher::GlobMatcher;
 use crate::otel_utils::get_dd_key_for_otlp_attribute;
 use crate::otel_utils::get_otel_operation_name_v2;
@@ -51,7 +51,7 @@ impl ResourceAccess for Arc<RwLock<opentelemetry_sdk::Resource>> {
 }
 
 fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
-    (rule != constants::pattern::NO_RULE).then(|| GlobMatcher::new(rule))
+    (rule != NO_RULE).then(|| GlobMatcher::new(rule))
 }
 
 /// Represents a sampling rule with criteria for matching spans
@@ -370,16 +370,16 @@ impl DatadogSampler {
         if let Some(rule) = rule {
             match rule.provenance.as_str() {
                 // Provenance will not be set for rules until we implement remote configuration
-                "customer" => SamplingMechanism::RemoteUserTraceSamplingRule,
-                "dynamic" => SamplingMechanism::RemoteDynamicTraceSamplingRule,
-                _ => SamplingMechanism::LocalUserTraceSamplingRule,
+                "customer" => mechanism::REMOTE_USER_TRACE_SAMPLING_RULE,
+                "dynamic" => mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE,
+                _ => mechanism::LOCAL_USER_TRACE_SAMPLING_RULE,
             }
         } else if used_agent_sampler {
             // If using service-based sampling from the agent
-            SamplingMechanism::AgentRateByService
+            mechanism::AGENT_RATE_BY_SERVICE
         } else {
             // Should not happen, but just in case
-            SamplingMechanism::Default
+            mechanism::DEFAULT
         }
     }
 
@@ -395,7 +395,7 @@ impl DatadogSampler {
         if let Some(is_parent_sampled) = is_parent_sampled {
             // If a parent exists, inherit its sampling decision and trace state
             return DdSamplingResult {
-                is_sampled: is_parent_sampled,
+                is_keep: is_parent_sampled,
                 trace_root_info: None,
             };
         }
@@ -412,7 +412,7 @@ impl DatadogSampler {
         span_kind: &opentelemetry::trace::SpanKind,
         attributes: &[KeyValue],
     ) -> DdSamplingResult {
-        let mut decision = true;
+        let mut is_keep = true;
         let mut used_agent_sampler = false;
         let sample_rate;
         let mut rl_effective_rate: Option<i32> = None;
@@ -427,10 +427,10 @@ impl DatadogSampler {
 
             // First check if the span should be sampled according to the rule
             if !rule.sample(trace_id) {
-                decision = false;
+                is_keep = false;
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
-                decision = false;
+                is_keep = false;
                 rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
             }
         } else {
@@ -443,7 +443,7 @@ impl DatadogSampler {
 
                 // Check if the service sampler decides to drop
                 if !sampler.sample(trace_id) {
-                    decision = false;
+                    is_keep = false;
                 }
             } else {
                 // Default sample rate, should never happen in practice if agent provides rates
@@ -456,9 +456,12 @@ impl DatadogSampler {
         let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
 
         DdSamplingResult {
-            is_sampled: decision,
+            is_keep,
             trace_root_info: Some(TraceRootSamplingInfo {
-                mechanism,
+                decision: DdSamplingDecision {
+                    mechanism,
+                    priority: mechanism.to_priority(is_keep),
+                },
                 rate: sample_rate,
                 rl_effective_rate,
             }),
@@ -467,12 +470,12 @@ impl DatadogSampler {
 }
 
 pub struct DdSamplingResult {
-    pub is_sampled: bool,
+    pub is_keep: bool,
     pub trace_root_info: Option<TraceRootSamplingInfo>,
 }
 
 pub struct TraceRootSamplingInfo {
-    pub mechanism: SamplingMechanism,
+    pub decision: DdSamplingDecision,
     pub rate: f64,
     pub rl_effective_rate: Option<i32>,
 }
@@ -502,23 +505,22 @@ impl DdSamplingResult {
         // Add the sampling decision trace tag with the mechanism
         result.push(KeyValue::new(
             SAMPLING_DECISION_MAKER_TAG_KEY,
-            format!("-{}", root_info.mechanism.value()),
+            root_info.decision.mechanism.to_cow(),
         ));
 
-        let priority = root_info.sampling_priority(self.is_sampled);
         result.push(KeyValue::new(
             SAMPLING_PRIORITY_TAG_KEY,
-            priority.value() as i64,
+            root_info.decision.priority.into_i8() as i64,
         ));
 
         // Add the sample rate tag with the correct key based on the mechanism
-        match root_info.mechanism {
-            SamplingMechanism::AgentRateByService => {
+        match root_info.decision.mechanism {
+            mechanism::AGENT_RATE_BY_SERVICE => {
                 result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
             }
-            SamplingMechanism::RemoteUserTraceSamplingRule
-            | SamplingMechanism::RemoteDynamicTraceSamplingRule
-            | SamplingMechanism::LocalUserTraceSamplingRule => {
+            mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
+            | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
+            | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE => {
                 result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate));
             }
             _ => {}
@@ -529,7 +531,7 @@ impl DdSamplingResult {
 
     /// Converts the sampling result to a SamplingResult for OpenTelemetry
     pub fn to_otel_decision(&self) -> SamplingDecision {
-        if self.is_sampled {
+        if self.is_keep {
             SamplingDecision::RecordAndSample
         } else {
             SamplingDecision::RecordOnly
@@ -537,17 +539,6 @@ impl DdSamplingResult {
     }
 }
 
-impl TraceRootSamplingInfo {
-    pub fn sampling_priority(&self, is_sampled: bool) -> constants::SamplingPriority {
-        let priority_pair = sampling_mechanism_to_priorities(self.mechanism);
-
-        if is_sampled {
-            priority_pair.keep
-        } else {
-            priority_pair.reject
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,38 +900,38 @@ mod tests {
 
         // Test with customer rule
         let mechanism1 = sampler.get_sampling_mechanism(Some(&rule_customer), false);
-        assert_eq!(mechanism1, SamplingMechanism::RemoteUserTraceSamplingRule);
+        assert_eq!(mechanism1, mechanism::REMOTE_USER_TRACE_SAMPLING_RULE);
 
         // Test with dynamic rule
         let mechanism2 = sampler.get_sampling_mechanism(Some(&rule_dynamic), false);
-        assert_eq!(
-            mechanism2,
-            SamplingMechanism::RemoteDynamicTraceSamplingRule
-        );
+        assert_eq!(mechanism2, mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE);
 
         // Test with default rule
         let mechanism3 = sampler.get_sampling_mechanism(Some(&rule_default), false);
-        assert_eq!(mechanism3, SamplingMechanism::LocalUserTraceSamplingRule);
+        assert_eq!(mechanism3, mechanism::LOCAL_USER_TRACE_SAMPLING_RULE);
 
         // Test with agent sampler
         let mechanism4 = sampler.get_sampling_mechanism(None, true);
-        assert_eq!(mechanism4, SamplingMechanism::AgentRateByService);
+        assert_eq!(mechanism4, mechanism::AGENT_RATE_BY_SERVICE);
 
         // Test fallback case
         let mechanism5 = sampler.get_sampling_mechanism(None, false);
-        assert_eq!(mechanism5, SamplingMechanism::Default);
+        assert_eq!(mechanism5, mechanism::DEFAULT);
     }
 
     #[test]
     fn test_add_dd_sampling_tags() {
         // Test with RecordAndSample decision and LocalUserTraceSamplingRule mechanism
-        let mechanism = SamplingMechanism::LocalUserTraceSamplingRule;
         let sample_rate = 0.5;
-
+        let is_sampled = true;
+        let mechanism = mechanism::LOCAL_USER_TRACE_SAMPLING_RULE;
         let sampling_result = DdSamplingResult {
-            is_sampled: true,
+            is_keep: true,
             trace_root_info: Some(TraceRootSamplingInfo {
-                mechanism: SamplingMechanism::LocalUserTraceSamplingRule,
+                decision: DdSamplingDecision {
+                    priority: mechanism.to_priority(is_sampled),
+                    mechanism,
+                },
                 rate: 0.5,
                 rl_effective_rate: None,
             }),
@@ -963,13 +954,12 @@ mod tests {
                         opentelemetry::Value::String(s) => s.to_string(),
                         _ => panic!("Expected string value for decision maker tag"),
                     };
-                    assert_eq!(value_str, format!("-{}", mechanism.value()));
+                    assert_eq!(value_str, mechanism.to_cow());
                     found_decision_maker = true;
                 }
                 SAMPLING_PRIORITY_TAG_KEY => {
                     // For LocalUserTraceSamplingRule with KEEP, it should be USER_KEEP
-                    let priority_pair = sampling_mechanism_to_priorities(mechanism);
-                    let expected_priority = priority_pair.keep.value() as i64;
+                    let expected_priority = mechanism.to_priority(true).into_i8() as i64;
 
                     let value_int = match attr.value {
                         opentelemetry::Value::I64(i) => i,
@@ -996,11 +986,15 @@ mod tests {
 
         // Test with rate limiting
         let rate_limit = 100;
-
+        let is_sampled = false;
+        let mechanism = mechanism::LOCAL_USER_TRACE_SAMPLING_RULE;
         let sampling_result = DdSamplingResult {
-            is_sampled: false,
+            is_keep: false,
             trace_root_info: Some(TraceRootSamplingInfo {
-                mechanism: SamplingMechanism::LocalUserTraceSamplingRule,
+                decision: DdSamplingDecision {
+                    priority: mechanism.to_priority(is_sampled),
+                    mechanism,
+                },
                 rate: 0.5,
                 rl_effective_rate: Some(rate_limit),
             }),
@@ -1029,10 +1023,15 @@ mod tests {
         // Test with AgentRateByService mechanism to check for SAMPLING_AGENT_RATE_TAG_KEY
 
         let agent_rate = 0.75;
+        let is_sampled = false;
+        let mechanism = mechanism::AGENT_RATE_BY_SERVICE;
         let sampling_result = DdSamplingResult {
-            is_sampled: false,
+            is_keep: false,
             trace_root_info: Some(TraceRootSamplingInfo {
-                mechanism: SamplingMechanism::AgentRateByService,
+                decision: DdSamplingDecision {
+                    priority: mechanism.to_priority(is_sampled),
+                    mechanism,
+                },
                 rate: agent_rate,
                 rl_effective_rate: None,
             }),

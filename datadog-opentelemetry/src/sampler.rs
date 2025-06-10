@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use dd_trace::Config;
+use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, Config};
 use dd_trace_sampling::DatadogSampler;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
@@ -10,10 +10,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{
-    span_processor::{RegisterTracePropagationResult, SamplingDecision},
-    TraceRegistry,
-};
+use crate::{span_processor::RegisterTracePropagationResult, TraceRegistry};
 
 #[derive(Debug, Clone)]
 pub struct Sampler {
@@ -72,24 +69,19 @@ impl ShouldSample for Sampler {
         if let Some(trace_root_info) = &result.trace_root_info {
             match self.trace_registry.register_trace_propagation_data(
                 trace_id.to_bytes(),
-                SamplingDecision {
-                    decision: trace_root_info.sampling_priority(result.is_sampled).value(),
-                    // TODO: unify these types with decision maker with the one in the span
-                    // processor
-                    decision_maker: trace_root_info.mechanism.value() as i8,
-                },
+                trace_root_info.decision,
                 None,
                 // TODO(paullgdc): This is here so the injector adds the t.dm tag to
                 // tracecontext. The injector should probably inject it from
                 // the trace propagation data instead of tags.
                 Some(HashMap::from_iter([(
-                    "_dd.p.dm".to_string(),
-                    format!("{}", -(trace_root_info.mechanism.value() as i32)),
+                    SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                    trace_root_info.decision.mechanism.to_cow().into_owned(),
                 )])),
             ) {
                 RegisterTracePropagationResult::Existing(sampling_decision) => {
                     return opentelemetry::trace::SamplingResult {
-                        decision: if sampling_decision.decision > 0 {
+                        decision: if sampling_decision.priority.is_keep() {
                             opentelemetry::trace::SamplingDecision::RecordAndSample
                         } else {
                             opentelemetry::trace::SamplingDecision::RecordOnly

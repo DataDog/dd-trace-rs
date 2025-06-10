@@ -17,6 +17,7 @@ opentelemetry_sdk = { workspace = true, features = ["trace"] }
 opentelemetry-semantic-conventions = { version = "0.15.0" }
 lru = "0.10.1"
 regex = "1.10.3"
+dd-trace = { path = "../dd-trace" }
 
 [dev-dependencies]
 # Add any testing dependencies here if needed

@@ -847,6 +847,7 @@ dependencies = [
 name = "dd-trace-sampling"
 version = "0.0.1"
 dependencies = [
+ "dd-trace",
  "lru",
  "opentelemetry",
  "opentelemetry-semantic-conventions 0.15.0",

@@ -3,14 +3,14 @@
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
-use dd_trace::Config;
+use dd_trace::{sampling::priority, Config};
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
 };
 
 use dd_trace_propagation::{
-    context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
+    context::{Sampling, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
 
@@ -94,14 +94,16 @@ impl TextMapPropagator for DatadogPropagator {
         // flags
         let sampling = if let Some(sampling) = propagation_data.sampling_decision {
             Some(Sampling {
-                priority: Some(sampling.decision.into()),
-                mechanism: Some(sampling.decision_maker.into()),
+                priority: Some(sampling.priority),
+                mechanism: Some(sampling.mechanism),
             })
         } else {
             Some(Sampling {
-                priority: Some(SamplingPriority::from_flags(
-                    otel_span_context.trace_flags().to_u8(),
-                )),
+                priority: Some(if otel_span_context.trace_flags().is_sampled() {
+                    priority::AUTO_KEEP
+                } else {
+                    priority::AUTO_REJECT
+                }),
                 mechanism: None,
             })
         };

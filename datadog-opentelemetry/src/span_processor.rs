@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision};
 use opentelemetry::{
     global::ObjectSafeSpan,
     trace::{SpanContext, TraceContextExt, TraceState},
@@ -27,12 +28,6 @@ struct Trace {
     sampling_decision: Option<SamplingDecision>,
     origin: Option<String>,
     tags: Option<HashMap<String, String>>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct SamplingDecision {
-    pub decision: i8,
-    pub decision_maker: i8,
 }
 
 pub(crate) struct TracePropagationData {
@@ -354,9 +349,11 @@ impl DatadogSpanProcessor {
                 span.add_link(link_ctx, attributes);
             });
 
-            let sampling_decision = sampling.map(|sampling| SamplingDecision {
-                decision: sampling.priority.unwrap_or_default().into(),
-                decision_maker: sampling.mechanism.unwrap_or_default() as i8,
+            let sampling_decision = sampling.and_then(|sampling| {
+                Some(SamplingDecision {
+                    priority: sampling.priority?,
+                    mechanism: sampling.mechanism.unwrap_or_default(),
+                })
             });
             return TracePropagationData {
                 origin,
@@ -393,12 +390,12 @@ impl DatadogSpanProcessor {
             if let Some(sampling_decision) = trace.sampling_decision {
                 span.attributes.push(KeyValue::new(
                     "_sampling_priority_v1",
-                    sampling_decision.decision as i64,
+                    sampling_decision.priority.into_i8() as i64,
                 ));
 
                 span.attributes.push(KeyValue::new(
-                    "_dd.p.dm",
-                    format!("-{}", sampling_decision.decision_maker),
+                    SAMPLING_DECISION_MAKER_TAG_KEY,
+                    sampling_decision.mechanism.to_cow(),
                 ));
             }
         }
