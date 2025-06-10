@@ -14,7 +14,7 @@ use datadog_trace_utils::span::{
     SpanLink, SpanLinkBytes,
 };
 
-use dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION;
+use dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -448,7 +448,7 @@ fn test_otel_span_to_dd_span() {
                     ("_top_level".into(), 1.0),
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION.into(), 0.0),
+                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 0.0),
                 ]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
@@ -528,7 +528,7 @@ fn test_otel_span_to_dd_span() {
                     ("_top_level".into(), 1.0),
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION.into(), 1.0),
+                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 1.0),
                 ]),
                 r#type: "db".into(),
                 span_events: vec![],
