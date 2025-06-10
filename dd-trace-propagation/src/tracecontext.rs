@@ -373,10 +373,7 @@ pub fn keys() -> &'static [String] {
 mod test {
     use dd_trace::{configuration::TracePropagationStyle, sampling::priority};
 
-    use crate::{
-        // context::{SamplingMechanism, SamplingPriority},
-        Propagator,
-    };
+    use crate::Propagator;
 
     use super::*;
 
