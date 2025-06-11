@@ -66,7 +66,7 @@ fn set_meta_otlp(k: BytesString, v: BytesString, dd_span: &mut DdSpan) {
         "resource.name" => dd_span.resource = v,
         "span.type" => dd_span.r#type = v,
         "analytics.event" => {
-            if let Ok(parsed) = v.as_str().parse::<bool>() {
+            if let Ok(parsed) = v.as_str().to_lowercase().parse::<bool>() {
                 dd_span.metrics.insert(
                     BytesString::from_static(
                         dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY,
