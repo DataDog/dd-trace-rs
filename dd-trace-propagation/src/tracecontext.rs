@@ -8,11 +8,16 @@ use std::{collections::HashMap, str::FromStr};
 use crate::{
     carrier::{Extractor, Injector},
     context::{
-        encode_tag_value, Sampling, SamplingMechanism, SamplingPriority, SpanContext, Traceparent,
-        Tracestate, DATADOG_PROPAGATION_TAG_PREFIX, DATADOG_SAMPLING_DECISION_KEY,
+        encode_tag_value, Sampling, SpanContext, Traceparent, Tracestate,
+        DATADOG_PROPAGATION_TAG_PREFIX,
     },
     datadog::{DATADOG_LAST_PARENT_ID_KEY, INVALID_SEGMENT_REGEX},
     error::Error,
+};
+
+use dd_trace::{
+    constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+    sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
 use dd_trace::{dd_error, dd_warn};
@@ -79,7 +84,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let priority = context
         .sampling
         .and_then(|sampling| sampling.priority)
-        .unwrap_or(SamplingPriority::UserKeep);
+        .unwrap_or(priority::USER_KEEP);
 
     tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{}", priority));
 
@@ -201,9 +206,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                     );
 
                     mechanism = tags
-                        .get(DATADOG_SAMPLING_DECISION_KEY)
-                        .map(|sm| SamplingMechanism::from_str(sm).ok())
-                        .unwrap_or_default();
+                        .get(SAMPLING_DECISION_MAKER_TAG_KEY)
+                        .and_then(|sm| SamplingMechanism::from_str(sm).ok());
 
                     Some(tracestate)
                 } else {
@@ -240,19 +244,25 @@ fn define_sampling_priority(
     tags: &mut HashMap<String, String>,
 ) -> SamplingPriority {
     if let Some(ts_sp) = tracestate_sampling_priority {
-        if (traceparent_sampling_priority == SamplingPriority::AutoKeep && ts_sp.is_keep())
-            || (traceparent_sampling_priority == SamplingPriority::AutoReject && !ts_sp.is_keep())
+        // If the both traceparent and tracestate headers are sampled, keep the tracestate sampling
+        // priority.
+        if (traceparent_sampling_priority == priority::AUTO_KEEP && ts_sp.is_keep())
+            || (traceparent_sampling_priority == priority::AUTO_REJECT && !ts_sp.is_keep())
         {
             return ts_sp;
         }
     }
 
+    // If
+    // * the tracestate sampling priority is missing
+    // * the traceparent disagrees with the tracestate
+    // Use the traceparent
     match traceparent_sampling_priority {
-        SamplingPriority::AutoKeep => tags.insert(
-            DATADOG_SAMPLING_DECISION_KEY.to_string(),
-            SamplingMechanism::Default.to_string(),
+        priority::AUTO_KEEP => tags.insert(
+            SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+            mechanism::DEFAULT.to_cow().into_owned(),
         ),
-        SamplingPriority::AutoReject => tags.remove(DATADOG_SAMPLING_DECISION_KEY),
+        priority::AUTO_REJECT => tags.remove(SAMPLING_DECISION_MAKER_TAG_KEY),
         _ => None,
     };
 
@@ -277,7 +287,12 @@ fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
 
     extract_version(version, tail, trace_flags)?;
 
-    let sampling_priority = SamplingPriority::from_flags(trace_flags & 0x1);
+    let is_sampled = (trace_flags & 0x1) == 1;
+    let sampling_priority = if is_sampled {
+        priority::AUTO_KEEP
+    } else {
+        priority::AUTO_REJECT
+    };
 
     Ok(Traceparent {
         sampling_priority,
@@ -356,12 +371,9 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use dd_trace::configuration::TracePropagationStyle;
+    use dd_trace::{configuration::TracePropagationStyle, sampling::priority};
 
-    use crate::{
-        context::{SamplingMechanism, SamplingPriority},
-        Propagator,
-    };
+    use crate::Propagator;
 
     use super::*;
 
@@ -391,7 +403,7 @@ mod test {
         assert_eq!(context.span_id, 67_667_974_448_284_343);
         assert_eq!(
             context.sampling.unwrap().priority,
-            Some(SamplingPriority::UserKeep)
+            Some(priority::USER_KEEP)
         );
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(
@@ -533,7 +545,7 @@ mod test {
         assert!(context.sampling.unwrap().priority.is_some());
         assert_eq!(
             context.sampling.unwrap().priority.unwrap(),
-            SamplingPriority::AutoReject
+            priority::AUTO_REJECT
         );
     }
 
@@ -560,7 +572,7 @@ mod test {
 
         assert_eq!(
             tracestate.sampling.unwrap().priority.unwrap(),
-            SamplingPriority::AutoKeep
+            priority::AUTO_KEEP
         );
 
         assert!(tracestate.additional_values.is_some());
@@ -579,8 +591,8 @@ mod test {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Some(Sampling {
-                priority: Some(SamplingPriority::UserKeep),
-                mechanism: Some(SamplingMechanism::Manual),
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
             }),
             origin: Some("foo,bar=".to_string()),
             tags: HashMap::from([(
@@ -612,8 +624,8 @@ mod test {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Some(Sampling {
-                priority: Some(SamplingPriority::UserKeep),
-                mechanism: Some(SamplingMechanism::Manual),
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
             }),
             origin: Some("abc".repeat(200)),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
@@ -647,8 +659,8 @@ mod test {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Some(Sampling {
-                priority: Some(SamplingPriority::UserKeep),
-                mechanism: Some(SamplingMechanism::Manual),
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
             }),
             origin: Some("rum".to_string()),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),

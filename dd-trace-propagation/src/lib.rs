@@ -166,11 +166,12 @@ pub mod tests {
 
     use assert_unordered::assert_eq_unordered;
 
+    use dd_trace::sampling::{mechanism, priority};
     use pretty_assertions::assert_eq;
 
     use lazy_static::lazy_static;
 
-    use crate::context::{Sampling, SamplingMechanism, SamplingPriority, Tracestate};
+    use crate::context::{Sampling, Tracestate};
 
     use super::*;
 
@@ -352,8 +353,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -371,8 +372,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::UserKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -406,8 +407,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -444,7 +445,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::UserKeep),
+                    priority: Some(priority::USER_KEEP),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -465,7 +466,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoReject),
+                    priority: Some(priority::AUTO_REJECT),
                     mechanism: None,
                 }),
                 origin: Some("rum".to_string()),
@@ -490,8 +491,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -521,8 +522,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -553,8 +554,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -580,8 +581,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -605,8 +606,8 @@ pub mod tests {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -628,8 +629,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -671,8 +672,8 @@ pub mod tests {
                 trace_id: 9_291_375_655_657_946_024,
                 span_id: 10,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::UserKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: None,
                 tags: HashMap::from([
@@ -692,8 +693,8 @@ pub mod tests {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::UserKeep),
-                    mechanism: Some(SamplingMechanism::Manual),
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::MANUAL),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -726,8 +727,8 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::UserKeep),
-                    mechanism: Some(SamplingMechanism::Manual),
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::MANUAL),
                 }),
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
@@ -751,7 +752,7 @@ pub mod tests {
                 ],
                 is_remote: true,
                 tracestate: Some(Tracestate {
-                    sampling: Some(Sampling { priority: Some(SamplingPriority::UserKeep), mechanism: Some(SamplingMechanism::Manual) }),
+                    sampling: Some(Sampling { priority: Some(priority::USER_KEEP), mechanism: Some(mechanism::MANUAL) }),
                     origin: Some("rum".to_string()),
                     lower_order_trace_id: None,
                     propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
@@ -767,8 +768,8 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1054,8 +1055,8 @@ pub mod tests {
                 trace_id: *TRACE_ID_LOWER_ORDER_BITS as u128,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1074,8 +1075,8 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1094,8 +1095,8 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
-                    mechanism: Some(SamplingMechanism::Rule),
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
                 }),
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
@@ -1114,7 +1115,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
+                    priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -1134,7 +1135,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
+                    priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -1154,7 +1155,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
+                    priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),
@@ -1174,7 +1175,7 @@ pub mod tests {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
                 sampling: Some(Sampling {
-                    priority: Some(SamplingPriority::AutoKeep),
+                    priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
                 }),
                 origin: Some("synthetics".to_string()),

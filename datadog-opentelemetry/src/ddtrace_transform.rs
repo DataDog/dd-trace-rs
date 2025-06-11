@@ -7,7 +7,7 @@
 use std::{borrow::Cow, collections::hash_map, time::SystemTime};
 
 use datadog_trace_utils::span::SpanBytes as DdSpan;
-use dd_trace::constants::{SAMPLING_DECISION_AUTO_DROP, SAMPLING_DECISION_AUTO_KEEP};
+use dd_trace::sampling;
 use opentelemetry::trace::Event;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use tinybytes::BytesString;
@@ -70,9 +70,9 @@ fn otel_sampling_to_dd_sampling(
         .entry(BytesString::from_static("_sampling_priority_v1"))
     {
         if otel_trace_flags.is_sampled() {
-            e.insert(SAMPLING_DECISION_AUTO_KEEP as f64);
+            e.insert(sampling::priority::AUTO_KEEP.into_i8() as f64);
         } else {
-            e.insert(SAMPLING_DECISION_AUTO_DROP as f64);
+            e.insert(sampling::priority::AUTO_REJECT.into_i8() as f64);
         }
     }
 }
