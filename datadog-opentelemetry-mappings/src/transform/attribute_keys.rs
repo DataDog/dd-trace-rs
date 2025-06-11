@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use opentelemetry::KeyValue;
-
-use super::sem_convs;
+use opentelemetry_semantic_conventions as semconv;
 
 macro_rules! token_count {
     () => {
@@ -86,10 +85,11 @@ attribute_key! {
     "db.query.text" => DB_QUERY_TEXT,
     "span.type" => SPAN_TYPE,
     "http.response.status_code" => HTTP_RESPONSE_STATUS_CODE,
-    sem_convs::ATTRIBUTE_HTTP_STATUS_CODE => HTTP_STATUS_CODE,
-    sem_convs::ATTRIBUTE_SERVICE_VERSION => SERVICE_VERSION,
+    opentelemetry_semantic_conventions::attribute::HTTP_STATUS_CODE => HTTP_STATUS_CODE,
+    semconv::attribute::SERVICE_NAME => SERVICE_NAME,
+    semconv::attribute::SERVICE_VERSION => SERVICE_VERSION,
     "deployment.environment.name" => DEPLOYMENT_ENVIRONMENT_NAME,
-    sem_convs::ATTRIBUTE_DEPLOYMENT_ENVIRONMENT => DEPLOYMENT_ENVIRONMENT,
+    semconv::attribute::DEPLOYMENT_ENVIRONMENT => DEPLOYMENT_ENVIRONMENT,
 
     "_dd.measured" => DD_MEASURED,
 }
@@ -122,7 +122,6 @@ impl AttributeIndices {
         self.0[key.idx] = val as u32;
     }
 
-    #[allow(unused)]
     pub fn get(&self, key: AttributeKey) -> Option<usize> {
         let val = self.0[key.idx];
         if val == u32::MAX {
@@ -134,7 +133,6 @@ impl AttributeIndices {
 }
 
 impl AttributeIndices {
-    #[allow(unused)]
     pub fn from_attribute_slice(attributes: &[opentelemetry::KeyValue]) -> Self {
         let mut s = Self::default();
         for (i, KeyValue { key, .. }) in attributes.iter().enumerate() {

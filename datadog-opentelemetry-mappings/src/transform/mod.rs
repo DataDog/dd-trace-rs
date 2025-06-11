@@ -32,14 +32,12 @@
 //! The code in attribute_keys.rs loops only once and then stores the offsets at which the
 //! attributes are stored, for the set of keys we are interested in.  
 
-mod attribute_keys;
-mod otel_util;
-mod semconv_shim;
+pub mod attribute_keys;
+pub mod otel_util;
+pub mod semconv_shim;
 
 #[cfg(test)]
 mod transform_tests;
-
-pub use otel_util::DEFAULT_OTLP_SERVICE_NAME;
 
 use attribute_keys::*;
 use otel_util::*;
@@ -53,49 +51,13 @@ use datadog_trace_utils::span::{
 };
 use opentelemetry::{
     trace::{Link, SpanKind},
-    Key, KeyValue, SpanId,
+    Key, KeyValue, SpanId, Value,
 };
 use opentelemetry_sdk::Resource;
-use opentelemetry_semantic_conventions as semconv;
+pub use opentelemetry_semantic_conventions as semconv;
 use tinybytes::BytesString;
 
-use crate::ddtrace_transform::ExportSpan;
-
-struct SpanExtractArgs<'a> {
-    span: &'a ExportSpan,
-    span_attrs: AttributeIndices,
-}
-
-impl OtelSpan for SpanExtractArgs<'_> {
-    fn name(&self) -> Cow<'static, str> {
-        self.span.name.clone()
-    }
-
-    fn span_kind(&self) -> SpanKind {
-        self.span.span_kind.clone()
-    }
-
-    fn has_attr(&self, attr_key: AttributeKey) -> bool {
-        self.span_attrs.get(attr_key).is_some()
-    }
-
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'static, str>> {
-        let idx = self.span_attrs.get(attr_key)?;
-        let kv = self.span.attributes.get(idx)?;
-        Some(Cow::Owned(kv.value.to_string()))
-    }
-
-    fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T> {
-        let idx = self.span_attrs.get(attr_key)?;
-        let kv = self.span.attributes.get(idx)?;
-        let i = match kv.value {
-            opentelemetry::Value::I64(i) => i,
-            opentelemetry::Value::F64(i) if i == i.floor() && i < i64::MAX as f64 => i as i64,
-            _ => return None,
-        };
-        T::try_from(i).ok()
-    }
-}
+use crate::sdk_span::SdkSpan;
 
 fn set_meta_otlp(k: BytesString, v: BytesString, dd_span: &mut DdSpan) {
     match k.as_str() {
@@ -125,10 +87,10 @@ fn set_meta_otlp_with_semconv_mappings(
     dd_span: &mut DdSpan,
 ) {
     let mapped_key = get_dd_key_for_otlp_attribute(k);
-    if mapped_key.is_empty() {
+    if mapped_key.as_str().is_empty() {
         return;
     }
-    let mapped_key = BytesString::from_cow(mapped_key);
+    let mapped_key = BytesString::from_cow(mapped_key.into_static_cow());
     if is_meta_key(mapped_key.as_ref())
         && !dd_span
             .meta
@@ -159,7 +121,7 @@ fn set_metric_otlp(s: &mut DdSpan, k: BytesString, v: f64) {
 
 fn set_metric_otlp_with_semconv_mappings(k: &str, value: f64, dd_span: &mut DdSpan) {
     let mapped_key = get_dd_key_for_otlp_attribute(k);
-    let mapped_key = BytesString::from_cow(mapped_key);
+    let mapped_key = BytesString::from_cow(mapped_key.into_static_cow());
 
     if !mapped_key.is_empty() {
         if is_meta_key(mapped_key.as_str()) && dd_span.metrics.contains_key(&mapped_key) {
@@ -170,11 +132,7 @@ fn set_metric_otlp_with_semconv_mappings(k: &str, value: f64, dd_span: &mut DdSp
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L69
-fn otel_span_to_dd_span_minimal(
-    span: &SpanExtractArgs,
-    res: &Resource,
-    is_top_level: bool,
-) -> DdSpan {
+fn otel_span_to_dd_span_minimal(span: &SpanExtractArgs, is_top_level: bool) -> DdSpan {
     let (trace_id_lower_half, _) = otel_trace_id_to_dd_id(span.span.span_context.trace_id());
     let span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
     let parent_id = otel_span_id_to_dd_id(span.span.parent_span_id);
@@ -221,7 +179,7 @@ fn otel_span_to_dd_span_minimal(
     }
 
     if dd_span.service.is_empty() {
-        dd_span.service = BytesString::from_cow(get_otel_service(res));
+        dd_span.service = BytesString::from_cow(get_otel_service(span));
     }
 
     if dd_span.name.is_empty() {
@@ -229,10 +187,10 @@ fn otel_span_to_dd_span_minimal(
     }
 
     if dd_span.resource.is_empty() {
-        dd_span.resource = BytesString::from_cow(get_otel_resource_v2(span, res));
+        dd_span.resource = BytesString::from_cow(get_otel_resource_v2(span));
     }
     if dd_span.r#type.is_empty() {
-        dd_span.r#type = BytesString::from_cow(get_otel_span_type(span, res));
+        dd_span.r#type = BytesString::from_cow(get_otel_span_type(span));
     }
     let code: u32 = if let Some(http_status_code) = span.get_attr_num(DATADOG_HTTP_STATUS_CODE) {
         http_status_code
@@ -438,6 +396,58 @@ fn is_meta_key(key: &str) -> bool {
     )
 }
 
+struct SpanExtractArgs<'a> {
+    span: &'a SdkSpan,
+    resource: &'a Resource,
+    span_attrs: AttributeIndices,
+}
+
+impl<'a> SpanExtractArgs<'a> {
+    pub fn new(span: &'a SdkSpan, resource: &'a Resource) -> Self {
+        let span_attrs = AttributeIndices::from_attribute_slice(&span.attributes);
+        Self {
+            span,
+            span_attrs,
+            resource,
+        }
+    }
+}
+
+impl OtelSpan for SpanExtractArgs<'_> {
+    fn name(&self) -> Cow<'static, str> {
+        self.span.name.clone()
+    }
+
+    fn span_kind(&self) -> SpanKind {
+        self.span.span_kind.clone()
+    }
+
+    fn has_attr(&self, attr_key: AttributeKey) -> bool {
+        self.span_attrs.get(attr_key).is_some()
+    }
+
+    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'static, str>> {
+        let idx = self.span_attrs.get(attr_key)?;
+        let kv = self.span.attributes.get(idx)?;
+        Some(Cow::Owned(kv.value.to_string()))
+    }
+
+    fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T> {
+        let idx = self.span_attrs.get(attr_key)?;
+        let kv = self.span.attributes.get(idx)?;
+        let i = match kv.value {
+            opentelemetry::Value::I64(i) => i,
+            opentelemetry::Value::F64(i) if i == i.floor() && i < i64::MAX as f64 => i as i64,
+            _ => return None,
+        };
+        T::try_from(i).ok()
+    }
+
+    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<Value> {
+        self.resource.get(&Key::from_static_str(attr_key.key()))
+    }
+}
+
 /// Converts an OpenTelemetry span to a Datadog span.
 /// https://github.com/DataDog/datadog-agent/blob/d91c1b47da4f5f24559f49be284e547cc847d5e2/pkg/trace/transform/transform.go#L236
 ///
@@ -448,7 +458,7 @@ fn is_meta_key(key: &str) -> bool {
 /// * `enable_otlp_compute_top_level_by_span_kind` => default to true
 /// * `IgnoreMissingDatadogFields` => default to false
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
-pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> DdSpan {
+pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdSpan {
     // There is a performance otpimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
@@ -457,15 +467,11 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     // If we use CSS we could probably do only 1. if we know the span is going to be dropped before
     // being sent...
 
-    let span_attrs = AttributeIndices::from_attribute_slice(&otel_span.attributes);
-    let span_extracted = SpanExtractArgs {
-        span: &otel_span,
-        span_attrs,
-    };
+    let span_extracted = SpanExtractArgs::new(&otel_span, otel_resource);
     let is_top_level = otel_span.parent_span_id == SpanId::INVALID
         || matches!(otel_span.span_kind, SpanKind::Server | SpanKind::Consumer);
 
-    let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, otel_resource, is_top_level);
+    let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, is_top_level);
 
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {
         let value = span_extracted.get_attr_str(*dd_semantics_key);
@@ -526,7 +532,7 @@ pub fn otel_span_to_dd_span(otel_span: ExportSpan, otel_resource: &Resource) -> 
     }
 
     if let hash_map::Entry::Vacant(env_slot) = dd_span.meta.entry(BytesString::from_static("env")) {
-        let env = get_otel_env(otel_resource);
+        let env = get_otel_env(&span_extracted);
         if !env.is_empty() {
             env_slot.insert(BytesString::from_cow(env));
         }

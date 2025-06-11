@@ -13,6 +13,7 @@ description.workspace = true
 dd-trace = { path = "../dd-trace" }
 dd-trace-sampling = { path = "../dd-trace-sampling" }
 dd-trace-propagation = { path = "../dd-trace-propagation", features = ["opentelemetry"] }
+datadog-opentelemetry-mappings = { path = "../datadog-opentelemetry-mappings" }
 
 # External dependencies
 futures = { workspace = true }
