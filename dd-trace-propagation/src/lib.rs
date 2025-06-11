@@ -127,6 +127,7 @@ impl DatadogCompositePropagator {
                     primary_context
                         .tags
                         .insert(TRACESTATE_KEY.to_string(), tracestate.clone());
+                    primary_context.tracestate = context.tracestate.clone();
                 }
 
                 if primary_context.trace_id == context.trace_id
@@ -616,7 +617,7 @@ pub mod tests {
                 ]),
                 links: vec![],
                 is_remote: true,
-                tracestate: None
+                tracestate: Some(Tracestate::from_str("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE").unwrap())
             }
         ),
         // Tracestate is not added when TraceContext style comes later and does not
