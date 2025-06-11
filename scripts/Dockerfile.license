@@ -1,0 +1,24 @@
+FROM rust:1.82-slim
+
+# Set up the workspace directory
+WORKDIR /usr/src/app
+
+# Copy just the cargo config first - this rarely changes
+COPY .cargo/config.toml /usr/src/app/.cargo/config.toml
+
+# Install the license tool with cache mount
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
+
+# Copy the rest of the project files
+COPY . .
+
+# Generate the license file during build, with caching
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    dd-rust-license-tool dump > LICENSE-3rdparty.csv
+
+# Simply output the pre-generated file at runtime
+ENTRYPOINT ["cat"]
+CMD ["./LICENSE-3rdparty.csv"] 
