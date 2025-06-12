@@ -6,7 +6,7 @@ use std::{borrow::Cow, time::SystemTime};
 /// A span exported from the OpenTelemetry SDK
 ///
 /// We don't use the `opentelemetry_sdk::trace::SpanData` because it's not
-/// constructibke so we can't create it and use to write tests on the span conversion
+/// constructible so we can't create it and use to write tests on the span conversion
 pub struct SdkSpan {
     pub span_context: opentelemetry::trace::SpanContext,
     pub parent_span_id: opentelemetry::trace::SpanId,
