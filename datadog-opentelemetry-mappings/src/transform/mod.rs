@@ -198,9 +198,10 @@ fn otel_span_to_dd_span_minimal(span: &SpanExtractArgs, is_top_level: bool) -> D
         get_otel_status_code(span)
     };
     if code != 0 {
-        dd_span
-            .metrics
-            .insert(BytesString::from("http.status_code"), code as f64);
+        dd_span.meta.insert(
+            BytesString::from("http.status_code"),
+            BytesString::from_string(code.to_string()),
+        );
     }
 
     if is_top_level {
