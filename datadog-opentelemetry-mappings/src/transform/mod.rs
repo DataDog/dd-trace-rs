@@ -253,7 +253,7 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
             continue;
         }
         for (otel_key, dd_key) in [
-            (semconv::attribute::EXCEPTION_MESSAGE, "error.msg"),
+            (semconv::attribute::EXCEPTION_MESSAGE, "error.message"),
             (semconv::attribute::EXCEPTION_TYPE, "error.type"),
             (semconv::attribute::EXCEPTION_STACKTRACE, "error.stack"),
         ] {
@@ -264,7 +264,7 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
             }
         }
     }
-    let error_msg_key = BytesString::from_static("error.msg");
+    let error_msg_key = BytesString::from_static("error.message");
     if let hash_map::Entry::Vacant(error_msg_slot) = dd_span.meta.entry(error_msg_key.clone()) {
         match status {
             opentelemetry::trace::Status::Error { description, .. } if !description.is_empty() => {
@@ -383,7 +383,7 @@ const DD_SEMANTICS_KEY_TO_META_KEY: &[(AttributeKey, &str)] = &[
     (DATADOG_ENV, "env"),
     (DATADOG_VERSION, "version"),
     (DATADOG_HTTP_STATUS_CODE, "http.status_code"),
-    (DATADOG_ERROR_MSG, "error.msg"),
+    (DATADOG_ERROR_MSG, "error.message"),
     (DATADOG_ERROR_TYPE, "error.type"),
     (DATADOG_ERROR_STACK, "error.stack"),
 ];
@@ -392,7 +392,7 @@ const DD_SEMANTICS_KEY_TO_META_KEY: &[(AttributeKey, &str)] = &[
 fn is_meta_key(key: &str) -> bool {
     matches!(
         key,
-        "env" | "version" | "http.status_code" | "error.msg" | "error.type" | "error.stack"
+        "env" | "version" | "http.status_code" | "error.message" | "error.type" | "error.stack"
     )
 }
 
@@ -638,7 +638,7 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
         }
     }
 
-    if ["error.msg", "error.type", "error.stack"]
+    if ["error.message", "error.type", "error.stack"]
         .into_iter()
         .any(|k| !dd_span.meta.contains_key(&BytesString::from_static(k)))
     {
