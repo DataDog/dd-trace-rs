@@ -1,4 +1,4 @@
-root_name: datadog-opentelemetry, dd-trace, dd-trace-propagation, dd-trace-sampling
+root_name: datadog-opentelemetry, datadog-opentelemetry-mappings, dd-trace, dd-trace-propagation, dd-trace-sampling
 third_party_libraries:
 - package_name: addr2line
   package_version: 0.24.2

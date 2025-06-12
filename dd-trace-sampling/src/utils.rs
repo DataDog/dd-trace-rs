@@ -1,15 +1,17 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::borrow::Cow;
+
 use opentelemetry::Value;
 
 /// Extracts a string value from an OpenTelemetry Value
-pub fn extract_string_value(value: &Value) -> Option<String> {
+pub fn extract_string_value(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::String(s) => Some(s.to_string()),
-        Value::I64(i) => Some(i.to_string()),
-        Value::F64(f) => Some(f.to_string()),
-        Value::Bool(b) => Some(b.to_string()),
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::I64(i) => Some(Cow::Owned(i.to_string())),
+        Value::F64(f) => Some(Cow::Owned(f.to_string())),
+        Value::Bool(b) => Some(Cow::Borrowed(if *b { "true" } else { "false" })),
         _ => None,
     }
 }
@@ -31,24 +33,24 @@ mod tests {
     #[test]
     fn test_extract_string_value() {
         assert_eq!(
-            extract_string_value(&Value::String("test".into())),
-            Some("test".to_string())
+            extract_string_value(&Value::String("test".into())).as_deref(),
+            Some("test")
         );
         assert_eq!(
-            extract_string_value(&Value::I64(123)),
-            Some("123".to_string())
+            extract_string_value(&Value::I64(123)).as_deref(),
+            Some("123")
         );
         assert_eq!(
-            extract_string_value(&Value::F64(12.34)),
-            Some("12.34".to_string())
+            extract_string_value(&Value::F64(12.34)).as_deref(),
+            Some("12.34")
         );
         assert_eq!(
-            extract_string_value(&Value::Bool(true)),
-            Some("true".to_string())
+            extract_string_value(&Value::Bool(true)).as_deref(),
+            Some("true")
         );
         assert_eq!(
-            extract_string_value(&Value::Bool(false)),
-            Some("false".to_string())
+            extract_string_value(&Value::Bool(false)).as_deref(),
+            Some("false")
         );
     }
 

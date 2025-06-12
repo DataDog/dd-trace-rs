@@ -7,7 +7,6 @@ mod span_exporter;
 mod span_processor;
 mod text_map_propagator;
 mod trace_id;
-mod transform;
 
 use std::sync::{Arc, RwLock};
 
