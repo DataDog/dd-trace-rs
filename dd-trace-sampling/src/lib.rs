@@ -8,6 +8,7 @@ pub(crate) mod otel_mappings;
 pub(crate) mod rate_limiter;
 pub(crate) mod rate_sampler;
 pub(crate) mod utils;
+pub(crate) mod agent_service_sampler;
 
 // Re-export key public types
 pub use datadog_sampler::{DatadogSampler, SamplingRule};

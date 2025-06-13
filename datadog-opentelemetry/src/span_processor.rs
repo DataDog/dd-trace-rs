@@ -303,10 +303,11 @@ impl DatadogSpanProcessor {
         config: dd_trace::Config,
         registry: Arc<TraceRegistry>,
         resource: Arc<RwLock<Resource>>,
+        agent_response_handler: Option<Box<dyn for <'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
         Self {
             registry,
-            span_exporter: DatadogExporter::new(config),
+            span_exporter: DatadogExporter::new(config, agent_response_handler),
             resource,
         }
     }
