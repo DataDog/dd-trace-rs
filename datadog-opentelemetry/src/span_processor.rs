@@ -303,7 +303,7 @@ impl DatadogSpanProcessor {
         config: dd_trace::Config,
         registry: Arc<TraceRegistry>,
         resource: Arc<RwLock<Resource>>,
-        agent_response_handler: Option<Box<dyn for <'a> Fn(&'a str) + Send + Sync>>,
+        agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
         Self {
             registry,

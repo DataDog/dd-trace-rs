@@ -21,7 +21,7 @@ impl ServicesSampler {
         self.inner.read().unwrap().get(service).cloned()
     }
 
-    pub fn update_rates<'a, I: IntoIterator<Item = (String, f64)>>(&self, rates: I) {
+    pub fn update_rates<I: IntoIterator<Item = (String, f64)>>(&self, rates: I) {
         let new_rates: HashMap<_, _> = rates
             .into_iter()
             .map(|(s, r)| (s, RateSampler::new(r)))
