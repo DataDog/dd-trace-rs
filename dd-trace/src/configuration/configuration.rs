@@ -43,14 +43,17 @@ fn default_provenance() -> String {
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[repr(usize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
 #[non_exhaustive]
 /// The level at which the library will log
 pub enum LogLevel {
-    Debug,
-    Warn,
+    Off,
     #[default]
     Error,
+    Warn,
+    Info,
+    Debug,
 }
 
 impl FromStr for LogLevel {
@@ -59,13 +62,31 @@ impl FromStr for LogLevel {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("debug") {
             Ok(LogLevel::Debug)
+        } else if s.eq_ignore_ascii_case("info") {
+            Ok(LogLevel::Info)
         } else if s.eq_ignore_ascii_case("warn") {
             Ok(LogLevel::Warn)
         } else if s.eq_ignore_ascii_case("error") {
             Ok(LogLevel::Error)
+        } else if s.eq_ignore_ascii_case("off") {
+            Ok(LogLevel::Off)
         } else {
-            Err("log level should be one of DEBUG, WARN, ERROR")
+            Err("log level should be one of DEBUG, INFO, WARN, ERROR, OFF")
         }
+    }
+}
+
+impl Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let level = match self {
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warn => "WARN",
+            LogLevel::Error => "ERROR",
+            LogLevel::Off => "OFF",
+        };
+
+        write!(f, "{level}")
     }
 }
 
@@ -411,6 +432,7 @@ pub struct ConfigBuilder {
 impl ConfigBuilder {
     /// Finalizes the builder and returns the configuration
     pub fn build(self) -> Config {
+        crate::log::set_max_level(self.config.log_level);
         self.config
     }
 
