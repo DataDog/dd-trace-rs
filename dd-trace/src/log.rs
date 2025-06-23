@@ -8,7 +8,7 @@ use std::{
 
 use crate::configuration::LogLevel;
 
-static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(1); // LogLevel::Error by default
+static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LogLevel::Error as usize);
 
 pub(crate) fn set_max_level(lvl: LogLevel) {
     MAX_LOG_LEVEL.store(lvl as usize, Ordering::Relaxed)
