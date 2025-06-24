@@ -10,3 +10,27 @@ mod error;
 pub use error::{Error, Result};
 
 pub mod log;
+
+/// Macro to catch panics and return a fallback value with error logging
+/// The fallback is only evaluated if a panic occurs
+#[macro_export]
+macro_rules! catch_panic {
+    ($operation:expr, $fallback:expr) => {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $operation)) {
+            Ok(result) => result,
+            Err(error) => {
+                dd_error!("{error:?}");
+                $fallback
+            }
+        }
+    };
+
+    ($operation:expr) => {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $operation)) {
+            Ok(result) => result,
+            Err(error) => {
+                dd_error!("{error:?}");
+            }
+        }
+    };
+}

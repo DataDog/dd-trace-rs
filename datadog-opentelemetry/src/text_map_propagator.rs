@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
-use dd_trace::{sampling::priority, Config};
+use dd_trace::{catch_panic, dd_error, sampling::priority, Config};
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
@@ -69,9 +69,7 @@ impl DatadogPropagator {
             registry,
         }
     }
-}
 
-impl TextMapPropagator for DatadogPropagator {
     /// Injects otel context delegating into [`DatadogCompositePropagator`]
     /// Before delegating, it converts otel SpanContext into a DD SpanContext obtaining propagation
     /// data from [`TraceRegistry`]
@@ -164,6 +162,27 @@ impl TextMapPropagator for DatadogPropagator {
                     .with_value(DatadogExtractData::from(dd_span_context))
             })
             .unwrap_or_else(|| cx.clone())
+    }
+}
+
+impl TextMapPropagator for DatadogPropagator {
+    fn inject_context(
+        &self,
+        cx: &opentelemetry::Context,
+        injector: &mut dyn opentelemetry::propagation::Injector,
+    ) {
+        catch_panic!(DatadogPropagator::inject_context(self, cx, injector));
+    }
+
+    fn extract_with_context(
+        &self,
+        cx: &opentelemetry::Context,
+        extractor: &dyn opentelemetry::propagation::Extractor,
+    ) -> opentelemetry::Context {
+        catch_panic!(
+            DatadogPropagator::extract_with_context(self, cx, extractor),
+            cx.clone()
+        )
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
