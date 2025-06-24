@@ -5,6 +5,4 @@
 mod configuration;
 mod sources;
 
-pub use configuration::{
-    Config, ConfigBuilder, LogLevelFilter, SamplingRuleConfig, TracePropagationStyle,
-};
+pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};

@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    fmt, mem,
+    fmt::{self, Display},
+    mem,
+    str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
-
-use crate::configuration::LogLevelFilter;
 
 static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LogLevelFilter::Error as usize);
 
@@ -16,6 +16,53 @@ pub(crate) fn set_max_level(lvl: LogLevelFilter) {
 
 pub fn max_level() -> LogLevelFilter {
     unsafe { mem::transmute(MAX_LOG_LEVEL.load(Ordering::Relaxed)) }
+}
+
+#[repr(usize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
+#[non_exhaustive]
+/// The level at which the library will log
+pub enum LogLevelFilter {
+    Off,
+    #[default]
+    Error,
+    Warn,
+    Info,
+    Debug,
+}
+
+impl FromStr for LogLevelFilter {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("debug") {
+            Ok(LogLevelFilter::Debug)
+        } else if s.eq_ignore_ascii_case("info") {
+            Ok(LogLevelFilter::Info)
+        } else if s.eq_ignore_ascii_case("warn") {
+            Ok(LogLevelFilter::Warn)
+        } else if s.eq_ignore_ascii_case("error") {
+            Ok(LogLevelFilter::Error)
+        } else if s.eq_ignore_ascii_case("off") {
+            Ok(LogLevelFilter::Off)
+        } else {
+            Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
+        }
+    }
+}
+
+impl Display for LogLevelFilter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let filter = match self {
+            LogLevelFilter::Debug => "DEBUG",
+            LogLevelFilter::Info => "INFO",
+            LogLevelFilter::Warn => "WARN",
+            LogLevelFilter::Error => "ERROR",
+            LogLevelFilter::Off => "OFF",
+        };
+
+        write!(f, "{filter}")
+    }
 }
 
 #[repr(usize)]
@@ -118,7 +165,7 @@ macro_rules! dd_log {
     ($lvl:expr, $($arg:tt)+) => {
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
-        if lvl == $crate::configuration::LogLevelFilter::Error {
+        if lvl == $crate::log::LogLevelFilter::Error {
           eprintln!("\x1b[91mERROR\x1b[0m {}:{} - {}", file!(), line!(), format!($($arg)*));
         } else {
           println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($($arg)*));
@@ -130,7 +177,7 @@ macro_rules! dd_log {
 #[cfg(test)]
 mod tests {
     use crate::{
-        configuration::LogLevelFilter,
+        log::LogLevelFilter,
         log::{max_level, set_max_level, Level},
     };
 
@@ -143,7 +190,7 @@ mod tests {
     fn test_max_level() {
         let default_lvl = max_level();
 
-        set_max_level(crate::configuration::LogLevelFilter::Warn);
+        set_max_level(crate::log::LogLevelFilter::Warn);
 
         assert!(LogLevelFilter::Warn == max_level());
         assert!(LogLevelFilter::Debug > max_level());

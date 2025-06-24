@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
 use crate::dd_warn;
+use crate::log::LogLevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
@@ -42,53 +43,6 @@ fn default_provenance() -> String {
 }
 
 pub const TRACER_VERSION: &str = "0.0.1";
-
-#[repr(usize)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
-#[non_exhaustive]
-/// The level at which the library will log
-pub enum LogLevelFilter {
-    Off,
-    #[default]
-    Error,
-    Warn,
-    Info,
-    Debug,
-}
-
-impl FromStr for LogLevelFilter {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("debug") {
-            Ok(LogLevelFilter::Debug)
-        } else if s.eq_ignore_ascii_case("info") {
-            Ok(LogLevelFilter::Info)
-        } else if s.eq_ignore_ascii_case("warn") {
-            Ok(LogLevelFilter::Warn)
-        } else if s.eq_ignore_ascii_case("error") {
-            Ok(LogLevelFilter::Error)
-        } else if s.eq_ignore_ascii_case("off") {
-            Ok(LogLevelFilter::Off)
-        } else {
-            Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
-        }
-    }
-}
-
-impl Display for LogLevelFilter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let filter = match self {
-            LogLevelFilter::Debug => "DEBUG",
-            LogLevelFilter::Info => "INFO",
-            LogLevelFilter::Warn => "WARN",
-            LogLevelFilter::Error => "ERROR",
-            LogLevelFilter::Off => "OFF",
-        };
-
-        write!(f, "{filter}")
-    }
-}
 
 #[derive(Debug, Default)]
 struct ParsedSamplingRules {
