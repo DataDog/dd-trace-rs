@@ -337,6 +337,14 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service(span: &impl OtelSpan) -> Cow<'static, str> {
+    // First, try to extract service from the span's attributes.
+    if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
+        if !service.is_empty() {
+            return service;
+        }
+    }
+
+    // If not in span attributes, check the resource attributes.
     let service: Option<_> = span.get_res_attribute_opt(SERVICE_NAME);
     if let Some(service) = service {
         if !service.as_str().is_empty() {
