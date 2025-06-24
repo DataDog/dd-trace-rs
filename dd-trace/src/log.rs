@@ -8,13 +8,13 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LogLevelFilter::Error as usize);
+static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Error as usize);
 
-pub(crate) fn set_max_level(lvl: LogLevelFilter) {
+pub(crate) fn set_max_level(lvl: LevelFilter) {
     MAX_LOG_LEVEL.store(lvl as usize, Ordering::Relaxed)
 }
 
-pub fn max_level() -> LogLevelFilter {
+pub fn max_level() -> LevelFilter {
     unsafe { mem::transmute(MAX_LOG_LEVEL.load(Ordering::Relaxed)) }
 }
 
@@ -22,7 +22,7 @@ pub fn max_level() -> LogLevelFilter {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
 #[non_exhaustive]
 /// The level at which the library will log
-pub enum LogLevelFilter {
+pub enum LevelFilter {
     Off,
     #[default]
     Error,
@@ -31,34 +31,34 @@ pub enum LogLevelFilter {
     Debug,
 }
 
-impl FromStr for LogLevelFilter {
+impl FromStr for LevelFilter {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("debug") {
-            Ok(LogLevelFilter::Debug)
+            Ok(LevelFilter::Debug)
         } else if s.eq_ignore_ascii_case("info") {
-            Ok(LogLevelFilter::Info)
+            Ok(LevelFilter::Info)
         } else if s.eq_ignore_ascii_case("warn") {
-            Ok(LogLevelFilter::Warn)
+            Ok(LevelFilter::Warn)
         } else if s.eq_ignore_ascii_case("error") {
-            Ok(LogLevelFilter::Error)
+            Ok(LevelFilter::Error)
         } else if s.eq_ignore_ascii_case("off") {
-            Ok(LogLevelFilter::Off)
+            Ok(LevelFilter::Off)
         } else {
             Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
         }
     }
 }
 
-impl Display for LogLevelFilter {
+impl Display for LevelFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let filter = match self {
-            LogLevelFilter::Debug => "DEBUG",
-            LogLevelFilter::Info => "INFO",
-            LogLevelFilter::Warn => "WARN",
-            LogLevelFilter::Error => "ERROR",
-            LogLevelFilter::Off => "OFF",
+            LevelFilter::Debug => "DEBUG",
+            LevelFilter::Info => "INFO",
+            LevelFilter::Warn => "WARN",
+            LevelFilter::Error => "ERROR",
+            LevelFilter::Off => "OFF",
         };
 
         write!(f, "{filter}")
@@ -94,36 +94,36 @@ impl Clone for Level {
     }
 }
 
-impl PartialEq<LogLevelFilter> for Level {
+impl PartialEq<LevelFilter> for Level {
     #[inline]
-    fn eq(&self, other: &LogLevelFilter) -> bool {
+    fn eq(&self, other: &LevelFilter) -> bool {
         (*self as usize) == (*other as usize)
     }
 }
 
-impl PartialOrd<LogLevelFilter> for Level {
+impl PartialOrd<LevelFilter> for Level {
     #[inline]
-    fn partial_cmp(&self, other: &LogLevelFilter) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &LevelFilter) -> Option<std::cmp::Ordering> {
         Some((*self as usize).cmp(&(*other as usize)))
     }
 
     #[inline]
-    fn lt(&self, other: &LogLevelFilter) -> bool {
+    fn lt(&self, other: &LevelFilter) -> bool {
         (*self as usize) < *other as usize
     }
 
     #[inline]
-    fn le(&self, other: &LogLevelFilter) -> bool {
+    fn le(&self, other: &LevelFilter) -> bool {
         *self as usize <= *other as usize
     }
 
     #[inline]
-    fn gt(&self, other: &LogLevelFilter) -> bool {
+    fn gt(&self, other: &LevelFilter) -> bool {
         *self as usize > *other as usize
     }
 
     #[inline]
-    fn ge(&self, other: &LogLevelFilter) -> bool {
+    fn ge(&self, other: &LevelFilter) -> bool {
         *self as usize >= *other as usize
     }
 }
@@ -165,7 +165,7 @@ macro_rules! dd_log {
     ($lvl:expr, $($arg:tt)+) => {
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
-        if lvl == $crate::log::LogLevelFilter::Error {
+        if lvl == $crate::log::LevelFilter::Error {
           eprintln!("\x1b[91mERROR\x1b[0m {}:{} - {}", file!(), line!(), format!($($arg)*));
         } else {
           println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($($arg)*));
@@ -177,24 +177,24 @@ macro_rules! dd_log {
 #[cfg(test)]
 mod tests {
     use crate::{
-        log::LogLevelFilter,
+        log::LevelFilter,
         log::{max_level, set_max_level, Level},
     };
 
     #[test]
     fn test_default_max_level() {
-        assert!(LogLevelFilter::Error == max_level());
+        assert!(LevelFilter::Error == max_level());
     }
 
     #[test]
     fn test_max_level() {
         let default_lvl = max_level();
 
-        set_max_level(crate::log::LogLevelFilter::Warn);
+        set_max_level(crate::log::LevelFilter::Warn);
 
-        assert!(LogLevelFilter::Warn == max_level());
-        assert!(LogLevelFilter::Debug > max_level());
-        assert!(LogLevelFilter::Error < max_level());
+        assert!(LevelFilter::Warn == max_level());
+        assert!(LevelFilter::Debug > max_level());
+        assert!(LevelFilter::Error < max_level());
 
         set_max_level(default_lvl);
     }
@@ -202,15 +202,15 @@ mod tests {
     #[test]
     fn test_level_and_filter() {
         const LEVELS: [Level; 4] = [Level::Error, Level::Warn, Level::Info, Level::Debug];
-        const FILTERS: [LogLevelFilter; 4] = [
-            LogLevelFilter::Error,
-            LogLevelFilter::Warn,
-            LogLevelFilter::Info,
-            LogLevelFilter::Debug,
+        const FILTERS: [LevelFilter; 4] = [
+            LevelFilter::Error,
+            LevelFilter::Warn,
+            LevelFilter::Info,
+            LevelFilter::Debug,
         ];
 
         for (lvl_index, lvl) in LEVELS.iter().enumerate() {
-            assert!(*lvl > LogLevelFilter::Off);
+            assert!(*lvl > LevelFilter::Off);
             assert!(*lvl == FILTERS[lvl_index]);
 
             for filter_index in lvl_index..3 {

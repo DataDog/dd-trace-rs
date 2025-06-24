@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
 use crate::dd_warn;
-use crate::log::LogLevelFilter;
+use crate::log::LevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
@@ -166,7 +166,7 @@ pub struct Config {
     /// Disables the library if this is false
     enabled: bool,
     /// The log level filter for the tracer
-    log_level_filter: LogLevelFilter,
+    log_level_filter: LevelFilter,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -318,7 +318,7 @@ impl Config {
         self.enabled
     }
 
-    pub fn log_level_filter(&self) -> &LogLevelFilter {
+    pub fn log_level_filter(&self) -> &LevelFilter {
         &self.log_level_filter
     }
 
@@ -366,7 +366,7 @@ impl Default for Config {
             trace_sampling_rules: Vec::new(),
             trace_rate_limit: 100,
             enabled: true,
-            log_level_filter: LogLevelFilter::default(),
+            log_level_filter: LevelFilter::default(),
             tracer_version: TRACER_VERSION,
             language_version: "TODO: Get from env",
             #[cfg(feature = "test-utils")]
@@ -462,7 +462,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_log_level_filter(&mut self, filter: LogLevelFilter) -> &mut Self {
+    pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
         self.config.log_level_filter = filter;
         self
     }
@@ -516,7 +516,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level_filter(), &super::LogLevelFilter::Debug);
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Debug);
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
         builder.set_trace_rate_limit(200);
         builder.set_service("manual-service".to_string());
         builder.set_env("manual-env".to_string());
-        builder.set_log_level_filter(super::LogLevelFilter::Warn);
+        builder.set_log_level_filter(super::LevelFilter::Warn);
 
         let config = builder.build();
 
@@ -583,7 +583,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level_filter(), &super::LogLevelFilter::Warn);
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Warn);
     }
 
     #[test]
