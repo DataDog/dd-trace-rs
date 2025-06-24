@@ -47,7 +47,7 @@ pub const TRACER_VERSION: &str = "0.0.1";
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
 #[non_exhaustive]
 /// The level at which the library will log
-pub enum LogLevel {
+pub enum LogLevelFilter {
     Off,
     #[default]
     Error,
@@ -56,37 +56,37 @@ pub enum LogLevel {
     Debug,
 }
 
-impl FromStr for LogLevel {
+impl FromStr for LogLevelFilter {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("debug") {
-            Ok(LogLevel::Debug)
+            Ok(LogLevelFilter::Debug)
         } else if s.eq_ignore_ascii_case("info") {
-            Ok(LogLevel::Info)
+            Ok(LogLevelFilter::Info)
         } else if s.eq_ignore_ascii_case("warn") {
-            Ok(LogLevel::Warn)
+            Ok(LogLevelFilter::Warn)
         } else if s.eq_ignore_ascii_case("error") {
-            Ok(LogLevel::Error)
+            Ok(LogLevelFilter::Error)
         } else if s.eq_ignore_ascii_case("off") {
-            Ok(LogLevel::Off)
+            Ok(LogLevelFilter::Off)
         } else {
-            Err("log level should be one of DEBUG, INFO, WARN, ERROR, OFF")
+            Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
         }
     }
 }
 
-impl Display for LogLevel {
+impl Display for LogLevelFilter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let level = match self {
-            LogLevel::Debug => "DEBUG",
-            LogLevel::Info => "INFO",
-            LogLevel::Warn => "WARN",
-            LogLevel::Error => "ERROR",
-            LogLevel::Off => "OFF",
+        let filter = match self {
+            LogLevelFilter::Debug => "DEBUG",
+            LogLevelFilter::Info => "INFO",
+            LogLevelFilter::Warn => "WARN",
+            LogLevelFilter::Error => "ERROR",
+            LogLevelFilter::Off => "OFF",
         };
 
-        write!(f, "{level}")
+        write!(f, "{filter}")
     }
 }
 
@@ -211,8 +211,8 @@ pub struct Config {
 
     /// Disables the library if this is false
     enabled: bool,
-    /// The log level for the tracer
-    log_level: LogLevel,
+    /// The log level filter for the tracer
+    log_level_filter: LogLevelFilter,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -279,7 +279,8 @@ impl Config {
                 .unwrap_or(default.trace_rate_limit),
 
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
-            log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
+            log_level_filter: to_val(sources.get_parse("DD_LOG_LEVEL"))
+                .unwrap_or(default.log_level_filter),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -363,8 +364,8 @@ impl Config {
         self.enabled
     }
 
-    pub fn log_level(&self) -> &LogLevel {
-        &self.log_level
+    pub fn log_level_filter(&self) -> &LogLevelFilter {
+        &self.log_level_filter
     }
 
     #[cfg(feature = "test-utils")]
@@ -411,7 +412,7 @@ impl Default for Config {
             trace_sampling_rules: Vec::new(),
             trace_rate_limit: 100,
             enabled: true,
-            log_level: LogLevel::default(),
+            log_level_filter: LogLevelFilter::default(),
             tracer_version: TRACER_VERSION,
             language_version: "TODO: Get from env",
             #[cfg(feature = "test-utils")]
@@ -432,7 +433,7 @@ pub struct ConfigBuilder {
 impl ConfigBuilder {
     /// Finalizes the builder and returns the configuration
     pub fn build(self) -> Config {
-        crate::log::set_max_level(self.config.log_level);
+        crate::log::set_max_level(self.config.log_level_filter);
         self.config
     }
 
@@ -507,8 +508,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: LogLevel) -> &mut Self {
-        self.config.log_level = log_level;
+    pub fn set_log_level_filter(&mut self, filter: LogLevelFilter) -> &mut Self {
+        self.config.log_level_filter = filter;
         self
     }
 
@@ -561,7 +562,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Debug);
+        assert_eq!(config.log_level_filter(), &super::LogLevelFilter::Debug);
     }
 
     #[test]
@@ -610,7 +611,7 @@ mod tests {
         builder.set_trace_rate_limit(200);
         builder.set_service("manual-service".to_string());
         builder.set_env("manual-env".to_string());
-        builder.set_log_level(super::LogLevel::Warn);
+        builder.set_log_level_filter(super::LogLevelFilter::Warn);
 
         let config = builder.build();
 
@@ -628,7 +629,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Warn);
+        assert_eq!(config.log_level_filter(), &super::LogLevelFilter::Warn);
     }
 
     #[test]

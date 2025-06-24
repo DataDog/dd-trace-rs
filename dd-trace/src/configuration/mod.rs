@@ -6,5 +6,5 @@ mod configuration;
 mod sources;
 
 pub use configuration::{
-    Config, ConfigBuilder, LogLevel, SamplingRuleConfig, TracePropagationStyle,
+    Config, ConfigBuilder, LogLevelFilter, SamplingRuleConfig, TracePropagationStyle,
 };
