@@ -1658,7 +1658,7 @@ mod tests {
             &create_empty_resource(),
         ));
         assert_eq!(
-            internal_op_name, "Internal",
+            internal_op_name, "internal",
             "Internal operation name should be the span kind"
         );
 
