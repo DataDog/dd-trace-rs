@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
-use dd_trace::{catch_panic, dd_error, sampling::priority, Config};
+use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
