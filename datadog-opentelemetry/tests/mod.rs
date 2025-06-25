@@ -37,7 +37,7 @@ mod datadog_test_agent {
                 ("SNAPSHOT_CI", "0"),
                 (
                     "SNAPSHOT_IGNORED_ATTRS",
-                    "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id",
+                    "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id,meta.w3c.tracestate",
                 ),
             ],
         )

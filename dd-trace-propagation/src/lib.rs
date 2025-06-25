@@ -751,13 +751,7 @@ pub mod tests {
                     }
                 ],
                 is_remote: true,
-                tracestate: Some(Tracestate {
-                    sampling: Some(Sampling { priority: Some(priority::USER_KEEP), mechanism: Some(mechanism::MANUAL) }),
-                    origin: Some("rum".to_string()),
-                    lower_order_trace_id: None,
-                    propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
-                    additional_values: Some(vec![("congo".to_string(), "t61rcWkgMz".to_string())])
-                }),
+                tracestate: Tracestate::from_str("dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz").ok(),
             }
         ),
 
