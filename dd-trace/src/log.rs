@@ -162,13 +162,34 @@ macro_rules! dd_error {
 
 #[macro_export]
 macro_rules! dd_log {
-    ($lvl:expr, $($arg:tt)+) => {
+    ($lvl:expr, $first:expr, $($rest:tt)*) => {{
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
         if lvl == $crate::log::LevelFilter::Error {
-          eprintln!("\x1b[91mERROR\x1b[0m {}:{} - {}", file!(), line!(), format!($($arg)*));
+            let file = file!();
+            let line = line!();
+            let formatted = format!($first, $($rest)*);
+            eprintln!("\x1b[91mERROR\x1b[0m {file}:{line} - {formatted}");
+
+            $crate::telemetry::add_log_error($first, Some(format!("Error: {formatted}\n at {file}:{line}")));
         } else {
-          println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($($arg)*));
+            println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($first, $($rest)*));
+        }
+      }
+    }};
+
+    ($lvl:expr, $first:expr) => {
+      let lvl = $lvl;
+      if lvl <= $crate::log::max_level() {
+        if lvl == $crate::log::LevelFilter::Error {
+            let file = file!();
+            let line = line!();
+            let formatted = format!($first);
+            eprintln!("\x1b[91mERROR\x1b[0m {file}:{line} - {formatted}");
+
+            $crate::telemetry::add_log_error($first, Some(format!("Error: {formatted}\n at {file}:{line}")));
+        } else {
+            println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($first));
         }
       }
     };

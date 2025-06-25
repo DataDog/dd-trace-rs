@@ -10,6 +10,7 @@ mod trace_id;
 
 use std::sync::{Arc, RwLock};
 
+use dd_trace::telemetry::init_telemetry;
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
@@ -42,6 +43,8 @@ pub fn init_datadog(
     // all parameters and has an install method?
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
+    init_telemetry(&config, None);
+
     let (tracer_provider, propagator) = make_tracer(config, tracer_provider_builder, None);
 
     opentelemetry::global::set_text_map_propagator(propagator);
