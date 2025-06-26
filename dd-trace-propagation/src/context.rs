@@ -147,7 +147,7 @@ impl FromStr for Tracestate {
     fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
         let ts_v = tracestate.split(',');
 
-        let mut dd: Option<HashMap<String, String>> = None;
+        let mut dd: HashMap<String, String> = HashMap::new();
         let mut additional_values = vec![];
 
         for v in ts_v {
@@ -160,21 +160,20 @@ impl FromStr for Tracestate {
                 return Err(String::from("Invalid tracestate"));
             }
 
+            // datadog tracestate part is as 'dd=key1:value1;key2:value2'
             if key == "dd" {
-                dd = Some(
-                    value
-                        .trim()
-                        .split(';')
-                        .filter_map(|item| {
-                            if INVALID_ASCII_CHARACTERS_REGEX.is_match(item) {
-                                None
-                            } else {
-                                let mut parts = item.splitn(2, ':');
-                                Some((parts.next()?.to_string(), decode_tag_value(parts.next()?)))
+                value
+                    .trim()
+                    .split(';')
+                    .filter(|item| !INVALID_ASCII_CHARACTERS_REGEX.is_match(item))
+                    .for_each(|item| {
+                        let mut parts = item.splitn(2, ':');
+                        if let Some(key) = parts.next() {
+                            if let Some(value) = parts.next() {
+                                dd.insert(key.to_string(), decode_tag_value(value));
                             }
-                        })
-                        .collect(),
-                );
+                        }
+                    });
             } else {
                 additional_values.push((key.to_string(), value.to_string()));
             }
@@ -193,7 +192,7 @@ impl FromStr for Tracestate {
             tracestate.additional_values = Some(additional_values);
         }
 
-        let propagation_tags = if let Some(dd) = dd {
+        let propagation_tags = if !dd.is_empty() {
             let mut tags = HashMap::new();
             let mut priority = None;
             let mut mechanism = None;
