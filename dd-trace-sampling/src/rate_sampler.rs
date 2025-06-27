@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn check_debug_impl() {
         let sampler = RateSampler::new(0.5);
-        let debug_output = format!("{:?}", sampler);
+        let debug_output = format!("{sampler:?}");
         assert!(debug_output.contains("RateSampler"));
         assert!(debug_output.contains("sample_rate: 0.5"));
     }
@@ -162,9 +162,7 @@ mod tests {
         // For rate 0.5, threshold is MAX/2. Hashing MAX should result in something > MAX/2
         assert!(
             drop_hash > threshold,
-            "Drop hash {} should be > threshold {}",
-            drop_hash,
-            threshold
+            "Drop hash {drop_hash} should be > threshold {threshold}",
         );
         assert!(
             !sampler_half.sample(trace_id_drop),

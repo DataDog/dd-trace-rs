@@ -186,9 +186,11 @@ mod tests {
             let span_context = SpanContext::new(
                 trace_id,
                 span_id,
-                is_sampled
-                    .then_some(TraceFlags::SAMPLED)
-                    .unwrap_or_default(),
+                if is_sampled {
+                    TraceFlags::SAMPLED
+                } else {
+                    Default::default()
+                },
                 true,
                 trace_state.clone(),
             );
