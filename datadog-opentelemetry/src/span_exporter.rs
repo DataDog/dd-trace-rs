@@ -133,6 +133,7 @@ impl DatadogExporter {
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
+                .enable_stats(Duration::from_secs(10))
                 .set_language("rust")
                 .set_url(config.trace_agent_url())
                 .set_dogstatsd_url(config.dogstatsd_agent_url())
@@ -141,9 +142,6 @@ impl DatadogExporter {
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
                 .set_client_computed_top_level();
-            if config.enable_stats() {
-                builder.enable_stats(Duration::from_secs(10));
-            }
             if let Some(env) = config.env() {
                 builder.set_env(env);
             }
