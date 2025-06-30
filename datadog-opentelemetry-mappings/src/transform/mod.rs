@@ -349,9 +349,9 @@ fn dd_value_to_string(value: &AttributeAnyValue<BytesString>) -> BytesString {
     fn write_scalar(value: &AttributeArrayValue<BytesString>, w: &mut String) {
         let _ = match value {
             AttributeArrayValue::String(s) => write!(w, "{}", s.as_str()),
-            AttributeArrayValue::Integer(i) => write!(w, "{}", i),
-            AttributeArrayValue::Double(d) => write!(w, "{}", d),
-            AttributeArrayValue::Boolean(b) => write!(w, "{}", b),
+            AttributeArrayValue::Integer(i) => write!(w, "{i}"),
+            AttributeArrayValue::Double(d) => write!(w, "{d}"),
+            AttributeArrayValue::Boolean(b) => write!(w, "{b}"),
         };
     }
     fn write_vec(value: &[AttributeArrayValue<BytesString>], w: &mut String) {
