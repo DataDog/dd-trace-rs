@@ -27,7 +27,7 @@ mod axum_servers {
     };
     use opentelemetry_http::HeaderExtractor;
     use opentelemetry_otlp::{Protocol, SpanExporter, WithExportConfig};
-    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
     use std::time::{Duration, Instant};
     use tower::ServiceBuilder;
     use tower_http::trace::TraceLayer;
@@ -47,10 +47,11 @@ mod axum_servers {
                 .expect("Failed to create trace exporter");
 
             let tracer_provider = SdkTracerProvider::builder()
-                /* .with_resource(Resource::new([
-                    opentelemetry::KeyValue::new("service.name", "otel-bench-server"),
-                    opentelemetry::KeyValue::new("service.version", "1.0.0"),
-                ])) */
+                .with_resource(
+                    Resource::builder()
+                        .with_service_name("otel-bench-server")
+                        .build(),
+                )
                 .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
                 .with_batch_exporter(exporter)
                 .build();
@@ -94,10 +95,11 @@ mod axum_servers {
 
             let tracer_provider = datadog_opentelemetry::init_datadog(
                 config.build(),
-                SdkTracerProvider::builder(), // .with_resource(Resource::new([
-                                              //     opentelemetry::KeyValue::new("service.name", "dd-bench-server"),
-                                              //     opentelemetry::KeyValue::new("service.version", "1.0.0"),
-                                              // ]))
+                SdkTracerProvider::builder().with_resource(
+                    Resource::builder()
+                        .with_service_name("dd-bench-server")
+                        .build(),
+                ),
             );
 
             global::set_tracer_provider(tracer_provider.clone());
@@ -467,6 +469,7 @@ fn bench_span_creation_overhead(c: &mut Criterion) {
 
 #[ctor::ctor]
 fn start_listeners() {
+    // if Otel collector or Datadog Agent are running, they will be used!
     let listeners = vec![
         ("4318", "Otel Collector"),
         ("8126", "Datadog Agent"),

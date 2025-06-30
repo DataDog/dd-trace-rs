@@ -1033,12 +1033,9 @@ name = "datadog-opentelemetry"
 version = "0.0.1"
 dependencies = [
  "assert_unordered",
- "axum",
- "axum-server",
- "clap",
  "criterion",
- "ctor",
  "data-pipeline",
+ "datadog-opentelemetry",
  "datadog-opentelemetry-mappings",
  "datadog-trace-utils",
  "dd-trace",
@@ -1046,15 +1043,32 @@ dependencies = [
  "dd-trace-sampling",
  "futures",
  "opentelemetry",
- "opentelemetry-http",
- "opentelemetry-otlp",
  "opentelemetry-semantic-conventions 0.29.0",
- "opentelemetry-stdout",
  "opentelemetry_sdk",
  "rand 0.8.5",
+ "tinybytes",
+ "tokio",
+]
+
+[[package]]
+name = "datadog-opentelemetry-benches"
+version = "0.0.1"
+dependencies = [
+ "axum",
+ "axum-server",
+ "clap",
+ "criterion",
+ "ctor",
+ "datadog-opentelemetry",
+ "dd-trace",
+ "futures",
+ "opentelemetry",
+ "opentelemetry-http",
+ "opentelemetry-otlp",
+ "opentelemetry-stdout",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
- "tinybytes",
  "tokio",
  "tower",
  "tower-http",

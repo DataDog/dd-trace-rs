@@ -5,6 +5,7 @@
 members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
+    "datadog-opentelemetry-benches",
     "datadog-opentelemetry-mappings",
     "dd-trace",
     "dd-trace-propagation",
