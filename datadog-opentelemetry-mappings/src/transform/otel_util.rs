@@ -65,7 +65,7 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
             SpanKind::Client | SpanKind::Server | SpanKind::Consumer | SpanKind::Producer
         )
     {
-        return Cow::Owned(format!("{}.{}", messaging_system, messaging_operation).to_lowercase());
+        return Cow::Owned(format!("{messaging_system}.{messaging_operation}").to_lowercase());
     }
 
     // RPC & AWS
@@ -91,7 +91,7 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     let faas_invoked_name = span.get_attr_str(FAAS_INVOKED_NAME);
     if is_client && !faas_invoked_provider.is_empty() && !faas_invoked_name.is_empty() {
         return Cow::Owned(
-            format!("{}.{}.invoke", faas_invoked_provider, faas_invoked_name).to_lowercase(),
+            format!("{faas_invoked_provider}.{faas_invoked_name}.invoke").to_lowercase(),
         );
     }
 
@@ -147,7 +147,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         if matches!(span.span_kind(), SpanKind::Server) {
             let route = get_res_span_attributes(span, &[HTTP_ROUTE]);
             if !route.is_empty() {
-                return Cow::Owned(format!("{} {}", m, route));
+                return Cow::Owned(format!("{m} {route}"));
             }
         }
         return m;
@@ -159,7 +159,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         let messaging_destination =
             get_res_span_attributes(span, &[MESSAGING_DESTINATION, MESSAGING_DESTINATION_NAME]);
         if !messaging_destination.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, messaging_destination));
+            res_name = Cow::Owned(format!("{res_name} {messaging_destination}"));
         }
         return res_name;
     }
@@ -169,7 +169,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         let mut res_name = rpc_method;
         let rpc_service = get_res_span_attributes(span, &[RPC_SERVICE]);
         if !rpc_service.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, rpc_service));
+            res_name = Cow::Owned(format!("{res_name} {rpc_service}"));
         }
         return res_name;
     }
@@ -179,7 +179,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         let mut res_name = graphql_operation_type;
         let graphql_operation_name = get_res_span_attributes(span, &[GRAPHQL_OPERATION_NAME]);
         if !graphql_operation_name.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, graphql_operation_name));
+            res_name = Cow::Owned(format!("{res_name} {graphql_operation_name}"));
         }
         return res_name;
     }
@@ -407,7 +407,7 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> BorrowedString {
         return BorrowedString::Static(mapped_key);
     }
     if let Some(suffix) = k.strip_prefix("http.request.header.") {
-        return BorrowedString::Owned(format!("http.request.headers.{}", suffix));
+        return BorrowedString::Owned(format!("http.request.headers.{suffix}"));
     }
     if is_datadog_convention_key(k) {
         return BorrowedString::Static("");

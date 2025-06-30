@@ -167,8 +167,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to add trace chunk: {:?}",
-                e
+                "DatadogExporter: failed to add trace chunk: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -183,8 +182,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to set resource: {:?}",
-                e
+                "DatadogExporter: failed to set resource: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -199,8 +197,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to trigger flush: {:?}",
-                e
+                "DatadogExporter: failed to trigger flush: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -221,8 +218,7 @@ impl DatadogExporter {
             }
             Err(e) => {
                 return Err(OTelSdkError::InternalFailure(format!(
-                    "DatadogExporter: trace exporter shutdown failed {:?}",
-                    e,
+                    "DatadogExporter: trace exporter shutdown failed {e:?}",
                 )));
             }
         };
@@ -249,7 +245,7 @@ impl DatadogExporter {
                 OTelSdkError::InternalFailure("Trace exporter thread panicked".to_string())
             })?
             .map_err(|e| {
-                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {}", e))
+                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {e}"))
             })
     }
 }

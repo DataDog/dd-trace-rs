@@ -365,9 +365,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &expected_context,
-                "Error with traceparent: {}, tracestate: {}",
-                trace_parent,
-                trace_state
+                "Error with traceparent: {trace_parent}, tracestate: {trace_state}",
             )
         }
     }
@@ -404,8 +402,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &opentelemetry::trace::SpanContext::empty_context(),
-                "{}",
-                reason
+                "{reason}",
             )
         }
     }

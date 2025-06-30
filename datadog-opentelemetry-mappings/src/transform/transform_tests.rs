@@ -719,35 +719,35 @@ fn hashmap_diff<V: PartialEq + Debug>(
         match (a.peek(), b.peek()) {
             (Some(a_v), Some(b_v)) => match a_v.0.as_str().cmp(b_v.0.as_str()) {
                 std::cmp::Ordering::Less => {
-                    writeln!(&mut message, "a  :+{:?}", a_v).unwrap();
+                    writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                     a.next();
                 }
                 std::cmp::Ordering::Equal => {
                     if a_v.1 != b_v.1 {
-                        writeln!(&mut message, "a!b: {:?} != {:?}", a_v, b_v).unwrap();
+                        writeln!(&mut message, "a!b: {a_v:?} != {b_v:?}").unwrap();
                     } else {
-                        writeln!(&mut message, "a b: {:?}", b_v).unwrap();
+                        writeln!(&mut message, "a b: {b_v:?}").unwrap();
                     }
                     a.next();
                     b.next();
                 }
                 std::cmp::Ordering::Greater => {
-                    writeln!(&mut message, "  b:+{:?}", b_v).unwrap();
+                    writeln!(&mut message, "  b:+{b_v:?}").unwrap();
                     b.next();
                 }
             },
             (None, None) => break,
             (Some(a_v), None) => {
-                writeln!(&mut message, "a  :+{:?}", a_v).unwrap();
+                writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                 a.next();
             }
             (None, Some(b_v)) => {
-                writeln!(&mut message, "  b:+{:?}", b_v).unwrap();
+                writeln!(&mut message, "  b:+{b_v:?}").unwrap();
                 b.next();
             }
         }
     }
     if output != expected {
-        eprintln!("Hashmaps are not equal :\n{}", message);
+        eprintln!("Hashmaps are not equal :\n{message}");
     }
 }
