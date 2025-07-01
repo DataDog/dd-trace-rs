@@ -284,7 +284,7 @@ impl DatadogSampler {
         // Get env from attributes
         let env = get_otel_env(span);
 
-        format!("service:{},env:{}", service, env)
+        format!("service:{service},env:{env}")
     }
 
     /// Updates the service-based sample rates from the Agent
@@ -678,7 +678,7 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource
-            format!("service:{},env:production", test_service_name)
+            format!("service:{test_service_name},env:production")
         );
 
         // Test with missing env
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource and an empty env
-            format!("service:{},env:", test_service_name)
+            format!("service:{test_service_name},env:")
         );
     }
 

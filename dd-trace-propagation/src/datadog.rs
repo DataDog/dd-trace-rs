@@ -73,7 +73,7 @@ fn inject_trace_id(trace_id: u128, carrier: &mut dyn Injector, tags: &mut HashMa
     if let Some(higher) = higher {
         tags.insert(
             DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-            format!("{:016x}", higher),
+            format!("{higher:016x}"),
         );
     } else {
         tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
@@ -589,7 +589,7 @@ mod test {
         assert_eq!(carrier[DATADOG_ORIGIN_KEY], "synthetics");
         assert_eq!(
             carrier[DATADOG_TAGS_KEY],
-            format!("_dd.p.tid={:016x}", higher)
+            format!("_dd.p.tid={higher:016x}")
         );
     }
 
