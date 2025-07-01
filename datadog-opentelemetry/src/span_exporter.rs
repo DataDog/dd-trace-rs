@@ -141,7 +141,7 @@ impl DatadogExporter {
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
                 .set_client_computed_top_level();
-            if config.enable_stats() {
+            if config.trace_stats_computation_enabled() {
                 builder.enable_stats(Duration::from_secs(10));
             }
             if let Some(env) = config.env() {

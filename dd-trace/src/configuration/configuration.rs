@@ -168,8 +168,9 @@ pub struct Config {
     /// The log level filter for the tracer
     log_level_filter: LevelFilter,
 
-    /// Whether to enable stats for the tracer
-    enable_stats: bool,
+    /// Whether to enable stats computation for the tracer
+    /// Results in dropped spans not being sent to the agent
+    trace_stats_computation_enabled: bool,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -238,8 +239,8 @@ impl Config {
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level_filter: to_val(sources.get_parse("DD_LOG_LEVEL"))
                 .unwrap_or(default.log_level_filter),
-            enable_stats: to_val(sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"))
-                .unwrap_or(default.enable_stats),
+            trace_stats_computation_enabled: to_val(sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"))
+                .unwrap_or(default.trace_stats_computation_enabled),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -327,8 +328,8 @@ impl Config {
         &self.log_level_filter
     }
 
-    pub fn enable_stats(&self) -> bool {
-        self.enable_stats
+    pub fn trace_stats_computation_enabled(&self) -> bool {
+        self.trace_stats_computation_enabled
     }
 
     #[cfg(feature = "test-utils")]
@@ -378,7 +379,7 @@ impl Default for Config {
             log_level_filter: LevelFilter::default(),
             tracer_version: TRACER_VERSION,
             language_version: "TODO: Get from env",
-            enable_stats: true,
+            trace_stats_computation_enabled: true,
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: false,
 
@@ -477,8 +478,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_enable_stats(&mut self, enable_stats: bool) -> &mut Self {
-        self.config.enable_stats = enable_stats;
+    pub fn set_trace_stats_computation_enabled(&mut self, trace_stats_computation_enabled: bool) -> &mut Self {
+        self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
         self
     }
 
@@ -766,7 +767,7 @@ mod tests {
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
-        assert!(!config.enable_stats());
+        assert!(!config.trace_stats_computation_enabled());
 
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
@@ -774,7 +775,7 @@ mod tests {
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
-        assert!(config.enable_stats());
+        assert!(config.trace_stats_computation_enabled());
 
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
@@ -782,11 +783,11 @@ mod tests {
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
-        assert!(config.enable_stats());
+        assert!(config.trace_stats_computation_enabled());
 
         let mut builder = Config::builder();
-        builder.set_enable_stats(false);
+        builder.set_trace_stats_computation_enabled(false);
         let config = builder.build();
-        assert!(!config.enable_stats());
+        assert!(!config.trace_stats_computation_enabled());
     }
 }
