@@ -239,8 +239,10 @@ impl Config {
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
             log_level_filter: to_val(sources.get_parse("DD_LOG_LEVEL"))
                 .unwrap_or(default.log_level_filter),
-            trace_stats_computation_enabled: to_val(sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"))
-                .unwrap_or(default.trace_stats_computation_enabled),
+            trace_stats_computation_enabled: to_val(
+                sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"),
+            )
+            .unwrap_or(default.trace_stats_computation_enabled),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -478,7 +480,10 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_stats_computation_enabled(&mut self, trace_stats_computation_enabled: bool) -> &mut Self {
+    pub fn set_trace_stats_computation_enabled(
+        &mut self,
+        trace_stats_computation_enabled: bool,
+    ) -> &mut Self {
         self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
         self
     }
