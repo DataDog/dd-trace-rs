@@ -396,7 +396,7 @@ fn test_otel_span_to_dd_span() {
             expected_out: SpanBytes {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
-                service: "myservice".into(),
+                service: "pylons".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,

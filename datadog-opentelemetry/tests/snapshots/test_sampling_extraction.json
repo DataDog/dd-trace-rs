@@ -18,7 +18,7 @@
       "telemetry.sdk.version": "0.28.0"
     },
     "metrics": {
-      "_dd.rule.psr": 1.0,
+      "_dd.rule_psr": 1.0,
       "_sampling_priority_v1": 2.0,
       "_top_level": 1.0
     },
