@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
+extern crate rustc_version_runtime;
+use rustc_version_runtime::version;
+
 use crate::dd_warn;
 use crate::log::LevelFilter;
 
@@ -138,7 +141,7 @@ pub struct Config {
 
     // # Tracer
     tracer_version: &'static str,
-    language_version: &'static str,
+    language_version: String,
     language: &'static str,
 
     // # Service tagging
@@ -303,7 +306,7 @@ impl Config {
     }
 
     pub fn language_version(&self) -> &str {
-        self.language_version
+        self.language_version.deref()
     }
 
     pub fn service(&self) -> &str {
@@ -405,7 +408,7 @@ impl Default for Config {
             log_level_filter: LevelFilter::default(),
             tracer_version: TRACER_VERSION,
             language: "rust",
-            language_version: "TODO: Get from env",
+            language_version: version().to_string(),
             trace_stats_computation_enabled: true,
 
             #[cfg(feature = "test-utils")]
