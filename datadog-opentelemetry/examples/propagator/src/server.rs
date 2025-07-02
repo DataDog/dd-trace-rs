@@ -19,7 +19,6 @@ use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogProcessor, SdkLogRecord, SdkLoggerProvider},
     trace::{SdkTracerProvider, SpanProcessor},
-    Resource,
 };
 use opentelemetry_semantic_conventions::trace;
 use opentelemetry_stdout::{LogExporter, SpanExporter};
@@ -218,12 +217,6 @@ fn init_tracer() -> SdkTracerProvider {
     datadog_opentelemetry::init_datadog(
         builder.build(),
         SdkTracerProvider::builder()
-            .with_resource(
-                // workaround to avoid unknown_service
-                Resource::builder()
-                    .with_service_name("igor-rust-propagator-service-disguised-as-nodejs")
-                    .build(),
-            )
             .with_span_processor(EnrichWithBaggageSpanProcessor)
             .with_simple_exporter(SpanExporter::default()),
     )
