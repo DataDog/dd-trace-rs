@@ -457,7 +457,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         let dd_resource = if !self.config_service_name.is_empty() {
-            let mut builder = opentelemetry_sdk::Resource::builder();
+            let mut builder = opentelemetry_sdk::Resource::builder_empty();
             if let Some(schema_url) = resource.schema_url() {
                 builder = builder.with_schema_url(
                     resource
