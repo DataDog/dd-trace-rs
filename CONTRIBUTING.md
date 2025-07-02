@@ -1,5 +1,14 @@
 # Contributing
 
+## Pull Request Naming
+
+All pull requests must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Our CI pipeline automatically checks PR titles and will fail if they don't conform to this format. Examples include
+
+- `feat: add span processor for datadog exporter`
+- `fix(sampling): correct rate limiting calculation`
+- `chore: update dependencies to latest versions`
+- `docs: add examples for custom span attributes`
+
 ## Code Formatting and Linting
 Before submitting a pull request, ensure your code passes all formatting and linting checks that run in our CI pipeline. This helps maintain code quality and consistency across the project.
 
