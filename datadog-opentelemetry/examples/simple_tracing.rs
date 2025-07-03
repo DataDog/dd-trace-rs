@@ -19,6 +19,7 @@ fn main() {
     let tracer_provider = datadog_opentelemetry::init_datadog(
         dd_trace::Config::default(),
         SdkTracerProvider::builder(),
+        None,
     );
 
     foo();

@@ -215,6 +215,7 @@ fn init_tracer() -> SdkTracerProvider {
         SdkTracerProvider::builder()
             .with_span_processor(EnrichWithBaggageSpanProcessor)
             .with_simple_exporter(SpanExporter::default()),
+        None,
     )
 }
 
