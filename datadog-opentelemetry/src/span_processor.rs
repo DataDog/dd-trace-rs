@@ -11,13 +11,14 @@ use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDec
 use opentelemetry::{
     global::ObjectSafeSpan,
     trace::{SpanContext, TraceContextExt, TraceState},
-    Key, KeyValue, SpanId, TraceFlags, TraceId,
+    KeyValue, SpanId, TraceFlags, TraceId,
 };
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
-use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
+use crate::{
+    create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
+};
 
 #[derive(Debug)]
 struct Trace {
@@ -457,34 +458,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        let otel_service_name = resource.get(&Key::from_static_str(SERVICE_NAME));
-        let dd_resource = if !self.config_service_name.is_empty()
-            && (otel_service_name.is_none()
-                || otel_service_name.unwrap().as_str() == "unknown_service")
-        {
-            let mut builder = opentelemetry_sdk::Resource::builder_empty();
-            if let Some(schema_url) = resource.schema_url() {
-                builder = builder.with_schema_url(
-                    resource
-                        .iter()
-                        .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
-                    schema_url.to_string(),
-                );
-            } else {
-                builder = builder.with_attributes(
-                    resource
-                        .iter()
-                        .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
-                );
-            }
-
-            builder
-                .with_service_name(self.config_service_name.clone())
-                .build()
-        } else {
-            resource.clone()
-        };
-
+        let dd_resource = create_dd_resource(resource.clone(), &self.config_service_name);
         if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
             dd_trace::dd_error!(
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
