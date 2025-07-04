@@ -28,8 +28,9 @@ datadog-trace-utils = { workspace = true }
 tinybytes = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 assert_unordered = "0.3"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tokio = { workspace = true }
 
 # Libdatadog dependencies - change to a stable version once we release
 datadog-trace-utils = { workspace = true, features = ["test-utils"] }
