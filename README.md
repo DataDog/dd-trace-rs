@@ -1,21 +1,89 @@
 # dd-trace-rs
 
-`dd-trace-rs` is a Rust library for tracing and monitoring applications using Datadog.
+`dd-trace-rs` is a Rust library for tracing and monitoring applications using Datadog. It provides OpenTelemetry compatibility with Datadog-specific features and optimizations.
 
-# State of the repository
+> ‼️ **PREVIEW**: This repository is still in preview. Use at your own risk.
 
-This is still in ‼️*PREVIEW*‼️, use at your own risks
+## Overview
 
-# Contributing
+This repository contains a collection of crates that work together to provide Datadog tracing capabilities for Rust applications, with full OpenTelemetry compatibility. The library allows you to instrument your Rust applications and send traces to Datadog while leveraging the OpenTelemetry ecosystem.
 
-## Third-party Licenses
+## Crates
 
-When adding or updating dependencies, you must update the `LICENSE-3rdparty.csv` file to reflect these changes. This file is checked by our CI pipeline to ensure all dependencies are properly documented.
+### `dd-trace`
+The core configuration and foundational types for Datadog tracing. This crate provides:
+- **Configuration management**: Reads from environment variables and allows programmatic configuration
+- **Core types**: Sampling decisions, priorities, and mechanisms
+- **Constants**: Datadog-specific tag keys and values
+- **Error handling**: Common error types used across the library
+- **Logging**: Internal logging infrastructure
 
-To update the license file:
+### `dd-trace-propagation`
+Handles trace context propagation between services. This crate implements:
+- **Datadog propagation format**: Extract and inject trace context using Datadog headers (`x-datadog-*`)
+- **W3C Trace Context**: Support for W3C `traceparent` and `tracestate` headers
+- **Composite propagator**: Automatically handles multiple propagation formats
+- **Span context management**: Maintains trace IDs, span IDs, sampling decisions, and tags across service boundaries
 
-1. Run `./scripts/generate-licenses.sh` (requires Docker)
-2. Review the changes to `LICENSE-3rdparty.csv`
-3. Commit the updated file
+### `dd-trace-sampling`
+Implements Datadog's trace sampling logic. Features include:
+- **Rule-based sampling**: Apply sampling rules based on service, operation name, resource, and tags
+- **Rate limiting**: Control the maximum number of traces per second
+- **Service-based sampling**: Apply different sampling rates per service/environment combination
+- **Glob pattern matching**: Flexible matching rules for sampling decisions
 
-The script uses Docker to ensure the generated file matches our CI environment, avoiding platform-specific differences.
+### `datadog-opentelemetry-mappings`
+Converts between OpenTelemetry and Datadog data models. This crate:
+- **Span conversion**: Transforms OpenTelemetry spans to Datadog's span format
+- **Semantic convention mapping**: Maps OpenTelemetry semantic conventions to Datadog equivalents
+- **Attribute extraction**: Efficiently extracts and maps span attributes
+- **Resource mapping**: Converts OpenTelemetry resources to Datadog service/env/version tags
+
+### `datadog-opentelemetry`
+The main integration point that brings everything together. This crate provides:
+- **Span processor**: Collects spans and assembles them into traces before sending to Datadog
+- **Span exporter**: Sends completed traces to the Datadog Agent
+- **Trace registry**: Manages in-flight traces and ensures complete trace assembly
+- **Propagator integration**: Integrates with OpenTelemetry's propagation system
+- **Sampler integration**: Provides OpenTelemetry-compatible sampling
+
+## How It All Works Together
+
+The crates are orchestrated in `datadog-opentelemetry/src/lib.rs` through the `init_datadog` function:
+
+1. **Configuration** (`dd-trace`): The system starts by loading configuration from environment variables and any programmatic overrides.
+
+2. **Trace Registry** (`datadog-opentelemetry`): A shared registry is created to track all active traces in the application.
+
+3. **Sampler** (`dd-trace-sampling`): A Datadog-compatible sampler is initialized with the configured sampling rules and rate limits.
+
+4. **Propagator** (`dd-trace-propagation`): A composite propagator is created that can handle both Datadog and W3C trace context formats.
+
+5. **Span Processor** (`datadog-opentelemetry`): The processor collects spans, uses the mappings to convert them to Datadog format, and manages trace assembly.
+
+6. **Global Registration**: The tracer provider and propagator are registered with OpenTelemetry's global API.
+
+## Usage Example
+
+```rust
+use dd_trace::Config;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
+
+// Load configuration from environment variables
+let datadog_config = Config::default();
+
+// Initialize Datadog with OpenTelemetry
+// This automatically registers the tracer provider and propagator globally
+datadog_opentelemetry::init_datadog(
+    datadog_config,
+    TracerProviderBuilder::default(),
+);
+
+// Now use standard OpenTelemetry APIs
+use opentelemetry::global;
+use opentelemetry::trace::Tracer;
+
+let tracer = global::tracer("my-service");
+let span = tracer.start("my-operation");
+// ... do work ...
+```

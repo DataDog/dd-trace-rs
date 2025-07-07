@@ -238,7 +238,7 @@ mod tests {
             ),
         ] {
             let result = source.get(key);
-            assert_eq!(result, expected, "Failed for key: {}", key);
+            assert_eq!(result, expected, "Failed for key: {key}");
         }
     }
 
@@ -289,7 +289,7 @@ mod tests {
             ),
         ] {
             let result = source.get(key);
-            assert_eq!(result, expected, "Failed for key: {}", key);
+            assert_eq!(result, expected, "Failed for key: {key}");
         }
     }
 

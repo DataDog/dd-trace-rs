@@ -11,7 +11,7 @@ pub const SAMPLING_PRIORITY_TAG_KEY: &str = "_sampling_priority_v1";
 
 pub const SAMPLING_DECISION_MAKER_TAG_KEY: &str = "_dd.p.dm";
 
-pub const SAMPLING_RULE_RATE_TAG_KEY: &str = "_dd.rule.psr";
+pub const SAMPLING_RULE_RATE_TAG_KEY: &str = "_dd.rule_psr";
 
 pub const SAMPLING_AGENT_RATE_TAG_KEY: &str = "_dd.agent_psr";
 

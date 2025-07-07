@@ -302,7 +302,7 @@ impl DatadogSampler {
         // Get env from attributes
         let env = get_otel_env(span);
 
-        format!("service:{},env:{}", service, env)
+        format!("service:{service},env:{env}")
     }
 
     /// Finds the highest precedence rule that matches the span
@@ -687,7 +687,7 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource
-            format!("service:{},env:production", test_service_name)
+            format!("service:{test_service_name},env:production")
         );
 
         // Test with missing env
@@ -702,7 +702,7 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource and an empty env
-            format!("service:{},env:", test_service_name)
+            format!("service:{test_service_name},env:")
         );
     }
 
@@ -1667,7 +1667,7 @@ mod tests {
             &create_empty_resource(),
         ));
         assert_eq!(
-            internal_op_name, "Internal",
+            internal_op_name, "internal",
             "Internal operation name should be the span kind"
         );
 

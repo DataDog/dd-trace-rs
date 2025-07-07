@@ -284,8 +284,7 @@ mod tests {
         let rate = limiter.effective_rate();
         assert!(
             (0.45..=0.55).contains(&rate),
-            "Expected rate around 0.5, got {}",
-            rate
+            "Expected rate around 0.5, got {rate}",
         );
     }
 
@@ -320,8 +319,7 @@ mod tests {
         let total_allowed = main_allowed_count + thread_allowed_count;
         assert!(
             (95..=105).contains(&total_allowed),
-            "Expected around 100 allowed requests, got {}",
-            total_allowed
+            "Expected around 100 allowed requests, got {total_allowed}",
         );
     }
 }

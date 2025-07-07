@@ -218,7 +218,7 @@ mod datadog_test_agent {
             [
                 "s:2".to_string(),
                 "t.dm:-3".to_string(),
-                format!("p:{:016x}", span_id),
+                format!("p:{span_id:016x}"),
             ],
         );
 
@@ -226,7 +226,7 @@ mod datadog_test_agent {
             injected.into_iter(),
             [(
                 "traceparent".to_string(),
-                format!("00-{:032x}-{:016x}-01", trace_id, span_id),
+                format!("00-{trace_id:032x}-{span_id:016x}-01"),
             )],
         );
     }
@@ -239,7 +239,7 @@ mod datadog_test_agent {
         let set: HashSet<_, RandomState> = HashSet::from_iter(set);
         for item in subset {
             if !set.contains(&item) {
-                panic!("Set {:?} does not contain subset item {:?}", set, item);
+                panic!("Set {set:?} does not contain subset item {item:?}");
             }
         }
     }

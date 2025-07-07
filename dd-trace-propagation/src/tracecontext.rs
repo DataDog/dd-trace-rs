@@ -86,7 +86,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         .and_then(|sampling| sampling.priority)
         .unwrap_or(priority::USER_KEEP);
 
-    tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{}", priority));
+    tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{priority}"));
 
     if let Some(origin) = context.origin.as_ref().map(|origin| {
         encode_tag_value(
