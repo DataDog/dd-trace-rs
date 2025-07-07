@@ -299,6 +299,7 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 }
 
 impl DatadogSpanProcessor {
+    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         config: dd_trace::Config,
         registry: Arc<TraceRegistry>,

@@ -31,15 +31,18 @@ impl ServicesSampler {
 
     // used for testing purposes
 
-    pub fn is_empty(&self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.inner.read().unwrap().is_empty()
     }
 
-    pub fn len(&self) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn len(&self) -> usize {
         self.inner.read().unwrap().len()
     }
 
-    pub fn contains_key(&self, service: &str) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn contains_key(&self, service: &str) -> bool {
         self.inner.read().unwrap().contains_key(service)
     }
 }

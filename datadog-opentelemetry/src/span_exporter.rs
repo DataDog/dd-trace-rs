@@ -9,7 +9,8 @@ use std::{
 };
 
 use data_pipeline::trace_exporter::{
-    error::TraceExporterError, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse, error::TraceExporterError, TraceExporter, TraceExporterBuilder,
+    TraceExporterOutputFormat,
 };
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
@@ -128,6 +129,7 @@ pub struct DatadogExporter {
 }
 
 impl DatadogExporter {
+    #[allow(clippy::type_complexity)]
     pub fn new(
         config: dd_trace::Config,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
@@ -144,7 +146,7 @@ impl DatadogExporter {
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
                 .set_client_computed_top_level()
-                .enable_agent_rates_payload_version_enabled();
+                .enable_agent_rates_payload_version();
 
             if config.trace_stats_computation_enabled() {
                 builder.enable_stats(Duration::from_secs(10));
@@ -447,6 +449,7 @@ struct TraceExporterWorker {
     trace_exporter: TraceExporter,
     rx: Receiver,
     otel_resource: opentelemetry_sdk::Resource,
+    #[allow(clippy::type_complexity)]
     agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
 }
 
@@ -457,11 +460,13 @@ impl TraceExporterWorker {
     /// * The handle is dropped
     /// * A shutdown flag is set
     /// * The thread panics
+    #[allow(clippy::type_complexity)]
     fn spawn(
         cfg: dd_trace::Config,
         builder: TraceExporterBuilder,
         rx: Receiver,
         otel_resource: opentelemetry_sdk::Resource,
+
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
@@ -538,10 +543,10 @@ impl TraceExporterWorker {
         }
     }
 
-    fn handle_agent_response(&self, agent_response: data_pipeline::trace_exporter::AgentResponse) {
+    fn handle_agent_response(&self, agent_response: AgentResponse) {
         match agent_response {
-            data_pipeline::trace_exporter::AgentResponse::Unchanged => {}
-            data_pipeline::trace_exporter::AgentResponse::Changed { body } => {
+            AgentResponse::Unchanged => {}
+            AgentResponse::Changed { body } => {
                 if let Some(ref handler) = self.agent_response_handler {
                     (handler)(&body);
                 }

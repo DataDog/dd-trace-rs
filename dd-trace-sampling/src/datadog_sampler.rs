@@ -278,7 +278,9 @@ impl DatadogSampler {
         }
     }
 
-    pub fn update_service_rates(&self, rates: impl IntoIterator<Item = (String, f64)>) {
+    // used for tests
+    #[allow(dead_code)]
+    pub(crate) fn update_service_rates(&self, rates: impl IntoIterator<Item = (String, f64)>) {
         self.service_samplers.update_rates(rates);
     }
 
@@ -708,7 +710,7 @@ mod tests {
 
     #[test]
     fn test_update_service_rates() {
-        let mut sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
 
         // Update with service rates
         let mut rates = HashMap::new();
