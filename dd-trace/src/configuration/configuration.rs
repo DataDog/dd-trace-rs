@@ -180,7 +180,7 @@ pub struct Config {
 
 impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
-        let default = Config::default();
+        let default = default_config();
 
         /// Helper function to convert a CompositeConfigSourceResult<T> into an Option<T>
         /// This drops errors origin associated with the configuration collected while parsing the
@@ -358,33 +358,31 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            runtime_id: Config::process_runtime_id(),
-            env: None,
-            // TODO(paulgdc): Default service naming detection, probably from arg0
-            service: "unnamed-rust-service".to_string(),
-            version: None,
-            global_tags: Vec::new(),
+fn default_config() -> Config {
+    Config {
+        runtime_id: Config::process_runtime_id(),
+        env: None,
+        // TODO(paulgdc): Default service naming detection, probably from arg0
+        service: "unnamed-rust-service".to_string(),
+        version: None,
+        global_tags: Vec::new(),
 
-            trace_agent_url: Cow::Borrowed("http://localhost:8126"),
-            dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-            trace_sampling_rules: Vec::new(),
-            trace_rate_limit: 100,
-            enabled: true,
-            log_level_filter: LevelFilter::default(),
-            tracer_version: TRACER_VERSION,
-            language_version: "TODO: Get from env",
-            trace_stats_computation_enabled: true,
-            #[cfg(feature = "test-utils")]
-            wait_agent_info_ready: false,
+        trace_agent_url: Cow::Borrowed("http://localhost:8126"),
+        dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
+        trace_sampling_rules: Vec::new(),
+        trace_rate_limit: 100,
+        enabled: true,
+        log_level_filter: LevelFilter::default(),
+        tracer_version: TRACER_VERSION,
+        language_version: "TODO: Get from env",
+        trace_stats_computation_enabled: true,
+        #[cfg(feature = "test-utils")]
+        wait_agent_info_ready: false,
 
-            trace_propagation_style: None,
-            trace_propagation_style_extract: None,
-            trace_propagation_style_inject: None,
-            trace_propagation_extract_first: false,
-        }
+        trace_propagation_style: None,
+        trace_propagation_style_extract: None,
+        trace_propagation_style_inject: None,
+        trace_propagation_extract_first: false,
     }
 }
 
