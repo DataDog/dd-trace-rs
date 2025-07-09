@@ -17,7 +17,9 @@ fn bar() {
 
 fn main() {
     let tracer_provider = datadog_opentelemetry::init_datadog(
-        dd_trace::Config::default(),
+        dd_trace::Config::builder()
+            .set_service("simple_tracing".to_string())
+            .build(),
         SdkTracerProvider::builder(),
     );
 
