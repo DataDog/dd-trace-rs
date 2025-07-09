@@ -311,15 +311,15 @@ pub mod tests {
                 #[test]
                 fn $name() {
                     let (styles, carrier, expected) = $value;
-                    let mut builder = Config::builder();
-                    if let Some(styles) = styles {
-                        builder.set_trace_propagation_style_extract(styles.to_vec());
-                    }
+                    let builder = if let Some(styles) = styles {
+                        Config::builder().set_trace_propagation_style_extract(styles.to_vec())
+                    } else {
+                        Config::builder()
+                    };
 
-                    let propagator = DatadogCompositePropagator::new(&builder.build());
-
+                    let config = builder.build();
+                    let propagator = DatadogCompositePropagator::new(&config);
                     let context = propagator.extract(&carrier).unwrap_or_default();
-
                     assert_eq!(context.trace_id, expected.trace_id);
                     assert_eq!(context.span_id, expected.span_id);
                     assert_eq!(context.sampling, expected.sampling);
@@ -799,12 +799,12 @@ pub mod tests {
         extract: Option<Vec<TracePropagationStyle>>,
         _: Option<Vec<TracePropagationStyle>>,
     ) -> Config {
-        let mut builder = Config::builder();
         if let Some(extract) = extract {
-            builder.set_trace_propagation_style_extract(extract);
+            Config::builder().set_trace_propagation_style_extract(extract)
+        } else {
+            Config::builder()
         }
-
-        builder.build()
+        .build()
     }
 
     #[test]
@@ -905,11 +905,10 @@ pub mod tests {
             TracePropagationStyle::TraceContext,
         ];
 
-        let mut builder = Config::builder();
-        builder.set_trace_propagation_style_extract(extract);
-        builder.set_trace_propagation_extract_first(true);
-
-        let config = builder.build();
+        let config = Config::builder()
+            .set_trace_propagation_style_extract(extract)
+            .set_trace_propagation_extract_first(true)
+            .build();
 
         let propagator = DatadogCompositePropagator::new(&config);
 
@@ -967,12 +966,14 @@ pub mod tests {
                 fn $name() {
                     let (styles, context, expected) = $value;
 
-                    let mut builder = Config::builder();
-                    if let Some(styles) = styles {
-                        builder.set_trace_propagation_style_inject(styles.to_vec());
-                    }
+                    let builder = if let Some(styles) = styles {
+                        Config::builder().set_trace_propagation_style_inject(styles.to_vec())
+                    } else {
+                        Config::builder()
+                    };
 
-                    let propagator = DatadogCompositePropagator::new(&builder.build());
+                    let config = builder.build();
+                    let propagator = DatadogCompositePropagator::new(&config);
 
                     let mut carrier = HashMap::new();
                     propagator.inject(context, &mut carrier);
@@ -980,7 +981,7 @@ pub mod tests {
                     assert_hashmap_keys(&expected, &carrier);
                     assert_hashmap_keys(&carrier, &expected);
                 }
-            )*
+                            )*
         }
     }
 

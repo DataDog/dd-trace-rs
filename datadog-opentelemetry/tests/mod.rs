@@ -52,8 +52,8 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_received_traces";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let config = dd_trace::Config::builder()
+            .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
 
         let tracer_provider = make_test_tracer(
             config.build(),
@@ -90,8 +90,8 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_injection_extraction";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let config = dd_trace::Config::builder()
+            .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
 
         let (tracer_provider, propagator) = make_test_tracer(
             config.build(),
@@ -168,15 +168,15 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_sampling_extraction";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        config.set_service("my_service_name".to_string());
-        config.set_trace_sampling_rules(vec![SamplingRuleConfig {
-            service: Some("my_service_name".to_string()),
-            sample_rate: 1.0,
-            ..SamplingRuleConfig::default()
-        }]);
-        config.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
+        let config = dd_trace::Config::builder()
+            .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into())
+            .set_service("my_service_name".to_string())
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                service: Some("my_service_name".to_string()),
+                sample_rate: 1.0,
+                ..SamplingRuleConfig::default()
+            }])
+            .set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
 
         let (tracer_provider, propagator) = make_test_tracer(
             config.build(),

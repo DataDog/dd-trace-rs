@@ -121,16 +121,12 @@ impl Display for TracePropagationStyle {
 /// ```
 /// use dd_trace::Config;
 ///
-/// // This pulls configuration from the environment and other sources
-/// let mut builder = Config::builder();
 ///
-/// // Manual overrides
-/// builder
-///     .set_service("my-service".to_string())
-///     .set_version("1.0.0".to_string());
+/// let config = Config::builder() // This pulls configuration from the environment and other sources
+///     .set_service("my-service".to_string()) // Override service name
+///     .set_version("1.0.0".to_string()) // Override version
+/// .build();
 ///
-/// // Finalize the configuratiom
-/// let config = builder.build();
 /// ```
 pub struct Config {
     // # Global
@@ -404,95 +400,92 @@ impl ConfigBuilder {
         self.config
     }
 
-    pub fn set_service(&mut self, service: String) -> &mut Self {
+    pub fn set_service(mut self, service: String) -> Self {
         self.config.service = service;
         self
     }
 
-    pub fn set_env(&mut self, env: String) -> &mut Self {
+    pub fn set_env(mut self, env: String) -> Self {
         self.config.env = Some(env);
         self
     }
 
-    pub fn set_version(&mut self, version: String) -> &mut Self {
+    pub fn set_version(mut self, version: String) -> Self {
         self.config.version = Some(version);
         self
     }
 
-    pub fn set_global_tags(&mut self, tags: Vec<String>) -> &mut Self {
+    pub fn set_global_tags(mut self, tags: Vec<String>) -> Self {
         self.config.global_tags = tags;
         self
     }
 
-    pub fn add_global_tag(&mut self, tag: String) -> &mut Self {
+    pub fn add_global_tag(mut self, tag: String) -> Self {
         self.config.global_tags.push(tag);
         self
     }
 
-    pub fn set_trace_agent_url(&mut self, url: Cow<'static, str>) -> &mut Self {
+    pub fn set_trace_agent_url(mut self, url: Cow<'static, str>) -> Self {
         self.config.trace_agent_url = Cow::Owned(url.to_string());
         self
     }
 
-    pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
+    pub fn set_trace_sampling_rules(mut self, rules: Vec<SamplingRuleConfig>) -> Self {
         self.config.trace_sampling_rules = rules;
         self
     }
 
-    pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
+    pub fn set_trace_rate_limit(mut self, rate_limit: i32) -> Self {
         self.config.trace_rate_limit = rate_limit;
         self
     }
 
-    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &Self {
+    pub fn set_trace_propagation_style(mut self, styles: Vec<TracePropagationStyle>) -> Self {
         self.config.trace_propagation_style = Some(styles);
         self
     }
 
     pub fn set_trace_propagation_style_extract(
-        &mut self,
+        mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> Self {
         self.config.trace_propagation_style_extract = Some(styles);
         self
     }
 
     pub fn set_trace_propagation_style_inject(
-        &mut self,
+        mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> Self {
         self.config.trace_propagation_style_inject = Some(styles);
         self
     }
 
-    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &Self {
+    pub fn set_trace_propagation_extract_first(mut self, first: bool) -> Self {
         self.config.trace_propagation_extract_first = first;
         self
     }
 
-    pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
+    pub fn set_enabled(mut self, enabled: bool) -> Self {
         self.config.enabled = enabled;
         self
     }
 
-    pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
+    pub fn set_log_level_filter(mut self, filter: LevelFilter) -> Self {
         self.config.log_level_filter = filter;
         self
     }
 
     pub fn set_trace_stats_computation_enabled(
-        &mut self,
+        mut self,
         trace_stats_computation_enabled: bool,
-    ) -> &mut Self {
+    ) -> Self {
         self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
         self
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn __internal_set_wait_agent_info_ready(
-        &mut self,
-        wait_agent_info_ready: bool,
-    ) -> &mut Self {
+    pub fn __internal_set_wait_agent_info_ready(mut self, wait_agent_info_ready: bool) -> Self {
         self.config.wait_agent_info_ready = wait_agent_info_ready;
         self
     }
@@ -574,21 +567,20 @@ mod tests {
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
-            sample_rate: 0.8,
-            service: Some("manual-service".to_string()),
-            name: None,
-            resource: None,
-            tags: HashMap::new(),
-            provenance: "manual".to_string(),
-        }]);
-        builder.set_trace_rate_limit(200);
-        builder.set_service("manual-service".to_string());
-        builder.set_env("manual-env".to_string());
-        builder.set_log_level_filter(super::LevelFilter::Warn);
-
-        let config = builder.build();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.8,
+                service: Some("manual-service".to_string()),
+                name: None,
+                resource: None,
+                tags: HashMap::new(),
+                provenance: "manual".to_string(),
+            }])
+            .set_trace_rate_limit(200)
+            .set_service("manual-service".to_string())
+            .set_env("manual-env".to_string())
+            .set_log_level_filter(super::LevelFilter::Warn)
+            .build();
 
         assert_eq!(config.trace_rate_limit(), 200);
         let rules = config.trace_sampling_rules();
@@ -655,16 +647,15 @@ mod tests {
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_trace_propagation_style(vec![
-            TracePropagationStyle::TraceContext,
-            TracePropagationStyle::Datadog,
-        ]);
-        builder.set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext]);
-        builder.set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog]);
-        builder.set_trace_propagation_extract_first(false);
-
-        let config = builder.build();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_propagation_style(vec![
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Datadog,
+            ])
+            .set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext])
+            .set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog])
+            .set_trace_propagation_extract_first(false)
+            .build();
 
         assert_eq!(
             config.trace_propagation_style(),
@@ -790,9 +781,10 @@ mod tests {
         let config = Config::builder_with_sources(&sources).build();
         assert!(config.trace_stats_computation_enabled());
 
-        let mut builder = Config::builder();
-        builder.set_trace_stats_computation_enabled(false);
-        let config = builder.build();
+        let config = Config::builder()
+            .set_trace_stats_computation_enabled(false)
+            .build();
+
         assert!(!config.trace_stats_computation_enabled());
     }
 }
