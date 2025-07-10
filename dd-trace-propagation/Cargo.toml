@@ -14,10 +14,16 @@ crate-type = ["lib"]
 [dependencies]
 dd-trace = { path = "../dd-trace" }
 lazy_static = { version = "1.5", default-features = false }
-regex = { version = "1.10", default-features = false, features = ["unicode-case"] }
-serde = { version = "1.0", default-features = false, optional = true, features = ["derive"] }
-serde_json = { version = "1.0", default-features = false, optional = true, features = ["alloc"] }
-thiserror = { version = "1.0", default-features = false}
+regex = { version = "1.10", default-features = false, features = [
+    "unicode-case",
+] }
+serde = { workspace = true, default-features = false, optional = true, features = [
+    "derive",
+] }
+serde_json = { workspace = true, default-features = false, optional = true, features = [
+    "alloc",
+] }
+thiserror = { version = "1.0", default-features = false }
 
 opentelemetry = { workspace = true, optional = true }
 

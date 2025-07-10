@@ -16,7 +16,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.81.0"
+rust-version = "1.84.1"
 edition = "2021"
 version = "0.0.1"
 license = "Apache-2.0"
@@ -26,9 +26,9 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
-data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
-datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
-tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "540ea1e63ab403774325ffadb76f870747f11f6c" }
+data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
+datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
+tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
 
 futures = "0.3.31"
 opentelemetry_sdk = { version = "0.28.0", features = [
@@ -40,6 +40,9 @@ opentelemetry = { version = "0.28.0", features = [
 opentelemetry-semantic-conventions = { version = "0.29.0", features = ["semconv_experimental"] }
 tokio = { version = "1.44.1" }
 rand = { version = "0.8" }
+
+serde = { version = "1.0.194" }
+serde_json = { version = "1.0.140" }
 
 [profile.dev]
 debug = 2 # full debug info
