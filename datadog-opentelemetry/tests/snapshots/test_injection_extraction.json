@@ -11,7 +11,7 @@
       "_dd.origin": "rum",
       "_dd.p.dm": "-0",
       "_dd.parent_id": "00f067aa0ba902b7",
-      "otel.library.name": "test",
+      "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "80f198ee56343ba864fe8b2a57d3eff7",
       "span.kind": "server",
@@ -37,7 +37,7 @@
        "meta": {
          "_dd.origin": "rum",
          "_dd.p.dm": "-0",
-         "otel.library.name": "test",
+         "otel.scope.name": "test",
          "otel.status_code": "Unset",
          "otel.trace_id": "80f198ee56343ba864fe8b2a57d3eff7",
          "span.kind": "client",

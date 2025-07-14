@@ -9,7 +9,7 @@
     "type": "web",
     "meta": {
       "_dd.p.dm": "-3",
-      "otel.library.name": "test",
+      "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
       "span.kind": "server",
@@ -35,7 +35,7 @@
        "type": "http",
        "meta": {
          "_dd.p.dm": "-3",
-         "otel.library.name": "test",
+         "otel.scope.name": "test",
          "otel.status_code": "Unset",
          "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
          "span.kind": "client",
