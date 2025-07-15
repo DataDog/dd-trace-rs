@@ -461,4 +461,11 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // set the shared resource in the DatadogSpanProcessor
         *self.resource.write().unwrap() = resource.clone();
     }
+
+    fn shutdown_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        self.span_exporter.shutdown_with_timeout(timeout)
+    }
 }
