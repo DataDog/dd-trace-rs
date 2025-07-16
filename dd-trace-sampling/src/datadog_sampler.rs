@@ -122,11 +122,9 @@ impl SamplingRule {
         for (key, matcher) in &self.tag_matchers {
             let rule_tag_key_str = key.as_str();
 
-            // Special handling for rules defined with "http.status_code" or
-            // "http.response.status_code"
-            if rule_tag_key_str == opentelemetry_semantic_conventions::trace::HTTP_STATUS_CODE
-                || rule_tag_key_str
-                    == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
+            // Special handling for rules defined with "http.response.status_code"
+            if rule_tag_key_str
+                == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
             {
                 match self.match_http_status_code_rule(matcher, span) {
                     Some(true) => continue,             // Status code matched
@@ -487,10 +485,12 @@ mod tests {
     use super::*;
     use crate::constants::attr::{ENV_TAG, RESOURCE_TAG};
     use crate::constants::pattern;
-    use datadog_opentelemetry_mappings::semconv::attribute::{DB_SYSTEM, HTTP_STATUS_CODE};
+    use datadog_opentelemetry_mappings::semconv::attribute::{
+        DB_SYSTEM_NAME, MESSAGING_OPERATION_TYPE,
+    };
     use datadog_opentelemetry_mappings::semconv::trace::HTTP_RESPONSE_STATUS_CODE;
     use datadog_opentelemetry_mappings::semconv::{
-        attribute::{HTTP_METHOD, MESSAGING_OPERATION, MESSAGING_SYSTEM},
+        attribute::{HTTP_REQUEST_METHOD, MESSAGING_SYSTEM},
         trace::NETWORK_PROTOCOL_NAME,
     };
     use opentelemetry::trace::SpanKind;
@@ -1278,34 +1278,20 @@ mod tests {
             None,
             None,
             Some(HashMap::from([(
-                "http.status_code".to_string(),
+                "http.response.status_code".to_string(),
                 "5*".to_string(),
             )])),
             None,
         );
 
         // Create attributes with OpenTelemetry naming convention
-        let otel_attrs = vec![
-            // OpenTelemetry uses http.response.status_code, but Datadog uses http.status_code
-            KeyValue::new("http.response.status_code", 500),
-        ];
+        let otel_attrs = vec![KeyValue::new("http.response.status_code", 500)];
 
-        // The rule should match because http.response.status_code maps to http.status_code
+        // The rule should match because both use the same OpenTelemetry attribute name
         assert!(rule.matches(&PreSampledSpan::new(
             "test-span",
             SpanKind::Client,
             otel_attrs.as_slice(),
-            &create_empty_resource()
-        )));
-
-        // Create attributes with Datadog naming convention (direct match)
-        let dd_attrs = vec![KeyValue::new("http.status_code", 500)];
-
-        // Direct match should also work
-        assert!(rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            dd_attrs.as_slice(),
             &create_empty_resource()
         )));
 
@@ -1388,7 +1374,7 @@ mod tests {
     #[test]
     fn test_direct_and_mapped_mixed_attributes() {
         // Constants for key names to improve readability and ensure consistency
-        let dd_status_key_str = HTTP_STATUS_CODE;
+        let dd_status_key_str = HTTP_RESPONSE_STATUS_CODE;
         let otel_response_status_key_str = HTTP_RESPONSE_STATUS_CODE;
         let custom_tag_key = "custom.tag";
         let custom_tag_value = "value";
@@ -1527,7 +1513,7 @@ mod tests {
 
         // 1. HTTP client request
         let http_client_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_METHOD),
+            Key::from_static_str(HTTP_REQUEST_METHOD),
             Value::String("GET".into()),
         )];
 
@@ -1556,7 +1542,7 @@ mod tests {
 
         // 2. HTTP server request
         let http_server_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_METHOD),
+            Key::from_static_str(HTTP_REQUEST_METHOD),
             Value::String("POST".into()),
         )];
 
@@ -1585,7 +1571,7 @@ mod tests {
 
         // 3. Database query
         let db_attrs = vec![KeyValue::new(
-            Key::from_static_str(DB_SYSTEM),
+            Key::from_static_str(DB_SYSTEM_NAME),
             Value::String("postgresql".into()),
         )];
 
@@ -1619,7 +1605,7 @@ mod tests {
                 Value::String("kafka".into()),
             ),
             KeyValue::new(
-                Key::from_static_str(MESSAGING_OPERATION),
+                Key::from_static_str(MESSAGING_OPERATION_TYPE),
                 Value::String("process".into()),
             ),
         ];

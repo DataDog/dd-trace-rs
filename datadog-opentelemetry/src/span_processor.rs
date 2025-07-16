@@ -452,6 +452,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         self.span_exporter.shutdown()
     }
 
+    fn shutdown_with_timeout(
+        &self,
+        timeout: std::time::Duration,
+    ) -> opentelemetry_sdk::error::OTelSdkResult {
+        self.span_exporter.shutdown_with_timeout(timeout)
+    }
+
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         if let Err(e) = self.span_exporter.set_resource(resource.clone()) {
             dd_trace::dd_error!(

@@ -605,7 +605,7 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
     let lib_name = otel_span.instrumentation_scope.name();
     if !lib_name.is_empty() {
         dd_span.meta.insert(
-            BytesString::from_static(semconv::attribute::OTEL_LIBRARY_NAME),
+            BytesString::from_static(semconv::attribute::OTEL_SCOPE_NAME),
             BytesString::from_string(lib_name.to_owned()),
         );
     }
@@ -614,7 +614,7 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
     if let Some(version) = lib_version {
         if !version.is_empty() {
             dd_span.meta.insert(
-                BytesString::from_static(semconv::attribute::OTEL_LIBRARY_VERSION),
+                BytesString::from_static(semconv::attribute::OTEL_SCOPE_VERSION),
                 BytesString::from_string(version.to_owned()),
             );
         }

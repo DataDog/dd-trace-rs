@@ -41,7 +41,7 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     let is_server = matches!(span.span_kind(), SpanKind::Server);
 
     // http
-    if span.has_attr(HTTP_METHOD) || span.has_attr(HTTP_REQUEST_METHOD) {
+    if span.has_attr(HTTP_REQUEST_METHOD) {
         if is_client {
             return Cow::Borrowed("http.client.request");
         } else if is_server {
@@ -50,14 +50,14 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // database
-    let db_system = span.get_attr_str(DB_SYSTEM);
+    let db_system = span.get_attr_str(DB_SYSTEM_NAME);
     if !db_system.is_empty() && is_client {
         return Cow::Owned(format!("{}.query", db_system.to_lowercase()));
     }
 
     // messaging
     let messaging_system = span.get_attr_str(MESSAGING_SYSTEM);
-    let messaging_operation = span.get_attr_str(MESSAGING_OPERATION);
+    let messaging_operation = span.get_attr_str(MESSAGING_OPERATION_TYPE);
     if !messaging_system.is_empty()
         && !messaging_operation.is_empty()
         && matches!(
@@ -139,7 +139,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return m;
     }
 
-    let mut m = get_res_span_attributes(span, &[HTTP_REQUEST_METHOD, HTTP_METHOD]);
+    let mut m = get_res_span_attributes(span, &[HTTP_REQUEST_METHOD]);
     if !m.is_empty() {
         if m == "_OTHER" {
             m = Cow::Borrowed("HTTP");
@@ -153,7 +153,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return m;
     }
 
-    let messaging_operation = get_res_span_attributes(span, &[MESSAGING_OPERATION]);
+    let messaging_operation = get_res_span_attributes(span, &[MESSAGING_OPERATION_TYPE]);
     if !messaging_operation.is_empty() {
         let mut res_name = messaging_operation;
         let messaging_destination =
@@ -184,7 +184,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return res_name;
     }
 
-    let db_system = get_res_span_attributes(span, &[DB_SYSTEM]);
+    let db_system = get_res_span_attributes(span, &[DB_SYSTEM_NAME]);
     if !db_system.is_empty() {
         let db_statement = get_res_span_attributes(span, &[DB_STATEMENT]);
         if !db_statement.is_empty() {
@@ -201,9 +201,6 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
 pub fn get_otel_status_code(span: &impl OtelSpan) -> u32 {
     if let Some(code) = span.get_attr_num(HTTP_RESPONSE_STATUS_CODE) {
-        return code;
-    }
-    if let Some(code) = span.get_attr_num(HTTP_STATUS_CODE) {
         return code;
     }
     0
@@ -312,7 +309,7 @@ pub fn get_otel_span_type(span: &impl OtelSpan) -> Cow<'static, str> {
     match span.span_kind() {
         SpanKind::Server => Cow::Borrowed("web"),
         SpanKind::Client => {
-            let db = get_res_span_attributes(span, &[DB_SYSTEM]);
+            let db = get_res_span_attributes(span, &[DB_SYSTEM_NAME]);
             if db.is_empty() {
                 Cow::Borrowed("http")
             } else {
@@ -329,7 +326,7 @@ pub fn get_otel_env(span: &impl OtelSpan) -> Cow<'static, str> {
     if !datadog_env.is_empty() {
         return datadog_env;
     }
-    get_res_attributes(span, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
+    get_res_attributes(span, &[DEPLOYMENT_ENVIRONMENT_NAME])
 }
 
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";

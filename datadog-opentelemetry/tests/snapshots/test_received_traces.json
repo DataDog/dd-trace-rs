@@ -8,13 +8,13 @@
     "parent_id": 0,
     "type": "http",
     "meta": {
-      "otel.library.name": "test",
+      "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "00d056b3f029e865f1d74b6959eb3fa6",
       "span.kind": "client",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.28.0"
+      "telemetry.sdk.version": "0.30.0"
     },
     "metrics": {
       "_dd.measured": 1.0,

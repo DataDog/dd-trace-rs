@@ -176,12 +176,12 @@ num-traits,https://github.com/rust-num/num-traits,MIT OR Apache-2.0,The Rust Pro
 object,https://github.com/gimli-rs/object,Apache-2.0 OR MIT,The object Authors
 once_cell,https://github.com/matklad/once_cell,MIT OR Apache-2.0,Aleksey Kladov <aleksey.kladov@gmail.com>
 openssl-probe,https://github.com/alexcrichton/openssl-probe,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
-opentelemetry,https://github.com/open-telemetry/opentelemetry-rust,Apache-2.0,The opentelemetry Authors
+opentelemetry,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry,Apache-2.0,The opentelemetry Authors
 opentelemetry-appender-tracing,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-appender-tracing,Apache-2.0,The opentelemetry-appender-tracing Authors
-opentelemetry-http,https://github.com/open-telemetry/opentelemetry-rust,Apache-2.0,The opentelemetry-http Authors
+opentelemetry-http,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-http,Apache-2.0,The opentelemetry-http Authors
 opentelemetry-semantic-conventions,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-semantic-conventions,Apache-2.0,The opentelemetry-semantic-conventions Authors
 opentelemetry-stdout,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-stdout,Apache-2.0,The opentelemetry-stdout Authors
-opentelemetry_sdk,https://github.com/open-telemetry/opentelemetry-rust,Apache-2.0,The opentelemetry_sdk Authors
+opentelemetry_sdk,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-sdk,Apache-2.0,The opentelemetry_sdk Authors
 option-ext,https://github.com/soc/option-ext,MPL-2.0,Simon Ochsenreither <simon@ochsenreither.de>
 parking,https://github.com/smol-rs/parking,Apache-2.0 OR MIT,"Stjepan Glavina <stjepang@gmail.com>, The Rust Project Developers"
 parking_lot,https://github.com/Amanieu/parking_lot,MIT OR Apache-2.0,Amanieu d'Antras <amanieu@gmail.com>
