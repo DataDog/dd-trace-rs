@@ -210,12 +210,13 @@ impl SpanProcessor for EnrichWithBaggageSpanProcessor {
 }
 
 fn init_tracer() -> SdkTracerProvider {
-    let mut builder = dd_trace::Config::builder();
-    builder.set_service("igor-rust-propagator-service-disguised-as-nodejs".to_string());
-    builder.set_env("staging".to_string());
+    let config = dd_trace::Config::builder()
+        .set_service("igor-rust-propagator-service-disguised-as-nodejs".to_string())
+        .set_env("staging".to_string())
+        .build();
 
     datadog_opentelemetry::init_datadog(
-        builder.build(),
+        config,
         SdkTracerProvider::builder()
             .with_span_processor(EnrichWithBaggageSpanProcessor)
             .with_simple_exporter(SpanExporter::default()),

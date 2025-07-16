@@ -181,9 +181,7 @@ mod tests {
     fn test_add_log_error_telemetry_disabled() {
         clear_logs();
 
-        let mut builder = Config::builder();
-        builder.set_telemetry_enabled(false);
-        let config = builder.build();
+        let config = Config::builder().set_telemetry_enabled(false).build();
 
         init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
 
@@ -198,7 +196,7 @@ mod tests {
     fn test_add_log_error() {
         clear_logs();
 
-        let config = Config::default();
+        let config = Config::builder().build();
 
         init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
 
@@ -213,9 +211,9 @@ mod tests {
     fn test_add_log_error_log_collection_disabled() {
         clear_logs();
 
-        let mut builder = Config::builder();
-        builder.set_telemetry_log_collection_enabled(false);
-        let config = builder.build();
+        let config = Config::builder()
+            .set_telemetry_log_collection_enabled(false)
+            .build();
 
         init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
 
@@ -230,7 +228,7 @@ mod tests {
     fn test_add_log_error_from_log_macros() {
         clear_logs();
 
-        let config = Config::default();
+        let config = Config::builder().build();
         init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
 
         let expected_messages = [
