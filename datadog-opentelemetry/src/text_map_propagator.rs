@@ -3,14 +3,14 @@
 
 use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
-use dd_trace::Config;
+use dd_trace::{sampling::priority, Config};
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
 };
 
 use dd_trace_propagation::{
-    context::{Sampling, SamplingPriority, SpanContext, SpanLink, Tracestate},
+    context::{Sampling, SpanContext, SpanLink, Tracestate},
     DatadogCompositePropagator, Propagator,
 };
 
@@ -22,7 +22,7 @@ const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags
 pub struct DatadogExtractData {
     pub links: Vec<SpanLink>,
     pub origin: Option<String>,
-    pub propagation_tags: HashMap<String, String>,
+    pub internal_tags: HashMap<String, String>,
     pub sampling: Option<Sampling>,
 }
 
@@ -36,10 +36,10 @@ impl DatadogExtractData {
             ..
         }: SpanContext,
     ) -> Self {
-        let propagation_tags = tags
+        let internal_tags = tags
             .iter()
             .filter_map(|tag| {
-                if tag.0.starts_with("_dd.p.") {
+                if tag.0.starts_with("_dd.") {
                     Some((tag.0.clone(), tag.1.clone()))
                 } else {
                     None
@@ -50,7 +50,7 @@ impl DatadogExtractData {
         DatadogExtractData {
             links,
             origin,
-            propagation_tags,
+            internal_tags,
             sampling,
         }
     }
@@ -63,7 +63,7 @@ pub struct DatadogPropagator {
 }
 
 impl DatadogPropagator {
-    pub fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
+    pub(crate) fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
             registry,
@@ -94,14 +94,16 @@ impl TextMapPropagator for DatadogPropagator {
         // flags
         let sampling = if let Some(sampling) = propagation_data.sampling_decision {
             Some(Sampling {
-                priority: Some(sampling.decision.into()),
-                mechanism: Some(sampling.decision_maker.into()),
+                priority: Some(sampling.priority),
+                mechanism: Some(sampling.mechanism),
             })
         } else {
             Some(Sampling {
-                priority: Some(SamplingPriority::from_flags(
-                    otel_span_context.trace_flags().to_u8(),
-                )),
+                priority: Some(if otel_span_context.trace_flags().is_sampled() {
+                    priority::AUTO_KEEP
+                } else {
+                    priority::AUTO_REJECT
+                }),
                 mechanism: None,
             })
         };
@@ -110,6 +112,15 @@ impl TextMapPropagator for DatadogPropagator {
         // TODO: optimize Tracestate conversion
         let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
 
+        let mut tags = HashMap::new();
+        if let Some(propagation_tags) = propagation_data.tags {
+            propagation_tags.iter().for_each(|(key, value)| {
+                if key.starts_with("_dd.p.") {
+                    tags.insert(key.clone(), value.clone());
+                }
+            });
+        }
+
         let dd_span_context = &mut SpanContext {
             trace_id: u128::from_be_bytes(trace_id),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
@@ -117,7 +128,7 @@ impl TextMapPropagator for DatadogPropagator {
             links: vec![], // links don't affect injection
             sampling,
             origin: propagation_data.origin,
-            tags: propagation_data.tags.unwrap_or_default(),
+            tags,
             tracestate,
         };
 
@@ -207,7 +218,10 @@ pub mod tests {
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };
 
-    use crate::{span_processor::TracePropagationData, TraceRegistry};
+    use crate::{
+        span_processor::TracePropagationData, text_map_propagator::DatadogExtractData,
+        TraceRegistry,
+    };
 
     use super::DatadogPropagator;
 
@@ -215,18 +229,20 @@ pub mod tests {
     const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
 
     fn get_propagator(styles: Option<Vec<TracePropagationStyle>>) -> DatadogPropagator {
-        let mut builder = Config::builder();
-
-        if let Some(ref styles) = styles {
-            builder.set_trace_propagation_style(styles.to_vec());
+        let config = if let Some(ref styles) = styles {
+            Config::builder()
+                .set_trace_propagation_style(styles.to_vec())
+                .build()
         } else {
-            builder.set_trace_propagation_style_extract(vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ]);
-        }
+            Config::builder()
+                .set_trace_propagation_style_extract(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                ])
+                .build()
+        };
 
-        DatadogPropagator::new(&builder.build(), Arc::new(TraceRegistry::new()))
+        DatadogPropagator::new(&config, Arc::new(TraceRegistry::new()))
     }
 
     #[derive(Debug)]
@@ -351,9 +367,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &expected_context,
-                "Error with traceparent: {}, tracestate: {}",
-                trace_parent,
-                trace_state
+                "Error with traceparent: {trace_parent}, tracestate: {trace_state}",
             )
         }
     }
@@ -390,8 +404,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &opentelemetry::trace::SpanContext::empty_context(),
-                "{}",
-                reason
+                "{reason}",
             )
         }
     }
@@ -455,6 +468,26 @@ pub mod tests {
         assert_eq!(trace_state.get("dd"), None);
         assert_eq!(trace_state.get("foo").unwrap(), "1");
         assert_eq!(trace_state.get("bar").unwrap(), "2");
+    }
+
+    #[test]
+    fn extract_w3c_adds_dd_propagation_tags() {
+        let propagator = get_propagator(None);
+
+        let parent = "00-12345678901234567890123456789012-1234567890123456-01".to_string();
+        let state = "dd=s:2;o:rum;p:0123456789abcdef;t.dm:-4;".to_string();
+
+        let mut extractor = HashMap::new();
+        extractor.insert(TRACEPARENT_KEY.to_string(), parent);
+        extractor.insert(TRACESTATE_KEY.to_string(), state.clone());
+
+        let context = propagator.extract(&extractor);
+
+        let extract_data = context.get::<DatadogExtractData>().unwrap();
+
+        assert!(extract_data.internal_tags.contains_key("_dd.parent_id"));
+        assert!(extract_data.internal_tags.contains_key("_dd.p.dm"));
+        assert!(!extract_data.internal_tags.contains_key("tracestate"));
     }
 
     #[test]

@@ -14,7 +14,7 @@ use datadog_trace_utils::span::{
     SpanLink, SpanLinkBytes,
 };
 
-use dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION;
+use dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -22,7 +22,7 @@ use opentelemetry::{
 use opentelemetry_sdk::Resource;
 use tinybytes::BytesString;
 
-use crate::{ddtrace_transform::ExportSpan, transform::otel_span_to_dd_span};
+use crate::{sdk_span::SdkSpan, transform::otel_span_to_dd_span};
 
 fn timestamp_nano(nanos: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)
@@ -165,7 +165,7 @@ fn test_otel_span_to_dd_span() {
     struct Test {
         name: &'static str,
         input_resource: Vec<(&'static str, &'static str)>,
-        input_span: ExportSpan,
+        input_span: SdkSpan,
         expected_out: SpanBytes,
     }
 
@@ -180,7 +180,7 @@ fn test_otel_span_to_dd_span() {
                 ("service.version", "v1.2.3"),
                 ("env", "staging"),
             ],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -236,7 +236,7 @@ fn test_otel_span_to_dd_span() {
                     ("otel.library.version".into(), "v2".into()),
                     ("service.version".into(), "v1.2.3".into()),
                     ("version".into(), "v1.2.3".into()),
-                    ("error.msg".into(), "Out of memory".into()),
+                    ("error.message".into(), "Out of memory".into()),
                     ("error.type".into(), "mem".into()),
                     ("error.stack".into(), "1/2/3".into()),
                     ("span.kind".into(), "server".into()),
@@ -260,7 +260,7 @@ fn test_otel_span_to_dd_span() {
                 ("service.name", "myservice"),
                 ("peer.service", "mypeerservice"),
             ],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -322,7 +322,7 @@ fn test_otel_span_to_dd_span() {
                     ("service.version".into(), "v1.2.3".into()),
                     ("w3c.tracestate".into(), "state=1".into()),
                     ("version".into(), "v1.2.3".into()),
-                    ("error.msg".into(), "Out of memory".into()),
+                    ("error.message".into(), "Out of memory".into()),
                     ("error.type".into(), "mem".into()),
                     ("error.stack".into(), "1/2/3".into()),
                     ("http.method".into(), "GET".into()),
@@ -359,7 +359,7 @@ fn test_otel_span_to_dd_span() {
                 ("user_agent.original", "sample_useragent"),
                 ("http.request.header.example", "test"),
             ],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -396,7 +396,7 @@ fn test_otel_span_to_dd_span() {
             expected_out: SpanBytes {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
-                service: "myservice".into(),
+                service: "pylons".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
@@ -420,7 +420,7 @@ fn test_otel_span_to_dd_span() {
                     ("service.version".into(), "v1.2.3".into()),
                     ("w3c.tracestate".into(), "state=1".into()),
                     ("version".into(), "v1.2.3".into()),
-                    ("error.msg".into(), "Out of memory".into()),
+                    ("error.message".into(), "Out of memory".into()),
                     ("error.type".into(), "mem".into()),
                     ("error.stack".into(), "1/2/3".into()),
                     ("http.method".into(), "GET".into()),
@@ -448,7 +448,7 @@ fn test_otel_span_to_dd_span() {
                     ("_top_level".into(), 1.0),
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION.into(), 0.0),
+                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 0.0),
                 ]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
@@ -459,7 +459,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "db_attributes",
             input_resource: vec![("env", "staging"), ("service.name", "mongo")],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -528,7 +528,7 @@ fn test_otel_span_to_dd_span() {
                     ("_top_level".into(), 1.0),
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION.into(), 1.0),
+                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 1.0),
                 ]),
                 r#type: "db".into(),
                 span_events: vec![],
@@ -539,7 +539,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "http_naming_old_semconv",
             input_resource: vec![("env", "staging"), ("service.name", "document-uploader")],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -591,7 +591,7 @@ fn test_otel_span_to_dd_span() {
                     ("otel.library.name".into(), "ddtracer".into()),
                     ("otel.library.version".into(), "v2".into()),
                     ("otel.status_code".into(), "Error".into()),
-                    ("error.msg".into(), "201".into()),
+                    ("error.message".into(), "201".into()),
                     ("http.method".into(), "POST".into()),
                     ("url.path".into(), "/uploads/4".into()),
                     ("url.scheme".into(), "https".into()),
@@ -614,7 +614,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "http_naming",
             input_resource: vec![("env", "staging"), ("service.name", "document-uploader")],
-            input_span: ExportSpan {
+            input_span: SdkSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -666,7 +666,7 @@ fn test_otel_span_to_dd_span() {
                     ("otel.library.name".into(), "ddtracer".into()),
                     ("otel.library.version".into(), "v2".into()),
                     ("otel.status_code".into(), "Error".into()),
-                    ("error.msg".into(), "201".into()),
+                    ("error.message".into(), "201".into()),
                     ("http.method".into(), "POST".into()),
                     ("url.path".into(), "/uploads/4".into()),
                     ("url.scheme".into(), "https".into()),
@@ -719,35 +719,35 @@ fn hashmap_diff<V: PartialEq + Debug>(
         match (a.peek(), b.peek()) {
             (Some(a_v), Some(b_v)) => match a_v.0.as_str().cmp(b_v.0.as_str()) {
                 std::cmp::Ordering::Less => {
-                    writeln!(&mut message, "a  :+{:?}", a_v).unwrap();
+                    writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                     a.next();
                 }
                 std::cmp::Ordering::Equal => {
                     if a_v.1 != b_v.1 {
-                        writeln!(&mut message, "a!b: {:?} != {:?}", a_v, b_v).unwrap();
+                        writeln!(&mut message, "a!b: {a_v:?} != {b_v:?}").unwrap();
                     } else {
-                        writeln!(&mut message, "a b: {:?}", b_v).unwrap();
+                        writeln!(&mut message, "a b: {b_v:?}").unwrap();
                     }
                     a.next();
                     b.next();
                 }
                 std::cmp::Ordering::Greater => {
-                    writeln!(&mut message, "  b:+{:?}", b_v).unwrap();
+                    writeln!(&mut message, "  b:+{b_v:?}").unwrap();
                     b.next();
                 }
             },
             (None, None) => break,
             (Some(a_v), None) => {
-                writeln!(&mut message, "a  :+{:?}", a_v).unwrap();
+                writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                 a.next();
             }
             (None, Some(b_v)) => {
-                writeln!(&mut message, "  b:+{:?}", b_v).unwrap();
+                writeln!(&mut message, "  b:+{b_v:?}").unwrap();
                 b.next();
             }
         }
     }
     if output != expected {
-        eprintln!("Hashmaps are not equal :\n{}", message);
+        eprintln!("Hashmaps are not equal :\n{message}");
     }
 }

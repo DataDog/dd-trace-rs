@@ -5,5 +5,4 @@
 mod configuration;
 mod sources;
 
-pub use configuration::Config;
-pub use configuration::TracePropagationStyle;
+pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};

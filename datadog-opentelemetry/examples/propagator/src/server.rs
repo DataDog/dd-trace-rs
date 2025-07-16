@@ -211,7 +211,7 @@ impl SpanProcessor for EnrichWithBaggageSpanProcessor {
 
 fn init_tracer() -> SdkTracerProvider {
     datadog_opentelemetry::init_datadog(
-        dd_trace::Config::default(),
+        dd_trace::Config::builder().build(),
         SdkTracerProvider::builder()
             .with_span_processor(EnrichWithBaggageSpanProcessor)
             .with_simple_exporter(SpanExporter::default()),

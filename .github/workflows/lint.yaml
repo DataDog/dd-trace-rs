@@ -87,6 +87,7 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           # cache key contains current version of cargo-bundle-licenses
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
@@ -123,4 +124,62 @@ jobs:
         with:
           name: LICENSE-3rdparty.yml
           path: /tmp/CI.yaml
+          overwrite: true
+
+  license-3rdparty-csv:
+    runs-on: ubuntu-latest
+    name: "Valid LICENSE-3rdparty.csv"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: stat LICENSE-3rdparty.csv
+      - name: Cache
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/db/
+            ~/.cargo/bin/
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+          # cache key contains current version of dd-rust-license-tool
+          # when upstream version is updated we can bump the cache key version,
+          # to cache the latest version of the tool
+          key: "v1-dd-rust-license-tool"
+      - name: Cache
+        uses: ./.github/actions/cache
+      - name: Install dd-rust-license-tool
+        run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
+      # To ensure the dependency tree is identical between the CI runner and the
+      # local license generation script (which also forces the 'git' protocol),
+      # we explicitly set the crates.io protocol. Cargo's default can vary
+      # between 'git' and 'sparse' depending on the environment, which can lead
+      # to different dependency resolutions. This guarantees consistency.
+      - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
+      - name: "Generate new LICENSE-3rdparty.csv and check against the previous"
+        run: |
+          # The LICENSE-3rdparty.csv file must match the output of the tool in the Linux CI environment.
+          # To update the file locally, run the './scripts/generate-licenses.sh' script.
+          echo "Running dd-rust-license-tool dump to generate CSV..."
+          if ! dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error; then
+            echo "ERROR: dd-rust-license-tool dump failed! See error output below:"
+            cat /tmp/CI.error
+            exit 1
+          fi
+
+          # Compare the generated CSV with the current one. If they differ, diff will have a non-zero exit code.
+          if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
+            echo "Differences detected in LICENSE-3rdparty.csv."
+            echo "Please run './scripts/generate-licenses.sh' to update the file and commit the changes."
+            exit 1
+          fi
+
+          echo "No differences found."
+
+      - name: export the generated license file on failure
+        if: failure()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: LICENSE-3rdparty.csv
+          path: /tmp/CI.csv
           overwrite: true

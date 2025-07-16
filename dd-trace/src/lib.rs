@@ -3,18 +3,10 @@
 
 pub mod configuration;
 pub mod constants;
+pub mod sampling;
 pub use configuration::Config;
 
 mod error;
 pub use error::{Error, Result};
 
 pub mod log;
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_empty() {
-        // TODO: Remove when we start commiting real code
-    }
-}

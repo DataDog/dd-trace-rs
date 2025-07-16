@@ -133,7 +133,6 @@ impl DatadogExporter {
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
-                .enable_stats(Duration::from_secs(10))
                 .set_language("rust")
                 .set_url(config.trace_agent_url())
                 .set_dogstatsd_url(config.dogstatsd_agent_url())
@@ -142,6 +141,9 @@ impl DatadogExporter {
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
                 .set_client_computed_top_level();
+            if config.trace_stats_computation_enabled() {
+                builder.enable_stats(Duration::from_secs(10));
+            }
             if let Some(env) = config.env() {
                 builder.set_env(env);
             }
@@ -167,8 +169,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to add trace chunk: {:?}",
-                e
+                "DatadogExporter: failed to add trace chunk: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -183,8 +184,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to set resource: {:?}",
-                e
+                "DatadogExporter: failed to set resource: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -199,8 +199,7 @@ impl DatadogExporter {
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to trigger flush: {:?}",
-                e
+                "DatadogExporter: failed to trigger flush: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -221,8 +220,7 @@ impl DatadogExporter {
             }
             Err(e) => {
                 return Err(OTelSdkError::InternalFailure(format!(
-                    "DatadogExporter: trace exporter shutdown failed {:?}",
-                    e,
+                    "DatadogExporter: trace exporter shutdown failed {e:?}",
                 )));
             }
         };
@@ -249,7 +247,7 @@ impl DatadogExporter {
                 OTelSdkError::InternalFailure("Trace exporter thread panicked".to_string())
             })?
             .map_err(|e| {
-                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {}", e))
+                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {e}"))
             })
     }
 }

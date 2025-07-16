@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod ddtrace_transform;
+mod sampler;
 mod span_exporter;
 mod span_processor;
 mod text_map_propagator;
 mod trace_id;
-mod transform;
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
+use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
 
@@ -24,7 +25,7 @@ use text_map_propagator::DatadogPropagator;
 /// use opentelemetry_sdk::trace::TracerProviderBuilder;
 ///
 /// // This picks up env var configuration and other datadog configuration sources
-/// let datadog_config = Config::default();
+/// let datadog_config = Config::builder().build();
 ///
 /// datadog_opentelemetry::init_datadog(
 ///     datadog_config,
@@ -41,41 +42,49 @@ pub fn init_datadog(
     // all parameters and has an install method?
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> SdkTracerProvider {
-    let registry = Arc::new(TraceRegistry::new());
+    let (tracer_provider, propagator) = make_tracer(config, tracer_provider_builder, None);
 
-    let propagator = DatadogPropagator::new(&config, registry.clone());
     opentelemetry::global::set_text_map_propagator(propagator);
-
-    let tracer_provider = tracer_provider_builder
-        .with_span_processor(DatadogSpanProcessor::new(config, registry))
-        .with_id_generator(trace_id::TraceidGenerator)
-        // TODO: hookup additional components
-        // .with_sampler(sampler)
-        .build();
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     tracer_provider
 }
 
+/// Create an instance of the tracer provider
+fn make_tracer(
+    config: dd_trace::Config,
+    mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
+    resource: Option<Resource>,
+) -> (SdkTracerProvider, DatadogPropagator) {
+    let registry = Arc::new(TraceRegistry::new());
+    let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
+    let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
+
+    if let Some(resource) = resource {
+        tracer_provider_builder = tracer_provider_builder.with_resource(resource)
+    }
+
+    let propagator = DatadogPropagator::new(&config, registry.clone());
+
+    let span_processor = DatadogSpanProcessor::new(config, registry.clone(), resource_slot.clone());
+    let tracer_provider = tracer_provider_builder
+        .with_span_processor(span_processor)
+        .with_sampler(sampler) // Use the sampler created above
+        .with_id_generator(trace_id::TraceidGenerator)
+        .build();
+
+    (tracer_provider, propagator)
+}
+
 #[cfg(feature = "test-utils")]
-/// Create a local instance of the tracer provider
-pub fn make_tracer(
+pub fn make_test_tracer(
     config: dd_trace::Config,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
-) -> SdkTracerProvider {
-    use opentelemetry::KeyValue;
-    use opentelemetry_sdk::Resource;
-
-    let registry = Arc::new(TraceRegistry::new());
-
-    tracer_provider_builder
-        .with_resource(
-            Resource::builder()
-                .with_attribute(KeyValue::new("service.name", config.service().to_string()))
-                .build(),
-        )
-        .with_span_processor(DatadogSpanProcessor::new(config, registry))
-        .with_id_generator(trace_id::TraceidGenerator)
-        // TODO: hookup additional components
-        // .with_sampler(sampler)
-        .build()
+) -> (SdkTracerProvider, DatadogPropagator) {
+    let resource = Resource::builder()
+        .with_attribute(opentelemetry::KeyValue::new(
+            "service.name",
+            config.service().to_string(),
+        ))
+        .build();
+    make_tracer(config, tracer_provider_builder, Some(resource))
 }

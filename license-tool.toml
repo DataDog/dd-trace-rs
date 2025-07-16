@@ -1,0 +1,5 @@
+[overrides]
+
+# bollard-stubs is generated from the bollard repository
+# Missing repository information fixed with package override
+"bollard-stubs" = { origin = "https://github.com/fussybeaver/bollard" }

@@ -1,37 +1,64 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
 
 use crate::dd_warn;
+use crate::log::LevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
-pub const TRACER_VERSION: &str = "0.0.1";
+/// Configuration for a single sampling rule
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct SamplingRuleConfig {
+    /// The sample rate to apply (0.0-1.0)
+    pub sample_rate: f64,
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-/// The level at which the library will log
-pub enum LogLevel {
-    Debug,
-    Warn,
-    #[default]
-    Error,
+    /// Optional service name pattern to match
+    #[serde(default)]
+    pub service: Option<String>,
+
+    /// Optional span name pattern to match
+    #[serde(default)]
+    pub name: Option<String>,
+
+    /// Optional resource name pattern to match
+    #[serde(default)]
+    pub resource: Option<String>,
+
+    /// Tags that must match (key-value pairs)
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+
+    /// Where this rule comes from (customer, dynamic, default)
+    // TODO(paullgdc): this value should not be definable by customers
+    #[serde(default = "default_provenance")]
+    pub provenance: String,
 }
 
-impl FromStr for LogLevel {
-    type Err = &'static str;
+fn default_provenance() -> String {
+    "default".to_string()
+}
+
+pub const TRACER_VERSION: &str = "0.0.1";
+
+#[derive(Debug, Default)]
+struct ParsedSamplingRules {
+    rules: Vec<SamplingRuleConfig>,
+}
+
+impl FromStr for ParsedSamplingRules {
+    type Err = serde_json::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("debug") {
-            Ok(LogLevel::Debug)
-        } else if s.eq_ignore_ascii_case("warn") {
-            Ok(LogLevel::Warn)
-        } else if s.eq_ignore_ascii_case("error") {
-            Ok(LogLevel::Error)
-        } else {
-            Err("log level should be one of DEBUG, WARN, ERROR")
+        if s.trim().is_empty() {
+            return Ok(ParsedSamplingRules::default());
         }
+        // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
+        let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
+        Ok(ParsedSamplingRules { rules: rules_vec })
     }
 }
 
@@ -86,26 +113,19 @@ impl Display for TracePropagationStyle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
-// TODO(paullgdc): We also want to keep the origin of each of configuration, and the errors
-// encountered during parsing to report it to telemetry.
 ///
 /// # Usage
 /// ```
 /// use dd_trace::Config;
 ///
-/// // This pulls configuration from the environment and other sources
-/// let mut builder = Config::builder();
 ///
-/// // Manual overrides
-/// builder
-///     .set_service("my-service".to_string())
-///     .set_version("1.0.0".to_string());
-///
-/// // Finalize the configuratiom
-/// let config = builder.build();
+/// let config = Config::builder() // This pulls configuration from the environment and other sources
+///     .set_service("my-service".to_string()) // Override service name
+///     .set_version("1.0.0".to_string()) // Override version
+/// .build();
 /// ```
 pub struct Config {
     // # Global
@@ -129,16 +149,23 @@ pub struct Config {
     /// url of the dogstatsd agent
     dogstatsd_agent_url: Cow<'static, str>,
 
-    // # Tracing
-    /// Maximum number of spans to sample per second, per process
-    /// if this is not set, the datadog Agent controls rate limiting
-    trace_rate_limit: Option<f64>,
-    trace_sample_rate: Option<f64>,
+    // # Sampling
+    ///  A list of sampling rules. Each rule is matched against the root span of a trace
+    /// If a rule matches, the trace is sampled with the associated sample rate.
+    trace_sampling_rules: Vec<SamplingRuleConfig>,
+
+    /// Maximum number of spans to sample per second
+    /// Only applied if trace_sampling_rules are matched
+    trace_rate_limit: i32,
 
     /// Disables the library if this is false
     enabled: bool,
-    /// The log level for the tracer
-    log_level: LogLevel,
+    /// The log level filter for the tracer
+    log_level_filter: LevelFilter,
+
+    /// Whether to enable stats computation for the tracer
+    /// Results in dropped spans not being sent to the agent
+    trace_stats_computation_enabled: bool,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -153,7 +180,7 @@ pub struct Config {
 
 impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
-        let default = Config::default();
+        let default = default_config();
 
         /// Helper function to convert a CompositeConfigSourceResult<T> into an Option<T>
         /// This drops errors origin associated with the configuration collected while parsing the
@@ -178,6 +205,9 @@ impl Config {
             }
         }
 
+        let parsed_sampling_rules_config =
+            to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
+
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
@@ -193,12 +223,21 @@ impl Config {
                 .map(Cow::Owned)
                 .unwrap_or(default.trace_agent_url),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
+
+            // Populate from parsed_sampling_rules_config or defaults
+            trace_sampling_rules: parsed_sampling_rules_config
+                .map(|psc| psc.rules)
+                .unwrap_or(default.trace_sampling_rules),
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
-                .or(default.trace_rate_limit),
-            trace_sample_rate: to_val(sources.get_parse("DD_TRACE_SAMPLE_RATE"))
-                .or(default.trace_sample_rate),
+                .unwrap_or(default.trace_rate_limit),
+
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
-            log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
+            log_level_filter: to_val(sources.get_parse("DD_LOG_LEVEL"))
+                .unwrap_or(default.log_level_filter),
+            trace_stats_computation_enabled: to_val(
+                sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"),
+            )
+            .unwrap_or(default.trace_stats_computation_enabled),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -270,20 +309,24 @@ impl Config {
         &self.dogstatsd_agent_url
     }
 
-    pub fn trace_rate_limit(&self) -> Option<f64> {
-        self.trace_rate_limit
+    pub fn trace_sampling_rules(&self) -> &[SamplingRuleConfig] {
+        self.trace_sampling_rules.as_ref()
     }
 
-    pub fn trace_sample_rate(&self) -> Option<f64> {
-        self.trace_sample_rate
+    pub fn trace_rate_limit(&self) -> i32 {
+        self.trace_rate_limit
     }
 
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
-    pub fn log_level(&self) -> &LogLevel {
-        &self.log_level
+    pub fn log_level_filter(&self) -> &LevelFilter {
+        &self.log_level_filter
+    }
+
+    pub fn trace_stats_computation_enabled(&self) -> bool {
+        self.trace_stats_computation_enabled
     }
 
     #[cfg(feature = "test-utils")]
@@ -315,32 +358,31 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            runtime_id: Config::process_runtime_id(),
-            env: None,
-            // TODO(paulgdc): Default service naming detection, probably from arg0
-            service: "unnamed-rust-service".to_string(),
-            version: None,
-            global_tags: Vec::new(),
+fn default_config() -> Config {
+    Config {
+        runtime_id: Config::process_runtime_id(),
+        env: None,
+        // TODO(paulgdc): Default service naming detection, probably from arg0
+        service: "unnamed-rust-service".to_string(),
+        version: None,
+        global_tags: Vec::new(),
 
-            trace_agent_url: Cow::Borrowed("http://localhost:8126"),
-            dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-            trace_rate_limit: None,
-            trace_sample_rate: None,
-            enabled: true,
-            log_level: LogLevel::default(),
-            tracer_version: TRACER_VERSION,
-            language_version: "TODO: Get from env",
-            #[cfg(feature = "test-utils")]
-            wait_agent_info_ready: false,
+        trace_agent_url: Cow::Borrowed("http://localhost:8126"),
+        dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
+        trace_sampling_rules: Vec::new(),
+        trace_rate_limit: 100,
+        enabled: true,
+        log_level_filter: LevelFilter::default(),
+        tracer_version: TRACER_VERSION,
+        language_version: "TODO: Get from env",
+        trace_stats_computation_enabled: true,
+        #[cfg(feature = "test-utils")]
+        wait_agent_info_ready: false,
 
-            trace_propagation_style: None,
-            trace_propagation_style_extract: None,
-            trace_propagation_style_inject: None,
-            trace_propagation_extract_first: false,
-        }
+        trace_propagation_style: None,
+        trace_propagation_style_extract: None,
+        trace_propagation_style_inject: None,
+        trace_propagation_extract_first: false,
     }
 }
 
@@ -350,8 +392,9 @@ pub struct ConfigBuilder {
 
 impl ConfigBuilder {
     /// Finalizes the builder and returns the configuration
-    pub fn build(self) -> Config {
-        self.config
+    pub fn build(&self) -> Config {
+        crate::log::set_max_level(self.config.log_level_filter);
+        self.config.clone()
     }
 
     pub fn set_service(&mut self, service: String) -> &mut Self {
@@ -384,17 +427,17 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_rate_limit(&mut self, rate_limit: f64) -> &mut Self {
-        self.config.trace_rate_limit = Some(rate_limit);
+    pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
+        self.config.trace_sampling_rules = rules;
         self
     }
 
-    pub fn set_trace_sample_rate(&mut self, sample_rate: f64) -> &mut Self {
-        self.config.trace_sample_rate = Some(sample_rate);
+    pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
+        self.config.trace_rate_limit = rate_limit;
         self
     }
 
-    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &Self {
+    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &mut Self {
         self.config.trace_propagation_style = Some(styles);
         self
     }
@@ -402,7 +445,7 @@ impl ConfigBuilder {
     pub fn set_trace_propagation_style_extract(
         &mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> &mut Self {
         self.config.trace_propagation_style_extract = Some(styles);
         self
     }
@@ -410,12 +453,12 @@ impl ConfigBuilder {
     pub fn set_trace_propagation_style_inject(
         &mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> &mut Self {
         self.config.trace_propagation_style_inject = Some(styles);
         self
     }
 
-    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &Self {
+    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
         self.config.trace_propagation_extract_first = first;
         self
     }
@@ -425,8 +468,16 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: LogLevel) -> &mut Self {
-        self.config.log_level = log_level;
+    pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
+        self.config.log_level_filter = filter;
+        self
+    }
+
+    pub fn set_trace_stats_computation_enabled(
+        &mut self,
+        trace_stats_computation_enabled: bool,
+    ) -> &mut Self {
+        self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
         self
     }
 
@@ -443,10 +494,8 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use super::Config;
-    use crate::configuration::{
-        sources::{CompositeSource, ConfigSourceOrigin, HashMapSource},
-        TracePropagationStyle,
-    };
+    use super::*;
+    use crate::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
 
     #[test]
     fn test_config_from_source() {
@@ -455,12 +504,10 @@ mod tests {
             [
                 ("DD_SERVICE", "test-service"),
                 ("DD_ENV", "test-env"),
-                ("DD_VERSION", "x.y.z"),
-                ("DD_TAGS", "abc:def,foo:bar"),
-                ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
-                ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_SAMPLE_RATE", "0.5"),
-                ("DD_TRACE_ENABLED", "false"),
+                ("DD_TRACE_SAMPLING_RULES", 
+                 r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#),
+                ("DD_TRACE_RATE_LIMIT", "123"),
+                ("DD_TRACE_ENABLED", "true"),
                 ("DD_LOG_LEVEL", "DEBUG"),
             ],
             ConfigSourceOrigin::EnvVar,
@@ -469,16 +516,45 @@ mod tests {
 
         assert_eq!(config.service(), "test-service");
         assert_eq!(config.env(), Some("test-env"));
-        assert_eq!(config.version(), Some("x.y.z"));
+        assert_eq!(config.trace_rate_limit(), 123);
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1, "Should have one rule");
         assert_eq!(
-            config.global_tags().collect::<Vec<_>>(),
-            vec!["abc:def", "foo:bar"]
+            &rules[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("web-api".to_string()),
+                provenance: "customer".to_string(),
+                ..SamplingRuleConfig::default()
+            }
         );
-        assert_eq!(config.trace_agent_url(), "http://localhost:1234");
-        assert_eq!(config.trace_rate_limit(), Some(100.0));
-        assert_eq!(config.trace_sample_rate(), Some(0.5));
-        assert!(!config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Debug);
+
+        assert!(config.enabled());
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Debug);
+    }
+
+    #[test]
+    fn test_sampling_rules() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "DD_TRACE_SAMPLING_RULES",
+                r#"[{"sample_rate":0.5,"service":"test-service","provenance":"customer"}]"#,
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(
+            &config.trace_sampling_rules()[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("test-service".to_string()),
+                provenance: "customer".to_string(),
+                ..SamplingRuleConfig::default()
+            }
+        );
     }
 
     #[test]
@@ -487,43 +563,40 @@ mod tests {
         sources.add_source(HashMapSource::from_iter(
             [
                 ("DD_SERVICE", "test-service"),
-                ("DD_ENV", "test-env"),
-                ("DD_VERSION", "x.y.z"),
-                ("DD_TAGS", "abc:def,foo:bar"),
-                ("DD_TRACE_AGENT_URL", "http://localhost:1234"),
-                ("DD_TRACE_RATE_LIMIT", "100"),
-                ("DD_TRACE_SAMPLE_RATE", "0.5"),
-                ("DD_TRACE_ENABLED", "false"),
-                ("DD_LOG_LEVEL", "DEBUG"),
+                ("DD_TRACE_RATE_LIMIT", "50"),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_service("manual-service".to_string());
-        builder.set_env("manual-env".to_string());
-        builder.set_version("manual-version".to_string());
-        builder.set_global_tags(vec!["manual:tag".to_string()]);
-        builder.add_global_tag("another:tag".to_string());
-        builder.set_trace_agent_url("http://localhost:4321".into());
-        builder.set_trace_rate_limit(200.0);
-        builder.set_trace_sample_rate(0.8);
-        builder.set_enabled(true);
-        builder.set_log_level(super::LogLevel::Warn);
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.8,
+                service: Some("manual-service".to_string()),
+                name: None,
+                resource: None,
+                tags: HashMap::new(),
+                provenance: "manual".to_string(),
+            }])
+            .set_trace_rate_limit(200)
+            .set_service("manual-service".to_string())
+            .set_env("manual-env".to_string())
+            .set_log_level_filter(super::LevelFilter::Warn)
+            .build();
 
-        let config = builder.build();
-
-        assert_eq!(config.service(), "manual-service");
-        assert_eq!(config.env(), Some("manual-env"));
-        assert_eq!(config.version(), Some("manual-version"));
+        assert_eq!(config.trace_rate_limit(), 200);
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1);
         assert_eq!(
-            config.global_tags().collect::<Vec<_>>(),
-            vec!["manual:tag", "another:tag"]
+            &config.trace_sampling_rules()[0],
+            &SamplingRuleConfig {
+                sample_rate: 0.8,
+                service: Some("manual-service".to_string()),
+                provenance: "manual".to_string(),
+                ..SamplingRuleConfig::default()
+            }
         );
-        assert_eq!(config.trace_agent_url(), "http://localhost:4321");
-        assert_eq!(config.trace_rate_limit(), Some(200.0));
-        assert_eq!(config.trace_sample_rate(), Some(0.8));
+
         assert!(config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Warn);
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Warn);
     }
 
     #[test]
@@ -574,16 +647,15 @@ mod tests {
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_trace_propagation_style(vec![
-            TracePropagationStyle::TraceContext,
-            TracePropagationStyle::Datadog,
-        ]);
-        builder.set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext]);
-        builder.set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog]);
-        builder.set_trace_propagation_extract_first(false);
-
-        let config = builder.build();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_propagation_style(vec![
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Datadog,
+            ])
+            .set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext])
+            .set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog])
+            .set_trace_propagation_extract_first(false)
+            .build();
 
         assert_eq!(
             config.trace_propagation_style(),
@@ -681,5 +753,38 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_stats_computation_enabled_config() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.trace_stats_computation_enabled());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.trace_stats_computation_enabled());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "a")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.trace_stats_computation_enabled());
+
+        let config = Config::builder()
+            .set_trace_stats_computation_enabled(false)
+            .build();
+
+        assert!(!config.trace_stats_computation_enabled());
     }
 }

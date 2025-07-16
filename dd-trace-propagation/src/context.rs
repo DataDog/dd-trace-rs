@@ -3,9 +3,13 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{borrow::Cow, collections::HashMap, fmt::Display, str::FromStr, vec};
+use std::{borrow::Cow, collections::HashMap, str::FromStr, vec};
 
-use dd_trace::{configuration::TracePropagationStyle, dd_debug};
+use dd_trace::{
+    configuration::TracePropagationStyle,
+    dd_debug,
+    sampling::{SamplingMechanism, SamplingPriority},
+};
 
 use crate::tracecontext::TRACESTATE_KEY;
 
@@ -15,137 +19,11 @@ lazy_static! {
 }
 
 pub const DATADOG_PROPAGATION_TAG_PREFIX: &str = "_dd.p.";
-pub const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Sampling {
     pub priority: Option<SamplingPriority>,
     pub mechanism: Option<SamplingMechanism>,
-}
-
-#[derive(Copy, Clone, Default, Debug, PartialEq)]
-pub enum SamplingMechanism {
-    #[default]
-    Default = 0,
-    Agent = 1,
-    Rule = 3,
-    Manual = 4,
-    Appsec = 5,
-    Span = 8,
-    User = 11,
-    Dynamic = 12,
-}
-
-impl Display for SamplingMechanism {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prio = match self {
-            Self::Default => "-0",
-            Self::Agent => "-1",
-            Self::Rule => "-3",
-            Self::Manual => "-4",
-            Self::Appsec => "-5",
-            Self::Span => "-8",
-            Self::User => "-11",
-            Self::Dynamic => "-12",
-        };
-        write!(f, "{prio}")
-    }
-}
-
-impl FromStr for SamplingMechanism {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "-0" => Ok(Self::Default),
-            "-1" => Ok(Self::Agent),
-            "-3" => Ok(Self::Rule),
-            "-4" => Ok(Self::Manual),
-            "-5" => Ok(Self::Appsec),
-            "-8" => Ok(Self::Span),
-            "-11" => Ok(Self::User),
-            "-12" => Ok(Self::Dynamic),
-            _ => Err(format!("Unknown Sampling mechanism: {s}")),
-        }
-    }
-}
-
-impl From<i8> for SamplingMechanism {
-    fn from(value: i8) -> Self {
-        match value {
-            0 => Self::Default,
-            1 => Self::Agent,
-            3 => Self::Rule,
-            4 => Self::Manual,
-            5 => Self::Appsec,
-            8 => Self::Span,
-            11 => Self::User,
-            12 => Self::Dynamic,
-            _ => Self::Default,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Default, Debug, PartialEq)]
-pub enum SamplingPriority {
-    UserReject = -1,
-    AutoReject = 0,
-
-    #[default]
-    AutoKeep = 1,
-    UserKeep = 2,
-}
-
-impl SamplingPriority {
-    pub fn is_keep(&self) -> bool {
-        *self == Self::AutoKeep || *self == Self::UserKeep
-    }
-
-    pub fn from_flags(flags: u8) -> Self {
-        match flags {
-            0 => Self::AutoReject,
-            1 => Self::AutoKeep,
-            _ => Self::default(),
-        }
-    }
-}
-
-impl From<i8> for SamplingPriority {
-    fn from(value: i8) -> Self {
-        match value {
-            -1 => Self::UserReject,
-            0 => Self::AutoReject,
-            1 => Self::AutoKeep,
-            2 => Self::UserKeep,
-            _ => Self::default(),
-        }
-    }
-}
-
-impl Display for SamplingPriority {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prio = match self {
-            Self::UserReject => "-1",
-            Self::AutoReject => "0",
-            Self::AutoKeep => "1",
-            Self::UserKeep => "2",
-        };
-        write!(f, "{prio}")
-    }
-}
-
-impl FromStr for SamplingPriority {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "-1" => Ok(Self::UserReject),
-            "0" => Ok(Self::AutoReject),
-            "1" => Ok(Self::AutoKeep),
-            "2" => Ok(Self::UserKeep),
-            _ => Err(format!("Unknown Sampling priority: {s}")),
-        }
-    }
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
@@ -207,7 +85,7 @@ pub struct SpanContext {
     pub tracestate: Option<Tracestate>,
 }
 
-#[derive(Clone, Default, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Traceparent {
     pub sampling_priority: SamplingPriority,
     pub trace_id: u128,
@@ -393,7 +271,9 @@ pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128
 mod test {
     use std::str::FromStr;
 
-    use crate::context::{combine_trace_id, split_trace_id};
+    use dd_trace::sampling::priority;
+
+    use crate::context::{combine_trace_id, split_trace_id, SamplingPriority};
 
     use super::Tracestate;
 
@@ -482,5 +362,35 @@ mod test {
             Tracestate::from_str("dd=\t  o:valid;;s:1; \t").expect("parsed tracestate");
 
         assert_eq!(tracestate.origin, Some("valid".to_string()))
+    }
+
+    #[test]
+    fn test_sampling_priority() {
+        assert_eq!(
+            SamplingPriority::from_str("-5").unwrap(),
+            SamplingPriority::from_i8(-5)
+        );
+
+        assert_eq!(
+            SamplingPriority::from_str("-1").unwrap(),
+            priority::USER_REJECT
+        );
+
+        assert_eq!(
+            SamplingPriority::from_str("1").unwrap(),
+            priority::AUTO_KEEP
+        );
+
+        assert!(SamplingPriority::from_str("-12345678901234567890").is_err());
+
+        assert!(!SamplingPriority::from_i8(-42).is_keep());
+
+        assert!(SamplingPriority::from_i8(42).is_keep());
+
+        let prio = SamplingPriority::from_i8(42).into_i8();
+        assert_eq!(prio, 42);
+
+        let prio = priority::USER_KEEP.into_i8();
+        assert_eq!(prio, 2);
     }
 }
