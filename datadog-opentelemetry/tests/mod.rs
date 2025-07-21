@@ -52,11 +52,12 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_received_traces";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let mut config_builder = dd_trace::Config::builder();
+        config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let config = config_builder.build();
 
         let tracer_provider = make_test_tracer(
-            config.build(),
+            config,
             opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         )
         .0;
@@ -90,11 +91,12 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_injection_extraction";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let mut config_builder = dd_trace::Config::builder();
+        config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        let config = config_builder.build();
 
         let (tracer_provider, propagator) = make_test_tracer(
-            config.build(),
+            config,
             opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         );
 
@@ -168,18 +170,19 @@ mod datadog_test_agent {
         const SESSION_NAME: &str = "test_sampling_extraction";
         let test_agent = make_test_agent(SESSION_NAME).await;
 
-        let mut config = dd_trace::Config::builder();
-        config.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        config.set_service("my_service_name".to_string());
-        config.set_trace_sampling_rules(vec![SamplingRuleConfig {
+        let mut config_builder = dd_trace::Config::builder();
+        config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+        config_builder.set_service("my_service_name".to_string());
+        config_builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
             service: Some("my_service_name".to_string()),
             sample_rate: 1.0,
             ..SamplingRuleConfig::default()
         }]);
-        config.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
+        config_builder.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
+        let config = config_builder.build();
 
         let (tracer_provider, propagator) = make_test_tracer(
-            config.build(),
+            config,
             opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         );
 

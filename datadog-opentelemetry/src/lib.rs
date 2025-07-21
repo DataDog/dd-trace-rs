@@ -27,7 +27,7 @@ use text_map_propagator::DatadogPropagator;
 /// use opentelemetry_sdk::trace::TracerProviderBuilder;
 ///
 /// // This picks up env var configuration and other datadog configuration sources
-/// let datadog_config = Config::default();
+/// let datadog_config = Config::builder().build();
 ///
 /// datadog_opentelemetry::init_datadog(
 ///     datadog_config,

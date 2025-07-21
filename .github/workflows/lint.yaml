@@ -87,6 +87,7 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           # cache key contains current version of cargo-bundle-licenses
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
@@ -140,6 +141,7 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           # cache key contains current version of dd-rust-license-tool
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
