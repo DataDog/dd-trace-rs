@@ -17,6 +17,7 @@ use opentelemetry::KeyValue;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::agent_service_sampler::{AgentRates, ServicesSampler};
 // Import the attr constants
 use crate::constants::pattern::NO_RULE;
 use crate::glob_matcher::GlobMatcher;
@@ -250,7 +251,7 @@ pub struct DatadogSampler {
     rules: Vec<SamplingRule>,
 
     /// Service-based samplers provided by the Agent
-    service_samplers: HashMap<String, RateSampler>,
+    service_samplers: ServicesSampler,
 
     /// Rate limiter for limiting the number of spans per second
     rate_limiter: RateLimiter,
@@ -271,10 +272,29 @@ impl DatadogSampler {
 
         DatadogSampler {
             rules,
-            service_samplers: HashMap::new(),
+            service_samplers: ServicesSampler::default(),
             rate_limiter: limiter,
             resource,
         }
+    }
+
+    // used for tests
+    #[allow(dead_code)]
+    pub(crate) fn update_service_rates(&self, rates: impl IntoIterator<Item = (String, f64)>) {
+        self.service_samplers.update_rates(rates);
+    }
+
+    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        let service_samplers = self.service_samplers.clone();
+        Box::new(move |s: &str| {
+            let Ok(new_rates) = serde_json::de::from_str::<AgentRates>(s) else {
+                return;
+            };
+            let Some(new_rates) = new_rates.rates_by_service else {
+                return;
+            };
+            service_samplers.update_rates(new_rates.into_iter().map(|(k, v)| (k.to_string(), v)));
+        })
     }
 
     /// Computes a key for service-based sampling
@@ -285,15 +305,6 @@ impl DatadogSampler {
         let env = get_otel_env(span);
 
         format!("service:{service},env:{env}")
-    }
-
-    /// Updates the service-based sample rates from the Agent
-    pub fn update_service_rates(&mut self, rates: HashMap<String, f64>) {
-        let mut samplers = HashMap::new();
-        for (key, rate) in rates {
-            samplers.insert(key, RateSampler::new(rate));
-        }
-        self.service_samplers = samplers;
     }
 
     /// Finds the highest precedence rule that matches the span
@@ -699,14 +710,14 @@ mod tests {
 
     #[test]
     fn test_update_service_rates() {
-        let mut sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
 
         // Update with service rates
         let mut rates = HashMap::new();
         rates.insert("service:web,env:prod".to_string(), 0.5);
         rates.insert("service:api,env:prod".to_string(), 0.75);
 
-        sampler.update_service_rates(rates);
+        sampler.service_samplers.update_rates(rates);
 
         // Check number of samplers
         assert_eq!(sampler.service_samplers.len(), 2);

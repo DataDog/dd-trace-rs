@@ -387,7 +387,7 @@ fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
         env: None,
-        // TODO(paulgdc): Default service naming detection, probably from arg0
+        // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ServiceName::Default,
         version: None,
         global_tags: Vec::new(),
