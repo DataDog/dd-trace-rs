@@ -122,9 +122,11 @@ impl SamplingRule {
         for (key, matcher) in &self.tag_matchers {
             let rule_tag_key_str = key.as_str();
 
-            // Special handling for rules defined with "http.response.status_code"
-            if rule_tag_key_str
-                == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
+            // Special handling for rules defined with "http.status_code" or
+            // "http.response.status_code"
+            if rule_tag_key_str == opentelemetry_semantic_conventions::trace::HTTP_STATUS_CODE
+                || rule_tag_key_str
+                    == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
             {
                 match self.match_http_status_code_rule(matcher, span) {
                     Some(true) => continue,             // Status code matched

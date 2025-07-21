@@ -64,8 +64,11 @@ attribute_key! {
     "datadog.error.stack" => DATADOG_ERROR_STACK,
     "operation.name" => OPERATION_NAME,
     "http.request.method" => HTTP_REQUEST_METHOD,
+    "http.method" => HTTP_METHOD,
+    "db.system" => DB_SYSTEM,
     "db.system.name" => DB_SYSTEM_NAME,
     "messaging.system" => MESSAGING_SYSTEM,
+    "messaging.operation" => MESSAGING_OPERATION,
     "messaging.operation.type" => MESSAGING_OPERATION_TYPE,
     "rpc.system" => RPC_SYSTEM,
     "rpc.service" => RPC_SERVICE,
@@ -84,9 +87,11 @@ attribute_key! {
     "db.query.text" => DB_QUERY_TEXT,
     "span.type" => SPAN_TYPE,
     "http.response.status_code" => HTTP_RESPONSE_STATUS_CODE,
+    "http.status_code" => HTTP_STATUS_CODE,
     semconv::attribute::SERVICE_NAME => SERVICE_NAME,
     semconv::attribute::SERVICE_VERSION => SERVICE_VERSION,
     "deployment.environment.name" => DEPLOYMENT_ENVIRONMENT_NAME,
+    "deployment.environment" => DEPLOYMENT_ENVIRONMENT,
 
     "_dd.measured" => DD_MEASURED,
 }
