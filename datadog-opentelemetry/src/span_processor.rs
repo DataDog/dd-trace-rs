@@ -16,7 +16,9 @@ use opentelemetry::{
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 
-use crate::{span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData};
+use crate::{
+    create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
+};
 
 #[derive(Debug)]
 struct Trace {
@@ -290,6 +292,7 @@ pub(crate) struct DatadogSpanProcessor {
     registry: Arc<TraceRegistry>,
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
+    config: dd_trace::Config,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -306,8 +309,9 @@ impl DatadogSpanProcessor {
     ) -> Self {
         Self {
             registry,
-            span_exporter: DatadogExporter::new(config),
+            span_exporter: DatadogExporter::new(config.clone()),
             resource,
+            config,
         }
     }
 
@@ -386,7 +390,7 @@ impl DatadogSpanProcessor {
             }
 
             // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted?
-            // they shouldn't be overrided
+            // they shouldn't be overridden
             if let Some(sampling_decision) = trace.sampling_decision {
                 span.attributes.push(KeyValue::new(
                     "_sampling_priority_v1",
@@ -453,12 +457,164 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        if let Err(e) = self.span_exporter.set_resource(resource.clone()) {
+        let dd_resource = create_dd_resource(resource.clone(), &self.config);
+        if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
             dd_trace::dd_error!(
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
             );
         }
         // set the shared resource in the DatadogSpanProcessor
-        *self.resource.write().unwrap() = resource.clone();
+        *self.resource.write().unwrap() = dd_resource.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+
+    use dd_trace::Config;
+    use opentelemetry::{Key, KeyValue, Value};
+    use opentelemetry_sdk::{trace::SpanProcessor, Resource};
+
+    use crate::span_processor::{DatadogSpanProcessor, TraceRegistry};
+
+    #[test]
+    fn test_set_resource_from_empty_dd_config() {
+        let builder = Config::builder();
+        let config = builder.build();
+
+        let registry = Arc::new(TraceRegistry::new());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+
+        let otel_resource = Resource::builder()
+            // .with_service_name("otel-service")
+            .with_attribute(KeyValue::new("key1", "value1"))
+            .build();
+
+        processor.set_resource(&otel_resource);
+
+        let dd_resource = resource.read().unwrap();
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("service.name")),
+            Some(Value::String("unnamed-rust-service".into()))
+        );
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("key1")),
+            Some(Value::String("value1".into()))
+        );
+    }
+
+    #[test]
+    fn test_set_resource_from_dd_config() {
+        let mut builder = Config::builder();
+        builder.set_service("test-service".to_string());
+        let config = builder.build();
+
+        let registry = Arc::new(TraceRegistry::new());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+
+        let attributes = [KeyValue::new("key_schema", "value_schema")];
+
+        let otel_resource = Resource::builder_empty()
+            //.with_service_name("otel-service")
+            .with_attribute(KeyValue::new("key1", "value1"))
+            .with_schema_url(attributes, "schema_url")
+            .build();
+
+        processor.set_resource(&otel_resource);
+
+        let dd_resource = resource.read().unwrap();
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("service.name")),
+            Some(Value::String("test-service".into()))
+        );
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("key1")),
+            Some(Value::String("value1".into()))
+        );
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("key_schema")),
+            Some(Value::String("value_schema".into()))
+        );
+
+        assert_eq!(dd_resource.schema_url(), Some("schema_url"));
+    }
+
+    #[test]
+    fn test_set_resource_empty_builder_from_dd_config() {
+        let mut builder = Config::builder();
+        builder.set_service("test-service".to_string());
+        let config = builder.build();
+
+        let registry = Arc::new(TraceRegistry::new());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+
+        let otel_resource = Resource::builder_empty()
+            .with_attribute(KeyValue::new("key1", "value1"))
+            .build();
+
+        processor.set_resource(&otel_resource);
+
+        let dd_resource = resource.read().unwrap();
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("service.name")),
+            Some(Value::String("test-service".into()))
+        );
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("key1")),
+            Some(Value::String("value1".into()))
+        );
+    }
+
+    #[test]
+    fn test_dd_config_non_default_service() {
+        let mut builder = Config::builder();
+        builder.set_service("test-service".to_string());
+        let config = builder.build();
+
+        let registry = Arc::new(TraceRegistry::new());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+
+        let otel_resource = Resource::builder()
+            .with_service_name("otel-service")
+            .build();
+
+        processor.set_resource(&otel_resource);
+
+        let dd_resource = resource.read().unwrap();
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("service.name")),
+            Some(Value::String("test-service".into()))
+        );
+    }
+
+    #[test]
+    fn test_dd_config_default_service() {
+        let config = Config::builder().build();
+
+        let registry = Arc::new(TraceRegistry::new());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+
+        let otel_resource = Resource::builder()
+            .with_service_name("otel-service")
+            .build();
+
+        processor.set_resource(&otel_resource);
+
+        let dd_resource = resource.read().unwrap();
+        assert_eq!(
+            dd_resource.get(&Key::from_static_str("service.name")),
+            Some(Value::String("otel-service".into()))
+        );
     }
 }

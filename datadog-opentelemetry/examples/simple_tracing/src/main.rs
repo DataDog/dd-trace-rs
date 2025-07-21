@@ -21,6 +21,7 @@ fn main() {
             .set_service("simple_tracing".to_string())
             .build(),
         SdkTracerProvider::builder(),
+        None,
     );
 
     foo();
