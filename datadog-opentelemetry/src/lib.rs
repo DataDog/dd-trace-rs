@@ -105,25 +105,25 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
     if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
         // If the OpenTelemetry service name is not set or is "unknown_service",
         // we override it with the Datadog service name.
-        return merge_resource(
+        merge_resource(
             Some(resource),
             [(
                 Key::from_static_str(SERVICE_NAME),
                 Value::from(cfg.service().to_string()),
             )],
-        );
+        )
     } else if !cfg.service_is_default() {
         // If the service is configured, we override the OpenTelemetry service name
-        return merge_resource(
+        merge_resource(
             Some(resource),
             [(
                 Key::from_static_str(SERVICE_NAME),
                 Value::from(cfg.service().to_string()),
             )],
-        );
+        )
     } else {
         // If the service is not configured, we keep the OpenTelemetry service name
-        return resource;
+        resource
     }
 }
 

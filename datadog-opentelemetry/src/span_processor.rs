@@ -17,7 +17,7 @@ use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 
 use crate::{
-    create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData
+    create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
 };
 
 #[derive(Debug)]
