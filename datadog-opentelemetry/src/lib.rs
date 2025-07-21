@@ -10,7 +10,7 @@ mod trace_id;
 
 use std::sync::{Arc, RwLock};
 
-use opentelemetry::{Key, KeyValue};
+use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use sampler::Sampler;
@@ -63,10 +63,7 @@ fn make_tracer(
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
 
-    let dd_resource = create_dd_resource(
-        resource.unwrap_or(Resource::builder().build()),
-        config.service(),
-    );
+    let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(&config, registry.clone());
 
@@ -80,30 +77,53 @@ fn make_tracer(
     (tracer_provider, propagator)
 }
 
-fn create_dd_resource(resource: Resource, service_name: &str) -> Resource {
-    let otel_service_name = resource.get(&Key::from_static_str(SERVICE_NAME));
-    if !service_name.is_empty()
-        && (otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service")
-    {
-        let mut builder = opentelemetry_sdk::Resource::builder_empty();
-        if let Some(schema_url) = resource.schema_url() {
+fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
+    base: Option<Resource>,
+    additional: I,
+) -> Resource {
+    let mut builder = opentelemetry_sdk::Resource::builder_empty();
+    if let Some(base) = base {
+        if let Some(schema_url) = base.schema_url() {
             builder = builder.with_schema_url(
-                resource
-                    .iter()
-                    .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
+                base.iter()
+                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
                 schema_url.to_string(),
             );
         } else {
             builder = builder.with_attributes(
-                resource
-                    .iter()
-                    .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
+                base.iter()
+                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
             );
         }
+    }
+    builder = builder.with_attributes(additional.into_iter().map(|(k, v)| KeyValue::new(k, v)));
+    builder.build()
+}
 
-        builder.with_service_name(service_name.to_string()).build()
+fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
+    let otel_service_name: Option<Value> = resource.get(&Key::from_static_str(SERVICE_NAME));
+    if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
+        // If the OpenTelemetry service name is not set or is "unknown_service",
+        // we override it with the Datadog service name.
+        return merge_resource(
+            Some(resource),
+            [(
+                Key::from_static_str(SERVICE_NAME),
+                Value::from(cfg.service().to_string()),
+            )],
+        );
+    } else if !cfg.service_is_default() {
+        // If the service is configured, we override the OpenTelemetry service name
+        return merge_resource(
+            Some(resource),
+            [(
+                Key::from_static_str(SERVICE_NAME),
+                Value::from(cfg.service().to_string()),
+            )],
+        );
     } else {
-        resource
+        // If the service is not configured, we keep the OpenTelemetry service name
+        return resource;
     }
 }
 
