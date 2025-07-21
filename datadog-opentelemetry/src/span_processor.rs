@@ -302,14 +302,16 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 }
 
 impl DatadogSpanProcessor {
+    #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         config: dd_trace::Config,
         registry: Arc<TraceRegistry>,
         resource: Arc<RwLock<Resource>>,
+        agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
         Self {
             registry,
-            span_exporter: DatadogExporter::new(config.clone()),
+            span_exporter: DatadogExporter::new(config.clone(), agent_response_handler),
             resource,
             config,
         }
@@ -486,7 +488,7 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
 
         let otel_resource = Resource::builder()
             // .with_service_name("otel-service")
@@ -515,7 +517,7 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
 
         let attributes = [KeyValue::new("key_schema", "value_schema")];
 
@@ -553,7 +555,7 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
 
         let otel_resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("key1", "value1"))
@@ -581,7 +583,7 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
@@ -603,7 +605,7 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone());
+        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")

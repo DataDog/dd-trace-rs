@@ -63,11 +63,18 @@ fn make_tracer(
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
 
+    let agent_response_handler = sampler.on_agent_response();
+
     let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(&config, registry.clone());
 
-    let span_processor = DatadogSpanProcessor::new(config, registry.clone(), resource_slot.clone());
+    let span_processor = DatadogSpanProcessor::new(
+        config,
+        registry.clone(),
+        resource_slot.clone(),
+        Some(agent_response_handler),
+    );
     let tracer_provider = tracer_provider_builder
         .with_span_processor(span_processor)
         .with_sampler(sampler) // Use the sampler created above
