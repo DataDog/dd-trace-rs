@@ -1,0 +1,14 @@
+[package]
+name = "aws_sdk_s3"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+
+[dependencies]
+aws-sdk-sqs = { version = "1.74" }
+opentelemetry = { workspace = true }
+serde_json = { version = "1.0" }

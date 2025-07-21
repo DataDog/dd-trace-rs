@@ -10,6 +10,7 @@ members = [
     "dd-trace",
     "dd-trace-propagation",
     "dd-trace-sampling",
+    "contrib/aws_sdk_sqs",
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
@@ -37,7 +38,9 @@ opentelemetry_sdk = { version = "0.28.0", features = [
 opentelemetry = { version = "0.28.0", features = [
     "trace",
 ], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.29.0", features = ["semconv_experimental"] }
+opentelemetry-semantic-conventions = { version = "0.29.0", features = [
+    "semconv_experimental",
+] }
 tokio = { version = "1.44.1" }
 rand = { version = "0.8" }
 
