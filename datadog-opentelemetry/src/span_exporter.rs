@@ -219,10 +219,14 @@ impl DatadogExporter {
     }
 
     pub fn shutdown(&self) -> OTelSdkResult {
+        self.shutdown_with_timeout(SPAN_EXPORTER_SHUTDOWN_TIMEOUT)
+    }
+
+    pub fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         match self
             .tx
             .trigger_shutdown()
-            .and_then(|()| self.tx.wait_shutdown_done(SPAN_EXPORTER_SHUTDOWN_TIMEOUT))
+            .and_then(|()| self.tx.wait_shutdown_done(timeout))
         {
             Ok(()) | Err(SenderError::BatchFull(_)) => {}
             Err(SenderError::AlreadyShutdown) => {
