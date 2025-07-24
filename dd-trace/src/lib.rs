@@ -10,3 +10,5 @@ mod error;
 pub use error::{Error, Result};
 
 pub mod log;
+
+pub mod telemetry;
