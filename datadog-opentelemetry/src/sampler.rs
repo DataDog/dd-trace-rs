@@ -45,6 +45,10 @@ impl Sampler {
             trace_registry,
         }
     }
+
+    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        self.sampler.on_agent_response()
+    }
 }
 
 impl ShouldSample for Sampler {

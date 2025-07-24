@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 extern crate rustc_version_runtime;
 use rustc_version_runtime::version;
@@ -117,6 +117,25 @@ impl Display for TracePropagationStyle {
 }
 
 #[derive(Debug, Clone)]
+enum ServiceName {
+    Default,
+    Configured(String),
+}
+
+impl ServiceName {
+    fn is_default(&self) -> bool {
+        matches!(self, ServiceName::Default)
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            ServiceName::Default => "unnamed-rust-service",
+            ServiceName::Configured(name) => name,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
 ///
@@ -140,7 +159,7 @@ pub struct Config {
     language: &'static str,
 
     // # Service tagging
-    service: String,
+    service: ServiceName,
     env: Option<String>,
     version: Option<String>,
 
@@ -221,7 +240,9 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: to_val(sources.get("DD_SERVICE")).unwrap_or(default.service),
+            service: to_val(sources.get("DD_SERVICE"))
+                .map(ServiceName::Configured)
+                .unwrap_or(default.service),
             env: to_val(sources.get("DD_ENV")).or(default.env),
             version: to_val(sources.get("DD_VERSION")).or(default.version),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -301,11 +322,15 @@ impl Config {
     }
 
     pub fn language_version(&self) -> &str {
-        self.language_version.deref()
+        self.language_version.as_str()
     }
 
     pub fn service(&self) -> &str {
-        self.service.deref()
+        self.service.as_str()
+    }
+
+    pub fn service_is_default(&self) -> bool {
+        self.service.is_default()
     }
 
     pub fn env(&self) -> Option<&str> {
@@ -389,8 +414,8 @@ fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
         env: None,
-        // TODO(paulgdc): Default service naming detection, probably from arg0
-        service: "unnamed-rust-service".to_string(),
+        // TODO(paullgdc): Default service naming detection, probably from arg0
+        service: ServiceName::Default,
         version: None,
         global_tags: Vec::new(),
 
@@ -429,7 +454,7 @@ impl ConfigBuilder {
     }
 
     pub fn set_service(&mut self, service: String) -> &mut Self {
-        self.config.service = service;
+        self.config.service = ServiceName::Configured(service);
         self
     }
 

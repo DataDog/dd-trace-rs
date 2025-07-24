@@ -14,16 +14,14 @@ description.workspace = true
 [dependencies]
 anyhow = "1.0.97"
 rustc_version_runtime = "0.3.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 uuid = { version = "1.11.0", features = ["v4"] }
 
 # Libdatadog dependencies
 ddtelemetry = { workspace = true }
 
 [dev-dependencies]
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
 serial_test = "3.2.0"
 
 [features]
