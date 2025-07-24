@@ -53,7 +53,11 @@ struct Telemetry {
     log_collection_enabled: bool,
 }
 
-pub fn init_telemetry(config: &Config, custom_handle: Option<Box<dyn TelemetryHandle>>) {
+pub fn init_telemetry(
+    config: &Config,
+    service_name: Option<String>,
+    custom_handle: Option<Box<dyn TelemetryHandle>>,
+) {
     let _guard = INIT_TELEMETRY_LOCK.lock().unwrap();
 
     if let Some(telemetry) = TELEMETRY.get() {
@@ -72,7 +76,7 @@ pub fn init_telemetry(config: &Config, custom_handle: Option<Box<dyn TelemetryHa
     let handle: Option<Box<dyn TelemetryHandle>> = if custom_handle.is_none() {
         let mut builder = worker::TelemetryWorkerBuilder::new(
             "127.0.0.1".to_string(), // FIXME
-            config.service().to_string(),
+            service_name.unwrap_or(config.service().to_string()),
             config.language().to_string(),
             config.language_version().to_string(),
             config.tracer_version().to_string(),
@@ -183,7 +187,7 @@ mod tests {
 
         let config = Config::builder().set_telemetry_enabled(false).build();
 
-        init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
+        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
 
         let message = "test.error.telemetry.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
@@ -198,7 +202,7 @@ mod tests {
 
         let config = Config::builder().build();
 
-        init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
+        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
 
         let message = "test.error.default";
         let stack_trace = Some("At telemetry.rs:42".to_string());
@@ -215,7 +219,7 @@ mod tests {
             .set_telemetry_log_collection_enabled(false)
             .build();
 
-        init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
+        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
 
         let message = "test.error.log_collection.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
@@ -229,7 +233,7 @@ mod tests {
         clear_logs();
 
         let config = Config::builder().build();
-        init_telemetry(&config, Some(Box::new(TestTelemetryHandle {})));
+        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
 
         let expected_messages = [
             "This is an error".to_string(),

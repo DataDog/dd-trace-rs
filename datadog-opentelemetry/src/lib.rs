@@ -47,9 +47,14 @@ pub fn init_datadog(
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> SdkTracerProvider {
-    init_telemetry(&config, None);
+    let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+    let service_name = dd_resource
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|service_name| service_name.as_str().to_string());
 
-    let (tracer_provider, propagator) = make_tracer(config, tracer_provider_builder, resource);
+    init_telemetry(&config, service_name, None);
+
+    let (tracer_provider, propagator) = make_tracer(config, tracer_provider_builder, dd_resource);
 
     opentelemetry::global::set_text_map_propagator(propagator);
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -60,7 +65,7 @@ pub fn init_datadog(
 fn make_tracer(
     config: dd_trace::Config,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
-    resource: Option<Resource>,
+    dd_resource: Resource,
 ) -> (SdkTracerProvider, DatadogPropagator) {
     let registry = Arc::new(TraceRegistry::new());
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
@@ -68,7 +73,6 @@ fn make_tracer(
 
     let agent_response_handler = sampler.on_agent_response();
 
-    let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(&config, registry.clone());
 
@@ -142,5 +146,5 @@ pub fn make_test_tracer(
     config: dd_trace::Config,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    make_tracer(config, tracer_provider_builder, None)
+    make_tracer(config, tracer_provider_builder, Resource::builder().build())
 }
