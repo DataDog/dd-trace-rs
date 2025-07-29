@@ -50,14 +50,15 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // database
-    let db_system = span.get_attr_str(DB_SYSTEM);
+    let db_system = get_span_attributes(span, &[DB_SYSTEM, DB_SYSTEM_NAME]);
     if !db_system.is_empty() && is_client {
         return Cow::Owned(format!("{}.query", db_system.to_lowercase()));
     }
 
     // messaging
     let messaging_system = span.get_attr_str(MESSAGING_SYSTEM);
-    let messaging_operation = span.get_attr_str(MESSAGING_OPERATION);
+    let messaging_operation =
+        get_span_attributes(span, &[MESSAGING_OPERATION, MESSAGING_OPERATION_TYPE]);
     if !messaging_system.is_empty()
         && !messaging_operation.is_empty()
         && matches!(
@@ -153,7 +154,8 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return m;
     }
 
-    let messaging_operation = get_res_span_attributes(span, &[MESSAGING_OPERATION]);
+    let messaging_operation =
+        get_res_span_attributes(span, &[MESSAGING_OPERATION_TYPE, MESSAGING_OPERATION]);
     if !messaging_operation.is_empty() {
         let mut res_name = messaging_operation;
         let messaging_destination =
@@ -184,7 +186,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         return res_name;
     }
 
-    let db_system = get_res_span_attributes(span, &[DB_SYSTEM]);
+    let db_system = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
     if !db_system.is_empty() {
         let db_statement = get_res_span_attributes(span, &[DB_STATEMENT]);
         if !db_statement.is_empty() {
@@ -312,7 +314,7 @@ pub fn get_otel_span_type(span: &impl OtelSpan) -> Cow<'static, str> {
     match span.span_kind() {
         SpanKind::Server => Cow::Borrowed("web"),
         SpanKind::Client => {
-            let db = get_res_span_attributes(span, &[DB_SYSTEM]);
+            let db = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
             if db.is_empty() {
                 Cow::Borrowed("http")
             } else {
@@ -423,6 +425,17 @@ fn get_res_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) ->
         }
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             return attr;
+        }
+    }
+    Cow::Borrowed("")
+}
+
+fn get_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow<'static, str> {
+    for &attr_key in attributes {
+        if let Some(attr) = span.get_attr_str_opt(attr_key) {
+            if !attr.is_empty() {
+                return attr;
+            }
         }
     }
     Cow::Borrowed("")

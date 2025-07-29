@@ -4,6 +4,81 @@
 
 > ‼️ **PREVIEW**: This repository is still in preview. Use at your own risk.
 
+## Usage
+
+The `datadog-opentelemetry` crate provides an easy to use override for the rust opentelemetry-sdk.
+
+
+### Initialization
+
+```rust
+use std::time::Duration;
+use dd_trace::Config;
+use opentelemetry_sdk::trace::TracerProviderBuilder;
+
+fn main() {
+    // This picks up env var configuration and other datadog configuration sources
+    let datadog_config = Config::builder().build();
+    let tracer_provider = datadog_opentelemetry::init_datadog(
+        datadog_config,
+        TracerProviderBuilder::default(),
+        None,
+    );
+
+    // Your code
+
+
+    tracer_provider.shutdown_with_timeout(Duration::from_secs(1)).expect("tracer shutdown error");
+}
+```
+
+### Tracing
+
+To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.30.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+
+### Configuration
+
+* `DD_SERVICE`
+    - default: "unnamed-rust-service"
+* `DD_ENV`
+* `DD_VERSION`
+* `DD_TAGS`
+    - format: "tag_1:value1,tag_2:value2"
+* `DD_TRACE_AGENT_URL`
+    - format: "http://<agent_url>:<agent_port>"
+* `DD_TRACE_SAMPLING_RULES`
+    - format: 
+* `DD_TRACE_RATE_LIMIT`
+    - format: "<int>"
+* `DD_TRACE_ENABLED`
+    - format: "true|false"
+* `DD_LOG_LEVEL`
+    - format: "ERROR|WARN|INFO|DEBUG"    
+* `DD_TRACE_PROPAGATION_STYLE`
+    - format: "datadog,w3c,B3" 
+
+### Features
+
+| Feature                   | Working | Planned |
+|---------------------------|---------|---------|
+| Tracing                   | ✅      |         |
+| Rule based sampling       | ✅      |         |
+| Agent sampling            | ✅      |         |
+| Tracecontext propagation  | ✅      |         |
+| Remote config sampling rate| ❌      | ✅      |
+| ASM SCA                   | ❌      | ✅      |
+| Statsd metrics            | ❌      | ✅      |
+| Continuous profiling      |         |         |
+| DataJobs monitoring       |         |         |
+| DataStreams monitoring    |         |         |
+| Dynamic Instrumentation   |         |         |
+| ASM WAF                   |         |         |
+
+## Support
+
+* MSRV: 1.84
+* Opentelemetry version: 0.30
+
 ## Overview
 
 This repository contains a collection of crates that work together to provide Datadog tracing capabilities for Rust applications, with full OpenTelemetry compatibility. The library allows you to instrument your Rust applications and send traces to Datadog while leveraging the OpenTelemetry ecosystem.

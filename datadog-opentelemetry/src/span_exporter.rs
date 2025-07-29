@@ -9,7 +9,8 @@ use std::{
 };
 
 use data_pipeline::trace_exporter::{
-    error::TraceExporterError, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse, error::TraceExporterError, TraceExporter, TraceExporterBuilder,
+    TraceExporterOutputFormat,
 };
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
@@ -19,7 +20,7 @@ use opentelemetry_sdk::{
 
 use crate::ddtrace_transform;
 
-/// A reasonnable amount of time that shouldn't impact the app while allowing
+/// A reasonable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
 const SPAN_EXPORTER_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -128,7 +129,11 @@ pub struct DatadogExporter {
 }
 
 impl DatadogExporter {
-    pub fn new(config: dd_trace::Config) -> Self {
+    #[allow(clippy::type_complexity)]
+    pub fn new(
+        config: dd_trace::Config,
+        agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
+    ) -> Self {
         let (tx, rx) = channel(SPAN_FLUSH_THRESHOLD, MAX_BUFFERED_SPANS);
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
@@ -140,7 +145,9 @@ impl DatadogExporter {
                 .set_language_version(config.language_version())
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
-                .set_client_computed_top_level();
+                .set_client_computed_top_level()
+                .enable_agent_rates_payload_version();
+
             if config.trace_stats_computation_enabled() {
                 builder.enable_stats(Duration::from_secs(10));
             }
@@ -150,7 +157,13 @@ impl DatadogExporter {
             if let Some(version) = config.version() {
                 builder.set_app_version(version);
             }
-            TraceExporterWorker::spawn(config, builder, rx, Resource::builder_empty().build())
+            TraceExporterWorker::spawn(
+                config,
+                builder,
+                rx,
+                Resource::builder_empty().build(),
+                agent_response_handler,
+            )
         };
         Self { trace_exporter, tx }
     }
@@ -206,10 +219,14 @@ impl DatadogExporter {
     }
 
     pub fn shutdown(&self) -> OTelSdkResult {
+        self.shutdown_with_timeout(SPAN_EXPORTER_SHUTDOWN_TIMEOUT)
+    }
+
+    pub fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
         match self
             .tx
             .trigger_shutdown()
-            .and_then(|()| self.tx.wait_shutdown_done(SPAN_EXPORTER_SHUTDOWN_TIMEOUT))
+            .and_then(|()| self.tx.wait_shutdown_done(timeout))
         {
             Ok(()) | Err(SenderError::BatchFull(_)) => {}
             Err(SenderError::AlreadyShutdown) => {
@@ -435,7 +452,9 @@ struct TraceExporterWorker {
     cfg: dd_trace::Config,
     trace_exporter: TraceExporter,
     rx: Receiver,
-    otel_resoure: opentelemetry_sdk::Resource,
+    otel_resource: opentelemetry_sdk::Resource,
+    #[allow(clippy::type_complexity)]
+    agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
 }
 
 impl TraceExporterWorker {
@@ -445,11 +464,14 @@ impl TraceExporterWorker {
     /// * The handle is dropped
     /// * A shutdown flag is set
     /// * The thread panics
+    #[allow(clippy::type_complexity)]
     fn spawn(
         cfg: dd_trace::Config,
         builder: TraceExporterBuilder,
         rx: Receiver,
-        otel_resoure: opentelemetry_sdk::Resource,
+        otel_resource: opentelemetry_sdk::Resource,
+
+        agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
             move || {
@@ -463,7 +485,8 @@ impl TraceExporterWorker {
                     trace_exporter,
                     cfg,
                     rx,
-                    otel_resoure,
+                    otel_resource,
+                    agent_response_handler,
                 };
                 task.run()
             }
@@ -496,7 +519,7 @@ impl TraceExporterWorker {
                 TraceExporterMessage::FlushTraceChunks
                 | TraceExporterMessage::FlushTraceChunksWithTimeout => {}
                 TraceExporterMessage::SetResource { resource } => {
-                    self.otel_resoure = resource;
+                    self.otel_resource = resource;
                 }
             }
         }
@@ -511,21 +534,28 @@ impl TraceExporterWorker {
                 ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
                     &self.cfg,
                     chunk,
-                    &self.otel_resoure,
+                    &self.otel_resource,
                 )
             })
             .collect();
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
             Ok(agent_response) => {
-                self.handle_agent_reponse(agent_response);
+                self.handle_agent_response(agent_response);
                 Ok(())
             }
             Err(e) => Err(OTelSdkError::InternalFailure(e.to_string())),
         }
     }
 
-    fn handle_agent_reponse(&self, _agent_response: String) {
-        // TODO: handle agent response
+    fn handle_agent_response(&self, agent_response: AgentResponse) {
+        match agent_response {
+            AgentResponse::Unchanged => {}
+            AgentResponse::Changed { body } => {
+                if let Some(ref handler) = self.agent_response_handler {
+                    (handler)(&body);
+                }
+            }
+        }
     }
 }
 

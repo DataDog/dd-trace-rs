@@ -200,6 +200,10 @@ impl SpanProcessor for EnrichWithBaggageSpanProcessor {
         Ok(())
     }
 
+    fn shutdown_with_timeout(&self, _timeout: std::time::Duration) -> OTelSdkResult {
+        Ok(())
+    }
+
     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &Context) {
         for (kk, vv) in cx.baggage().iter() {
             span.set_attribute(KeyValue::new(kk.clone(), vv.0.clone()));
@@ -215,6 +219,7 @@ fn init_tracer() -> SdkTracerProvider {
         SdkTracerProvider::builder()
             .with_span_processor(EnrichWithBaggageSpanProcessor)
             .with_simple_exporter(SpanExporter::default()),
+        None,
     )
 }
 
