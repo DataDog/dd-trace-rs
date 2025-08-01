@@ -194,9 +194,13 @@ pub struct Config {
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
 
-    /// Telemetry configuration
+    // # Telemetry configuration
+    /// Disables telemetry if false
     telemetry_enabled: bool,
+    /// Disables telemetry log collection if false.
     telemetry_log_collection_enabled: bool,
+    /// Interval by which telemetry events are flushed (seconds)
+    telemetry_heartbeat_interval: f64,
 
     /// Trace propagation configuration
     trace_propagation_style: Option<Vec<TracePropagationStyle>>,
@@ -274,6 +278,10 @@ impl Config {
                 sources.get_parse("DD_TELEMETRY_LOG_COLLECTION_ENABLED"),
             )
             .unwrap_or(default.telemetry_log_collection_enabled),
+            telemetry_heartbeat_interval: to_val(
+                sources.get_parse("DD_TELEMETRY_HEARTBEAT_INTERVAL"),
+            )
+            .unwrap_or(default.telemetry_heartbeat_interval),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -393,6 +401,10 @@ impl Config {
         self.telemetry_log_collection_enabled
     }
 
+    pub fn telemetry_heartbeat_interval(&self) -> f64 {
+        self.telemetry_heartbeat_interval
+    }
+
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style.as_deref()
     }
@@ -434,6 +446,7 @@ fn default_config() -> Config {
 
         telemetry_enabled: true,
         telemetry_log_collection_enabled: true,
+        telemetry_heartbeat_interval: 60.0,
 
         trace_propagation_style: None,
         trace_propagation_style_extract: None,
@@ -485,6 +498,11 @@ impl ConfigBuilder {
 
     pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.telemetry_log_collection_enabled = enabled;
+        self
+    }
+
+    pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
+        self.config.telemetry_heartbeat_interval = seconds;
         self
     }
 
@@ -861,6 +879,7 @@ mod tests {
             [
                 ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
                 ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
@@ -868,6 +887,7 @@ mod tests {
 
         assert!(!config.telemetry_enabled());
         assert!(!config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 42.0);
     }
 
     #[test]
@@ -877,6 +897,7 @@ mod tests {
             [
                 ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
                 ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
             ],
             ConfigSourceOrigin::EnvVar,
         ));
@@ -884,11 +905,13 @@ mod tests {
 
         builder
             .set_telemetry_enabled(true)
-            .set_telemetry_log_collection_enabled(true);
+            .set_telemetry_log_collection_enabled(true)
+            .set_telemetry_heartbeat_interval(0.1);
 
         let config = builder.build();
 
         assert!(config.telemetry_enabled());
         assert!(config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
     }
 }

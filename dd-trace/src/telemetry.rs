@@ -82,8 +82,9 @@ pub fn init_telemetry(
             config.tracer_version().to_string(),
         );
         builder.config = ddtelemetry::config::Config::from_env();
-        builder.config.telemetry_heartbeat_interval = Duration::from_secs(60);
-        builder.config.debug_enabled = true;
+        builder.config.telemetry_heartbeat_interval =
+            Duration::from_secs_f64(config.telemetry_heartbeat_interval());
+        // builder.config.debug_enabled = true;
 
         match builder.run() {
             Ok(handle) => Some(Box::new(handle)),
