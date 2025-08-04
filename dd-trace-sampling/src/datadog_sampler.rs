@@ -24,6 +24,7 @@ use crate::glob_matcher::GlobMatcher;
 use crate::otel_mappings::PreSampledSpan;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
+use crate::rules_sampler::{RulesSampler, SamplingRulesConfig};
 use crate::utils;
 
 fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
@@ -248,7 +249,7 @@ impl From<&str> for RuleProvenance {
 #[derive(Clone, Debug)]
 pub struct DatadogSampler {
     /// Sampling rules to apply, in order of precedence
-    rules: Vec<SamplingRule>,
+    rules: RulesSampler,
 
     /// Service-based samplers provided by the Agent
     service_samplers: ServicesSampler,
@@ -271,7 +272,7 @@ impl DatadogSampler {
         let limiter = RateLimiter::new(rate_limit, None);
 
         DatadogSampler {
-            rules,
+            rules: RulesSampler::new(rules),
             service_samplers: ServicesSampler::default(),
             rate_limiter: limiter,
             resource,
@@ -297,6 +298,42 @@ impl DatadogSampler {
         })
     }
 
+    /// Creates a callback for updating sampling rules from remote configuration
+    ///
+    /// # Returns
+    /// A boxed function that takes a JSON string and updates the sampling rules
+    ///
+    /// # Example
+    /// The callback expects JSON in the following format:
+    /// ```json
+    /// {
+    ///   "rules": [
+    ///     {
+    ///       "sample_rate": 0.5,
+    ///       "service": "web-*",
+    ///       "name": "http.*",
+    ///       "resource": "/api/*",
+    ///       "tags": {"env": "prod"},
+    ///       "provenance": "customer"
+    ///     }
+    ///   ]
+    /// }
+    /// ```
+    pub fn on_rules_update(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        let rules_sampler = self.rules.clone();
+        Box::new(move |s: &str| {
+            let Ok(config) = serde_json::de::from_str::<SamplingRulesConfig>(s) else {
+                return;
+            };
+
+            // Convert the rule configs to SamplingRule instances
+            let new_rules = config.into_rules();
+
+            // Update the rules
+            rules_sampler.update_rules(new_rules);
+        })
+    }
+
     /// Computes a key for service-based sampling
     fn service_key(&self, span: &impl OtelSpan) -> String {
         // Get service directly from resource
@@ -308,8 +345,8 @@ impl DatadogSampler {
     }
 
     /// Finds the highest precedence rule that matches the span
-    fn find_matching_rule(&self, span: &PreSampledSpan) -> Option<&SamplingRule> {
-        self.rules.iter().find(|rule| rule.matches(span))
+    fn find_matching_rule(&self, span: &PreSampledSpan) -> Option<SamplingRule> {
+        self.rules.find_matching_rule(|rule| rule.matches(span))
     }
 
     /// Returns the sampling mechanism used for the decision
@@ -375,7 +412,7 @@ impl DatadogSampler {
         let matching_rule = self.find_matching_rule(&span);
 
         // Apply sampling logic
-        if let Some(rule) = matching_rule {
+        if let Some(rule) = &matching_rule {
             // Get the sample rate from the rule
             sample_rate = rule.sample_rate;
 
@@ -407,7 +444,7 @@ impl DatadogSampler {
         }
 
         // Determine the sampling mechanism
-        let mechanism = self.get_sampling_mechanism(matching_rule, used_agent_sampler);
+        let mechanism = self.get_sampling_mechanism(matching_rule.as_ref(), used_agent_sampler);
 
         DdSamplingResult {
             is_keep,
@@ -672,7 +709,6 @@ mod tests {
         let rule = SamplingRule::new(0.5, None, None, None, None, None);
         let sampler_with_rules = DatadogSampler::new(vec![rule], 200, create_empty_resource_arc());
         assert_eq!(sampler_with_rules.rules.len(), 1);
-        assert_eq!(sampler_with_rules.rules[0].sample_rate, 0.5);
     }
 
     #[test]
@@ -794,16 +830,9 @@ mod tests {
                 matching_rule_for_attrs1.is_some(),
                 "Expected rule1 to match for service1"
             );
-            assert_eq!(
-                matching_rule_for_attrs1.unwrap().sample_rate,
-                0.1,
-                "Expected rule1 sample rate"
-            );
-            assert_eq!(
-                matching_rule_for_attrs1.unwrap().provenance,
-                "customer",
-                "Expected rule1 provenance"
-            );
+            let rule = matching_rule_for_attrs1.unwrap();
+            assert_eq!(rule.sample_rate, 0.1, "Expected rule1 sample rate");
+            assert_eq!(rule.provenance, "customer", "Expected rule1 provenance");
         }
 
         // Test with a specific service that should match the second rule (rule2)
@@ -817,16 +846,9 @@ mod tests {
                 matching_rule_for_attrs2.is_some(),
                 "Expected rule2 to match for service2"
             );
-            assert_eq!(
-                matching_rule_for_attrs2.unwrap().sample_rate,
-                0.2,
-                "Expected rule2 sample rate"
-            );
-            assert_eq!(
-                matching_rule_for_attrs2.unwrap().provenance,
-                "dynamic",
-                "Expected rule2 provenance"
-            );
+            let rule = matching_rule_for_attrs2.unwrap();
+            assert_eq!(rule.sample_rate, 0.2, "Expected rule2 sample rate");
+            assert_eq!(rule.provenance, "dynamic", "Expected rule2 provenance");
         }
 
         // Test with a service that matches the wildcard rule (rule3)
@@ -840,16 +862,9 @@ mod tests {
                 matching_rule_for_attrs3.is_some(),
                 "Expected rule3 to match for service3"
             );
-            assert_eq!(
-                matching_rule_for_attrs3.unwrap().sample_rate,
-                0.3,
-                "Expected rule3 sample rate"
-            );
-            assert_eq!(
-                matching_rule_for_attrs3.unwrap().provenance,
-                "default",
-                "Expected rule3 provenance"
-            );
+            let rule = matching_rule_for_attrs3.unwrap();
+            assert_eq!(rule.sample_rate, 0.3, "Expected rule3 sample rate");
+            assert_eq!(rule.provenance, "default", "Expected rule3 provenance");
         }
 
         // Test with a service that doesn't match any rule's service pattern
@@ -1701,5 +1716,88 @@ mod tests {
         // Should not match our http rule since operation name would be "http.server.request"
         // But should still be sampled (default behavior)
         assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
+    }
+
+    #[test]
+    fn test_on_rules_update_callback() {
+        // Create a sampler with initial rules
+        let initial_rule = SamplingRule::new(
+            0.1,
+            Some("initial-service".to_string()),
+            None,
+            None,
+            None,
+            Some("default".to_string()),
+        );
+
+        // Create a resource with a service name that will match our test rule
+        let test_resource = Arc::new(RwLock::new(
+            opentelemetry_sdk::Resource::builder_empty()
+                .with_attributes(vec![KeyValue::new(
+                    semconv::resource::SERVICE_NAME,
+                    "web-frontend",
+                )])
+                .build(),
+        ));
+
+        let sampler = DatadogSampler::new(vec![initial_rule], 100, test_resource);
+
+        // Verify initial state
+        assert_eq!(sampler.rules.len(), 1);
+
+        // Get the callback
+        let callback = sampler.on_rules_update();
+
+        // Create JSON for new rules
+        let json_config = r#"{
+            "rules": [
+                {
+                    "sample_rate": 0.5,
+                    "service": "web-*",
+                    "name": "http.*",
+                    "provenance": "customer"
+                },
+                {
+                    "sample_rate": 0.2,
+                    "service": "api-*",
+                    "resource": "/api/*",
+                    "tags": {"env": "prod"},
+                    "provenance": "dynamic"
+                }
+            ]
+        }"#;
+
+        // Apply the update
+        callback(json_config);
+
+        // Verify the rules were updated
+        assert_eq!(sampler.rules.len(), 2);
+
+        // Test that the new rules work by finding a matching rule
+        // Create attributes that will generate an operation name matching "http.*"
+        let attrs = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"), // This will make operation name "http.client.request"
+        ];
+        let resource_guard = sampler.resource.read().unwrap();
+        let span = PreSampledSpan::new(
+            "test-span",
+            SpanKind::Client,
+            attrs.as_slice(),
+            &resource_guard,
+        );
+
+        let matching_rule = sampler.find_matching_rule(&span);
+        assert!(matching_rule.is_some(), "Expected to find a matching rule for service 'web-frontend' and name 'http.client.request'");
+        let rule = matching_rule.unwrap();
+        assert_eq!(rule.sample_rate, 0.5);
+        assert_eq!(rule.provenance, "customer");
+
+        // Test with invalid JSON - should not crash
+        callback("invalid json");
+        assert_eq!(sampler.rules.len(), 2); // Should still have the same rules
+
+        // Test with empty rules array
+        callback(r#"{"rules": []}"#);
+        assert_eq!(sampler.rules.len(), 0); // Should now have no rules
     }
 }
