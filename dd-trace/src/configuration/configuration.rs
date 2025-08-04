@@ -44,7 +44,7 @@ fn default_provenance() -> String {
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ParsedSamplingRules {
     rules: Vec<SamplingRuleConfig>,
 }
@@ -61,6 +61,101 @@ impl FromStr for ParsedSamplingRules {
         Ok(ParsedSamplingRules { rules: rules_vec })
     }
 }
+
+/// Source of a configuration value
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSource {
+    #[allow(dead_code)] // Used in tests, returned by source()
+    Default,
+    EnvVar,
+    #[allow(dead_code)] // Will be used when set_code is called from user code  
+    Code,
+    #[allow(dead_code)] // Will be used for remote configuration
+    RemoteConfig,
+}
+
+/// Configuration item that tracks the value of a setting and where it came from
+// This allows us to manage configuration precedence
+#[derive(Debug, Clone)]
+pub struct ConfigItem<T> {
+    name: String,
+    default_value: T,
+    env_value: Option<T>,
+    code_value: Option<T>,
+    rc_value: Option<T>,
+}
+
+impl<T: Clone> ConfigItem<T> {
+    /// Creates a new ConfigItem with a default value
+    pub fn new(name: impl Into<String>, default: T) -> Self {
+        Self {
+            name: name.into(),
+            default_value: default,
+            env_value: None,
+            code_value: None,
+            rc_value: None,
+        }
+    }
+
+    /// Sets a value from a specific source
+    pub fn set_value_source(&mut self, value: T, source: ConfigSource) {
+        match source {
+            ConfigSource::Code => self.code_value = Some(value),
+            ConfigSource::RemoteConfig => self.rc_value = Some(value),
+            ConfigSource::EnvVar => self.env_value = Some(value),
+            ConfigSource::Default => {
+                dd_warn!("Cannot set default value after initialization");
+            }
+        }
+    }
+
+    /// Sets the code value (convenience method)
+    pub fn set_code(&mut self, value: T) {
+        self.code_value = Some(value);
+    }
+
+    /// Unsets the remote config value
+    #[allow(dead_code)] // Will be used when implementing remote configuration
+    pub fn unset_rc(&mut self) {
+        self.rc_value = None;
+    }
+
+    /// Gets the current value based on priority:
+    /// remote_config > code > env_var > default
+    pub fn value(&self) -> &T {
+        self.rc_value
+            .as_ref()
+            .or(self.code_value.as_ref())
+            .or(self.env_value.as_ref())
+            .unwrap_or(&self.default_value)
+    }
+
+    /// Gets the source of the current value
+    #[allow(dead_code)] // Used in tests and will be used for remote configuration
+    pub fn source(&self) -> ConfigSource {
+        if self.rc_value.is_some() {
+            ConfigSource::RemoteConfig
+        } else if self.code_value.is_some() {
+            ConfigSource::Code
+        } else if self.env_value.is_some() {
+            ConfigSource::EnvVar
+        } else {
+            ConfigSource::Default
+        }
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Display for ConfigItem<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "<ConfigItem name={} default={:?} env_value={:?} code_value={:?} rc_value={:?}>",
+            self.name, self.default_value, self.env_value, self.code_value, self.rc_value
+        )
+    }
+}
+
+type SamplingRulesConfigItem = ConfigItem<ParsedSamplingRules>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -171,7 +266,7 @@ pub struct Config {
     // # Sampling
     ///  A list of sampling rules. Each rule is matched against the root span of a trace
     /// If a rule matches, the trace is sampled with the associated sample rate.
-    trace_sampling_rules: Vec<SamplingRuleConfig>,
+    trace_sampling_rules: SamplingRulesConfigItem,
 
     /// Maximum number of spans to sample per second
     /// Only applied if trace_sampling_rules are matched
@@ -227,6 +322,17 @@ impl Config {
         let parsed_sampling_rules_config =
             to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
 
+        // Initialize the sampling rules ConfigItem
+        let mut sampling_rules_item = ConfigItem::new(
+            "DD_TRACE_SAMPLING_RULES",
+            ParsedSamplingRules::default(), // default is empty rules
+        );
+
+        // Set env value if it was parsed from environment
+        if let Some(rules) = parsed_sampling_rules_config {
+            sampling_rules_item.set_value_source(rules, ConfigSource::EnvVar);
+        }
+
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
@@ -245,10 +351,8 @@ impl Config {
                 .unwrap_or(default.trace_agent_url),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
 
-            // Populate from parsed_sampling_rules_config or defaults
-            trace_sampling_rules: parsed_sampling_rules_config
-                .map(|psc| psc.rules)
-                .unwrap_or(default.trace_sampling_rules),
+            // Use the initialized ConfigItem
+            trace_sampling_rules: sampling_rules_item,
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .unwrap_or(default.trace_rate_limit),
 
@@ -335,7 +439,7 @@ impl Config {
     }
 
     pub fn trace_sampling_rules(&self) -> &[SamplingRuleConfig] {
-        self.trace_sampling_rules.as_ref()
+        self.trace_sampling_rules.value().rules.as_ref()
     }
 
     pub fn trace_rate_limit(&self) -> i32 {
@@ -394,7 +498,10 @@ fn default_config() -> Config {
 
         trace_agent_url: Cow::Borrowed("http://localhost:8126"),
         dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-        trace_sampling_rules: Vec::new(),
+        trace_sampling_rules: ConfigItem::new(
+            "DD_TRACE_SAMPLING_RULES",
+            ParsedSamplingRules::default(), // Empty rules by default
+        ),
         trace_rate_limit: 100,
         enabled: true,
         log_level_filter: LevelFilter::default(),
@@ -453,7 +560,9 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
-        self.config.trace_sampling_rules = rules;
+        // Create a new ParsedSamplingRules and set it as code value
+        let parsed_rules = ParsedSamplingRules { rules };
+        self.config.trace_sampling_rules.set_code(parsed_rules);
         self
     }
 
@@ -811,5 +920,89 @@ mod tests {
             .build();
 
         assert!(!config.trace_stats_computation_enabled());
+    }
+
+    #[test]
+    fn test_config_item_priority() {
+        // Test that ConfigItem respects priority: remote_config > code > env_var > default
+        let mut config_item =
+            ConfigItem::new("DD_TRACE_SAMPLING_RULES", ParsedSamplingRules::default());
+
+        // Default value
+        assert_eq!(config_item.source(), ConfigSource::Default);
+        assert_eq!(config_item.value().rules.len(), 0);
+
+        // Env overrides default
+        config_item.set_value_source(
+            ParsedSamplingRules {
+                rules: vec![SamplingRuleConfig {
+                    sample_rate: 0.3,
+                    ..SamplingRuleConfig::default()
+                }],
+            },
+            ConfigSource::EnvVar,
+        );
+        assert_eq!(config_item.source(), ConfigSource::EnvVar);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.3);
+
+        // Code overrides env
+        config_item.set_code(ParsedSamplingRules {
+            rules: vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                ..SamplingRuleConfig::default()
+            }],
+        });
+        assert_eq!(config_item.source(), ConfigSource::Code);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+
+        // Remote config overrides all
+        config_item.set_value_source(
+            ParsedSamplingRules {
+                rules: vec![SamplingRuleConfig {
+                    sample_rate: 0.8,
+                    ..SamplingRuleConfig::default()
+                }],
+            },
+            ConfigSource::RemoteConfig,
+        );
+        assert_eq!(config_item.source(), ConfigSource::RemoteConfig);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.8);
+
+        // Unset RC falls back to code
+        config_item.unset_rc();
+        assert_eq!(config_item.source(), ConfigSource::Code);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_sampling_rules_with_config_item() {
+        // Test integration: env var is parsed, then overridden by code
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "DD_TRACE_SAMPLING_RULES",
+                r#"[{"sample_rate":0.25,"service":"env-service"}]"#,
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+
+        // First, env var should be used
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.25);
+
+        // Builder override should take precedence
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.75,
+                service: Some("code-service".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.75);
+        assert_eq!(
+            config.trace_sampling_rules()[0].service.as_ref().unwrap(),
+            "code-service"
+        );
     }
 }
