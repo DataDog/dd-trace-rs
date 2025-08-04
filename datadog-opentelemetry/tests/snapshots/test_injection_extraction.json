@@ -24,6 +24,7 @@
       "_top_level": 1.0
     },
     "duration": 2191000,
+    "error": 0,
     "start": 1748951431412730000
   },
      {
@@ -50,5 +51,6 @@
          "_sampling_priority_v1": 2.0
        },
        "duration": 2155000,
+       "error": 0,	
        "start": 1748951431412759000
      }]]
