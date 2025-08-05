@@ -203,10 +203,7 @@ pub fn tracing() -> DatadogTracingBuilder {
     }
 }
 
-
-#[deprecated(
-    note = "Use `datadog_opentelemetry::tracing()` instead",
-)]
+#[deprecated(note = "Use `datadog_opentelemetry::tracing()` instead")]
 // TODO: update system tests to use the new API and remove this function
 pub fn init_datadog(
     config: dd_trace::Config,
