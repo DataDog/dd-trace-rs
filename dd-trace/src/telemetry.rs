@@ -2,24 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
+    any::Any,
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };
 
+use anyhow::Error;
 use ddtelemetry::{
     data::{self},
     worker::{self, TelemetryWorkerHandle},
 };
 
-use crate::{dd_debug, dd_error, dd_info, Config};
-
-static INIT_TELEMETRY_LOCK: Mutex<()> = Mutex::new(());
+use crate::{dd_error, dd_info, Config};
 
 static TELEMETRY: OnceLock<Arc<Mutex<Telemetry>>> = OnceLock::new();
 
-pub trait TelemetryHandle: Sync + Send + 'static {
+pub trait TelemetryHandle: Sync + Send + 'static + Any {
     fn add_error_log(
-        &self,
+        &mut self,
         message: String,
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error>;
@@ -27,11 +27,13 @@ pub trait TelemetryHandle: Sync + Send + 'static {
     fn send_start(&self) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl TelemetryHandle for TelemetryWorkerHandle {
     fn add_error_log(
-        &self,
+        &mut self,
         message: String,
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error> {
@@ -45,8 +47,13 @@ impl TelemetryHandle for TelemetryWorkerHandle {
     fn send_stop(&self) -> Result<(), anyhow::Error> {
         self.send_stop()
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
+#[derive(Default)]
 struct Telemetry {
     handle: Option<Box<dyn TelemetryHandle>>,
     enabled: bool,
@@ -58,24 +65,41 @@ pub fn init_telemetry(
     service_name: Option<String>,
     custom_handle: Option<Box<dyn TelemetryHandle>>,
 ) {
-    let _guard = INIT_TELEMETRY_LOCK.lock().unwrap();
+    init_telemetry_inner(config, service_name, custom_handle, &TELEMETRY);
+}
 
-    if let Some(telemetry) = TELEMETRY.get() {
-        dd_debug!("Updating already initialized telemetry");
+fn init_telemetry_inner(
+    config: &Config,
+    service_name: Option<String>,
+    custom_handle: Option<Box<dyn TelemetryHandle>>,
+    telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
+) {
+    telemetry_cell.get_or_init(|| {
+        match make_telemetry_worker(config, service_name, custom_handle) {
+            Ok(handle) => {
+                handle.send_start().ok();
+                Arc::new(Mutex::new(Telemetry {
+                    handle: Some(handle),
+                    enabled: config.telemetry_enabled(),
+                    log_collection_enabled: config.telemetry_log_collection_enabled(),
+                }))
+            }
+            Err(err) => {
+                dd_error!("Error initializing telemetry worker: {err:?}");
+                Arc::new(Mutex::new(Telemetry::default()))
+            }
+        }
+    });
+}
 
-        let mut telemetry = telemetry.lock().unwrap();
-        telemetry.enabled = config.telemetry_enabled();
-        telemetry.log_collection_enabled = config.telemetry_log_collection_enabled();
-
-        return;
-    } else if !config.telemetry_enabled() {
-        dd_info!("Telemetry not enabled");
-        return;
-    }
-
-    let handle: Option<Box<dyn TelemetryHandle>> = if custom_handle.is_none() {
+fn make_telemetry_worker(
+    config: &Config,
+    service_name: Option<String>,
+    custom_handle: Option<Box<dyn TelemetryHandle>>,
+) -> Result<Box<dyn TelemetryHandle>, Error> {
+    if custom_handle.is_none() {
         let mut builder = worker::TelemetryWorkerBuilder::new(
-            "127.0.0.1".to_string(), // FIXME
+            config.trace_agent_url().to_string(),
             service_name.unwrap_or(config.service().to_string()),
             config.language().to_string(),
             config.language_version().to_string(),
@@ -86,90 +110,90 @@ pub fn init_telemetry(
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
         // builder.config.debug_enabled = true;
 
-        match builder.run() {
-            Ok(handle) => Some(Box::new(handle)),
-            Err(err) => {
-                dd_error!("Error initializing telemetry worker: {err:?}");
-                None
-            }
-        }
+        builder
+            .run()
+            .map(|handle| Box::new(handle) as Box<dyn TelemetryHandle>)
     } else {
-        custom_handle
-    };
-
-    if let Some(ref handle) = handle {
-        handle.send_start().ok();
-    };
-
-    if TELEMETRY
-        .set(Arc::new(Mutex::new(Telemetry {
-            handle,
-            enabled: config.telemetry_enabled(),
-            log_collection_enabled: config.telemetry_log_collection_enabled(),
-        })))
-        .is_err()
-    {
-        dd_error!("Error initializing telemetry");
+        custom_handle.ok_or_else(|| Error::msg("Custom telemetry handle not provided"))
     }
 }
 
 pub fn stop_telemetry() {
-    if let Some(telemetry) = TELEMETRY.get() {
-        if let Ok(telemetry) = telemetry.lock() {
-            if let Some(ref handle) = telemetry.handle {
-                dd_info!("Stopping telemetry");
-                handle.send_stop().ok();
-            }
-        }
-    }
+    stop_telemetry_inner(&TELEMETRY);
+}
+
+fn stop_telemetry_inner(telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>) {
+    let Some(telemetry) = telemetry_cell.get() else {
+        return;
+    };
+    let Ok(telemetry) = telemetry.lock() else {
+        return;
+    };
+    let Some(handle) = &telemetry.handle else {
+        return;
+    };
+    dd_info!("Stopping telemetry");
+    handle.send_stop().ok();
+}
+
+pub fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
+    add_log_error_inner(message, stack, &TELEMETRY)
 }
 
 // message should be a template and must avoid dynamic messages
-pub fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
-    if let Some(telemetry) = TELEMETRY.get() {
-        if let Ok(telemetry) = telemetry.lock() {
-            if telemetry.enabled && telemetry.log_collection_enabled {
-                if let Some(handle) = &telemetry.handle {
-                    handle.add_error_log(message.into(), stack).ok();
-                }
-            }
-        }
+fn add_log_error_inner<I: Into<String>>(
+    message: I,
+    stack: Option<String>,
+    telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
+) {
+    let Some(telemetry) = telemetry_cell.get() else {
+        return;
+    };
+    let Ok(mut telemetry) = telemetry.lock() else {
+        return;
+    };
+    if !telemetry.enabled || !telemetry.log_collection_enabled {
+        return;
     }
+    let Some(handle) = telemetry.handle.as_mut() else {
+        return;
+    };
+    handle.add_error_log(message.into(), stack).ok();
 }
 
 #[cfg(test)]
-#[serial_test::serial]
 mod tests {
     use ddtelemetry::data;
 
     use crate::{
-        dd_error,
-        telemetry::{add_log_error, init_telemetry, TelemetryHandle},
+        dd_debug, dd_error, dd_warn,
+        telemetry::{
+            add_log_error_inner, init_telemetry, init_telemetry_inner, TelemetryHandle, TELEMETRY,
+        },
         Config,
     };
 
-    use std::sync::Mutex;
+    use std::{any::Any, sync::OnceLock};
 
-    static LOGS: Mutex<Vec<(String, data::LogLevel, Option<String>)>> = Mutex::new(vec![]);
-
-    fn clear_logs() {
-        LOGS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    #[derive(Clone)]
+    struct TestTelemetryHandle {
+        pub logs: Vec<(String, data::LogLevel, Option<String>)>,
     }
 
-    fn logs() -> std::sync::MutexGuard<'static, Vec<(String, data::LogLevel, Option<String>)>> {
-        LOGS.lock().unwrap_or_else(|e| e.into_inner())
+    impl TestTelemetryHandle {
+        fn new() -> Self {
+            TestTelemetryHandle { logs: vec![] }
+        }
     }
-
-    struct TestTelemetryHandle {}
 
     impl TelemetryHandle for TestTelemetryHandle {
         fn add_error_log(
-            &self,
+            &mut self,
             message: String,
             stack_trace: Option<String>,
         ) -> Result<(), anyhow::Error> {
-            let mut logs = LOGS.lock().unwrap_or_else(|e| e.into_inner());
-            logs.push((message, data::LogLevel::Error, stack_trace));
+            self.logs
+                .push((message, data::LogLevel::Error, stack_trace));
             Ok(())
         }
 
@@ -180,61 +204,111 @@ mod tests {
         fn send_stop(&self) -> Result<(), anyhow::Error> {
             Ok(())
         }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
     }
 
     #[test]
     fn test_add_log_error_telemetry_disabled() {
-        clear_logs();
-
         let config = Config::builder().set_telemetry_enabled(false).build();
 
-        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            None,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
 
         let message = "test.error.telemetry.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        add_log_error(message, stack_trace.clone());
+        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
-        assert!(!logs().contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        assert!(!handle
+            .logs
+            .contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
     }
 
     #[test]
     fn test_add_log_error() {
-        clear_logs();
-
         let config = Config::builder().build();
 
-        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            None,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
 
         let message = "test.error.default";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        add_log_error(message, stack_trace.clone());
+        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
-        assert!(logs().contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        assert!(handle
+            .logs
+            .contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
     }
 
     #[test]
     fn test_add_log_error_log_collection_disabled() {
-        clear_logs();
-
         let config = Config::builder()
             .set_telemetry_log_collection_enabled(false)
             .build();
 
-        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            None,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
 
         let message = "test.error.log_collection.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        add_log_error(message, stack_trace.clone());
+        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
-        assert!(!logs().contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        assert!(!handle
+            .logs
+            .contains(&(message.to_string(), data::LogLevel::Error, stack_trace)));
     }
 
     #[test]
     fn test_add_log_error_from_log_macros() {
-        clear_logs();
+        let config = Config::builder()
+            .set_log_level_filter(crate::log::LevelFilter::Debug)
+            .build();
 
-        let config = Config::builder().build();
-        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle {})));
+        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle::new())));
 
         let expected_messages = [
             "This is an error".to_string(),
@@ -243,6 +317,8 @@ mod tests {
             "This is an error with mutiple {} {}".to_string(),
         ];
 
+        dd_debug!("This is an debug");
+        dd_warn!("This is an warn");
         dd_error!("This is an error");
         dd_error!("This is an error with {config:?}");
         dd_error!("This is an error with {:?}", config);
@@ -252,14 +328,28 @@ mod tests {
             "detail 2"
         );
 
-        let logs = logs();
+        let t = TELEMETRY.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
 
-        assert_eq!(logs.len(), 4);
+        // Errors are sent via Telemetry
+        let logs = handle.logs.clone();
+        expected_messages.iter().for_each(|message| {
+            let log = logs.iter().find(|(msg, _, _)| msg == message);
+            assert!(log.is_some());
+            let (_, level, stack_trace) = log.unwrap();
 
-        logs.iter().for_each(|(message, level, stack_trace)| {
-            assert!(expected_messages.contains(message));
             assert_eq!(*level, data::LogLevel::Error);
             assert!(stack_trace.is_some());
         });
+
+        // Other levels not
+        assert!(!logs.iter().any(|(msg, _, _)| msg == "This is an debug"));
+        assert!(!logs.iter().any(|(msg, _, _)| msg == "This is an warn"));
     }
 }
