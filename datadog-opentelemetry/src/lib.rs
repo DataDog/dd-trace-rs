@@ -15,8 +15,7 @@
 //!
 //! ```rust
 //! # fn main() {
-//! datadog_opentelemetry::tracing()
-//!    .init();
+//! datadog_opentelemetry::tracing().init();
 //! # }
 //! ```
 //!
@@ -25,30 +24,41 @@
 //! ```rust
 //! // Custom datadog configuration
 //! datadog_opentelemetry::tracing()
-//!     .with_config(dd_trace::Config::builder()
-//!         .set_service("my_service".to_string())
-//!         .set_env("my_env".to_string())
-//!         .set_version("1.0.0".to_string())
-//!         .build()
+//!     .with_config(
+//!         dd_trace::Config::builder()
+//!             .set_service("my_service".to_string())
+//!             .set_env("my_env".to_string())
+//!             .set_version("1.0.0".to_string())
+//!             .build(),
 //!     )
 //!     .init();
 //! ```
 //!
 //! Or to pass options to the OpenTelemetry SDK TracerProviderBuilder
 //! ```rust
-//! #[derive(Debug)]
-//! struct MySpanProcessor;
-//!
-//! impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor {
-//!     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {}
-//!     fn on_end(&self, span: opentelemetry_sdk::trace::SpanData) {}
-//!     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult { Ok(()) }
-//!     fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> opentelemetry_sdk::error::OTelSdkResult { Ok(()) }
-//!     fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
-//! }
-//!
+//! # #[derive(Debug)]
+//! # struct MySpanProcessor;
+//! #
+//! # impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor {
+//! #     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {
+//! #     }
+//! #     fn on_end(&self, span: opentelemetry_sdk::trace::SpanData) {}
+//! #     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+//! #         Ok(())
+//! #     }
+//! #     fn shutdown_with_timeout(
+//! #         &self,
+//! #         timeout: std::time::Duration,
+//! #     ) -> opentelemetry_sdk::error::OTelSdkResult {
+//! #         Ok(())
+//! #     }
+//! #     fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
+//! # }
+//! #
+//! // Custom otel tracer sdk options
 //! datadog_opentelemetry::tracing()
 //!     .with_max_attributes_per_span(64)
+//!     // Custom span processor
 //!     .with_span_processor(MySpanProcessor)
 //!     .init();
 //! ```
@@ -159,8 +169,7 @@ impl DatadogTracingBuilder {
 ///
 /// ```rust
 /// // Default configuration
-/// datadog_opentelemetry::tracing()
-///     .init();
+/// datadog_opentelemetry::tracing().init();
 /// ```
 ///
 /// It is also possible to customize the datadog configuration passed to the tracer provider.
@@ -168,30 +177,41 @@ impl DatadogTracingBuilder {
 /// ```rust
 /// // Custom datadog configuration
 /// datadog_opentelemetry::tracing()
-///     .with_config(dd_trace::Config::builder()
-///         .set_service("my_service".to_string())
-///         .set_env("my_env".to_string())
-///         .set_version("1.0.0".to_string())
-///         .build()
+///     .with_config(
+///         dd_trace::Config::builder()
+///             .set_service("my_service".to_string())
+///             .set_env("my_env".to_string())
+///             .set_version("1.0.0".to_string())
+///             .build(),
 ///     )
 ///     .init();
 /// ```
 ///
 /// Or to pass options to the OpenTelemetry SDK TracerProviderBuilder
 /// ```rust
-/// #[derive(Debug)]
-/// struct MySpanProcessor;
-///
-/// impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor {
-///     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {}
-///     fn on_end(&self, span: opentelemetry_sdk::trace::SpanData) {}
-///     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult { Ok(()) }
-///     fn shutdown_with_timeout(&self, timeout: std::time::Duration) -> opentelemetry_sdk::error::OTelSdkResult { Ok(()) }
-///     fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
-/// }
-///
+/// # #[derive(Debug)]
+/// # struct MySpanProcessor;
+/// #
+/// # impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor {
+/// #     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {
+/// #     }
+/// #     fn on_end(&self, span: opentelemetry_sdk::trace::SpanData) {}
+/// #     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+/// #         Ok(())
+/// #     }
+/// #     fn shutdown_with_timeout(
+/// #         &self,
+/// #         timeout: std::time::Duration,
+/// #     ) -> opentelemetry_sdk::error::OTelSdkResult {
+/// #         Ok(())
+/// #     }
+/// #     fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
+/// # }
+/// #
+/// // Custom otel tracer sdk options
 /// datadog_opentelemetry::tracing()
 ///     .with_max_attributes_per_span(64)
+///     // Custom span processor
 ///     .with_span_processor(MySpanProcessor)
 ///     .init();
 /// ```
