@@ -224,7 +224,7 @@ mod tests {
 
         let message = "test.error.telemetry.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
+        add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
         let t = telemetry_cell.get().unwrap().lock().unwrap();
         let handle = t
@@ -254,7 +254,7 @@ mod tests {
 
         let message = "test.error.default";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
+        add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
         let t = telemetry_cell.get().unwrap().lock().unwrap();
         let handle = t
@@ -286,7 +286,7 @@ mod tests {
 
         let message = "test.error.log_collection.disabled";
         let stack_trace = Some("At telemetry.rs:42".to_string());
-        let _ = add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
+        add_log_error_inner(message, stack_trace.clone(), &telemetry_cell);
 
         let t = telemetry_cell.get().unwrap().lock().unwrap();
         let handle = t
