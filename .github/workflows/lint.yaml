@@ -149,7 +149,7 @@ jobs:
       - name: Cache
         uses: ./.github/actions/cache
       - name: Install dd-rust-license-tool
-        run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
+        run: which dd-rust-license-tool || cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       # To ensure the dependency tree is identical between the CI runner and the
       # local license generation script (which also forces the 'git' protocol),
       # we explicitly set the crates.io protocol. Cargo's default can vary
