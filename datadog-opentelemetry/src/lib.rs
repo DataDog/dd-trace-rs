@@ -4,12 +4,12 @@
 //! # Datadog Opentelemetry
 //!
 //! A datadog layer of compatibility for the opentelemetry SDK
-//! 
+//!
 //! ## Usage
-//! 
+//!
 //! This is the minimal example to initialize the SDK.
-//! 
-//! This will read datadog and opentelemetry configuration from environment variables and other 
+//!
+//! This will read datadog and opentelemetry configuration from environment variables and other
 //! available sources.
 //! And initialize and set up the tracer provider and the text map propagator globally.
 //!
@@ -19,7 +19,7 @@
 //!    .init();
 //! # }
 //! ```
-//! 
+//!
 //! It is also possible to customize the datadog configuration passed to the tracer provider.
 //!
 //! ```rust
