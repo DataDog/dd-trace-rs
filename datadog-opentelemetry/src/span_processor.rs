@@ -483,7 +483,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        init_telemetry(&self.config, service_name, None);
+        init_telemetry(&self.config, service_name);
     }
 }
 

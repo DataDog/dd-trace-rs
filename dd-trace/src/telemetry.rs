@@ -17,7 +17,7 @@ use crate::{dd_error, dd_info, Config};
 
 static TELEMETRY: OnceLock<Arc<Mutex<Telemetry>>> = OnceLock::new();
 
-pub trait TelemetryHandle: Sync + Send + 'static + Any {
+trait TelemetryHandle: Sync + Send + 'static + Any {
     fn add_error_log(
         &mut self,
         message: String,
@@ -28,6 +28,7 @@ pub trait TelemetryHandle: Sync + Send + 'static + Any {
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
+    #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
 }
 
@@ -60,12 +61,8 @@ struct Telemetry {
     log_collection_enabled: bool,
 }
 
-pub fn init_telemetry(
-    config: &Config,
-    service_name: Option<String>,
-    custom_handle: Option<Box<dyn TelemetryHandle>>,
-) {
-    init_telemetry_inner(config, service_name, custom_handle, &TELEMETRY);
+pub fn init_telemetry(config: &Config, service_name: Option<String>) {
+    init_telemetry_inner(config, service_name, None, &TELEMETRY);
 }
 
 fn init_telemetry_inner(
@@ -167,9 +164,7 @@ mod tests {
 
     use crate::{
         dd_debug, dd_error, dd_warn,
-        telemetry::{
-            add_log_error_inner, init_telemetry, init_telemetry_inner, TelemetryHandle, TELEMETRY,
-        },
+        telemetry::{add_log_error_inner, init_telemetry_inner, TelemetryHandle, TELEMETRY},
         Config,
     };
 
@@ -308,7 +303,12 @@ mod tests {
             .set_log_level_filter(crate::log::LevelFilter::Debug)
             .build();
 
-        init_telemetry(&config, None, Some(Box::new(TestTelemetryHandle::new())));
+        init_telemetry_inner(
+            &config,
+            None,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &TELEMETRY,
+        );
 
         let expected_messages = [
             "This is an error".to_string(),
