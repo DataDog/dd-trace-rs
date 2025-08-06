@@ -50,14 +50,15 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     }
 
     // database
-    let db_system = span.get_attr_str(DB_SYSTEM);
+    let db_system = get_span_attributes(span, &[DB_SYSTEM, DB_SYSTEM_NAME]);
     if !db_system.is_empty() && is_client {
-        return Cow::Owned(format!("{}.query", db_system));
+        return Cow::Owned(format!("{}.query", db_system.to_lowercase()));
     }
 
     // messaging
     let messaging_system = span.get_attr_str(MESSAGING_SYSTEM);
-    let messaging_operation = span.get_attr_str(MESSAGING_OPERATION);
+    let messaging_operation =
+        get_span_attributes(span, &[MESSAGING_OPERATION, MESSAGING_OPERATION_TYPE]);
     if !messaging_system.is_empty()
         && !messaging_operation.is_empty()
         && matches!(
@@ -65,7 +66,7 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
             SpanKind::Client | SpanKind::Server | SpanKind::Consumer | SpanKind::Producer
         )
     {
-        return Cow::Owned(format!("{}.{}", messaging_system, messaging_operation));
+        return Cow::Owned(format!("{messaging_system}.{messaging_operation}").to_lowercase());
     }
 
     // RPC & AWS
@@ -75,31 +76,30 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     if is_client && is_aws {
         let rpc_service = span.get_attr_str(RPC_SERVICE);
         if !rpc_service.is_empty() {
-            return Cow::Owned(format!("aws.{}.request", rpc_service));
+            return Cow::Owned(format!("aws.{}.request", rpc_service.to_lowercase()));
         }
         return Cow::Borrowed("aws.client.request");
     }
     if is_client && is_rpc {
-        return Cow::Owned(format!("{}.client.request", rpc_system));
+        return Cow::Owned(format!("{}.client.request", rpc_system.to_lowercase()));
     }
     if is_server && is_rpc {
-        return Cow::Owned(format!("{}.server.request", rpc_system));
+        return Cow::Owned(format!("{}.server.request", rpc_system.to_lowercase()));
     }
 
     // FAAS client
     let faas_invoked_provider = span.get_attr_str(FAAS_INVOKED_PROVIDER);
     let faas_invoked_name = span.get_attr_str(FAAS_INVOKED_NAME);
     if is_client && !faas_invoked_provider.is_empty() && !faas_invoked_name.is_empty() {
-        return Cow::Owned(format!(
-            "{}.{}.invoke",
-            faas_invoked_provider, faas_invoked_name
-        ));
+        return Cow::Owned(
+            format!("{faas_invoked_provider}.{faas_invoked_name}.invoke").to_lowercase(),
+        );
     }
 
     // FAAS server
     let faas_trigger = span.get_attr_str(FAAS_TRIGGER);
     if !faas_trigger.is_empty() && is_server {
-        return Cow::Owned(format!("{}.invoke", faas_trigger));
+        return Cow::Owned(format!("{}.invoke", faas_trigger.to_lowercase()));
     }
 
     // GraphQL
@@ -111,12 +111,12 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
     let protocol = span.get_attr_str(NETWORK_PROTOCOL_NAME);
     if is_server {
         if !protocol.is_empty() {
-            return Cow::Owned(format!("{}.server.request", protocol));
+            return Cow::Owned(format!("{}.server.request", protocol.to_lowercase()));
         }
         return Cow::Borrowed("server.request");
     } else if is_client {
         if !protocol.is_empty() {
-            return Cow::Owned(format!("{}.client.request", protocol));
+            return Cow::Owned(format!("{}.client.request", protocol.to_lowercase()));
         }
         return Cow::Borrowed("client.request");
     }
@@ -125,11 +125,11 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
 
     // Fallback in span kind
     Cow::Borrowed(match span.span_kind() {
-        SpanKind::Client => "Client",
-        SpanKind::Server => "Server",
-        SpanKind::Producer => "Producer",
-        SpanKind::Consumer => "Consumer",
-        SpanKind::Internal => "Internal",
+        SpanKind::Client => "client",
+        SpanKind::Server => "server",
+        SpanKind::Producer => "producer",
+        SpanKind::Consumer => "consumer",
+        SpanKind::Internal => "internal",
     })
 }
 
@@ -148,19 +148,20 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         if matches!(span.span_kind(), SpanKind::Server) {
             let route = get_res_span_attributes(span, &[HTTP_ROUTE]);
             if !route.is_empty() {
-                return Cow::Owned(format!("{} {}", m, route));
+                return Cow::Owned(format!("{m} {route}"));
             }
         }
         return m;
     }
 
-    let messaging_operation = get_res_span_attributes(span, &[MESSAGING_OPERATION]);
+    let messaging_operation =
+        get_res_span_attributes(span, &[MESSAGING_OPERATION_TYPE, MESSAGING_OPERATION]);
     if !messaging_operation.is_empty() {
         let mut res_name = messaging_operation;
         let messaging_destination =
             get_res_span_attributes(span, &[MESSAGING_DESTINATION, MESSAGING_DESTINATION_NAME]);
         if !messaging_destination.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, messaging_destination));
+            res_name = Cow::Owned(format!("{res_name} {messaging_destination}"));
         }
         return res_name;
     }
@@ -170,7 +171,7 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         let mut res_name = rpc_method;
         let rpc_service = get_res_span_attributes(span, &[RPC_SERVICE]);
         if !rpc_service.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, rpc_service));
+            res_name = Cow::Owned(format!("{res_name} {rpc_service}"));
         }
         return res_name;
     }
@@ -180,12 +181,12 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
         let mut res_name = graphql_operation_type;
         let graphql_operation_name = get_res_span_attributes(span, &[GRAPHQL_OPERATION_NAME]);
         if !graphql_operation_name.is_empty() {
-            res_name = Cow::Owned(format!("{} {}", res_name, graphql_operation_name));
+            res_name = Cow::Owned(format!("{res_name} {graphql_operation_name}"));
         }
         return res_name;
     }
 
-    let db_system = get_res_span_attributes(span, &[DB_SYSTEM]);
+    let db_system = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
     if !db_system.is_empty() {
         let db_statement = get_res_span_attributes(span, &[DB_STATEMENT]);
         if !db_statement.is_empty() {
@@ -313,7 +314,7 @@ pub fn get_otel_span_type(span: &impl OtelSpan) -> Cow<'static, str> {
     match span.span_kind() {
         SpanKind::Server => Cow::Borrowed("web"),
         SpanKind::Client => {
-            let db = get_res_span_attributes(span, &[DB_SYSTEM]);
+            let db = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
             if db.is_empty() {
                 Cow::Borrowed("http")
             } else {
@@ -337,6 +338,14 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service(span: &impl OtelSpan) -> Cow<'static, str> {
+    // First, try to extract service from the span's attributes.
+    if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
+        if !service.is_empty() {
+            return service;
+        }
+    }
+
+    // If not in span attributes, check the resource attributes.
     let service: Option<_> = span.get_res_attribute_opt(SERVICE_NAME);
     if let Some(service) = service {
         if !service.as_str().is_empty() {
@@ -400,7 +409,7 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> BorrowedString {
         return BorrowedString::Static(mapped_key);
     }
     if let Some(suffix) = k.strip_prefix("http.request.header.") {
-        return BorrowedString::Owned(format!("http.request.headers.{}", suffix));
+        return BorrowedString::Owned(format!("http.request.headers.{suffix}"));
     }
     if is_datadog_convention_key(k) {
         return BorrowedString::Static("");
@@ -416,6 +425,17 @@ fn get_res_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) ->
         }
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             return attr;
+        }
+    }
+    Cow::Borrowed("")
+}
+
+fn get_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow<'static, str> {
+    for &attr_key in attributes {
+        if let Some(attr) = span.get_attr_str_opt(attr_key) {
+            if !attr.is_empty() {
+                return attr;
+            }
         }
     }
     Cow::Borrowed("")

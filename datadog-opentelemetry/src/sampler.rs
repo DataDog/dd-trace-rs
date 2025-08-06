@@ -45,6 +45,10 @@ impl Sampler {
             trace_registry,
         }
     }
+
+    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        self.sampler.on_agent_response()
+    }
 }
 
 impl ShouldSample for Sampler {
@@ -120,16 +124,16 @@ mod tests {
     #[test]
     fn test_create_sampler_with_sampling_rules() {
         // Build a fresh config to pick up the env var
-        let mut config = Config::builder();
-        config.set_trace_sampling_rules(vec![SamplingRuleConfig {
-            sample_rate: 0.5,
-            service: Some("test-service".to_string()),
-            name: None,
-            resource: None,
-            tags: HashMap::new(),
-            provenance: "customer".to_string(),
-        }]);
-        let config = config.build();
+        let config = Config::builder()
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("test-service".to_string()),
+                name: None,
+                resource: None,
+                tags: HashMap::new(),
+                provenance: "customer".to_string(),
+            }])
+            .build();
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
         let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
@@ -186,9 +190,11 @@ mod tests {
             let span_context = SpanContext::new(
                 trace_id,
                 span_id,
-                is_sampled
-                    .then_some(TraceFlags::SAMPLED)
-                    .unwrap_or_default(),
+                if is_sampled {
+                    TraceFlags::SAMPLED
+                } else {
+                    Default::default()
+                },
                 true,
                 trace_state.clone(),
             );

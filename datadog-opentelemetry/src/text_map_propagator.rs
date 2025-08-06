@@ -248,18 +248,20 @@ pub mod tests {
     const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
 
     fn get_propagator(styles: Option<Vec<TracePropagationStyle>>) -> DatadogPropagator {
-        let mut builder = Config::builder();
-
-        if let Some(ref styles) = styles {
-            builder.set_trace_propagation_style(styles.to_vec());
+        let config = if let Some(ref styles) = styles {
+            Config::builder()
+                .set_trace_propagation_style(styles.to_vec())
+                .build()
         } else {
-            builder.set_trace_propagation_style_extract(vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ]);
-        }
+            Config::builder()
+                .set_trace_propagation_style_extract(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                ])
+                .build()
+        };
 
-        DatadogPropagator::new(&builder.build(), Arc::new(TraceRegistry::new()))
+        DatadogPropagator::new(&config, Arc::new(TraceRegistry::new()))
     }
 
     #[derive(Debug)]
@@ -384,9 +386,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &expected_context,
-                "Error with traceparent: {}, tracestate: {}",
-                trace_parent,
-                trace_state
+                "Error with traceparent: {trace_parent}, tracestate: {trace_state}",
             )
         }
     }
@@ -423,8 +423,7 @@ pub mod tests {
             assert_eq!(
                 propagator.extract(&extractor).span().span_context(),
                 &opentelemetry::trace::SpanContext::empty_context(),
-                "{}",
-                reason
+                "{reason}",
             )
         }
     }

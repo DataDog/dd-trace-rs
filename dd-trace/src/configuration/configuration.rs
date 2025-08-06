@@ -3,9 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::{borrow::Cow, fmt::Display, ops::Deref, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
+
+extern crate rustc_version_runtime;
+use rustc_version_runtime::version;
 
 use crate::dd_warn;
+use crate::log::LevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
@@ -42,32 +46,6 @@ fn default_provenance() -> String {
 }
 
 pub const TRACER_VERSION: &str = "0.0.1";
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-/// The level at which the library will log
-pub enum LogLevel {
-    Debug,
-    Warn,
-    #[default]
-    Error,
-}
-
-impl FromStr for LogLevel {
-    type Err = &'static str;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("debug") {
-            Ok(LogLevel::Debug)
-        } else if s.eq_ignore_ascii_case("warn") {
-            Ok(LogLevel::Warn)
-        } else if s.eq_ignore_ascii_case("error") {
-            Ok(LogLevel::Error)
-        } else {
-            Err("log level should be one of DEBUG, WARN, ERROR")
-        }
-    }
-}
 
 #[derive(Debug, Default)]
 struct ParsedSamplingRules {
@@ -138,7 +116,26 @@ impl Display for TracePropagationStyle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+enum ServiceName {
+    Default,
+    Configured(String),
+}
+
+impl ServiceName {
+    fn is_default(&self) -> bool {
+        matches!(self, ServiceName::Default)
+    }
+
+    fn as_str(&self) -> &str {
+        match self {
+            ServiceName::Default => "unnamed-rust-service",
+            ServiceName::Configured(name) => name,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
 ///
@@ -146,16 +143,11 @@ impl Display for TracePropagationStyle {
 /// ```
 /// use dd_trace::Config;
 ///
-/// // This pulls configuration from the environment and other sources
-/// let mut builder = Config::builder();
 ///
-/// // Manual overrides
-/// builder
-///     .set_service("my-service".to_string())
-///     .set_version("1.0.0".to_string());
-///
-/// // Finalize the configuratiom
-/// let config = builder.build();
+/// let config = Config::builder() // This pulls configuration from the environment and other sources
+///     .set_service("my-service".to_string()) // Override service name
+///     .set_version("1.0.0".to_string()) // Override version
+/// .build();
 /// ```
 pub struct Config {
     // # Global
@@ -163,10 +155,11 @@ pub struct Config {
 
     // # Tracer
     tracer_version: &'static str,
-    language_version: &'static str,
+    language_version: String,
+    language: &'static str,
 
     // # Service tagging
-    service: String,
+    service: ServiceName,
     env: Option<String>,
     version: Option<String>,
 
@@ -190,12 +183,24 @@ pub struct Config {
 
     /// Disables the library if this is false
     enabled: bool,
-    /// The log level for the tracer
-    log_level: LogLevel,
+    /// The log level filter for the tracer
+    log_level_filter: LevelFilter,
+
+    /// Whether to enable stats computation for the tracer
+    /// Results in dropped spans not being sent to the agent
+    trace_stats_computation_enabled: bool,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
+
+    // # Telemetry configuration
+    /// Disables telemetry if false
+    telemetry_enabled: bool,
+    /// Disables telemetry log collection if false.
+    telemetry_log_collection_enabled: bool,
+    /// Interval by which telemetry events are flushed (seconds)
+    telemetry_heartbeat_interval: f64,
 
     /// Trace propagation configuration
     trace_propagation_style: Option<Vec<TracePropagationStyle>>,
@@ -206,7 +211,7 @@ pub struct Config {
 
 impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
-        let default = Config::default();
+        let default = default_config();
 
         /// Helper function to convert a CompositeConfigSourceResult<T> into an Option<T>
         /// This drops errors origin associated with the configuration collected while parsing the
@@ -238,7 +243,10 @@ impl Config {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
             language_version: default.language_version,
-            service: to_val(sources.get("DD_SERVICE")).unwrap_or(default.service),
+            language: default.language,
+            service: to_val(sources.get("DD_SERVICE"))
+                .map(ServiceName::Configured)
+                .unwrap_or(default.service),
             env: to_val(sources.get("DD_ENV")).or(default.env),
             version: to_val(sources.get("DD_VERSION")).or(default.version),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -258,7 +266,22 @@ impl Config {
                 .unwrap_or(default.trace_rate_limit),
 
             enabled: to_val(sources.get_parse("DD_TRACE_ENABLED")).unwrap_or(default.enabled),
-            log_level: to_val(sources.get_parse("DD_LOG_LEVEL")).unwrap_or(default.log_level),
+            log_level_filter: to_val(sources.get_parse("DD_LOG_LEVEL"))
+                .unwrap_or(default.log_level_filter),
+            trace_stats_computation_enabled: to_val(
+                sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"),
+            )
+            .unwrap_or(default.trace_stats_computation_enabled),
+            telemetry_enabled: to_val(sources.get_parse("DD_INSTRUMENTATION_TELEMETRY_ENABLED"))
+                .unwrap_or(default.telemetry_enabled),
+            telemetry_log_collection_enabled: to_val(
+                sources.get_parse("DD_TELEMETRY_LOG_COLLECTION_ENABLED"),
+            )
+            .unwrap_or(default.telemetry_log_collection_enabled),
+            telemetry_heartbeat_interval: to_val(
+                sources.get_parse("DD_TELEMETRY_HEARTBEAT_INTERVAL"),
+            )
+            .unwrap_or(default.telemetry_heartbeat_interval),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -302,12 +325,20 @@ impl Config {
         self.tracer_version
     }
 
+    pub fn language(&self) -> &str {
+        self.language
+    }
+
     pub fn language_version(&self) -> &str {
-        self.language_version
+        self.language_version.as_str()
     }
 
     pub fn service(&self) -> &str {
-        self.service.deref()
+        self.service.as_str()
+    }
+
+    pub fn service_is_default(&self) -> bool {
+        self.service.is_default()
     }
 
     pub fn env(&self) -> Option<&str> {
@@ -342,8 +373,12 @@ impl Config {
         self.enabled
     }
 
-    pub fn log_level(&self) -> &LogLevel {
-        &self.log_level
+    pub fn log_level_filter(&self) -> &LevelFilter {
+        &self.log_level_filter
+    }
+
+    pub fn trace_stats_computation_enabled(&self) -> bool {
+        self.trace_stats_computation_enabled
     }
 
     #[cfg(feature = "test-utils")]
@@ -356,6 +391,18 @@ impl Config {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    pub fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled
+    }
+
+    pub fn telemetry_log_collection_enabled(&self) -> bool {
+        self.telemetry_log_collection_enabled
+    }
+
+    pub fn telemetry_heartbeat_interval(&self) -> f64 {
+        self.telemetry_heartbeat_interval
     }
 
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
@@ -375,32 +422,36 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            runtime_id: Config::process_runtime_id(),
-            env: None,
-            // TODO(paulgdc): Default service naming detection, probably from arg0
-            service: "unnamed-rust-service".to_string(),
-            version: None,
-            global_tags: Vec::new(),
+fn default_config() -> Config {
+    Config {
+        runtime_id: Config::process_runtime_id(),
+        env: None,
+        // TODO(paullgdc): Default service naming detection, probably from arg0
+        service: ServiceName::Default,
+        version: None,
+        global_tags: Vec::new(),
 
-            trace_agent_url: Cow::Borrowed("http://localhost:8126"),
-            dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
-            trace_sampling_rules: Vec::new(),
-            trace_rate_limit: 100,
-            enabled: true,
-            log_level: LogLevel::default(),
-            tracer_version: TRACER_VERSION,
-            language_version: "TODO: Get from env",
-            #[cfg(feature = "test-utils")]
-            wait_agent_info_ready: false,
+        trace_agent_url: Cow::Borrowed("http://localhost:8126"),
+        dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
+        trace_sampling_rules: Vec::new(),
+        trace_rate_limit: 100,
+        enabled: true,
+        log_level_filter: LevelFilter::default(),
+        tracer_version: TRACER_VERSION,
+        language: "rust",
+        language_version: version().to_string(),
+        trace_stats_computation_enabled: true,
+        #[cfg(feature = "test-utils")]
+        wait_agent_info_ready: false,
 
-            trace_propagation_style: None,
-            trace_propagation_style_extract: None,
-            trace_propagation_style_inject: None,
-            trace_propagation_extract_first: false,
-        }
+        telemetry_enabled: true,
+        telemetry_log_collection_enabled: true,
+        telemetry_heartbeat_interval: 60.0,
+
+        trace_propagation_style: None,
+        trace_propagation_style_extract: None,
+        trace_propagation_style_inject: None,
+        trace_propagation_extract_first: false,
     }
 }
 
@@ -410,12 +461,13 @@ pub struct ConfigBuilder {
 
 impl ConfigBuilder {
     /// Finalizes the builder and returns the configuration
-    pub fn build(self) -> Config {
-        self.config
+    pub fn build(&self) -> Config {
+        crate::log::set_max_level(self.config.log_level_filter);
+        self.config.clone()
     }
 
     pub fn set_service(&mut self, service: String) -> &mut Self {
-        self.config.service = service;
+        self.config.service = ServiceName::Configured(service);
         self
     }
 
@@ -439,6 +491,21 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn set_telemetry_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.telemetry_enabled = enabled;
+        self
+    }
+
+    pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.telemetry_log_collection_enabled = enabled;
+        self
+    }
+
+    pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
+        self.config.telemetry_heartbeat_interval = seconds;
+        self
+    }
+
     pub fn set_trace_agent_url(&mut self, url: Cow<'static, str>) -> &mut Self {
         self.config.trace_agent_url = Cow::Owned(url.to_string());
         self
@@ -454,7 +521,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &Self {
+    pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &mut Self {
         self.config.trace_propagation_style = Some(styles);
         self
     }
@@ -462,7 +529,7 @@ impl ConfigBuilder {
     pub fn set_trace_propagation_style_extract(
         &mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> &mut Self {
         self.config.trace_propagation_style_extract = Some(styles);
         self
     }
@@ -470,12 +537,12 @@ impl ConfigBuilder {
     pub fn set_trace_propagation_style_inject(
         &mut self,
         styles: Vec<TracePropagationStyle>,
-    ) -> &Self {
+    ) -> &mut Self {
         self.config.trace_propagation_style_inject = Some(styles);
         self
     }
 
-    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &Self {
+    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
         self.config.trace_propagation_extract_first = first;
         self
     }
@@ -485,8 +552,16 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: LogLevel) -> &mut Self {
-        self.config.log_level = log_level;
+    pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
+        self.config.log_level_filter = filter;
+        self
+    }
+
+    pub fn set_trace_stats_computation_enabled(
+        &mut self,
+        trace_stats_computation_enabled: bool,
+    ) -> &mut Self {
+        self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
         self
     }
 
@@ -539,7 +614,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Debug);
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Debug);
     }
 
     #[test]
@@ -576,21 +651,20 @@ mod tests {
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
-            sample_rate: 0.8,
-            service: Some("manual-service".to_string()),
-            name: None,
-            resource: None,
-            tags: HashMap::new(),
-            provenance: "manual".to_string(),
-        }]);
-        builder.set_trace_rate_limit(200);
-        builder.set_service("manual-service".to_string());
-        builder.set_env("manual-env".to_string());
-        builder.set_log_level(super::LogLevel::Warn);
-
-        let config = builder.build();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.8,
+                service: Some("manual-service".to_string()),
+                name: None,
+                resource: None,
+                tags: HashMap::new(),
+                provenance: "manual".to_string(),
+            }])
+            .set_trace_rate_limit(200)
+            .set_service("manual-service".to_string())
+            .set_env("manual-env".to_string())
+            .set_log_level_filter(super::LevelFilter::Warn)
+            .build();
 
         assert_eq!(config.trace_rate_limit(), 200);
         let rules = config.trace_sampling_rules();
@@ -606,7 +680,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level(), &super::LogLevel::Warn);
+        assert_eq!(config.log_level_filter(), &super::LevelFilter::Warn);
     }
 
     #[test]
@@ -657,16 +731,15 @@ mod tests {
             ],
             ConfigSourceOrigin::EnvVar,
         ));
-        let mut builder = Config::builder_with_sources(&sources);
-        builder.set_trace_propagation_style(vec![
-            TracePropagationStyle::TraceContext,
-            TracePropagationStyle::Datadog,
-        ]);
-        builder.set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext]);
-        builder.set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog]);
-        builder.set_trace_propagation_extract_first(false);
-
-        let config = builder.build();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_propagation_style(vec![
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Datadog,
+            ])
+            .set_trace_propagation_style_extract(vec![TracePropagationStyle::TraceContext])
+            .set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog])
+            .set_trace_propagation_extract_first(false)
+            .build();
 
         assert_eq!(
             config.trace_propagation_style(),
@@ -764,5 +837,81 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_stats_computation_enabled_config() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.trace_stats_computation_enabled());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.trace_stats_computation_enabled());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "a")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.trace_stats_computation_enabled());
+
+        let config = Config::builder()
+            .set_trace_stats_computation_enabled(false)
+            .build();
+
+        assert!(!config.trace_stats_computation_enabled());
+    }
+
+    #[test]
+    fn test_telemetry_config_from_sources() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
+                ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(!config.telemetry_enabled());
+        assert!(!config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 42.0);
+    }
+
+    #[test]
+    fn test_telemetry_config() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
+                ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let mut builder = Config::builder_with_sources(&sources);
+
+        builder
+            .set_telemetry_enabled(true)
+            .set_telemetry_log_collection_enabled(true)
+            .set_telemetry_heartbeat_interval(0.1);
+
+        let config = builder.build();
+
+        assert!(config.telemetry_enabled());
+        assert!(config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
     }
 }

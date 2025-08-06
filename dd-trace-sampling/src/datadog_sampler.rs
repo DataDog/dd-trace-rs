@@ -17,6 +17,7 @@ use opentelemetry::KeyValue;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::agent_service_sampler::{AgentRates, ServicesSampler};
 // Import the attr constants
 use crate::constants::pattern::NO_RULE;
 use crate::glob_matcher::GlobMatcher;
@@ -250,7 +251,7 @@ pub struct DatadogSampler {
     rules: Vec<SamplingRule>,
 
     /// Service-based samplers provided by the Agent
-    service_samplers: HashMap<String, RateSampler>,
+    service_samplers: ServicesSampler,
 
     /// Rate limiter for limiting the number of spans per second
     rate_limiter: RateLimiter,
@@ -271,10 +272,29 @@ impl DatadogSampler {
 
         DatadogSampler {
             rules,
-            service_samplers: HashMap::new(),
+            service_samplers: ServicesSampler::default(),
             rate_limiter: limiter,
             resource,
         }
+    }
+
+    // used for tests
+    #[allow(dead_code)]
+    pub(crate) fn update_service_rates(&self, rates: impl IntoIterator<Item = (String, f64)>) {
+        self.service_samplers.update_rates(rates);
+    }
+
+    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        let service_samplers = self.service_samplers.clone();
+        Box::new(move |s: &str| {
+            let Ok(new_rates) = serde_json::de::from_str::<AgentRates>(s) else {
+                return;
+            };
+            let Some(new_rates) = new_rates.rates_by_service else {
+                return;
+            };
+            service_samplers.update_rates(new_rates.into_iter().map(|(k, v)| (k.to_string(), v)));
+        })
     }
 
     /// Computes a key for service-based sampling
@@ -284,16 +304,7 @@ impl DatadogSampler {
         // Get env from attributes
         let env = get_otel_env(span);
 
-        format!("service:{},env:{}", service, env)
-    }
-
-    /// Updates the service-based sample rates from the Agent
-    pub fn update_service_rates(&mut self, rates: HashMap<String, f64>) {
-        let mut samplers = HashMap::new();
-        for (key, rate) in rates {
-            samplers.insert(key, RateSampler::new(rate));
-        }
-        self.service_samplers = samplers;
+        format!("service:{service},env:{env}")
     }
 
     /// Finds the highest precedence rule that matches the span
@@ -487,10 +498,12 @@ mod tests {
     use super::*;
     use crate::constants::attr::{ENV_TAG, RESOURCE_TAG};
     use crate::constants::pattern;
-    use datadog_opentelemetry_mappings::semconv::attribute::{DB_SYSTEM, HTTP_STATUS_CODE};
+    use datadog_opentelemetry_mappings::semconv::attribute::{
+        DB_SYSTEM_NAME, MESSAGING_OPERATION_TYPE,
+    };
     use datadog_opentelemetry_mappings::semconv::trace::HTTP_RESPONSE_STATUS_CODE;
     use datadog_opentelemetry_mappings::semconv::{
-        attribute::{HTTP_METHOD, MESSAGING_OPERATION, MESSAGING_SYSTEM},
+        attribute::{HTTP_REQUEST_METHOD, MESSAGING_SYSTEM},
         trace::NETWORK_PROTOCOL_NAME,
     };
     use opentelemetry::trace::SpanKind;
@@ -678,7 +691,7 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource
-            format!("service:{},env:production", test_service_name)
+            format!("service:{test_service_name},env:production")
         );
 
         // Test with missing env
@@ -693,20 +706,20 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             // Expect the service name from the sampler's resource and an empty env
-            format!("service:{},env:", test_service_name)
+            format!("service:{test_service_name},env:")
         );
     }
 
     #[test]
     fn test_update_service_rates() {
-        let mut sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
 
         // Update with service rates
         let mut rates = HashMap::new();
         rates.insert("service:web,env:prod".to_string(), 0.5);
         rates.insert("service:api,env:prod".to_string(), 0.75);
 
-        sampler.update_service_rates(rates);
+        sampler.service_samplers.update_rates(rates);
 
         // Check number of samplers
         assert_eq!(sampler.service_samplers.len(), 2);
@@ -1278,34 +1291,20 @@ mod tests {
             None,
             None,
             Some(HashMap::from([(
-                "http.status_code".to_string(),
+                "http.response.status_code".to_string(),
                 "5*".to_string(),
             )])),
             None,
         );
 
         // Create attributes with OpenTelemetry naming convention
-        let otel_attrs = vec![
-            // OpenTelemetry uses http.response.status_code, but Datadog uses http.status_code
-            KeyValue::new("http.response.status_code", 500),
-        ];
+        let otel_attrs = vec![KeyValue::new("http.response.status_code", 500)];
 
-        // The rule should match because http.response.status_code maps to http.status_code
+        // The rule should match because both use the same OpenTelemetry attribute name
         assert!(rule.matches(&PreSampledSpan::new(
             "test-span",
             SpanKind::Client,
             otel_attrs.as_slice(),
-            &create_empty_resource()
-        )));
-
-        // Create attributes with Datadog naming convention (direct match)
-        let dd_attrs = vec![KeyValue::new("http.status_code", 500)];
-
-        // Direct match should also work
-        assert!(rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            dd_attrs.as_slice(),
             &create_empty_resource()
         )));
 
@@ -1388,7 +1387,7 @@ mod tests {
     #[test]
     fn test_direct_and_mapped_mixed_attributes() {
         // Constants for key names to improve readability and ensure consistency
-        let dd_status_key_str = HTTP_STATUS_CODE;
+        let dd_status_key_str = HTTP_RESPONSE_STATUS_CODE;
         let otel_response_status_key_str = HTTP_RESPONSE_STATUS_CODE;
         let custom_tag_key = "custom.tag";
         let custom_tag_value = "value";
@@ -1527,7 +1526,7 @@ mod tests {
 
         // 1. HTTP client request
         let http_client_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_METHOD),
+            Key::from_static_str(HTTP_REQUEST_METHOD),
             Value::String("GET".into()),
         )];
 
@@ -1556,7 +1555,7 @@ mod tests {
 
         // 2. HTTP server request
         let http_server_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_METHOD),
+            Key::from_static_str(HTTP_REQUEST_METHOD),
             Value::String("POST".into()),
         )];
 
@@ -1585,7 +1584,7 @@ mod tests {
 
         // 3. Database query
         let db_attrs = vec![KeyValue::new(
-            Key::from_static_str(DB_SYSTEM),
+            Key::from_static_str(DB_SYSTEM_NAME),
             Value::String("postgresql".into()),
         )];
 
@@ -1619,7 +1618,7 @@ mod tests {
                 Value::String("kafka".into()),
             ),
             KeyValue::new(
-                Key::from_static_str(MESSAGING_OPERATION),
+                Key::from_static_str(MESSAGING_OPERATION_TYPE),
                 Value::String("process".into()),
             ),
         ];
@@ -1658,7 +1657,7 @@ mod tests {
             &create_empty_resource(),
         ));
         assert_eq!(
-            internal_op_name, "Internal",
+            internal_op_name, "internal",
             "Internal operation name should be the span kind"
         );
 

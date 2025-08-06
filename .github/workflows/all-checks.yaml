@@ -22,3 +22,5 @@ jobs:
           # Checks for 15mn (30 * 30s)
           max-retries: 30
           polling-interval-seconds: 30
+          ignored-name-patterns: |
+            parametric.*

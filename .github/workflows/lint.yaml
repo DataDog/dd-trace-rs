@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust_version: ["1.81.0", "stable", "nightly-2024-12-16"]
+        rust_version: ["1.84.1", "stable", "nightly-2024-12-16"]
         platform: [windows-latest, ubuntu-latest]
     steps:
       - name: Checkout sources
@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           # shellcheck disable=SC2046
-          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings $([ ${{ matrix.rust_version }} = 1.81.0 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
   licensecheck:
     runs-on: ubuntu-latest
     name: "Presence of licence headers"
@@ -87,6 +87,7 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           # cache key contains current version of cargo-bundle-licenses
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
@@ -140,6 +141,7 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
           # cache key contains current version of dd-rust-license-tool
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
@@ -147,7 +149,7 @@ jobs:
       - name: Cache
         uses: ./.github/actions/cache
       - name: Install dd-rust-license-tool
-        run: cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
+        run: which dd-rust-license-tool || cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
       # To ensure the dependency tree is identical between the CI runner and the
       # local license generation script (which also forces the 'git' protocol),
       # we explicitly set the crates.io protocol. Cargo's default can vary

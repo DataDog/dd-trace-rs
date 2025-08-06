@@ -1,0 +1,18 @@
+[package]
+name = "simple_tracing"
+version = "0.1.0"
+edition = "2021"
+publish = false
+autobenches = false
+
+[[bin]]
+name = "simple_tracing"
+path = "src/main.rs"
+doc = false
+bench = false
+
+[dependencies]
+dd-trace = { path = "../../../dd-trace" }
+datadog-opentelemetry = { path = "../../../datadog-opentelemetry" }
+opentelemetry = "0.30.0"
+opentelemetry_sdk = "0.30.0"

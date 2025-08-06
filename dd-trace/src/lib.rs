@@ -9,7 +9,8 @@ pub use configuration::Config;
 mod error;
 pub use error::{Error, Result};
 
-mod log;
+pub mod log;
+pub mod telemetry;
 
 /// Macro to catch panics and return a fallback value with error logging
 /// The fallback is only evaluated if a panic occurs

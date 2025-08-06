@@ -9,16 +9,16 @@
     "type": "web",
     "meta": {
       "_dd.p.dm": "-3",
-      "otel.library.name": "test",
+      "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.28.0"
+      "telemetry.sdk.version": "0.30.0"
     },
     "metrics": {
-      "_dd.rule.psr": 1.0,
+      "_dd.rule_psr": 1.0,
       "_sampling_priority_v1": 2.0,
       "_top_level": 1.0
     },
@@ -35,13 +35,13 @@
        "type": "http",
        "meta": {
          "_dd.p.dm": "-3",
-         "otel.library.name": "test",
+         "otel.scope.name": "test",
          "otel.status_code": "Unset",
          "otel.trace_id": "684068c7000000007eaf83ddeb833e92",
          "span.kind": "client",
          "telemetry.sdk.language": "rust",
          "telemetry.sdk.name": "opentelemetry",
-         "telemetry.sdk.version": "0.28.0"
+         "telemetry.sdk.version": "0.30.0"
        },
        "metrics": {
          "_dd.measured": 1.0,
