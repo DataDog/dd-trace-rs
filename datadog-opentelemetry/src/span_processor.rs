@@ -7,14 +7,18 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision};
+use dd_trace::{
+    constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision,
+    telemetry::init_telemetry,
+};
 use opentelemetry::{
     global::ObjectSafeSpan,
     trace::{SpanContext, TraceContextExt, TraceState},
-    KeyValue, SpanId, TraceFlags, TraceId,
+    Key, KeyValue, SpanId, TraceFlags, TraceId,
 };
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 use crate::{
     create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
@@ -474,6 +478,12 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         }
         // set the shared resource in the DatadogSpanProcessor
         *self.resource.write().unwrap() = dd_resource.clone();
+
+        // init telemetry once service name has been resolved
+        let service_name = dd_resource
+            .get(&Key::from_static_str(SERVICE_NAME))
+            .map(|service_name| service_name.as_str().to_string());
+        init_telemetry(&self.config, service_name);
     }
 }
 

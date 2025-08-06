@@ -128,6 +128,26 @@ impl PartialOrd<LevelFilter> for Level {
     }
 }
 
+pub fn print_log<I: Into<String>>(
+    lvl: crate::log::Level,
+    log: I,
+    file: &str,
+    line: u32,
+    template: Option<&str>,
+) {
+    let log = log.into();
+    if lvl == crate::log::LevelFilter::Error {
+        eprintln!("\x1b[91m{lvl}\x1b[0m {file}:{line} - {log}");
+
+        crate::telemetry::add_log_error(
+            template.unwrap_or(&log),
+            Some(format!("Error: {log}\n at {file}:{line}")),
+        );
+    } else {
+        println!("\x1b[93m{lvl}\x1b[0m {file}:{line} - {log}");
+    }
+}
+
 #[macro_export]
 macro_rules! dd_debug {
     // debug!("a {} event", "log")
@@ -162,14 +182,17 @@ macro_rules! dd_error {
 
 #[macro_export]
 macro_rules! dd_log {
-    ($lvl:expr, $($arg:tt)+) => {
+    ($lvl:expr, $first:expr, $($rest:tt)*) => {{
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
-        if lvl == $crate::log::LevelFilter::Error {
-          eprintln!("\x1b[91mERROR\x1b[0m {}:{} - {}", file!(), line!(), format!($($arg)*));
-        } else {
-          println!("\x1b[93m{}\x1b[0m {}:{} - {}", lvl, file!(), line!(), format!($($arg)*));
-        }
+        $crate::log::print_log(lvl, format!($first, $($rest)*), file!(), line!(), Some($first));
+      }
+    }};
+
+    ($lvl:expr, $first:expr) => {
+      let lvl = $lvl;
+      if lvl <= $crate::log::max_level() {
+        $crate::log::print_log(lvl, format!($first), file!(), line!(), Some($first));
       }
     };
 }

@@ -12,10 +12,14 @@ readme.workspace = true
 description.workspace = true
 
 [dependencies]
-uuid = { version = "1.11.0", features = ["v4"] }
 anyhow = "1.0.97"
+rustc_version_runtime = "0.3.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+uuid = { version = "1.11.0", features = ["v4"] }
+
+# Libdatadog dependencies
+ddtelemetry = { workspace = true }
 
 [features]
 test-utils = []

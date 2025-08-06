@@ -28,6 +28,7 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 # Libdatadog dependencies - change to a stable version once we release
 data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
 datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
+ddtelemetry = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
 tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "2a14f037b05115ddbf1376ae42b81261c10ace69" }
 
 futures = "0.3.31"
