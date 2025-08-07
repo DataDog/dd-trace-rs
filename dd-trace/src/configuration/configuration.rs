@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 use crate::dd_warn;
@@ -68,7 +69,7 @@ pub enum ConfigSource {
     #[allow(dead_code)] // Used in tests, returned by source()
     Default,
     EnvVar,
-    #[allow(dead_code)] // Will be used when set_code is called from user code  
+    #[allow(dead_code)] // Will be used when set_code is called from user code
     Code,
     #[allow(dead_code)] // Will be used for remote configuration
     RemoteConfig,
@@ -156,6 +157,96 @@ impl<T: std::fmt::Debug> std::fmt::Display for ConfigItem<T> {
 }
 
 type SamplingRulesConfigItem = ConfigItem<ParsedSamplingRules>;
+
+/// Manages extra services discovered at runtime
+/// This is used to track services beyond the main service for remote configuration
+#[derive(Debug, Clone)]
+struct ExtraServicesTracker {
+    /// Whether remote configuration is enabled
+    remote_config_enabled: bool,
+    /// Services that have been discovered
+    extra_services: Arc<Mutex<HashSet<String>>>,
+    /// Services that have already been sent to the agent
+    extra_services_sent: Arc<Mutex<HashSet<String>>>,
+    /// Queue of new services to process
+    extra_services_queue: Arc<Mutex<Option<VecDeque<String>>>>,
+}
+
+impl ExtraServicesTracker {
+    fn new(remote_config_enabled: bool) -> Self {
+        Self {
+            extra_services: Arc::new(Mutex::new(HashSet::new())),
+            extra_services_sent: Arc::new(Mutex::new(HashSet::new())),
+            extra_services_queue: Arc::new(Mutex::new(Some(VecDeque::new()))),
+            remote_config_enabled,
+        }
+    }
+
+    fn add_extra_service(&self, service_name: &str, main_service: &str) {
+        if !self.remote_config_enabled {
+            return;
+        }
+
+        if service_name == main_service {
+            return;
+        }
+
+        let mut sent = match self.extra_services_sent.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        if sent.contains(service_name) {
+            return;
+        }
+
+        let mut queue = match self.extra_services_queue.lock() {
+            Ok(q) => q,
+            Err(_) => return,
+        };
+
+        // Add to queue and mark as sent
+        if let Some(ref mut q) = *queue {
+            q.push_back(service_name.to_string());
+        }
+        sent.insert(service_name.to_string());
+    }
+
+    /// Get all extra services, updating from the queue
+    fn get_extra_services(&self) -> Vec<String> {
+        if !self.remote_config_enabled {
+            return Vec::new();
+        }
+
+        let mut queue = match self.extra_services_queue.lock() {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut services = match self.extra_services.lock() {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        // Drain the queue into extra_services
+        if let Some(ref mut q) = *queue {
+            while let Some(service) = q.pop_front() {
+                services.insert(service);
+
+                // Limit to 64 services
+                if services.len() > 64 {
+                    // Remove one arbitrary service (HashSet doesn't guarantee order)
+                    if let Some(to_remove) = services.iter().next().cloned() {
+                        dd_warn!("ExtraServicesTracker:RemoteConfig: Exceeded 64 service limit, removing service: {}", to_remove);
+                        services.remove(&to_remove);
+                    }
+                }
+            }
+        }
+
+        services.iter().cloned().collect()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -290,6 +381,13 @@ pub struct Config {
     trace_propagation_style_extract: Option<Vec<TracePropagationStyle>>,
     trace_propagation_style_inject: Option<Vec<TracePropagationStyle>>,
     trace_propagation_extract_first: bool,
+
+    /// Whether remote configuration is enabled
+    remote_config_enabled: bool,
+
+    /// Tracks extra services discovered at runtime
+    /// Used for remote configuration to report all services
+    extra_services_tracker: ExtraServicesTracker,
 }
 
 impl Config {
@@ -332,6 +430,10 @@ impl Config {
         if let Some(rules) = parsed_sampling_rules_config {
             sampling_rules_item.set_value_source(rules, ConfigSource::EnvVar);
         }
+
+        // Parse remote configuration enabled flag
+        let remote_config_enabled =
+            to_val(sources.get_parse::<bool>("DD_REMOTE_CONFIGURATION_ENABLED")).unwrap_or(true); // Default to enabled
 
         Self {
             runtime_id: default.runtime_id,
@@ -384,6 +486,8 @@ impl Config {
             .unwrap_or(default.trace_propagation_extract_first),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
+            extra_services_tracker: ExtraServicesTracker::new(remote_config_enabled),
+            remote_config_enabled,
         }
     }
 
@@ -485,6 +589,36 @@ impl Config {
     pub fn trace_propagation_extract_first(&self) -> bool {
         self.trace_propagation_extract_first
     }
+
+    /// Updates sampling rules from remote configuration
+    /// This method is used by the remote config client to apply new rules
+    pub fn update_sampling_rules_from_remote(&mut self, rules: Vec<SamplingRuleConfig>) {
+        let parsed_rules = ParsedSamplingRules { rules };
+        self.trace_sampling_rules
+            .set_value_source(parsed_rules, ConfigSource::RemoteConfig);
+    }
+
+    /// Clears remote configuration sampling rules, falling back to code/env/default
+    pub fn clear_remote_sampling_rules(&mut self) {
+        self.trace_sampling_rules.unset_rc();
+    }
+
+    /// Add an extra service discovered at runtime
+    /// This is used for remote configuration
+    pub fn add_extra_service(&self, service_name: &str) {
+        self.extra_services_tracker
+            .add_extra_service(service_name, self.service());
+    }
+
+    /// Get all extra services discovered at runtime
+    pub fn get_extra_services(&self) -> Vec<String> {
+        self.extra_services_tracker.get_extra_services()
+    }
+
+    /// Check if remote configuration is enabled
+    pub fn remote_config_enabled(&self) -> bool {
+        self.remote_config_enabled
+    }
 }
 
 fn default_config() -> Config {
@@ -515,6 +649,8 @@ fn default_config() -> Config {
         trace_propagation_style_extract: None,
         trace_propagation_style_inject: None,
         trace_propagation_extract_first: false,
+        extra_services_tracker: ExtraServicesTracker::new(true),
+        remote_config_enabled: true,
     }
 }
 
@@ -612,6 +748,13 @@ impl ConfigBuilder {
         trace_stats_computation_enabled: bool,
     ) -> &mut Self {
         self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
+        self
+    }
+
+    pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.remote_config_enabled = enabled;
+        // Also update the extra services tracker
+        self.config.extra_services_tracker = ExtraServicesTracker::new(enabled);
         self
     }
 
@@ -920,6 +1063,100 @@ mod tests {
             .build();
 
         assert!(!config.trace_stats_computation_enabled());
+    }
+
+    #[test]
+    fn test_extra_services_tracking() {
+        let config = Config::builder()
+            .set_service("main-service".to_string())
+            .build();
+
+        // Initially empty
+        assert_eq!(config.get_extra_services().len(), 0);
+
+        // Add some extra services
+        config.add_extra_service("service-1");
+        config.add_extra_service("service-2");
+        config.add_extra_service("service-3");
+
+        // Should not add the main service
+        config.add_extra_service("main-service");
+
+        // Should not add duplicates
+        config.add_extra_service("service-1");
+
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 3);
+        assert!(services.contains(&"service-1".to_string()));
+        assert!(services.contains(&"service-2".to_string()));
+        assert!(services.contains(&"service-3".to_string()));
+        assert!(!services.contains(&"main-service".to_string()));
+    }
+
+    #[test]
+    fn test_extra_services_disabled_when_remote_config_disabled() {
+        let config = Config::builder()
+            .set_service("main-service".to_string())
+            .set_remote_config_enabled(false)
+            .build();
+
+        // Add services when remote config is disabled
+        config.add_extra_service("service-1");
+        config.add_extra_service("service-2");
+
+        // Should return empty since remote config is disabled
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 0);
+    }
+
+    #[test]
+    fn test_extra_services_limit() {
+        let config = Config::builder()
+            .set_service("main-service".to_string())
+            .build();
+
+        // Add more than 64 services
+        for i in 0..70 {
+            config.add_extra_service(&format!("service-{}", i));
+        }
+
+        // Should be limited to 64
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 64);
+    }
+
+    #[test]
+    fn test_remote_config_enabled_from_env() {
+        // Test with explicit true
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.remote_config_enabled());
+
+        // Test with explicit false
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.remote_config_enabled());
+
+        // Test with invalid value (should default to true)
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "invalid")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.remote_config_enabled());
+
+        // Test without env var (should use default)
+        let config = Config::builder().build();
+        assert!(config.remote_config_enabled()); // Default is true based on user's change
     }
 
     #[test]
