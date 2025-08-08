@@ -20,7 +20,7 @@ macro_rules! catch_panic {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $operation)) {
             Ok(result) => result,
             Err(error) => {
-                $crate::dd_error!("{error:?}");
+                $crate::dd_error!("Panic caught {error:?}");
                 $fallback
             }
         }
@@ -30,7 +30,7 @@ macro_rules! catch_panic {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $operation)) {
             Ok(result) => result,
             Err(error) => {
-                $crate::dd_error!("{error:?}");
+                $crate::dd_error!("Panic caught {error:?}");
             }
         }
     };
