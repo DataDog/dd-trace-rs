@@ -16,6 +16,13 @@ uuid = { version = "1.11.0", features = ["v4"] }
 anyhow = "1.0.97"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+reqwest = { version = "0.11", features = ["blocking", "json"] }
+base64 = "0.21"
+sha2 = "0.10"
 
 [features]
 test-utils = []
+
+[[example]]
+name = "remote_config"
+path = "examples/remote_config.rs"
