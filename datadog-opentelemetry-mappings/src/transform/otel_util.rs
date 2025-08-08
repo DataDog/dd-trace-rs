@@ -404,7 +404,7 @@ impl BorrowedString<'_> {
     }
 }
 
-pub fn get_dd_key_for_otlp_attribute(k: &str) -> BorrowedString {
+pub fn get_dd_key_for_otlp_attribute(k: &str) -> BorrowedString<'_> {
     if let Some(mapped_key) = http_mappings(k) {
         return BorrowedString::Static(mapped_key);
     }

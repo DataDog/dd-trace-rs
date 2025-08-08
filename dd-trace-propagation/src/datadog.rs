@@ -16,7 +16,7 @@ use crate::{
 
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-    dd_debug, dd_warn,
+    dd_error, dd_warn,
     sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
@@ -119,7 +119,7 @@ fn inject_tags(tags: &mut HashMap<String, String>, carrier: &mut dyn Injector, m
                 DATADOG_PROPAGATION_ERROR_KEY.to_string(),
                 err.message.to_string(),
             );
-            dd_debug!("{err}");
+            dd_error!("Propagator (datadog): Error getting propagation tags {err}");
         }
     }
 }
@@ -160,7 +160,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id,
         Err(e) => {
-            dd_debug!("{e}");
+            dd_error!("Propagator (datadog): Error extracting trace_id {e}");
             return None;
         }
     };
@@ -168,7 +168,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let parent_id = match extract_parent_id(carrier) {
         Ok(parent_id) => parent_id,
         Err(e) => {
-            dd_debug!("{e}");
+            dd_error!("Propagator (datadog): Error extracting parent_id {e}");
             0
         }
     };
@@ -185,7 +185,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 .unwrap_or_default(),
         }),
         Err(e) => {
-            dd_debug!("{e}");
+            dd_warn!("Propagator (datadog): Error extracting sampling priority {e}");
             None
         }
     };

@@ -510,7 +510,20 @@ impl TraceExporterWorker {
                 match self.export_trace_chunks(data) {
                     Ok(()) => {}
                     Err(e) => {
-                        dd_trace::dd_error!("DatadogExporter: Export error {}", e,);
+                        match e {
+                            OTelSdkError::AlreadyShutdown => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Shutdown already invoked {}",
+                                e,
+                            ),
+                            OTelSdkError::Timeout(_) => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Operation timed out {}",
+                                e,
+                            ),
+                            OTelSdkError::InternalFailure(_) => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Operation failed {}",
+                                e,
+                            ),
+                        };
                     }
                 };
             }
