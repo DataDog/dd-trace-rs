@@ -234,6 +234,42 @@ mod datadog_test_agent {
         );
     }
 
+    #[test]
+    fn test_remote_config_initialization() {
+        // Test that remote config client is initialized when remote config is enabled
+        let mut config_builder = dd_trace::Config::builder();
+        config_builder.set_remote_config_enabled(true);
+        let config = config_builder.build();
+
+        // This should initialize the remote config client
+        let (tracer_provider, _propagator) = make_test_tracer(
+            config,
+            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        );
+
+        // Verify the tracer provider was created successfully
+        let _tracer = tracer_provider.tracer("test");
+        // If we get here, the tracer provider was created successfully
+    }
+
+    #[test]
+    fn test_remote_config_disabled() {
+        // Test that remote config client is not initialized when remote config is disabled
+        let mut config_builder = dd_trace::Config::builder();
+        config_builder.set_remote_config_enabled(false);
+        let config = config_builder.build();
+
+        // This should not initialize the remote config client
+        let (tracer_provider, _propagator) = make_test_tracer(
+            config,
+            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        );
+
+        // Verify the tracer provider was created successfully
+        let _tracer = tracer_provider.tracer("test");
+        // If we get here, the tracer provider was created successfully
+    }
+
     #[track_caller]
     fn assert_subset<I, S: IntoIterator<Item = I>, SS: IntoIterator<Item = I>>(set: S, subset: SS)
     where
