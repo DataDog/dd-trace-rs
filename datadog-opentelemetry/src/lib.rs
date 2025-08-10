@@ -8,7 +8,7 @@ mod span_processor;
 mod text_map_propagator;
 mod trace_id;
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
@@ -16,6 +16,7 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
+use serde_json;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -69,8 +70,15 @@ fn make_tracer(
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(&config, registry.clone());
 
+    // Get sampler callback before moving sampler into tracer provider
+    let sampler_callback = if config.remote_config_enabled() {
+        Some(sampler.on_rules_update())
+    } else {
+        None
+    };
+
     let span_processor = DatadogSpanProcessor::new(
-        config,
+        config.clone(),
         registry.clone(),
         resource_slot.clone(),
         Some(agent_response_handler),
@@ -80,6 +88,40 @@ fn make_tracer(
         .with_sampler(sampler) // Use the sampler created above
         .with_id_generator(trace_id::TraceidGenerator)
         .build();
+
+    // Initialize remote configuration client if enabled
+    if config.remote_config_enabled() {
+        // AIDEV-NOTE: Create a mutable config that can be updated by remote config
+        let config_arc = Arc::new(config);
+        let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
+
+        // Add sampler callback to the config before creating the remote config client
+        if let Some(sampler_callback) = sampler_callback {
+            let sampler_callback = Arc::new(sampler_callback);
+            let sampler_callback_clone = sampler_callback.clone();
+            mutable_config.lock().unwrap().add_remote_config_callback("datadog_sampler_on_rules_update".to_string(), move |json_str| {
+                sampler_callback_clone(json_str);
+            });
+        }
+
+        // Create remote config client
+        if let Ok(mut client) = dd_trace::configuration::remote_config::RemoteConfigClient::new(config_arc) {
+            // Set up callback to handle configuration updates
+            let config_clone = mutable_config.clone();
+            client.set_update_callback(move |rules| {
+                if let Ok(mut cfg) = config_clone.lock() {
+                    cfg.update_sampling_rules_from_remote(rules);
+                    dd_trace::dd_info!("RemoteConfigClient: Applied new sampling rules from remote config");
+                }
+            });
+
+            // Start the client in background
+            let _handle = client.start();
+            dd_trace::dd_info!("RemoteConfigClient: Started remote configuration client");
+        } else {
+            dd_trace::dd_warn!("RemoteConfigClient: Failed to create remote config client");
+        }
+    }
 
     (tracer_provider, propagator)
 }

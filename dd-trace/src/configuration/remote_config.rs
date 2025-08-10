@@ -239,12 +239,17 @@ struct SignedTargets {
 ///
 /// let mut client = RemoteConfigClient::new(config).unwrap();
 ///
-/// // Set callback to update configuration when new rules arrive
+/// // Set multiple callbacks to update configuration when new rules arrive
 /// let config_clone = mutable_config.clone();
 /// client.set_update_callback(move |rules| {
 ///     if let Ok(mut cfg) = config_clone.lock() {
 ///         cfg.update_sampling_rules_from_remote(rules);
 ///     }
+/// });
+///
+/// // Add another callback for logging
+/// client.set_update_callback(move |rules| {
+///     println!("Received {} new sampling rules", rules.len());
 /// });
 ///
 /// // Start the client in a background thread
@@ -260,8 +265,8 @@ pub struct RemoteConfigClient {
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
-    // Callback to update sampling rules
-    update_callback: Option<Box<dyn Fn(Vec<SamplingRuleConfig>) + Send + Sync>>,
+    // Callbacks to update sampling rules
+    update_callbacks: Vec<Box<dyn Fn(Vec<SamplingRuleConfig>) + Send + Sync>>,
     // Cache of successfully applied configurations
     cached_target_files: Arc<Mutex<Vec<CachedTargetFile>>>,
 }
@@ -294,17 +299,23 @@ impl RemoteConfigClient {
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval: DEFAULT_POLL_INTERVAL,
-            update_callback: None,
+            update_callbacks: Vec::new(),
             cached_target_files: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
-    /// Sets the callback to be called when sampling rules are updated
+    /// Sets a callback to be called when sampling rules are updated
+    /// Multiple callbacks can be set - all will be called when new rules arrive
     pub fn set_update_callback<F>(&mut self, callback: F)
     where
         F: Fn(Vec<SamplingRuleConfig>) + Send + Sync + 'static,
     {
-        self.update_callback = Some(Box::new(callback));
+        self.update_callbacks.push(Box::new(callback));
+    }
+
+    /// Clears all update callbacks
+    pub fn clear_update_callbacks(&mut self) {
+        self.update_callbacks.clear();
     }
 
     /// Starts the remote configuration client in a background thread
@@ -621,8 +632,8 @@ impl RemoteConfigClient {
 
         // Extract sampling rules if present
         if let Some(rules) = tracing_config.tracing_sampling_rules {
-            // Call the update callback with new rules
-            if let Some(ref callback) = self.update_callback {
+            // Call all update callbacks with new rules
+            for callback in &self.update_callbacks {
                 callback(rules.clone());
             }
 
@@ -1130,5 +1141,55 @@ mod tests {
         // Verify that cached target files were not added since they're not APM_TRACING
         let cached_files = client.cached_target_files.lock().unwrap();
         assert_eq!(cached_files.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_callbacks() {
+        // Test that multiple callbacks are called when sampling rules are updated
+        let config = Arc::new(Config::builder().build());
+        let mut client = RemoteConfigClient::new(config).unwrap();
+
+        let callback1_called = Arc::new(Mutex::new(false));
+        let callback2_called = Arc::new(Mutex::new(false));
+
+        let callback1_clone = callback1_called.clone();
+        let callback2_clone = callback2_called.clone();
+
+        // Set multiple callbacks
+        client.set_update_callback(move |_rules| {
+            if let Ok(mut called) = callback1_clone.lock() {
+                *called = true;
+            }
+        });
+
+        client.set_update_callback(move |_rules| {
+            if let Ok(mut called) = callback2_clone.lock() {
+                *called = true;
+            }
+        });
+
+        // Process a config response with sampling rules
+        let config_response = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogM319Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/test-config/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0=".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/test-config/config".to_string(),
+            ]),
+        };
+
+        let result = client.process_response(config_response);
+        assert!(result.is_ok(), "process_response should succeed");
+
+        // Verify that both callbacks were called
+        let callback1_result = callback1_called.lock().unwrap();
+        let callback2_result = callback2_called.lock().unwrap();
+        assert!(*callback1_result, "First callback should have been called");
+        assert!(*callback2_result, "Second callback should have been called");
     }
 }

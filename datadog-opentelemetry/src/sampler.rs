@@ -49,6 +49,11 @@ impl Sampler {
     pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
         self.sampler.on_agent_response()
     }
+
+    /// Get the callback for updating sampling rules
+    pub fn on_rules_update(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+        self.sampler.on_rules_update()
+    }
 }
 
 impl ShouldSample for Sampler {
