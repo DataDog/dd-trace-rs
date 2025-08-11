@@ -104,17 +104,12 @@ fn make_tracer(
             });
         }
 
-        // Create remote config client
-        if let Ok(mut client) = dd_trace::configuration::remote_config::RemoteConfigClient::new(config_arc) {
-            // Set up callback to handle configuration updates
-            let config_clone = mutable_config.clone();
-            client.set_update_callback(move |rules| {
-                if let Ok(mut cfg) = config_clone.lock() {
-                    cfg.update_sampling_rules_from_remote(rules);
-                    dd_trace::dd_info!("RemoteConfigClient: Applied new sampling rules from remote config");
-                }
-            });
-
+        // Create remote config client with mutable config
+        let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
+        if let Ok(client) = dd_trace::configuration::remote_config::RemoteConfigClient::new(mutable_config) {
+            // The client now directly updates the config when new rules arrive
+            // No need for callbacks - the config is automatically updated
+            
             // Start the client in background
             let _handle = client.start();
             dd_trace::dd_info!("RemoteConfigClient: Started remote configuration client");

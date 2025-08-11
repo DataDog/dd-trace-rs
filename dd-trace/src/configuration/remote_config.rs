@@ -234,23 +234,11 @@ struct SignedTargets {
 /// use dd_trace::{Config, ConfigBuilder};
 /// use dd_trace::configuration::remote_config::RemoteConfigClient;
 ///
-/// let config = Arc::new(ConfigBuilder::new().build());
-/// let mutable_config = Arc::new(Mutex::new(config.clone()));
+/// let config = Arc::new(Mutex::new(ConfigBuilder::new().build()));
 ///
-/// let mut client = RemoteConfigClient::new(config).unwrap();
+/// let client = RemoteConfigClient::new(config).unwrap();
 ///
-/// // Set multiple callbacks to update configuration when new rules arrive
-/// let config_clone = mutable_config.clone();
-/// client.set_update_callback(move |rules| {
-///     if let Ok(mut cfg) = config_clone.lock() {
-///         cfg.update_sampling_rules_from_remote(rules);
-///     }
-/// });
-///
-/// // Add another callback for logging
-/// client.set_update_callback(move |rules| {
-///     println!("Received {} new sampling rules", rules.len());
-/// });
+/// // The client directly updates the config when new rules arrive
 ///
 /// // Start the client in a background thread
 /// let handle = client.start();
@@ -259,22 +247,20 @@ pub struct RemoteConfigClient {
     /// Unique identifier for this client instance
     /// AIDEV-NOTE: Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
-    config: Arc<Config>,
+    config: Arc<Mutex<Config>>,
     agent_url: String,
     client: reqwest::blocking::Client,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
-    // Callbacks to update sampling rules
-    update_callbacks: Vec<Box<dyn Fn(Vec<SamplingRuleConfig>) + Send + Sync>>,
     // Cache of successfully applied configurations
     cached_target_files: Arc<Mutex<Vec<CachedTargetFile>>>,
 }
 
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
-    pub fn new(config: Arc<Config>) -> Result<Self> {
-        let agent_url = format!("{}/v0.7/config", config.trace_agent_url());
+    pub fn new(config: Arc<Mutex<Config>>) -> Result<Self> {
+        let agent_url = format!("{}/v0.7/config", config.lock().unwrap().trace_agent_url());
 
         // Create HTTP client with timeout
         let client = reqwest::blocking::Client::builder()
@@ -299,24 +285,11 @@ impl RemoteConfigClient {
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval: DEFAULT_POLL_INTERVAL,
-            update_callbacks: Vec::new(),
             cached_target_files: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
-    /// Sets a callback to be called when sampling rules are updated
-    /// Multiple callbacks can be set - all will be called when new rules arrive
-    pub fn set_update_callback<F>(&mut self, callback: F)
-    where
-        F: Fn(Vec<SamplingRuleConfig>) + Send + Sync + 'static,
-    {
-        self.update_callbacks.push(Box::new(callback));
-    }
 
-    /// Clears all update callbacks
-    pub fn clear_update_callbacks(&mut self) {
-        self.update_callbacks.clear();
-    }
 
     /// Starts the remote configuration client in a background thread
     pub fn start(self) -> thread::JoinHandle<()> {
@@ -394,20 +367,22 @@ impl RemoteConfigClient {
             .lock()
             .map_err(|_| anyhow::anyhow!("Failed to lock state"))?;
 
+        let config = self.config.lock().map_err(|_| anyhow::anyhow!("Failed to lock config"))?;
+
         let client_info = ClientInfo {
             state: Some(state.clone()),
             id: self.client_id.clone(),
             products: vec!["APM_TRACING".to_string()],
             is_tracer: true,
             client_tracer: Some(ClientTracer {
-                runtime_id: self.config.runtime_id().to_string(),
+                runtime_id: config.runtime_id().to_string(),
                 language: "rust".to_string(),
-                tracer_version: self.config.tracer_version().to_string(),
-                service: self.config.service().to_string(),
-                extra_services: self.config.get_extra_services(),
-                env: self.config.env().map(|s| s.to_string()),
-                app_version: self.config.version().map(|s| s.to_string()),
-                tags: self.config.global_tags().map(|s| s.to_string()).collect(),
+                tracer_version: config.tracer_version().to_string(),
+                service: config.service().to_string(),
+                extra_services: config.get_extra_services(),
+                env: config.env().map(|s| s.to_string()),
+                app_version: config.version().map(|s| s.to_string()),
+                tags: config.global_tags().map(|s| s.to_string()).collect(),
             }),
             capabilities: self.capabilities.encode(),
         };
@@ -632,15 +607,16 @@ impl RemoteConfigClient {
 
         // Extract sampling rules if present
         if let Some(rules) = tracing_config.tracing_sampling_rules {
-            // Call all update callbacks with new rules
-            for callback in &self.update_callbacks {
-                callback(rules.clone());
+            // Directly update the config with new rules from remote configuration
+            if let Ok(mut config) = self.config.lock() {
+                config.update_sampling_rules_from_remote(rules.clone());
+                crate::dd_info!(
+                    "RemoteConfigClient: Applied {} sampling rules from remote config",
+                    rules.len()
+                );
+            } else {
+                crate::dd_warn!("RemoteConfigClient: Failed to lock config to update sampling rules");
             }
-
-            crate::dd_info!(
-                "RemoteConfigClient: Applied {} sampling rules from remote config",
-                rules.len()
-            );
         } else {
             crate::dd_info!(
                 "RemoteConfigClient: APM tracing config received but no sampling rules present"
@@ -937,7 +913,7 @@ mod tests {
     #[test]
     fn test_validate_signed_target_files() {
         // Create a mock RemoteConfigClient for testing
-        let config = Arc::new(Config::builder().build());
+        let config = Arc::new(Mutex::new(Config::builder().build()));
         let client = RemoteConfigClient::new(config).unwrap();
 
         // Test case 1: Target file exists in signed targets
@@ -1043,17 +1019,10 @@ mod tests {
             ]),
         };
 
-        // Create a RemoteConfigClient and set up a callback to capture processed rules
-        let config = Arc::new(Config::builder().build());
-        let mut client = RemoteConfigClient::new(config).unwrap();
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config).unwrap();
 
-        let processed_rules = Arc::new(Mutex::new(Vec::new()));
-        let rules_clone = processed_rules.clone();
-        client.set_update_callback(move |rules| {
-            if let Ok(mut captured_rules) = rules_clone.lock() {
-                *captured_rules = rules;
-            }
-        });
+        // For testing purposes, we'll verify the config was updated by checking the rules
 
         // Process the response - this should update the client's state and process APM_TRACING configs
         let result = client.process_response(config_response);
@@ -1085,11 +1054,12 @@ mod tests {
         assert_eq!(cached_files[0].hashes.len(), 1);
         assert_eq!(cached_files[0].hashes[0].algorithm, "sha256");
 
-        // Verify that the callback was called with the processed rules
-        let captured_rules = processed_rules.lock().unwrap();
-        assert_eq!(captured_rules.len(), 1);
-        assert_eq!(captured_rules[0].sample_rate, 0.5);
-        assert_eq!(captured_rules[0].service, Some("test-service".to_string()));
+        // Verify that the config was updated with the processed rules
+        let config = client.config.lock().unwrap();
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.5);
+        assert_eq!(rules[0].service, Some("test-service".to_string()));
     }
 
     #[test]
@@ -1119,7 +1089,7 @@ mod tests {
         };
 
         // Create a RemoteConfigClient and process the response
-        let config = Arc::new(Config::builder().build());
+        let config = Arc::new(Mutex::new(Config::builder().build()));
         let client = RemoteConfigClient::new(config).unwrap();
 
         // Process the response - this should update the client's state
@@ -1144,29 +1114,11 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_callbacks() {
-        // Test that multiple callbacks are called when sampling rules are updated
-        let config = Arc::new(Config::builder().build());
-        let mut client = RemoteConfigClient::new(config).unwrap();
+    fn test_config_update_from_remote() {
+        // Test that the config is updated when sampling rules are received
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config).unwrap();
 
-        let callback1_called = Arc::new(Mutex::new(false));
-        let callback2_called = Arc::new(Mutex::new(false));
-
-        let callback1_clone = callback1_called.clone();
-        let callback2_clone = callback2_called.clone();
-
-        // Set multiple callbacks
-        client.set_update_callback(move |_rules| {
-            if let Ok(mut called) = callback1_clone.lock() {
-                *called = true;
-            }
-        });
-
-        client.set_update_callback(move |_rules| {
-            if let Ok(mut called) = callback2_clone.lock() {
-                *called = true;
-            }
-        });
 
         // Process a config response with sampling rules
         let config_response = ConfigResponse {
@@ -1186,10 +1138,11 @@ mod tests {
         let result = client.process_response(config_response);
         assert!(result.is_ok(), "process_response should succeed");
 
-        // Verify that both callbacks were called
-        let callback1_result = callback1_called.lock().unwrap();
-        let callback2_result = callback2_called.lock().unwrap();
-        assert!(*callback1_result, "First callback should have been called");
-        assert!(*callback2_result, "Second callback should have been called");
+        // Verify that the config was updated with the sampling rules
+        let config = client.config.lock().unwrap();
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.5);
+        assert_eq!(rules[0].service, Some("test-service".to_string()));
     }
 }
