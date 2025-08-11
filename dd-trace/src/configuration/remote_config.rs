@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::configuration::{Config, SamplingRuleConfig};
+use crate::configuration::Config;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -168,10 +168,8 @@ struct TargetFile {
 /// See: https://github.com/DataDog/dd-go/blob/main/remote-config/apps/rc-product/schemas/apm-tracing.json
 #[derive(Debug, Clone, Deserialize)]
 struct ApmTracingConfig {
-    /// Sampling rules to apply
-    /// This field contains an array of sampling rules that can match based on service, name, resource, tags
     #[serde(default, rename = "tracing_sampling_rules")]
-    tracing_sampling_rules: Option<Vec<SamplingRuleConfig>>,
+    tracing_sampling_rules: Option<serde_json::Value>,
     // Add other APM tracing config fields as needed (e.g., tracing_header_tags, etc.)
 }
 
@@ -602,24 +600,40 @@ impl RemoteConfigClient {
 
     /// Processes APM tracing configuration
     fn process_apm_tracing_config(&self, config_json: &str) -> Result<()> {
+        // Parse the config to extract sampling rules as raw JSON
         let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
 
         // Extract sampling rules if present
-        if let Some(rules) = tracing_config.tracing_sampling_rules {
-            // Directly update the config with new rules from remote configuration
-            if let Ok(mut config) = self.config.lock() {
-                config.update_sampling_rules_from_remote(rules.clone());
-                crate::dd_info!(
-                    "RemoteConfigClient: Applied {} sampling rules from remote config",
-                    rules.len()
-                );
+        if let Some(rules_value) = tracing_config.tracing_sampling_rules {
+            if !rules_value.is_null() {
+                // Convert the raw JSON value to string for the config method
+                let rules_json = serde_json::to_string(&rules_value)
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
+
+                // Directly update the config with the raw JSON
+                if let Ok(mut config) = self.config.lock() {
+                    match config.update_sampling_rules_from_remote(&rules_json) {
+                        Ok(()) => {
+                            crate::dd_info!(
+                                "RemoteConfigClient: Applied sampling rules from remote config"
+                            );
+                        }
+                        Err(e) => {
+                            crate::dd_warn!("RemoteConfigClient: Failed to update sampling rules: {}", e);
+                        }
+                    }
+                } else {
+                    crate::dd_warn!("RemoteConfigClient: Failed to lock config to update sampling rules");
+                }
             } else {
-                crate::dd_warn!("RemoteConfigClient: Failed to lock config to update sampling rules");
+                crate::dd_info!(
+                    "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
+                );
             }
         } else {
             crate::dd_info!(
-                "RemoteConfigClient: APM tracing config received but no sampling rules present"
+                "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules present"
             );
         }
 
@@ -814,11 +828,14 @@ mod tests {
 
         let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
-        let rules = config.tracing_sampling_rules.unwrap();
+        let rules_value = config.tracing_sampling_rules.unwrap();
+        
+        // Parse the raw JSON value to verify the content
+        let rules: Vec<serde_json::Value> = serde_json::from_value(rules_value).unwrap();
         assert_eq!(rules.len(), 1);
-        assert_eq!(rules[0].sample_rate, 0.5);
-        assert_eq!(rules[0].service, Some("test-service".to_string()));
-        assert_eq!(rules[0].provenance, "dynamic");
+        assert_eq!(rules[0]["sample_rate"], 0.5);
+        assert_eq!(rules[0]["service"], "test-service");
+        assert_eq!(rules[0]["provenance"], "dynamic");
     }
 
     #[test]
@@ -847,26 +864,26 @@ mod tests {
 
         let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
-        let rules = config.tracing_sampling_rules.unwrap();
+        let rules_value = config.tracing_sampling_rules.unwrap();
+        
+        // Parse the raw JSON value to verify the content
+        let rules: Vec<serde_json::Value> = serde_json::from_value(rules_value).unwrap();
         assert_eq!(rules.len(), 2);
 
         // Check first rule
-        assert_eq!(rules[0].sample_rate, 0.3);
-        assert_eq!(rules[0].service, Some("web-api".to_string()));
-        assert_eq!(rules[0].name, Some("GET /users/*".to_string()));
-        assert_eq!(rules[0].resource, Some("UserController.list".to_string()));
-        assert_eq!(rules[0].tags.len(), 2);
-        assert_eq!(
-            rules[0].tags.get("environment"),
-            Some(&"production".to_string())
-        );
-        assert_eq!(rules[0].tags.get("region"), Some(&"us-east-1".to_string()));
-        assert_eq!(rules[0].provenance, "customer");
+        assert_eq!(rules[0]["sample_rate"], 0.3);
+        assert_eq!(rules[0]["service"], "web-api");
+        assert_eq!(rules[0]["name"], "GET /users/*");
+        assert_eq!(rules[0]["resource"], "UserController.list");
+        assert_eq!(rules[0]["tags"].as_object().unwrap().len(), 2);
+        assert_eq!(rules[0]["tags"]["environment"], "production");
+        assert_eq!(rules[0]["tags"]["region"], "us-east-1");
+        assert_eq!(rules[0]["provenance"], "customer");
 
         // Check second rule
-        assert_eq!(rules[1].sample_rate, 1.0);
-        assert_eq!(rules[1].service, Some("auth-service".to_string()));
-        assert_eq!(rules[1].provenance, "dynamic");
+        assert_eq!(rules[1]["sample_rate"], 1.0);
+        assert_eq!(rules[1]["service"], "auth-service");
+        assert_eq!(rules[1]["provenance"], "dynamic");
     }
 
     #[test]

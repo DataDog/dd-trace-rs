@@ -597,8 +597,12 @@ impl Config {
 
     /// Updates sampling rules from remote configuration
     /// This method is used by the remote config client to apply new rules
-    pub fn update_sampling_rules_from_remote(&mut self, rules: Vec<SamplingRuleConfig>) {
-        let parsed_rules = ParsedSamplingRules { rules: rules.clone() };
+    pub fn update_sampling_rules_from_remote(&mut self, rules_json: &str) -> Result<(), String> {
+        // Parse the JSON into SamplingRuleConfig objects
+        let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
+            .map_err(|e| format!("Failed to parse sampling rules JSON: {}", e))?;
+        
+        let parsed_rules = ParsedSamplingRules { rules };
         self.trace_sampling_rules
             .set_value_source(parsed_rules, ConfigSource::RemoteConfig);
         
@@ -606,12 +610,12 @@ impl Config {
         // This specifically calls the DatadogSampler's on_rules_update method
         if let Ok(callbacks) = self.remote_config_callbacks.lock() {
             if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
-                // Convert rules to JSON string for the sampler callback
-                if let Ok(json_str) = serde_json::to_string(&rules) {
-                    callback(&json_str);
-                }
+                // Pass the rules array JSON directly to the callback (not wrapped in {"rules": ...})
+                callback(rules_json);
             }
         }
+        
+        Ok(())
     }
 
     /// Clears remote configuration sampling rules, falling back to code/env/default
@@ -622,10 +626,8 @@ impl Config {
         // This specifically calls the DatadogSampler's on_rules_update method
         if let Ok(callbacks) = self.remote_config_callbacks.lock() {
             if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
-                // Convert empty rules to JSON string for the sampler callback
-                if let Ok(json_str) = serde_json::to_string(&Vec::<SamplingRuleConfig>::new()) {
-                    callback(&json_str);
-                }
+                // Pass empty rules as JSON array
+                callback("[]");
             }
         }
     }
@@ -1289,7 +1291,8 @@ mod tests {
             }
         ];
         
-        config.update_sampling_rules_from_remote(new_rules.clone());
+        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        config.update_sampling_rules_from_remote(&rules_json).unwrap();
         
         // Callback should be called with the new rules
         assert!(*callback_called.lock().unwrap());
