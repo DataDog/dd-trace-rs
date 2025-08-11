@@ -143,6 +143,7 @@ struct Hash {
 struct ConfigResponse {
     /// Root metadata (TUF roots) - base64 encoded
     #[serde(default)]
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     roots: Option<Vec<String>>,
     /// Targets metadata - base64 encoded JSON
     #[serde(default)]
@@ -193,12 +194,15 @@ struct TargetDesc {
 struct Targets {
     /// Type of the targets (usually "targets")
     #[serde(rename = "_type")]
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     target_type: String,
     /// Custom metadata
     custom: Option<serde_json::Value>,
     /// Expiration time
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     expires: String,
     /// Specification version
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     spec_version: String,
     /// Target descriptions (path -> TargetDesc)
     targets: HashMap<String, TargetDesc>,
@@ -209,10 +213,12 @@ struct Targets {
 #[derive(Debug, Deserialize)]
 struct SignedTargets {
     /// Signatures (we don't validate these currently)
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     signatures: Option<Vec<serde_json::Value>>,
     /// The signed targets data
     signed: Targets,
     /// Version of the signed targets
+    #[allow(dead_code)] // Part of TUF specification but not used in current implementation
     version: Option<u64>,
 }
 
@@ -228,11 +234,11 @@ struct SignedTargets {
 ///
 /// # Example
 /// ```no_run
-/// use std::sync::{Arc, Mutex};
-/// use dd_trace::{Config, ConfigBuilder};
 /// use dd_trace::configuration::remote_config::RemoteConfigClient;
+/// use dd_trace::Config;
+/// use std::sync::{Arc, Mutex};
 ///
-/// let config = Arc::new(Mutex::new(ConfigBuilder::new().build()));
+/// let config = Arc::new(Mutex::new(Config::builder().build()));
 ///
 /// let client = RemoteConfigClient::new(config).unwrap();
 ///
@@ -286,8 +292,6 @@ impl RemoteConfigClient {
             cached_target_files: Arc::new(Mutex::new(Vec::new())),
         })
     }
-
-
 
     /// Starts the remote configuration client in a background thread
     pub fn start(self) -> thread::JoinHandle<()> {
@@ -365,7 +369,10 @@ impl RemoteConfigClient {
             .lock()
             .map_err(|_| anyhow::anyhow!("Failed to lock state"))?;
 
-        let config = self.config.lock().map_err(|_| anyhow::anyhow!("Failed to lock config"))?;
+        let config = self
+            .config
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Failed to lock config"))?;
 
         let client_info = ClientInfo {
             state: Some(state.clone()),
@@ -611,7 +618,6 @@ impl RemoteConfigClient {
                 let rules_json = serde_json::to_string(&rules_value)
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                // Directly update the config with the raw JSON
                 if let Ok(mut config) = self.config.lock() {
                     match config.update_sampling_rules_from_remote(&rules_json) {
                         Ok(()) => {
@@ -620,11 +626,16 @@ impl RemoteConfigClient {
                             );
                         }
                         Err(e) => {
-                            crate::dd_warn!("RemoteConfigClient: Failed to update sampling rules: {}", e);
+                            crate::dd_warn!(
+                                "RemoteConfigClient: Failed to update sampling rules: {}",
+                                e
+                            );
                         }
                     }
                 } else {
-                    crate::dd_warn!("RemoteConfigClient: Failed to lock config to update sampling rules");
+                    crate::dd_warn!(
+                        "RemoteConfigClient: Failed to lock config to update sampling rules"
+                    );
                 }
             } else {
                 crate::dd_info!(
@@ -829,7 +840,7 @@ mod tests {
         let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
         let rules_value = config.tracing_sampling_rules.unwrap();
-        
+
         // Parse the raw JSON value to verify the content
         let rules: Vec<serde_json::Value> = serde_json::from_value(rules_value).unwrap();
         assert_eq!(rules.len(), 1);
@@ -865,7 +876,7 @@ mod tests {
         let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
         let rules_value = config.tracing_sampling_rules.unwrap();
-        
+
         // Parse the raw JSON value to verify the content
         let rules: Vec<serde_json::Value> = serde_json::from_value(rules_value).unwrap();
         assert_eq!(rules.len(), 2);
@@ -1041,7 +1052,8 @@ mod tests {
 
         // For testing purposes, we'll verify the config was updated by checking the rules
 
-        // Process the response - this should update the client's state and process APM_TRACING configs
+        // Process the response - this should update the client's state and process APM_TRACING
+        // configs
         let result = client.process_response(config_response);
         assert!(result.is_ok(), "process_response should succeed");
 
@@ -1052,7 +1064,7 @@ mod tests {
             state.backend_client_state,
             Some("eyJfooIOiAiYmFoIn0=".to_string())
         );
-        assert_eq!(state.has_error, false);
+        assert!(!state.has_error);
 
         // Verify that APM_TRACING config states were added
         assert_eq!(state.config_states.len(), 1);
@@ -1120,7 +1132,7 @@ mod tests {
             state.backend_client_state,
             Some("eyJfooIOiAiYmFoIn0=".to_string())
         );
-        assert_eq!(state.has_error, false);
+        assert!(!state.has_error);
 
         // Verify that no config states were added since we don't process non-APM_TRACING products
         assert_eq!(state.config_states.len(), 0);
@@ -1135,7 +1147,6 @@ mod tests {
         // Test that the config is updated when sampling rules are received
         let config = Arc::new(Mutex::new(Config::builder().build()));
         let client = RemoteConfigClient::new(config).unwrap();
-
 
         // Process a config response with sampling rules
         let config_response = ConfigResponse {

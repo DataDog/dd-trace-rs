@@ -8,7 +8,7 @@ mod span_processor;
 mod text_map_propagator;
 mod trace_id;
 
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
@@ -16,7 +16,6 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
-use serde_json;
 
 /// Initialize the Datadog OpenTelemetry exporter.
 ///
@@ -99,17 +98,19 @@ fn make_tracer(
         if let Some(sampler_callback) = sampler_callback {
             let sampler_callback = Arc::new(sampler_callback);
             let sampler_callback_clone = sampler_callback.clone();
-            mutable_config.lock().unwrap().add_remote_config_callback("datadog_sampler_on_rules_update".to_string(), move |json_str| {
-                sampler_callback_clone(json_str);
-            });
+            mutable_config.lock().unwrap().add_remote_config_callback(
+                "datadog_sampler_on_rules_update".to_string(),
+                move |rules| {
+                    sampler_callback_clone(rules);
+                },
+            );
         }
 
         // Create remote config client with mutable config
         let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
-        if let Ok(client) = dd_trace::configuration::remote_config::RemoteConfigClient::new(mutable_config) {
-            // The client now directly updates the config when new rules arrive
-            // No need for callbacks - the config is automatically updated
-            
+        if let Ok(client) =
+            dd_trace::configuration::remote_config::RemoteConfigClient::new(mutable_config)
+        {
             // Start the client in background
             let _handle = client.start();
             dd_trace::dd_info!("RemoteConfigClient: Started remote configuration client");

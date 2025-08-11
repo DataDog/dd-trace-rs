@@ -12,6 +12,9 @@ use std::{
 
 use crate::{span_processor::RegisterTracePropagationResult, TraceRegistry};
 
+/// Type alias for sampling rules update callback
+type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [dd_trace::SamplingRuleConfig]) + Send + Sync>;
+
 #[derive(Debug, Clone)]
 pub struct Sampler {
     sampler: DatadogSampler,
@@ -24,20 +27,8 @@ impl Sampler {
         resource: Arc<RwLock<Resource>>,
         trace_registry: Arc<TraceRegistry>,
     ) -> Self {
-        let rules = cfg
-            .trace_sampling_rules()
-            .iter()
-            .map(|r| {
-                dd_trace_sampling::SamplingRule::new(
-                    r.sample_rate,
-                    r.service.clone(),
-                    r.name.clone(),
-                    r.resource.clone(),
-                    Some(r.tags.clone()),
-                    Some(r.provenance.clone()),
-                )
-            })
-            .collect::<Vec<_>>();
+        let rules =
+            dd_trace_sampling::SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
         let sampler =
             dd_trace_sampling::DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
         Self {
@@ -51,7 +42,7 @@ impl Sampler {
     }
 
     /// Get the callback for updating sampling rules
-    pub fn on_rules_update(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+    pub fn on_rules_update(&self) -> SamplingRulesCallback {
         self.sampler.on_rules_update()
     }
 }

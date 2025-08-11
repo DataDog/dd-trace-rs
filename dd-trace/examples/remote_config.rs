@@ -20,10 +20,7 @@ fn main() {
 
     println!("Starting remote configuration client...");
     if let Ok(cfg) = config.lock() {
-        println!(
-            "Initial sampling rules: {:?}",
-            cfg.trace_sampling_rules()
-        );
+        println!("Initial sampling rules: {:?}", cfg.trace_sampling_rules());
     }
 
     // Create remote config client

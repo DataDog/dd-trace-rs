@@ -24,8 +24,11 @@ use crate::glob_matcher::GlobMatcher;
 use crate::otel_mappings::PreSampledSpan;
 use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
-use crate::rules_sampler::{RulesSampler, SamplingRulesConfig};
+use crate::rules_sampler::RulesSampler;
 use crate::utils;
+
+/// Type alias for sampling rules update callback
+type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [dd_trace::SamplingRuleConfig]) + Send + Sync>;
 
 fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
     (rule != NO_RULE).then(|| GlobMatcher::new(rule))
@@ -51,6 +54,24 @@ pub struct SamplingRule {
 }
 
 impl SamplingRule {
+    /// Converts a vector of SamplingRuleConfig into SamplingRule objects
+    /// Centralizes the conversion logic to avoid duplication across different modules
+    pub fn from_configs(configs: Vec<dd_trace::SamplingRuleConfig>) -> Vec<Self> {
+        configs
+            .into_iter()
+            .map(|config| {
+                Self::new(
+                    config.sample_rate,
+                    config.service,
+                    config.name,
+                    config.resource,
+                    Some(config.tags),
+                    Some(config.provenance),
+                )
+            })
+            .collect()
+    }
+
     /// Creates a new sampling rule
     pub fn new(
         sample_rate: f64,
@@ -301,33 +322,27 @@ impl DatadogSampler {
     /// Creates a callback for updating sampling rules from remote configuration
     ///
     /// # Returns
-    /// A boxed function that takes a JSON string and updates the sampling rules
+    /// A boxed function that takes a slice of SamplingRuleConfig and updates the sampling rules
     ///
     /// # Example
-    /// The callback expects JSON in the following format:
-    /// ```json
-    /// {
-    ///   "rules": [
-    ///     {
-    ///       "sample_rate": 0.5,
-    ///       "service": "web-*",
-    ///       "name": "http.*",
-    ///       "resource": "/api/*",
-    ///       "tags": {"env": "prod"},
-    ///       "provenance": "customer"
-    ///     }
-    ///   ]
-    /// }
+    /// The callback receives sampling rules directly from the configuration:
+    /// ```rust
+    /// use dd_trace::SamplingRuleConfig;
+    ///
+    /// let rules = &[SamplingRuleConfig {
+    ///     sample_rate: 0.5,
+    ///     service: Some("web-*".to_string()),
+    ///     name: Some("http.*".to_string()),
+    ///     resource: Some("/api/*".to_string()),
+    ///     tags: [("env".to_string(), "prod".to_string())].into(),
+    ///     provenance: "customer".to_string(),
+    /// }];
     /// ```
-    pub fn on_rules_update(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+    pub fn on_rules_update(&self) -> SamplingRulesCallback {
         let rules_sampler = self.rules.clone();
-        Box::new(move |s: &str| {
-            let Ok(config) = serde_json::de::from_str::<SamplingRulesConfig>(s) else {
-                return;
-            };
-
+        Box::new(move |rule_configs: &[dd_trace::SamplingRuleConfig]| {
             // Convert the rule configs to SamplingRule instances
-            let new_rules = config.into_rules();
+            let new_rules = SamplingRule::from_configs(rule_configs.to_vec());
 
             // Update the rules
             rules_sampler.update_rules(new_rules);
@@ -1748,27 +1763,28 @@ mod tests {
         // Get the callback
         let callback = sampler.on_rules_update();
 
-        // Create JSON for new rules
-        let json_config = r#"{
-            "rules": [
-                {
-                    "sample_rate": 0.5,
-                    "service": "web-*",
-                    "name": "http.*",
-                    "provenance": "customer"
-                },
-                {
-                    "sample_rate": 0.2,
-                    "service": "api-*",
-                    "resource": "/api/*",
-                    "tags": {"env": "prod"},
-                    "provenance": "dynamic"
-                }
-            ]
-        }"#;
+        // Create new rules directly as SamplingRuleConfig objects
+        let new_rules = vec![
+            dd_trace::SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("web-*".to_string()),
+                name: Some("http.*".to_string()),
+                resource: None,
+                tags: std::collections::HashMap::new(),
+                provenance: "customer".to_string(),
+            },
+            dd_trace::SamplingRuleConfig {
+                sample_rate: 0.2,
+                service: Some("api-*".to_string()),
+                name: None,
+                resource: Some("/api/*".to_string()),
+                tags: [("env".to_string(), "prod".to_string())].into(),
+                provenance: "dynamic".to_string(),
+            },
+        ];
 
         // Apply the update
-        callback(json_config);
+        callback(&new_rules);
 
         // Verify the rules were updated
         assert_eq!(sampler.rules.len(), 2);
@@ -1776,7 +1792,8 @@ mod tests {
         // Test that the new rules work by finding a matching rule
         // Create attributes that will generate an operation name matching "http.*"
         let attrs = vec![
-            KeyValue::new(HTTP_REQUEST_METHOD, "GET"), // This will make operation name "http.client.request"
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"), /* This will make operation name
+                                                        * "http.client.request" */
         ];
         let resource_guard = sampler.resource.read().unwrap();
         let span = PreSampledSpan::new(
@@ -1792,12 +1809,8 @@ mod tests {
         assert_eq!(rule.sample_rate, 0.5);
         assert_eq!(rule.provenance, "customer");
 
-        // Test with invalid JSON - should not crash
-        callback("invalid json");
-        assert_eq!(sampler.rules.len(), 2); // Should still have the same rules
-
         // Test with empty rules array
-        callback(r#"{"rules": []}"#);
+        callback(&[]);
         assert_eq!(sampler.rules.len(), 0); // Should now have no rules
     }
 }

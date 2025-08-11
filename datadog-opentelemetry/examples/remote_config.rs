@@ -35,15 +35,15 @@ fn main() {
 
     let config = builder.build();
 
-    println!("Initial sampling rules: {:?}", config.trace_sampling_rules());
+    println!(
+        "Initial sampling rules: {:?}",
+        config.trace_sampling_rules()
+    );
 
     // Initialize the OpenTelemetry tracer
     // This automatically starts the RemoteConfigClient in the background
-    let tracer_provider = datadog_opentelemetry::init_datadog(
-        config,
-        TracerProviderBuilder::default(),
-        None,
-    );
+    let tracer_provider =
+        datadog_opentelemetry::init_datadog(config, TracerProviderBuilder::default(), None);
 
     let tracer = tracer_provider.tracer("remote-config-example");
 
@@ -54,14 +54,16 @@ fn main() {
     // Create some test spans to demonstrate the tracer is working
     for i in 1..=5 {
         tracer.in_span("test-operation", |_cx| {
-            println!("Created span {}", i);
+            println!("Created span {i}");
             // Simulate some work
             thread::sleep(Duration::from_millis(100));
         });
-        
+
         thread::sleep(Duration::from_secs(2));
     }
 
     println!("Example completed. The RemoteConfigClient continues running in the background.");
-    println!("In a real application, it would keep running and apply any remote configuration updates.");
-} 
+    println!(
+        "In a real application, it would keep running and apply any remote configuration updates."
+    );
+}

@@ -4,7 +4,7 @@
 pub mod configuration;
 pub mod constants;
 pub mod sampling;
-pub use configuration::Config;
+pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig};
 
 mod error;
 pub use error::{Error, Result};
