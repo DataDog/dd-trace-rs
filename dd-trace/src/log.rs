@@ -140,7 +140,7 @@ pub fn print_log<I: Into<String>>(
         eprintln!("\x1b[91m{lvl}\x1b[0m {file}:{line} - {log}");
 
         if let Some(template) = template {
-            // there should be no dynamic messages in either log message or log stack_trace
+            // we should only send the template to telemetry to not leak sensitive information
             crate::telemetry::add_log_error(
                 template,
                 Some(format!("Error: {template}\n at {file}:{line}")),
