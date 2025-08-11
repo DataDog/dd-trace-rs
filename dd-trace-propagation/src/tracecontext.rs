@@ -232,7 +232,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             })
         }
         Err(e) => {
-            dd_error!("Failed to extract traceparent: {e}");
+            dd_error!("Propagator (tracecontext): Failed to extract traceparent: {e}");
             None
         }
     }
@@ -324,7 +324,7 @@ fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Err
             }
         }
         _ => {
-            dd_warn!("Unsupported traceparent version {version}, still atempenting to parse");
+            dd_warn!("Propagator (tracecontext): Unsupported traceparent version {version}, still atempenting to parse");
         }
     }
 

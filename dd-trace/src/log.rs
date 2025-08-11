@@ -139,10 +139,13 @@ pub fn print_log<I: Into<String>>(
     if lvl == crate::log::LevelFilter::Error {
         eprintln!("\x1b[91m{lvl}\x1b[0m {file}:{line} - {log}");
 
-        crate::telemetry::add_log_error(
-            template.unwrap_or(&log),
-            Some(format!("Error: {log}\n at {file}:{line}")),
-        );
+        if let Some(template) = template {
+            // we should only send the template to telemetry to not leak sensitive information
+            crate::telemetry::add_log_error(
+                template,
+                Some(format!("Error: {template}\n at {file}:{line}")),
+            );
+        }
     } else {
         println!("\x1b[93m{lvl}\x1b[0m {file}:{line} - {log}");
     }

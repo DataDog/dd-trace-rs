@@ -82,7 +82,7 @@ fn init_telemetry_inner(
                 }))
             }
             Err(err) => {
-                dd_error!("Error initializing telemetry worker: {err:?}");
+                dd_error!("Telemetry: Error initializing worker: {err:?}");
                 Arc::new(Mutex::new(Telemetry::default()))
             }
         }
@@ -317,8 +317,8 @@ mod tests {
             "This is an error with mutiple {} {}".to_string(),
         ];
 
-        dd_debug!("This is an debug");
-        dd_warn!("This is an warn");
+        dd_debug!("This is a debug");
+        dd_warn!("This is a warn");
         dd_error!("This is an error");
         dd_error!("This is an error with {config:?}");
         dd_error!("This is an error with {:?}", config);
