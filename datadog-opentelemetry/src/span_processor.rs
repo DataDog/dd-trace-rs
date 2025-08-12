@@ -468,11 +468,11 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
-        
+
         // Extract service name from span and add to extra services for remote config
         // This allows discovery of all services at runtime for proper remote configuration
         self.extract_and_add_service_from_span(&span);
-        
+
         let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
@@ -662,6 +662,4 @@ mod tests {
             Some(Value::String("otel-service".into()))
         );
     }
-
-
 }

@@ -249,7 +249,7 @@ mod datadog_test_agent {
         // Verify the tracer provider was created successfully
         let _tracer = tracer_provider.tracer("test");
         // If we get here, the tracer provider was created successfully
-        
+
         std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
     }
 
@@ -268,7 +268,7 @@ mod datadog_test_agent {
         // Verify the tracer provider was created successfully
         let _tracer = tracer_provider.tracer("test");
         // If we get here, the tracer provider was created successfully
-        
+
         std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
     }
 

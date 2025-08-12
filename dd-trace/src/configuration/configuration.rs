@@ -602,7 +602,7 @@ impl Config {
     pub fn update_sampling_rules_from_remote(&mut self, rules_json: &str) -> Result<(), String> {
         // Parse the JSON into SamplingRuleConfig objects
         let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
-            .map_err(|e| format!("Failed to parse sampling rules JSON: {}", e))?;
+            .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
 
         // If remote config sends empty rules, clear remote config to fall back to local rules
         if rules.is_empty() {
@@ -1217,7 +1217,7 @@ mod tests {
 
         // Add more than 64 services
         for i in 0..70 {
-            config.add_extra_service(&format!("service-{}", i));
+            config.add_extra_service(&format!("service-{i}"));
         }
 
         // Should be limited to 64
@@ -1408,7 +1408,9 @@ mod tests {
                 ..SamplingRuleConfig::default()
             }],
         };
-        config.trace_sampling_rules.set_value_source(local_rules.clone(), ConfigSource::EnvVar);
+        config
+            .trace_sampling_rules
+            .set_value_source(local_rules.clone(), ConfigSource::EnvVar);
 
         // Verify local rules are active
         assert_eq!(config.trace_sampling_rules().len(), 1);
@@ -1416,17 +1418,25 @@ mod tests {
         assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
 
         // 2. Remote config sends non-empty rules
-        let remote_rules_json = r#"[{"sample_rate": 0.8, "service": "remote-service", "provenance": "remote"}]"#;
-        config.update_sampling_rules_from_remote(remote_rules_json).unwrap();
+        let remote_rules_json =
+            r#"[{"sample_rate": 0.8, "service": "remote-service", "provenance": "remote"}]"#;
+        config
+            .update_sampling_rules_from_remote(remote_rules_json)
+            .unwrap();
 
         // Verify remote rules override local rules
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.8);
-        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::RemoteConfig);
+        assert_eq!(
+            config.trace_sampling_rules.source(),
+            ConfigSource::RemoteConfig
+        );
 
         // 3. Remote config sends empty array []
         let empty_remote_rules_json = "[]";
-        config.update_sampling_rules_from_remote(empty_remote_rules_json).unwrap();
+        config
+            .update_sampling_rules_from_remote(empty_remote_rules_json)
+            .unwrap();
 
         // NEW BEHAVIOR: Empty remote rules now automatically fall back to local rules
         assert_eq!(config.trace_sampling_rules().len(), 1); // Falls back to local rules
@@ -1436,7 +1446,7 @@ mod tests {
         // 4. Verify explicit clearing still works (for completeness)
         // Since we're already on local rules, clear should keep us on local rules
         config.clear_remote_sampling_rules();
-        
+
         // Should remain on local rules
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);

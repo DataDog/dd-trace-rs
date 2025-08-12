@@ -1233,7 +1233,7 @@ mod tests {
         assert!(targets.signatures.is_some());
         let signatures = targets.signatures.unwrap();
         assert_eq!(signatures.len(), 1);
-        
+
         // Verify the signed targets structure
         assert_eq!(targets.signed.target_type, "targets");
         assert_eq!(targets.signed.expires, "2022-09-22T09:01:04Z");
@@ -1243,7 +1243,8 @@ mod tests {
         // Verify custom metadata with opaque_backend_state
         assert!(targets.signed.custom.is_some());
         let custom = targets.signed.custom.unwrap();
-        let backend_state = custom.get("opaque_backend_state")
+        let backend_state = custom
+            .get("opaque_backend_state")
             .and_then(|v| v.as_str())
             .expect("Should have opaque_backend_state");
         assert_eq!(backend_state, "eyJ2ZXJzaW9uIjoxLCJzdGF0ZSI6eyJmaWxlX2hhc2hlcyI6WyJGZXJOT1FyMStmTThKWk9TY0crZllucnhXMWpKN0w0ZlB5aGtxUWVCT3dJPSIsInd1aW9BVm1Qcy9oNEpXMDh1dnI1bi9meERLQ3lKdG1sQmRjaDNOcFdLZDg9IiwiOGFDYVJFc3hIV3R3SFNFWm5SV0pJYmtENXVBNUtETENoZG8vZ0RNdnJJMD0iXX19");
@@ -1252,7 +1253,10 @@ mod tests {
         assert_eq!(targets.signed.targets.len(), 3);
 
         // Test APM_SAMPLING target
-        let apm_sampling = targets.signed.targets.get("datadog/2/APM_SAMPLING/dynamic_rates/config")
+        let apm_sampling = targets
+            .signed
+            .targets
+            .get("datadog/2/APM_SAMPLING/dynamic_rates/config")
             .expect("Should have APM_SAMPLING target");
         assert_eq!(apm_sampling.length, 58409);
         assert_eq!(
@@ -1263,7 +1267,10 @@ mod tests {
         assert_eq!(apm_custom.get("v").unwrap().as_u64().unwrap(), 27423);
 
         // Test ASM_DD target
-        let asm_dd = targets.signed.targets.get("employee/ASM_DD/1.recommended.json/config")
+        let asm_dd = targets
+            .signed
+            .targets
+            .get("employee/ASM_DD/1.recommended.json/config")
             .expect("Should have ASM_DD target");
         assert_eq!(asm_dd.length, 235228);
         assert_eq!(
@@ -1274,7 +1281,10 @@ mod tests {
         assert_eq!(asm_custom.get("v").unwrap().as_u64().unwrap(), 1);
 
         // Test CWS_DD target
-        let cws_dd = targets.signed.targets.get("employee/CWS_DD/4.default.policy/config")
+        let cws_dd = targets
+            .signed
+            .targets
+            .get("employee/CWS_DD/4.default.policy/config")
             .expect("Should have CWS_DD target");
         assert_eq!(cws_dd.length, 34777);
         assert_eq!(
@@ -1322,7 +1332,8 @@ mod tests {
 }"#;
 
         use base64::Engine;
-        let encoded_targets = base64::engine::general_purpose::STANDARD.encode(tuf_targets_json.as_bytes());
+        let encoded_targets =
+            base64::engine::general_purpose::STANDARD.encode(tuf_targets_json.as_bytes());
 
         // Create a config response with the TUF targets and a corresponding target file
         let config_response = ConfigResponse {
@@ -1335,13 +1346,16 @@ mod tests {
                 },
             ]),
             client_configs: Some(vec![
-                "datadog/2/APM_TRACING/test-sampling/config".to_string(),
+                "datadog/2/APM_TRACING/test-sampling/config".to_string()
             ]),
         };
 
         // Process the response
         let result = client.process_response(config_response);
-        assert!(result.is_ok(), "process_response should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "process_response should succeed: {result:?}"
+        );
 
         // Verify state was updated with targets metadata
         let state = client.state.lock().unwrap();

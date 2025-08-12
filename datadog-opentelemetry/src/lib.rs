@@ -90,7 +90,7 @@ fn make_tracer(
 
     // Initialize remote configuration client if enabled
     if config.remote_config_enabled() {
-        //  Create a mutable config that can be updated by remote config
+        // Create a mutable config that can be updated by remote config
         let config_arc = Arc::new(config);
         let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
 
