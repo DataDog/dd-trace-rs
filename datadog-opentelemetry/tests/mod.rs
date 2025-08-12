@@ -237,9 +237,8 @@ mod datadog_test_agent {
     #[test]
     fn test_remote_config_initialization() {
         // Test that remote config client is initialized when remote config is enabled
-        let mut config_builder = dd_trace::Config::builder();
-        config_builder.set_remote_config_enabled(true);
-        let config = config_builder.build();
+        std::env::set_var("DD_REMOTE_CONFIGURATION_ENABLED", "true");
+        let config = dd_trace::Config::builder().build();
 
         // This should initialize the remote config client
         let (tracer_provider, _propagator) = make_test_tracer(
@@ -250,14 +249,15 @@ mod datadog_test_agent {
         // Verify the tracer provider was created successfully
         let _tracer = tracer_provider.tracer("test");
         // If we get here, the tracer provider was created successfully
+        
+        std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
     }
 
     #[test]
     fn test_remote_config_disabled() {
         // Test that remote config client is not initialized when remote config is disabled
-        let mut config_builder = dd_trace::Config::builder();
-        config_builder.set_remote_config_enabled(false);
-        let config = config_builder.build();
+        std::env::set_var("DD_REMOTE_CONFIGURATION_ENABLED", "false");
+        let config = dd_trace::Config::builder().build();
 
         // This should not initialize the remote config client
         let (tracer_provider, _propagator) = make_test_tracer(
@@ -268,6 +268,8 @@ mod datadog_test_agent {
         // Verify the tracer provider was created successfully
         let _tracer = tracer_provider.tracer("test");
         // If we get here, the tracer provider was created successfully
+        
+        std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
     }
 
     #[track_caller]

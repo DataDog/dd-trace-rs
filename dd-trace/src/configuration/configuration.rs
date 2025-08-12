@@ -664,20 +664,6 @@ impl Config {
         }
     }
 
-    /// Remove a specific callback by key
-    pub fn remove_remote_config_callback(&self, key: &str) {
-        if let Ok(mut callbacks) = self.remote_config_callbacks.lock() {
-            callbacks.remove(key);
-        }
-    }
-
-    /// Remove all remote config callbacks
-    pub fn clear_remote_config_callbacks(&self) {
-        if let Ok(mut callbacks) = self.remote_config_callbacks.lock() {
-            callbacks.clear();
-        }
-    }
-
     /// Add an extra service discovered at runtime
     /// This is used for remote configuration
     pub fn add_extra_service(&self, service_name: &str) {
@@ -864,13 +850,6 @@ impl ConfigBuilder {
         trace_stats_computation_enabled: bool,
     ) -> &mut Self {
         self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
-        self
-    }
-
-    pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.remote_config_enabled = enabled;
-        // Also update the extra services tracker
-        self.config.extra_services_tracker = ExtraServicesTracker::new(enabled);
         self
     }
 
@@ -1211,9 +1190,14 @@ mod tests {
 
     #[test]
     fn test_extra_services_disabled_when_remote_config_disabled() {
-        let config = Config::builder()
+        // Use environment variable to disable remote config
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources)
             .set_service("main-service".to_string())
-            .set_remote_config_enabled(false)
             .build();
 
         // Add services when remote config is disabled

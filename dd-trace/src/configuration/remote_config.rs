@@ -175,7 +175,7 @@ struct ApmTracingConfig {
 }
 
 /// TUF targets metadata
-/// AIDEV-NOTE: This is just an alias for SignedTargets to match the JSON structure
+/// This is just an alias for SignedTargets to match the JSON structure
 type TargetsMetadata = SignedTargets;
 
 /// Target description matching Python's TargetDesc
@@ -249,7 +249,7 @@ struct SignedTargets {
 /// ```
 pub struct RemoteConfigClient {
     /// Unique identifier for this client instance
-    /// AIDEV-NOTE: Different from runtime_id - each RemoteConfigClient gets its own UUID
+    /// Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
     config: Arc<Mutex<Config>>,
     agent_url: String,
@@ -273,7 +273,7 @@ impl RemoteConfigClient {
             .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
 
         let state = Arc::new(Mutex::new(ClientState {
-            root_version: 1, // AIDEV-NOTE: Agent requires >= 1 (base TUF director root)
+            root_version: 1, // Agent requires >= 1 (base TUF director root)
             targets_version: 0,
             config_states: Vec::new(),
             has_error: false,
@@ -1172,5 +1172,197 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.5);
         assert_eq!(rules[0].service, Some("test-service".to_string()));
+    }
+
+    #[test]
+    fn test_tuf_targets_parsing() {
+        // Test parsing of a realistic TUF targets file structure
+        // Based on the example provided in the user query
+        let tuf_targets_json = r#"{
+   "signatures": [
+       {
+           "keyid": "5c4ece41241a1bb513f6e3e5df74ab7d5183dfffbd71bfd43127920d880569fd",
+           "sig": "4dd483db8b4aff81a9afd2ed4eaeb23fe3aca9a148a7a8942e24e8c5ef911e2692f94492b882727b257dacfbf6bcea09d6e26ea28ac145fcb4254ea046be3b03"
+       }
+   ],
+   "signed": {
+       "_type": "targets",
+       "custom": {
+           "opaque_backend_state": "eyJ2ZXJzaW9uIjoxLCJzdGF0ZSI6eyJmaWxlX2hhc2hlcyI6WyJGZXJOT1FyMStmTThKWk9TY0crZllucnhXMWpKN0w0ZlB5aGtxUWVCT3dJPSIsInd1aW9BVm1Qcy9oNEpXMDh1dnI1bi9meERLQ3lKdG1sQmRjaDNOcFdLZDg9IiwiOGFDYVJFc3hIV3R3SFNFWm5SV0pJYmtENXVBNUtETENoZG8vZ0RNdnJJMD0iXX19"
+       },
+       "expires": "2022-09-22T09:01:04Z",
+       "spec_version": "1.0.0",
+       "targets": {
+           "datadog/2/APM_SAMPLING/dynamic_rates/config": {
+               "custom": {
+                   "v": 27423
+               },
+               "hashes": {
+                   "sha256": "c2e8a801598fb3f878256d3cbafaf99ff7f10ca0b226d9a505d721dcda5629df"
+               },
+               "length": 58409
+           },
+           "employee/ASM_DD/1.recommended.json/config": {
+               "custom": {
+                   "v": 1
+               },
+               "hashes": {
+                   "sha256": "15eacd390af5f9f33c259392706f9f627af15b58c9ecbe1f3f2864a907813b02"
+               },
+               "length": 235228
+           },
+           "employee/CWS_DD/4.default.policy/config": {
+               "custom": {
+                   "v": 1
+               },
+               "hashes": {
+                   "sha256": "f1a09a444b311d6b701d21199d158921b903e6e0392832c285da3f80332fac8d"
+               },
+               "length": 34777
+           }
+       },
+       "version": 23755701
+   }
+}"#;
+
+        // Parse the TUF targets structure
+        let targets: SignedTargets = serde_json::from_str(tuf_targets_json)
+            .expect("Should successfully parse TUF targets JSON");
+
+        // Verify signatures array is parsed correctly
+        assert!(targets.signatures.is_some());
+        let signatures = targets.signatures.unwrap();
+        assert_eq!(signatures.len(), 1);
+        
+        // Verify the signed targets structure
+        assert_eq!(targets.signed.target_type, "targets");
+        assert_eq!(targets.signed.expires, "2022-09-22T09:01:04Z");
+        assert_eq!(targets.signed.spec_version, "1.0.0");
+        assert_eq!(targets.signed.version, 23755701);
+
+        // Verify custom metadata with opaque_backend_state
+        assert!(targets.signed.custom.is_some());
+        let custom = targets.signed.custom.unwrap();
+        let backend_state = custom.get("opaque_backend_state")
+            .and_then(|v| v.as_str())
+            .expect("Should have opaque_backend_state");
+        assert_eq!(backend_state, "eyJ2ZXJzaW9uIjoxLCJzdGF0ZSI6eyJmaWxlX2hhc2hlcyI6WyJGZXJOT1FyMStmTThKWk9TY0crZllucnhXMWpKN0w0ZlB5aGtxUWVCT3dJPSIsInd1aW9BVm1Qcy9oNEpXMDh1dnI1bi9meERLQ3lKdG1sQmRjaDNOcFdLZDg9IiwiOGFDYVJFc3hIV3R3SFNFWm5SV0pJYmtENXVBNUtETENoZG8vZ0RNdnJJMD0iXX19");
+
+        // Verify targets parsing
+        assert_eq!(targets.signed.targets.len(), 3);
+
+        // Test APM_SAMPLING target
+        let apm_sampling = targets.signed.targets.get("datadog/2/APM_SAMPLING/dynamic_rates/config")
+            .expect("Should have APM_SAMPLING target");
+        assert_eq!(apm_sampling.length, 58409);
+        assert_eq!(
+            apm_sampling.hashes.get("sha256").unwrap(),
+            "c2e8a801598fb3f878256d3cbafaf99ff7f10ca0b226d9a505d721dcda5629df"
+        );
+        let apm_custom = apm_sampling.custom.as_ref().unwrap();
+        assert_eq!(apm_custom.get("v").unwrap().as_u64().unwrap(), 27423);
+
+        // Test ASM_DD target
+        let asm_dd = targets.signed.targets.get("employee/ASM_DD/1.recommended.json/config")
+            .expect("Should have ASM_DD target");
+        assert_eq!(asm_dd.length, 235228);
+        assert_eq!(
+            asm_dd.hashes.get("sha256").unwrap(),
+            "15eacd390af5f9f33c259392706f9f627af15b58c9ecbe1f3f2864a907813b02"
+        );
+        let asm_custom = asm_dd.custom.as_ref().unwrap();
+        assert_eq!(asm_custom.get("v").unwrap().as_u64().unwrap(), 1);
+
+        // Test CWS_DD target
+        let cws_dd = targets.signed.targets.get("employee/CWS_DD/4.default.policy/config")
+            .expect("Should have CWS_DD target");
+        assert_eq!(cws_dd.length, 34777);
+        assert_eq!(
+            cws_dd.hashes.get("sha256").unwrap(),
+            "f1a09a444b311d6b701d21199d158921b903e6e0392832c285da3f80332fac8d"
+        );
+        let cws_custom = cws_dd.custom.as_ref().unwrap();
+        assert_eq!(cws_custom.get("v").unwrap().as_u64().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_tuf_targets_integration_with_remote_config() {
+        // Test that we can process a TUF targets response through the remote config system
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config).unwrap();
+
+        // Create a realistic TUF targets JSON and base64 encode it
+        let tuf_targets_json = r#"{
+   "signatures": [
+       {
+           "keyid": "5c4ece41241a1bb513f6e3e5df74ab7d5183dfffbd71bfd43127920d880569fd",
+           "sig": "4dd483db8b4aff81a9afd2ed4eaeb23fe3aca9a148a7a8942e24e8c5ef911e2692f94492b882727b257dacfbf6bcea09d6e26ea28ac145fcb4254ea046be3b03"
+       }
+   ],
+   "signed": {
+       "_type": "targets",
+       "custom": {
+           "opaque_backend_state": "eyJ2ZXJzaW9uIjoxLCJzdGF0ZSI6eyJmaWxlX2hhc2hlcyI6WyJGZXJOT1FyMStmTThKWk9TY0crZllucnhXMWpKN0w0ZlB5aGtxUWVCT3dJPSIsInd1aW9BVm1Qcy9oNEpXMDh1dnI1bi9meERLQ3lKdG1sQmRjaDNOcFdLZDg9IiwiOGFDYVJFc3hIV3R3SFNFWm5SV0pJYmtENXVBNUtETENoZG8vZ0RNdnJJMD0iXX19"
+       },
+       "expires": "2022-09-22T09:01:04Z",
+       "spec_version": "1.0.0",
+       "targets": {
+           "datadog/2/APM_TRACING/test-sampling/config": {
+               "custom": {
+                   "v": 100
+               },
+               "hashes": {
+                   "sha256": "c2e8a801598fb3f878256d3cbafaf99ff7f10ca0b226d9a505d721dcda5629df"
+               },
+               "length": 58409
+           }
+       },
+       "version": 23755701
+   }
+}"#;
+
+        use base64::Engine;
+        let encoded_targets = base64::engine::general_purpose::STANDARD.encode(tuf_targets_json.as_bytes());
+
+        // Create a config response with the TUF targets and a corresponding target file
+        let config_response = ConfigResponse {
+            roots: None,
+            targets: Some(encoded_targets),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/test-sampling/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LWFwcC1zZXJ2aWNlIn1dfQ==".to_string(), // base64 encoded sampling rules
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/test-sampling/config".to_string(),
+            ]),
+        };
+
+        // Process the response
+        let result = client.process_response(config_response);
+        assert!(result.is_ok(), "process_response should succeed: {:?}", result);
+
+        // Verify state was updated with targets metadata
+        let state = client.state.lock().unwrap();
+        assert_eq!(state.targets_version, 23755701);
+        assert_eq!(
+            state.backend_client_state,
+            Some("eyJ2ZXJzaW9uIjoxLCJzdGF0ZSI6eyJmaWxlX2hhc2hlcyI6WyJGZXJOT1FyMStmTThKWk9TY0crZllucnhXMWpKN0w0ZlB5aGtxUWVCT3dJPSIsInd1aW9BVm1Qcy9oNEpXMDh1dnI1bi9meERLQ3lKdG1sQmRjaDNOcFdLZDg9IiwiOGFDYVJFc3hIV3R3SFNFWm5SV0pJYmtENXVBNUtETENoZG8vZ0RNdnJJMD0iXX19".to_string())
+        );
+
+        // Verify config states were updated with version from targets custom.v
+        assert_eq!(state.config_states.len(), 1);
+        let config_state = &state.config_states[0];
+        assert!(config_state.id == "test-sampling" || config_state.id == "apm-tracing-sampling");
+        assert_eq!(config_state.version, 100); // From custom.v in targets
+        assert_eq!(config_state.product, "APM_TRACING");
+
+        // Verify that the sampling rules were applied to the config
+        let config = client.config.lock().unwrap();
+        let rules = config.trace_sampling_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.75);
+        assert_eq!(rules[0].service, Some("test-app-service".to_string()));
     }
 }
