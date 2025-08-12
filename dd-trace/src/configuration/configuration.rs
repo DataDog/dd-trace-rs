@@ -13,8 +13,19 @@ use crate::log::LevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
-/// Type alias for remote configuration callback functions  
-type RemoteConfigCallback = Box<dyn Fn(&[SamplingRuleConfig]) + Send + Sync>;
+/// Different types of remote configuration updates that can trigger callbacks
+#[derive(Debug, Clone)]
+pub enum RemoteConfigUpdate {
+    /// Sampling rules were updated from remote configuration
+    SamplingRules(Vec<SamplingRuleConfig>),
+    // Future remote config update types should be added here as new variants.
+    // E.g.
+    // - FeatureFlags(HashMap<String, bool>)
+}
+
+/// Type alias for remote configuration callback functions
+/// Callbacks receive a RemoteConfigUpdate enum to handle different config types
+type RemoteConfigCallback = Box<dyn Fn(&RemoteConfigUpdate) + Send + Sync>;
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -654,7 +665,9 @@ impl Config {
             // This specifically calls the DatadogSampler's on_rules_update method
             if let Ok(callbacks) = self.remote_config_callbacks.lock() {
                 if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
-                    callback(self.trace_sampling_rules());
+                    let update =
+                        RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec());
+                    callback(&update);
                 }
             }
         }
@@ -669,33 +682,39 @@ impl Config {
         if let Ok(callbacks) = self.remote_config_callbacks.lock() {
             if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
                 // Now that rc_value is cleared, this will return the fallback rules
-                callback(self.trace_sampling_rules());
+                let update =
+                    RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec());
+                callback(&update);
             }
         }
     }
 
-    /// Add a callback to be called when sampling rules are updated from remote configuration
-    /// This allows components like the DatadogSampler to be updated without circular imports
+    /// Add a callback to be called when remote configuration is updated
+    /// This allows components to be updated without circular imports
     ///
     /// # Arguments
     /// * `key` - A unique identifier for this callback (e.g., "datadog_sampler_on_rules_update")
-    /// * `callback` - The function to call when sampling rules are updated (receives
-    ///   SamplingRuleConfig slice)
+    /// * `callback` - The function to call when remote config is updated (receives
+    ///   RemoteConfigUpdate enum)
     ///
     /// # Example
     /// ```
-    /// use dd_trace::Config;
-    /// use std::sync::Arc;
+    /// use dd_trace::{configuration::RemoteConfigUpdate, Config};
     ///
     /// let config = Config::builder().build();
-    /// config.add_remote_config_callback("datadog_sampler_on_rules_update".to_string(), |rules| {
-    ///     println!("Received {} new sampling rules", rules.len());
-    ///     // Update your sampler here
+    /// config.add_remote_config_callback("my_component_callback".to_string(), |update| {
+    ///     match update {
+    ///         RemoteConfigUpdate::SamplingRules(rules) => {
+    ///             println!("Received {} new sampling rules", rules.len());
+    ///             // Update your sampler here
+    ///         } // Future remote config types can be handled here by adding new match arms
+    ///           // as new variants are added to the RemoteConfigUpdate enum
+    ///     }
     /// });
     /// ```
     pub fn add_remote_config_callback<F>(&self, key: String, callback: F)
     where
-        F: Fn(&[SamplingRuleConfig]) + Send + Sync + 'static,
+        F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
     {
         if let Ok(mut callbacks) = self.remote_config_callbacks.lock() {
             callbacks.insert(key, Box::new(callback));
@@ -1330,10 +1349,11 @@ mod tests {
 
         config.add_remote_config_callback(
             "datadog_sampler_on_rules_update".to_string(),
-            move |rules| {
+            move |update| {
                 *callback_called_clone.lock().unwrap() = true;
-                // Store the rules directly for testing
-                *callback_rules_clone.lock().unwrap() = rules.to_vec();
+                // Store the rules - for now we only have SamplingRules variant
+                let RemoteConfigUpdate::SamplingRules(rules) = update;
+                *callback_rules_clone.lock().unwrap() = rules.clone();
             },
         );
 
