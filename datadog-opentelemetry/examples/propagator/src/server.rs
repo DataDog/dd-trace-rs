@@ -18,7 +18,7 @@ use opentelemetry_http::{Bytes, HeaderExtractor, HeaderInjector};
 use opentelemetry_sdk::{
     error::OTelSdkResult,
     logs::{LogProcessor, SdkLogRecord, SdkLoggerProvider},
-    trace::{SdkTracerProvider, SpanProcessor},
+    trace::{SdkTracerProvider, SpanProcessor, TracerProviderBuilder},
 };
 use opentelemetry_semantic_conventions::trace;
 use opentelemetry_stdout::{LogExporter, SpanExporter};
@@ -219,13 +219,13 @@ fn init_tracer() -> SdkTracerProvider {
         .set_env("staging".to_string())
         .build();
 
-    datadog_opentelemetry::tracing()
-        .with_config(config)
+    let tracer_provider_builder = TracerProviderBuilder::default()
         .with_span_processor(EnrichWithBaggageSpanProcessor)
         .with_span_processor(opentelemetry_sdk::trace::SimpleSpanProcessor::new(
             SpanExporter::default(),
-        ))
-        .init()
+        ));
+
+    datadog_opentelemetry::init_datadog(config, tracer_provider_builder, None)
 }
 
 fn init_logs() -> SdkLoggerProvider {
