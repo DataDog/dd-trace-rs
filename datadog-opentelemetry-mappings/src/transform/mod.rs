@@ -551,7 +551,7 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
                 let (trace_id, trace_id_high) = otel_trace_id_to_dd_id(span_context.trace_id());
                 let span_id = otel_span_id_to_dd_id(span_context.span_id());
                 let tracestate = BytesString::from(span_context.trace_state().header());
-                let flags = span_context.trace_flags().to_u8() as u64;
+                let flags = span_context.trace_flags().to_u8() as u32;
                 let attributes = otel_attributes
                     .into_iter()
                     .map(|KeyValue { key, value, .. }| {

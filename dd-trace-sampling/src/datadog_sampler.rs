@@ -125,7 +125,7 @@ impl SamplingRule {
 
             // Special handling for rules defined with "http.status_code" or
             // "http.response.status_code"
-            if rule_tag_key_str == opentelemetry_semantic_conventions::trace::HTTP_STATUS_CODE
+            if rule_tag_key_str == "http.status_code"
                 || rule_tag_key_str
                     == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
             {
