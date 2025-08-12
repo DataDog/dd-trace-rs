@@ -138,10 +138,10 @@ impl DatadogExporter {
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
-                .set_language("rust")
                 .set_url(config.trace_agent_url())
                 .set_dogstatsd_url(config.dogstatsd_agent_url())
                 .set_tracer_version(config.tracer_version())
+                .set_language(config.language())
                 .set_language_version(config.language_version())
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
@@ -510,7 +510,20 @@ impl TraceExporterWorker {
                 match self.export_trace_chunks(data) {
                     Ok(()) => {}
                     Err(e) => {
-                        dd_trace::dd_error!("DatadogExporter: Export error {}", e,);
+                        match e {
+                            OTelSdkError::AlreadyShutdown => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Shutdown already invoked {}",
+                                e,
+                            ),
+                            OTelSdkError::Timeout(_) => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Operation timed out {}",
+                                e,
+                            ),
+                            OTelSdkError::InternalFailure(_) => dd_trace::dd_error!(
+                                "DatadogExporter: Export error - Operation failed {}",
+                                e,
+                            ),
+                        };
                     }
                 };
             }

@@ -13,21 +13,22 @@ The `datadog-opentelemetry` crate provides an easy to use override for the rust 
 
 ```rust
 use std::time::Duration;
-use dd_trace::Config;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 
 fn main() {
     // This picks up env var configuration and other datadog configuration sources
-    let datadog_config = Config::builder().build();
-    let tracer_provider = datadog_opentelemetry::init_datadog(
-        datadog_config,
-        TracerProviderBuilder::default(),
-        None,
-    );
+    let tracer_provider = datadog_opentelemetry::tracing()
+        .init();
 
     // Your code
+    // Now use standard OpenTelemetry APIs
+    use opentelemetry::global;
+    use opentelemetry::trace::Tracer;
 
+    let tracer = global::tracer("my-service");
+    let span = tracer.start("my-operation");
+    // ... do work ...
 
+    // Shutdown the tracer to flush the remaining data
     tracer_provider.shutdown_with_timeout(Duration::from_secs(1)).expect("tracer shutdown error");
 }
 ```
@@ -137,28 +138,3 @@ The crates are orchestrated in `datadog-opentelemetry/src/lib.rs` through the `i
 5. **Span Processor** (`datadog-opentelemetry`): The processor collects spans, uses the mappings to convert them to Datadog format, and manages trace assembly.
 
 6. **Global Registration**: The tracer provider and propagator are registered with OpenTelemetry's global API.
-
-## Usage Example
-
-```rust
-use dd_trace::Config;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
-
-// Load configuration from environment variables
-let datadog_config = Config::default();
-
-// Initialize Datadog with OpenTelemetry
-// This automatically registers the tracer provider and propagator globally
-datadog_opentelemetry::init_datadog(
-    datadog_config,
-    TracerProviderBuilder::default(),
-);
-
-// Now use standard OpenTelemetry APIs
-use opentelemetry::global;
-use opentelemetry::trace::Tracer;
-
-let tracer = global::tracer("my-service");
-let span = tracer.start("my-operation");
-// ... do work ...
-```

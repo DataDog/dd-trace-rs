@@ -249,6 +249,7 @@ impl SamplingRule {
 }
 
 /// Represents a priority for sampling rules
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RuleProvenance {
     Customer = 0,

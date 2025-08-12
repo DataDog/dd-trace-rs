@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
+use rustc_version_runtime::version;
+
 use crate::dd_warn;
 use crate::log::LevelFilter;
 
@@ -341,7 +343,8 @@ pub struct Config {
 
     // # Tracer
     tracer_version: &'static str,
-    language_version: &'static str,
+    language_version: String,
+    language: &'static str,
 
     // # Service tagging
     service: ServiceName,
@@ -378,6 +381,14 @@ pub struct Config {
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
+
+    // # Telemetry configuration
+    /// Disables telemetry if false
+    telemetry_enabled: bool,
+    /// Disables telemetry log collection if false.
+    telemetry_log_collection_enabled: bool,
+    /// Interval by which telemetry events are flushed (seconds)
+    telemetry_heartbeat_interval: f64,
 
     /// Trace propagation configuration
     trace_propagation_style: Option<Vec<TracePropagationStyle>>,
@@ -446,6 +457,7 @@ impl Config {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
             language_version: default.language_version,
+            language: default.language,
             service: to_val(sources.get("DD_SERVICE"))
                 .map(ServiceName::Configured)
                 .unwrap_or(default.service),
@@ -472,6 +484,16 @@ impl Config {
                 sources.get_parse("DD_TRACE_STATS_COMPUTATION_ENABLED"),
             )
             .unwrap_or(default.trace_stats_computation_enabled),
+            telemetry_enabled: to_val(sources.get_parse("DD_INSTRUMENTATION_TELEMETRY_ENABLED"))
+                .unwrap_or(default.telemetry_enabled),
+            telemetry_log_collection_enabled: to_val(
+                sources.get_parse("DD_TELEMETRY_LOG_COLLECTION_ENABLED"),
+            )
+            .unwrap_or(default.telemetry_log_collection_enabled),
+            telemetry_heartbeat_interval: to_val(
+                sources.get_parse("DD_TELEMETRY_HEARTBEAT_INTERVAL"),
+            )
+            .unwrap_or(default.telemetry_heartbeat_interval),
             trace_propagation_style: TracePropagationStyle::from_tags(
                 to_val(sources.get_parse::<DdTags>("DD_TRACE_PROPAGATION_STYLE"))
                     .map(|DdTags(tags)| Some(tags))
@@ -518,8 +540,12 @@ impl Config {
         self.tracer_version
     }
 
+    pub fn language(&self) -> &str {
+        self.language
+    }
+
     pub fn language_version(&self) -> &str {
-        self.language_version
+        self.language_version.as_str()
     }
 
     pub fn service(&self) -> &str {
@@ -580,6 +606,18 @@ impl Config {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    pub fn telemetry_enabled(&self) -> bool {
+        self.telemetry_enabled
+    }
+
+    pub fn telemetry_log_collection_enabled(&self) -> bool {
+        self.telemetry_log_collection_enabled
+    }
+
+    pub fn telemetry_heartbeat_interval(&self) -> f64 {
+        self.telemetry_heartbeat_interval
     }
 
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
@@ -741,10 +779,15 @@ fn default_config() -> Config {
         enabled: true,
         log_level_filter: LevelFilter::default(),
         tracer_version: TRACER_VERSION,
-        language_version: "TODO: Get from env",
+        language: "rust",
+        language_version: version().to_string(),
         trace_stats_computation_enabled: true,
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
+
+        telemetry_enabled: true,
+        telemetry_log_collection_enabled: true,
+        telemetry_heartbeat_interval: 60.0,
 
         trace_propagation_style: None,
         trace_propagation_style_extract: None,
@@ -789,6 +832,21 @@ impl ConfigBuilder {
 
     pub fn add_global_tag(&mut self, tag: String) -> &mut Self {
         self.config.global_tags.push(tag);
+        self
+    }
+
+    pub fn set_telemetry_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.telemetry_enabled = enabled;
+        self
+    }
+
+    pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.telemetry_log_collection_enabled = enabled;
+        self
+    }
+
+    pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
+        self.config.telemetry_heartbeat_interval = seconds;
         self
     }
 
@@ -1306,7 +1364,8 @@ mod tests {
 
         config.clear_remote_sampling_rules();
 
-        // Callback should be called with fallback rules (empty in this case since no env/code rules set)
+        // Callback should be called with fallback rules (empty in this case since no env/code rules
+        // set)
         assert!(*callback_called.lock().unwrap());
         assert!(callback_rules.lock().unwrap().is_empty());
     }
@@ -1451,5 +1510,48 @@ mod tests {
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);
         assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
+    }
+
+    #[test]
+    fn test_telemetry_config_from_sources() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
+                ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(!config.telemetry_enabled());
+        assert!(!config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 42.0);
+    }
+
+    #[test]
+    fn test_telemetry_config() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false"),
+                ("DD_TELEMETRY_LOG_COLLECTION_ENABLED", "false"),
+                ("DD_TELEMETRY_HEARTBEAT_INTERVAL", "42"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let mut builder = Config::builder_with_sources(&sources);
+
+        builder
+            .set_telemetry_enabled(true)
+            .set_telemetry_log_collection_enabled(true)
+            .set_telemetry_heartbeat_interval(0.1);
+
+        let config = builder.build();
+
+        assert!(config.telemetry_enabled());
+        assert!(config.telemetry_log_collection_enabled());
+        assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
     }
 }
