@@ -11,6 +11,8 @@ pub struct Error {
     propagator_name: &'static str,
     // what operation was attempted
     operation: &'static str,
+    // flag to indicate if error should be sent via telemetry
+    pub send_telemetry: bool,
 }
 
 impl Error {
@@ -21,6 +23,17 @@ impl Error {
             message,
             propagator_name,
             operation: "extract",
+            send_telemetry: true,
+        }
+    }
+
+    /// Error when extracting a value from a carrier with telemetry off
+    pub fn extract_silent(message: &'static str, propagator_name: &'static str) -> Self {
+        Self {
+            message,
+            propagator_name,
+            operation: "extract",
+            send_telemetry: false,
         }
     }
 
@@ -31,6 +44,7 @@ impl Error {
             message,
             propagator_name,
             operation: "inject",
+            send_telemetry: true,
         }
     }
 }
