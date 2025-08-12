@@ -420,7 +420,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) {
-        if !span.is_recording() || !span.span_context().is_valid() {
+        if !self.config.enabled() || !span.is_recording() || !span.span_context().is_valid() {
             return;
         }
 
