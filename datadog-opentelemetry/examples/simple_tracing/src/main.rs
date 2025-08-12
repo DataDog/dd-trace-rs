@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use opentelemetry::trace::Tracer;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 
 fn foo() {
     opentelemetry::global::tracer("foo").in_span("foo", |_cx| {
@@ -16,12 +15,13 @@ fn bar() {
 }
 
 fn main() {
-    let config = dd_trace::Config::builder()
-        .set_service("simple_tracing".to_string())
-        .build();
-
-    let tracer_provider =
-        datadog_opentelemetry::init_datadog(config, TracerProviderBuilder::default(), None);
+    let tracer_provider = datadog_opentelemetry::tracing()
+        .with_config(
+            dd_trace::Config::builder()
+                .set_service("simple_tracing".to_string())
+                .build(),
+        )
+        .init();
 
     foo();
 

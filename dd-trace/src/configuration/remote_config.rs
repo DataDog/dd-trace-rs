@@ -567,7 +567,7 @@ impl RemoteConfigClient {
                             state.config_states.push(ConfigState {
                                 id: config_id,
                                 version: config_version,
-                                product: product,
+                                product,
                                 apply_state: 3, // 3 denotes error
                                 apply_error: Some(format!("{e}")),
                             });
@@ -718,8 +718,8 @@ impl ProductRegistry {
         self.handlers.insert(handler.product_name().to_string(), handler);
     }
     
-    fn get_handler(&self, product: &str) -> Option<&Box<dyn ProductHandler + Send + Sync>> {
-        self.handlers.get(product)
+    fn get_handler(&self, product: &str) -> Option<&(dyn ProductHandler + Send + Sync)> {
+        self.handlers.get(product).map(|handler| handler.as_ref())
     }
 
 }

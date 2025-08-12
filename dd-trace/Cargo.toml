@@ -26,7 +26,3 @@ ddtelemetry = { workspace = true }
 
 [features]
 test-utils = []
-
-[[example]]
-name = "remote_config"
-path = "examples/remote_config.rs"
