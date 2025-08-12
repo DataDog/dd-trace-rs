@@ -49,11 +49,32 @@ pub fn otel_trace_chunk_to_dd_trace_chunk(
                 otel_resource,
             );
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
-            if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
-                dd_span.service = BytesString::from_string(cfg.service().to_string());
-            }
+
+            add_config_metadata(&mut dd_span, cfg);
 
             dd_span
         })
         .collect()
+}
+
+fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config) {
+    if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
+        dd_span.service = BytesString::from_string(cfg.service().to_string());
+    }
+
+    if let Some(env) = cfg.env() {
+        dd_span.meta.insert(
+            BytesString::from_static("env"),
+            BytesString::from_string(env.to_string()),
+        );
+    }
+
+    if let Some(version) = cfg.version() {
+        if dd_span.service == cfg.service() {
+            dd_span.meta.insert(
+                BytesString::from_static("version"),
+                BytesString::from_string(version.to_string()),
+            );
+        }
+    }
 }

@@ -412,15 +412,6 @@ impl DatadogSpanProcessor {
 
         trace.finished_spans
     }
-
-    fn add_config_metadata(&self, span: &mut opentelemetry_sdk::trace::Span) {
-        if let Some(env) = self.config.env() {
-            span.set_attribute(KeyValue::new("datadog.env", env.to_string()));
-        }
-        if let Some(version) = self.config.version() {
-            span.set_attribute(KeyValue::new("datadog.version", version.to_string()));
-        }
-    }
 }
 
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
@@ -435,8 +426,6 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
-
-        self.add_config_metadata(span);
 
         if parent_ctx.span().span_context().is_remote() {
             let propagation_data = self.get_remote_propagation_data(span, parent_ctx);
