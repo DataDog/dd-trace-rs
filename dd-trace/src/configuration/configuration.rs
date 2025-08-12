@@ -449,7 +449,6 @@ impl Config {
         let parsed_sampling_rules_config =
             to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
 
-        // Initialize the sampling rules ConfigItem
         let mut sampling_rules_item = ConfigItem::new(
             "DD_TRACE_SAMPLING_RULES",
             ParsedSamplingRules::default(), // default is empty rules
@@ -462,7 +461,7 @@ impl Config {
 
         // Parse remote configuration enabled flag
         let remote_config_enabled =
-            to_val(sources.get_parse::<bool>("DD_REMOTE_CONFIGURATION_ENABLED")).unwrap_or(true); // Default to enabled
+            to_val(sources.get_parse::<bool>("DD_REMOTE_CONFIGURATION_ENABLED")).unwrap_or(true);
 
         Self {
             runtime_id: default.runtime_id,
@@ -647,7 +646,6 @@ impl Config {
         self.trace_propagation_extract_first
     }
 
-    /// Updates sampling rules from remote configuration
     pub fn update_sampling_rules_from_remote(&mut self, rules_json: &str) -> Result<(), String> {
         // Parse the JSON into SamplingRuleConfig objects
         let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
@@ -675,7 +673,6 @@ impl Config {
         Ok(())
     }
 
-    /// Clears remote configuration sampling rules, falling back to code/env/default
     pub fn clear_remote_sampling_rules(&mut self) {
         self.trace_sampling_rules.unset_rc();
 
@@ -707,7 +704,7 @@ impl Config {
     ///         RemoteConfigUpdate::SamplingRules(rules) => {
     ///             println!("Received {} new sampling rules", rules.len());
     ///             // Update your sampler here
-    ///         } // Future remote config types can be handled here by adding new match arms
+    ///         } // Future remote config types can be added here
     ///           // as new variants are added to the RemoteConfigUpdate enum
     ///     }
     /// });
@@ -1459,7 +1456,7 @@ mod tests {
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.25);
 
-        // Builder override should take precedence
+        // Code override should take precedence
         let config = Config::builder_with_sources(&sources)
             .set_trace_sampling_rules(vec![SamplingRuleConfig {
                 sample_rate: 0.75,
@@ -1517,7 +1514,7 @@ mod tests {
             .update_sampling_rules_from_remote(empty_remote_rules_json)
             .unwrap();
 
-        // NEW BEHAVIOR: Empty remote rules now automatically fall back to local rules
+        // Empty remote rules automatically fall back to local rules
         assert_eq!(config.trace_sampling_rules().len(), 1); // Falls back to local rules
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3); // Local rule values
         assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar); // Back to env source!

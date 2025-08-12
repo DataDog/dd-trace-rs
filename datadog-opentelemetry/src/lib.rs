@@ -81,7 +81,8 @@ use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
 
 // Type alias to simplify complex callback type for remote config
-type SamplerCallback = Arc<Box<dyn Fn(&[dd_trace::SamplingRuleConfig]) + Send + Sync>>;
+// Arc wrapper around SamplingRulesCallback for shared ownership in remote config
+type SamplerCallback = Arc<dd_trace_sampling::SamplingRulesCallback>;
 
 pub struct DatadogTracingBuilder {
     config: Option<dd_trace::Config>,
@@ -277,9 +278,7 @@ fn make_tracer(
         .with_id_generator(trace_id::TraceidGenerator)
         .build();
 
-    // Initialize remote configuration client if enabled
     if config.remote_config_enabled() {
-        // Create a mutable config that can be updated by remote config
         let config_arc = Arc::new(config);
         let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
 

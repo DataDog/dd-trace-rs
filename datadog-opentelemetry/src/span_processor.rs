@@ -417,30 +417,31 @@ impl DatadogSpanProcessor {
     /// This allows discovery of all services at runtime for proper remote configuration.
     fn extract_and_add_service_from_span(&self, span: &SpanData) {
         // First check span attributes for service.name
-        if let Some(service_name) = span.attributes.iter().find_map(|kv| {
+        let service_name = if let Some(service_name) = span.attributes.iter().find_map(|kv| {
             if kv.key.as_str() == "service.name" {
                 Some(kv.value.to_string())
             } else {
                 None
             }
         }) {
-            // Only add if it's not the default service name
-            if !service_name.is_empty() && service_name != "otlpresourcenoservicename" {
-                self.config.add_extra_service(&service_name);
-            }
-            return;
-        }
-
-        // If not found in span attributes, check resource attributes
-        if let Ok(resource) = self.resource.read() {
-            let service_key = opentelemetry::Key::from_static_str("service.name");
-            if let Some(service_attr) = resource.get(&service_key) {
-                let service_name = service_attr.to_string();
-                // Only add if it's not the default service name
-                if !service_name.is_empty() && service_name != "otlpresourcenoservicename" {
-                    self.config.add_extra_service(&service_name);
+            service_name
+        } else {
+            // If not found in span attributes, check resource attributes
+            if let Ok(resource) = self.resource.read() {
+                let service_key = opentelemetry::Key::from_static_str("service.name");
+                if let Some(service_attr) = resource.get(&service_key) {
+                    service_attr.to_string()
+                } else {
+                    return; // No service name found anywhere
                 }
+            } else {
+                return; // Could not read resource
             }
+        };
+
+        // Only add if it's not empty or the default service name
+        if !service_name.is_empty() && service_name != "otlpresourcenoservicename" {
+            self.config.add_extra_service(&service_name);
         }
     }
 }

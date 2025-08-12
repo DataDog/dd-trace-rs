@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, Config};
-use dd_trace_sampling::DatadogSampler;
+use dd_trace_sampling::{DatadogSampler, SamplingRulesCallback};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::{
@@ -11,9 +11,6 @@ use std::{
 };
 
 use crate::{span_processor::RegisterTracePropagationResult, TraceRegistry};
-
-/// Type alias for sampling rules update callback
-type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [dd_trace::SamplingRuleConfig]) + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct Sampler {

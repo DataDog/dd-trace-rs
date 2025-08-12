@@ -7,6 +7,11 @@ use dd_trace::constants::{
 };
 use dd_trace::sampling::{mechanism, SamplingDecision as DdSamplingDecision, SamplingMechanism};
 
+/// Type alias for sampling rules update callback
+/// Consolidated callback type used across crates for remote config sampling updates
+pub type SamplingRulesCallback =
+    Box<dyn for<'a> Fn(&'a [dd_trace::SamplingRuleConfig]) + Send + Sync>;
+
 use datadog_opentelemetry_mappings::{
     get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
     get_otel_service, get_otel_status_code, OtelSpan,
@@ -26,9 +31,6 @@ use crate::rate_limiter::RateLimiter;
 use crate::rate_sampler::RateSampler;
 use crate::rules_sampler::RulesSampler;
 use crate::utils;
-
-/// Type alias for sampling rules update callback
-type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [dd_trace::SamplingRuleConfig]) + Send + Sync>;
 
 fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
     (rule != NO_RULE).then(|| GlobMatcher::new(rule))
@@ -55,7 +57,7 @@ pub struct SamplingRule {
 
 impl SamplingRule {
     /// Converts a vector of SamplingRuleConfig into SamplingRule objects
-    /// Centralizes the conversion logic to avoid duplication across different modules
+    /// Centralizes the conversion logic
     pub fn from_configs(configs: Vec<dd_trace::SamplingRuleConfig>) -> Vec<Self> {
         configs
             .into_iter()
@@ -321,31 +323,13 @@ impl DatadogSampler {
     }
 
     /// Creates a callback for updating sampling rules from remote configuration
-    ///
     /// # Returns
     /// A boxed function that takes a slice of SamplingRuleConfig and updates the sampling rules
-    ///
-    /// # Example
-    /// The callback receives sampling rules directly from the configuration:
-    /// ```rust
-    /// use dd_trace::SamplingRuleConfig;
-    ///
-    /// let rules = &[SamplingRuleConfig {
-    ///     sample_rate: 0.5,
-    ///     service: Some("web-*".to_string()),
-    ///     name: Some("http.*".to_string()),
-    ///     resource: Some("/api/*".to_string()),
-    ///     tags: [("env".to_string(), "prod".to_string())].into(),
-    ///     provenance: "customer".to_string(),
-    /// }];
-    /// ```
     pub fn on_rules_update(&self) -> SamplingRulesCallback {
         let rules_sampler = self.rules.clone();
         Box::new(move |rule_configs: &[dd_trace::SamplingRuleConfig]| {
-            // Convert the rule configs to SamplingRule instances
             let new_rules = SamplingRule::from_configs(rule_configs.to_vec());
 
-            // Update the rules
             rules_sampler.update_rules(new_rules);
         })
     }

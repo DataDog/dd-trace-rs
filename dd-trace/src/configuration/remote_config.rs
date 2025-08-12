@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5);
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5); // 5 seconds is the highest interval allowed by the spec
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Capabilities that the client supports
 #[derive(Debug, Clone)]
@@ -166,7 +166,7 @@ struct TargetFile {
 
 /// Configuration payload for APM tracing
 /// Based on the apm-tracing.json schema from dd-go
-/// See: https://github.com/DataDog/dd-go/blob/main/remote-config/apps/rc-product/schemas/apm-tracing.json
+/// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
 #[derive(Debug, Clone, Deserialize)]
 struct ApmTracingConfig {
     #[serde(default, rename = "tracing_sampling_rules")]
@@ -178,7 +178,6 @@ struct ApmTracingConfig {
 /// This is just an alias for SignedTargets to match the JSON structure
 type TargetsMetadata = SignedTargets;
 
-/// Target description matching Python's TargetDesc
 #[derive(Debug, Deserialize, Serialize)]
 struct TargetDesc {
     /// Length of the target file
@@ -189,7 +188,6 @@ struct TargetDesc {
     custom: Option<serde_json::Value>,
 }
 
-/// Targets structure matching Python's Targets
 #[derive(Debug, Deserialize)]
 struct Targets {
     /// Type of the targets (usually "targets")
@@ -230,23 +228,8 @@ struct SignedTargets {
 /// The client expects to receive configuration files with paths like:
 /// `datadog/2/APM_TRACING/{config_id}/config`
 ///
-/// These files contain JSON with a `tracing_sampling_rules` field that defines sampling rules.
-///
-/// # Example
-/// ```no_run
-/// use dd_trace::configuration::remote_config::RemoteConfigClient;
-/// use dd_trace::Config;
-/// use std::sync::{Arc, Mutex};
-///
-/// let config = Arc::new(Mutex::new(Config::builder().build()));
-///
-/// let client = RemoteConfigClient::new(config).unwrap();
-///
-/// // The client directly updates the config when new rules arrive
-///
-/// // Start the client in a background thread
-/// let handle = client.start();
-/// ```
+/// These files contain JSON with a various fields, one of which is `tracing_sampling_rules` field
+/// that defines sampling rules.
 pub struct RemoteConfigClient {
     /// Unique identifier for this client instance
     /// Different from runtime_id - each RemoteConfigClient gets its own UUID
@@ -481,7 +464,7 @@ impl RemoteConfigClient {
 
         // Parse target files if present
         if let Some(target_files) = response.target_files {
-            // Build a new cache - don't clear the old one yet!
+            // Build a new cache
             let mut new_cache = Vec::new();
             let mut any_failure = false;
 
@@ -491,7 +474,10 @@ impl RemoteConfigClient {
                 let product = match extract_product_from_path(&file.path) {
                     Some(p) => p,
                     None => {
-                        crate::dd_debug!("RemoteConfigClient: Failed to extract product from path: {}", file.path);
+                        crate::dd_debug!(
+                            "RemoteConfigClient: Failed to extract product from path: {}",
+                            file.path
+                        );
                         continue;
                     }
                 };
@@ -525,6 +511,8 @@ impl RemoteConfigClient {
                 let config_version = meta_version.unwrap_or(1);
 
                 // Apply the config and record success or failure state
+                // Right now we only support APM_TRACING handler, but in the future we will support
+                // other products
                 match handler.process_config(&config_str, &self.config) {
                     Ok(_) => {
                         // Calculate SHA256 hash of the raw content
@@ -591,7 +579,6 @@ impl RemoteConfigClient {
     }
 
     /// Validates that target files exist in either signed targets or client configs
-    /// This validation ensures security by preventing unauthorized config files from being applied
     fn validate_signed_target_files(
         &self,
         payload_target_files: &[TargetFile],
@@ -619,34 +606,23 @@ impl RemoteConfigClient {
 
         Ok(())
     }
-
-
 }
 
 /// Product handler trait for processing different remote config products
-/// Each product (APM_TRACING, ASM_FEATURES, etc.) implements this trait to handle their specific configuration format
+/// Each product (APM_TRACING, AGENT_CONFIG, etc.) implements this trait to handle their specific
+/// configuration format
 trait ProductHandler {
     /// Process the configuration for this product
-    fn process_config(
-        &self,
-        config_json: &str,
-        config: &Arc<Mutex<Config>>,
-    ) -> Result<()>;
-    
+    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()>;
+
     /// Get the product name this handler supports
     fn product_name(&self) -> &'static str;
 }
 
 struct ApmTracingHandler;
 
-
-
 impl ProductHandler for ApmTracingHandler {
-    fn process_config(
-        &self,
-        config_json: &str,
-        config: &Arc<Mutex<Config>>,
-    ) -> Result<()> {
+    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()> {
         // Parse the config to extract sampling rules as raw JSON
         let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
@@ -690,7 +666,7 @@ impl ProductHandler for ApmTracingHandler {
 
         Ok(())
     }
-    
+
     fn product_name(&self) -> &'static str {
         "APM_TRACING"
     }
@@ -707,21 +683,21 @@ impl ProductRegistry {
         let mut registry = Self {
             handlers: HashMap::new(),
         };
-        
+
         // Register all supported products
         registry.register(Box::new(ApmTracingHandler));
 
         registry
     }
-    
+
     fn register(&mut self, handler: Box<dyn ProductHandler + Send + Sync>) {
-        self.handlers.insert(handler.product_name().to_string(), handler);
+        self.handlers
+            .insert(handler.product_name().to_string(), handler);
     }
-    
+
     fn get_handler(&self, product: &str) -> Option<&(dyn ProductHandler + Send + Sync)> {
         self.handlers.get(product).map(|handler| handler.as_ref())
     }
-
 }
 
 /// Extract product name from remote config path
@@ -779,7 +755,7 @@ mod tests {
 
     #[test]
     fn test_request_serialization() {
-        // Test that our request format matches the expected structure from Python
+        // Test that our request format matches the expected structure
         let state = ClientState {
             root_version: 1,
             targets_version: 122282776,
@@ -1385,28 +1361,28 @@ mod tests {
             Some("APM_TRACING".to_string())
         );
 
-        // Test ASM_FEATURES path
-        assert_eq!(
-            extract_product_from_path("datadog/2/ASM_FEATURES/ASM_FEATURES-base/config"),
-            Some("ASM_FEATURES".to_string())
-        );
-
         // Test LIVE_DEBUGGING path
         assert_eq!(
             extract_product_from_path("datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config"),
             Some("LIVE_DEBUGGING".to_string())
         );
 
-        // Test APM_SAMPLING path
+        // Test AGENT_CONFIG path
         assert_eq!(
-            extract_product_from_path("datadog/2/APM_SAMPLING/dynamic_rates/config"),
-            Some("APM_SAMPLING".to_string())
+            extract_product_from_path("datadog/2/AGENT_CONFIG/dynamic_rates/config"),
+            Some("AGENT_CONFIG".to_string())
         );
 
         // Test invalid paths
         assert_eq!(extract_product_from_path("invalid/path"), None);
-        assert_eq!(extract_product_from_path("datadog/1/APM_TRACING/config"), None);
-        assert_eq!(extract_product_from_path("datadog/APM_TRACING/config"), None);
+        assert_eq!(
+            extract_product_from_path("datadog/1/APM_TRACING/config"),
+            None
+        );
+        assert_eq!(
+            extract_product_from_path("datadog/APM_TRACING/config"),
+            None
+        );
         assert_eq!(extract_product_from_path(""), None);
     }
 
@@ -1426,7 +1402,10 @@ mod tests {
 
         // Test invalid paths
         assert_eq!(extract_config_id_from_path("invalid/path"), None);
-        assert_eq!(extract_config_id_from_path("datadog/2/APM_TRACING/config"), None); // Missing /config at end
+        assert_eq!(
+            extract_config_id_from_path("datadog/2/APM_TRACING/config"),
+            None
+        ); // Missing /config at end
         assert_eq!(extract_config_id_from_path("datadog/2/APM_TRACING"), None); // Too short
         assert_eq!(extract_config_id_from_path(""), None);
     }
@@ -1434,10 +1413,10 @@ mod tests {
     #[test]
     fn test_product_registry() {
         let registry = ProductRegistry::new();
-        
+
         // Should have APM_TRACING handler registered
         assert!(registry.get_handler("APM_TRACING").is_some());
-        
+
         // Should not have unknown products
         assert!(registry.get_handler("UNKNOWN_PRODUCT").is_none());
     }
@@ -1446,22 +1425,21 @@ mod tests {
     fn test_apm_tracing_handler() {
         let handler = ApmTracingHandler;
         assert_eq!(handler.product_name(), "APM_TRACING");
-        
+
         // Test processing config - this should not panic for valid JSON
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let config_json = r#"{"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}"#;
-        
+        let config_json =
+            r#"{"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}"#;
+
         // This should succeed
         let result = handler.process_config(config_json, &config);
         assert!(result.is_ok());
-        
+
         // Test invalid JSON
         let invalid_json = "invalid json";
         let result = handler.process_config(invalid_json, &config);
         assert!(result.is_err());
     }
-
-
 
     #[test]
     fn test_tuf_targets_integration_with_remote_config() {

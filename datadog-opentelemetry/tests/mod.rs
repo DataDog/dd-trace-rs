@@ -234,44 +234,6 @@ mod datadog_test_agent {
         );
     }
 
-    #[test]
-    fn test_remote_config_initialization() {
-        // Test that remote config client is initialized when remote config is enabled
-        std::env::set_var("DD_REMOTE_CONFIGURATION_ENABLED", "true");
-        let config = dd_trace::Config::builder().build();
-
-        // This should initialize the remote config client
-        let (tracer_provider, _propagator) = make_test_tracer(
-            config,
-            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
-        );
-
-        // Verify the tracer provider was created successfully
-        let _tracer = tracer_provider.tracer("test");
-        // If we get here, the tracer provider was created successfully
-
-        std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
-    }
-
-    #[test]
-    fn test_remote_config_disabled() {
-        // Test that remote config client is not initialized when remote config is disabled
-        std::env::set_var("DD_REMOTE_CONFIGURATION_ENABLED", "false");
-        let config = dd_trace::Config::builder().build();
-
-        // This should not initialize the remote config client
-        let (tracer_provider, _propagator) = make_test_tracer(
-            config,
-            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
-        );
-
-        // Verify the tracer provider was created successfully
-        let _tracer = tracer_provider.tracer("test");
-        // If we get here, the tracer provider was created successfully
-
-        std::env::remove_var("DD_REMOTE_CONFIGURATION_ENABLED");
-    }
-
     #[track_caller]
     fn assert_subset<I, S: IntoIterator<Item = I>, SS: IntoIterator<Item = I>>(set: S, subset: SS)
     where

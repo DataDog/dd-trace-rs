@@ -12,4 +12,4 @@ pub(crate) mod rules_sampler;
 pub(crate) mod utils;
 
 // Re-export key public types
-pub use datadog_sampler::{DatadogSampler, SamplingRule};
+pub use datadog_sampler::{DatadogSampler, SamplingRule, SamplingRulesCallback};

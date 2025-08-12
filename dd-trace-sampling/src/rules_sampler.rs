@@ -12,17 +12,10 @@ pub(crate) struct RulesSampler {
 }
 
 impl RulesSampler {
-    /// Creates a new RulesSampler with the given initial rules
     pub fn new(rules: Vec<SamplingRule>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(rules)),
         }
-    }
-
-    /// Gets a clone of the current rules
-    #[allow(dead_code)]
-    pub fn get_rules(&self) -> Vec<SamplingRule> {
-        self.inner.read().unwrap().clone()
     }
 
     /// Updates the rules with a new set
