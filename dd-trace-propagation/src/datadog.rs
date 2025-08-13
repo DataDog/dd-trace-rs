@@ -157,6 +157,8 @@ fn validate_tag_value(value: &str) -> bool {
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+    carrier.get(DATADOG_TRACE_ID_KEY)?;
+
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id,
         Err(e) => {
