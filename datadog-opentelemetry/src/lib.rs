@@ -251,6 +251,8 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     let registry = Arc::new(TraceRegistry::new());
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
+    // Sampler only needs config for initialization (reads initial sampling rules)
+    // Runtime updates come via config callback, so no need for shared config
     let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
 
     let agent_response_handler = sampler.on_agent_response();
@@ -266,8 +268,14 @@ fn make_tracer(
         None
     };
 
+    // Create shared config only for SpanProcessor (needs service discovery) and remote config
+    // Other components get cloned config since they don't use values that can be updated via remote
+    // config (e.g., propagation style, tracer version, language settings are static after
+    // initialization)
+    let shared_config = Arc::new(Mutex::new(config.clone()));
+
     let span_processor = DatadogSpanProcessor::new(
-        config.clone(),
+        shared_config.clone(),
         registry.clone(),
         resource_slot.clone(),
         Some(agent_response_handler),
@@ -279,14 +287,11 @@ fn make_tracer(
         .build();
 
     if config.remote_config_enabled() {
-        let config_arc = Arc::new(config);
-        let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
-
-        // Add sampler callback to the config before creating the remote config client
+        // Add sampler callback to the shared config before creating the remote config client
         if let Some(sampler_callback) = sampler_callback {
             let sampler_callback = Arc::new(sampler_callback);
             let sampler_callback_clone: SamplerCallback = sampler_callback.clone();
-            mutable_config.lock().unwrap().add_remote_config_callback(
+            shared_config.lock().unwrap().add_remote_config_callback(
                 "datadog_sampler_on_rules_update".to_string(),
                 move |update| match update {
                     RemoteConfigUpdate::SamplingRules(rules) => {
@@ -296,10 +301,9 @@ fn make_tracer(
             );
         }
 
-        // Create remote config client with mutable config
-        let mutable_config = Arc::new(Mutex::new(config_arc.as_ref().clone()));
+        // Create remote config client with shared config
         if let Ok(client) =
-            dd_trace::configuration::remote_config::RemoteConfigClient::new(mutable_config)
+            dd_trace::configuration::remote_config::RemoteConfigClient::new(shared_config)
         {
             // Start the client in background
             let _handle = client.start();
