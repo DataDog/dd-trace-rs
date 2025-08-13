@@ -16,7 +16,7 @@ use crate::{
 
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-    dd_debug, dd_error, dd_warn,
+    dd_error, dd_warn,
     sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
@@ -157,14 +157,12 @@ fn validate_tag_value(value: &str) -> bool {
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+    carrier.get(DATADOG_TRACE_ID_KEY)?;
+
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id,
         Err(e) => {
-            if e.send_telemetry {
-                dd_error!("Propagator (datadog): Error extracting trace_id {e}");
-            } else {
-                dd_debug!("Propagator (datadog): Error extracting trace_id {e}");
-            }
+            dd_error!("Propagator (datadog): Error extracting trace_id {e}");
             return None;
         }
     };
@@ -214,7 +212,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
     let trace_id = carrier
         .get(DATADOG_TRACE_ID_KEY)
-        .ok_or(Error::extract_silent("`trace_id` not found", "datadog"))?;
+        .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
 
     if INVALID_SEGMENT_REGEX.is_match(trace_id) {
         return Err(Error::extract("Invalid `trace_id` found", "datadog"));
