@@ -220,15 +220,15 @@ struct SignedTargets {
     version: Option<u64>,
 }
 
-/// Remote configuration client
+/// Remote configuration client that polls the Datadog Agent for configuration updates.
 ///
-/// This client polls the Datadog Agent for configuration updates and applies them to the tracer.
-/// Currently supports APM tracing sampling rules from the APM_TRACING product.
+/// This client is responsible for:
+/// - Fetching remote configuration from the Datadog Agent
+/// - Processing APM_TRACING product updates (specifically sampling rules)
+/// - Maintaining client state and capabilities
+/// - Providing a callback mechanism for configuration updates
 ///
-/// The client expects to receive configuration files with paths like:
-/// `datadog/2/APM_TRACING/{config_id}/config`
-///
-/// These files contain JSON with a various fields, one of which is `tracing_sampling_rules` field
+/// The client currently handles a single product type (APM_TRACING)
 /// that defines sampling rules.
 pub struct RemoteConfigClient {
     /// Unique identifier for this client instance
@@ -236,7 +236,9 @@ pub struct RemoteConfigClient {
     client_id: String,
     config: Arc<Mutex<Config>>,
     agent_url: String,
-    client: reqwest::blocking::Client,
+    // HTTP client creation deferred to background thread to avoid Tokio panic
+    // Store timeout instead of creating client immediately
+    client_timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
@@ -251,12 +253,6 @@ impl RemoteConfigClient {
     pub fn new(config: Arc<Mutex<Config>>) -> Result<Self> {
         let agent_url = format!("{}/v0.7/config", config.lock().unwrap().trace_agent_url());
 
-        // Create HTTP client with timeout
-        let client = reqwest::blocking::Client::builder()
-            .timeout(DEFAULT_TIMEOUT)
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
-
         let state = Arc::new(Mutex::new(ClientState {
             root_version: 1, // Agent requires >= 1 (base TUF director root)
             targets_version: 0,
@@ -270,7 +266,7 @@ impl RemoteConfigClient {
             client_id: uuid::Uuid::new_v4().to_string(),
             config,
             agent_url,
-            client,
+            client_timeout: DEFAULT_TIMEOUT,
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval: DEFAULT_POLL_INTERVAL,
@@ -288,6 +284,19 @@ impl RemoteConfigClient {
 
     /// Main polling loop
     fn run(self) {
+        // Create HTTP client in the background thread to avoid blocking client creation in async
+        // context
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(self.client_timeout)
+            .build()
+        {
+            Ok(client) => client,
+            Err(e) => {
+                crate::dd_debug!("RemoteConfigClient: Failed to create HTTP client: {}", e);
+                return;
+            }
+        };
+
         let mut last_poll = Instant::now();
 
         loop {
@@ -299,7 +308,7 @@ impl RemoteConfigClient {
             last_poll = Instant::now();
 
             // Fetch and apply configuration
-            match self.fetch_and_apply_config() {
+            match self.fetch_and_apply_config(&client) {
                 Ok(_) => {
                     // Clear any previous errors
                     if let Ok(mut state) = self.state.lock() {
@@ -320,12 +329,11 @@ impl RemoteConfigClient {
     }
 
     /// Fetches configuration from the agent and applies it
-    fn fetch_and_apply_config(&self) -> Result<()> {
+    fn fetch_and_apply_config(&self, client: &reqwest::blocking::Client) -> Result<()> {
         let request = self.build_request()?;
 
         // Send request to agent
-        let response = self
-            .client
+        let response = client
             .post(&self.agent_url)
             .json(&request)
             .send()
