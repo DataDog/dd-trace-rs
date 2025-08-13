@@ -9,8 +9,12 @@ use std::collections::hash_map;
 use datadog_opentelemetry_mappings::SdkSpan;
 use datadog_trace_utils::span::SpanBytes as DdSpan;
 use dd_trace::sampling;
+use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use tinybytes::BytesString;
+
+static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
 
 /// The OTLP receiver in the agent only receives sampled spans
 /// because others are dropped in the process. In this spirit, we check for the sampling
@@ -50,14 +54,14 @@ pub fn otel_trace_chunk_to_dd_trace_chunk(
             );
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
-            add_config_metadata(&mut dd_span, cfg);
+            add_config_metadata(&mut dd_span, cfg, otel_resource);
 
             dd_span
         })
         .collect()
 }
 
-fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config) {
+fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config, otel_resource: &Resource) {
     if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
         dd_span.service = BytesString::from_string(cfg.service().to_string());
     }
@@ -77,11 +81,13 @@ fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config) {
     }
 
     if let Some(version) = cfg.version() {
-        if dd_span.service == cfg.service() {
-            dd_span.meta.insert(
-                BytesString::from_static("version"),
-                BytesString::from_string(version.to_string()),
-            );
+        if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
+            if dd_span.service.as_str() == service_name.as_str() {
+                dd_span.meta.insert(
+                    BytesString::from_static("version"),
+                    BytesString::from_string(version.to_string()),
+                );
+            }
         }
     }
 }
