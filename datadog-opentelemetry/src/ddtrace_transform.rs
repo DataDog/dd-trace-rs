@@ -63,15 +63,10 @@ fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config) {
     }
 
     cfg.global_tags().for_each(|tag| {
-        let mut parts = tag.splitn(2, ':');
-
-        if let Some(key) = parts.next() {
-            let value = parts.next().unwrap_or_default();
-            dd_span.meta.insert(
-                BytesString::from_string(key.to_string()),
-                BytesString::from_string(value.to_string()),
-            );
-        }
+        dd_span.meta.insert(
+            BytesString::from_string(tag.0.to_string()),
+            BytesString::from_string(tag.1.to_string()),
+        );
     });
 
     if let Some(env) = cfg.env() {

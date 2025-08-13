@@ -166,7 +166,7 @@ pub struct Config {
     // # Agent
     /// A list of default tags to be added to every span
     /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
-    global_tags: Vec<String>,
+    global_tags: Vec<(String, String)>,
     /// url of the trace agent
     trace_agent_url: Cow<'static, str>,
     /// url of the dogstatsd agent
@@ -236,6 +236,25 @@ impl Config {
             }
         }
 
+        /// Wrapper to parse "," separated key:value tags to vector<(key, value)>
+        /// discarding tags without ":" delimiter
+        struct DdKeyValueTags(Vec<(String, String)>);
+
+        impl FromStr for DdKeyValueTags {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(DdKeyValueTags(
+                    s.split(',')
+                        .filter_map(|s| {
+                            s.split_once(':')
+                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                        })
+                        .collect(),
+                ))
+            }
+        }
+
         let parsed_sampling_rules_config =
             to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
 
@@ -250,8 +269,8 @@ impl Config {
             env: to_val(sources.get("DD_ENV")).or(default.env),
             version: to_val(sources.get("DD_VERSION")).or(default.version),
             // TODO(paullgdc): tags should be merged, not replaced
-            global_tags: to_val(sources.get_parse::<DdTags>("DD_TAGS"))
-                .map(|DdTags(tags)| tags)
+            global_tags: to_val(sources.get_parse::<DdKeyValueTags>("DD_TAGS"))
+                .map(|DdKeyValueTags(tags)| tags)
                 .unwrap_or(default.global_tags),
             trace_agent_url: to_val(sources.get("DD_TRACE_AGENT_URL"))
                 .map(Cow::Owned)
@@ -349,8 +368,10 @@ impl Config {
         self.version.as_deref()
     }
 
-    pub fn global_tags(&self) -> impl Iterator<Item = &str> {
-        self.global_tags.iter().map(String::as_str)
+    pub fn global_tags(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.global_tags
+            .iter()
+            .map(|tag| (tag.0.as_str(), tag.1.as_str()))
     }
 
     pub fn trace_agent_url(&self) -> &Cow<'static, str> {
@@ -481,12 +502,12 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_global_tags(&mut self, tags: Vec<String>) -> &mut Self {
+    pub fn set_global_tags(&mut self, tags: Vec<(String, String)>) -> &mut Self {
         self.config.global_tags = tags;
         self
     }
 
-    pub fn add_global_tag(&mut self, tag: String) -> &mut Self {
+    pub fn add_global_tag(&mut self, tag: (String, String)) -> &mut Self {
         self.config.global_tags.push(tag);
         self
     }
@@ -913,5 +934,20 @@ mod tests {
         assert!(config.telemetry_enabled());
         assert!(config.telemetry_log_collection_enabled());
         assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
+    }
+
+    #[test]
+    fn test_dd_tags() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TAGS", "key1   :value1          ,   key2:,key3")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let tags: Vec<(&str, &str)> = config.global_tags().collect();
+
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
     }
 }
