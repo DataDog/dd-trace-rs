@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5); // 5 seconds is the highest interval allowed by the spec
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3); // lowest timeout with no failures
 
 /// Capabilities that the client supports
 #[derive(Debug, Clone)]
