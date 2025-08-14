@@ -16,7 +16,10 @@ anyhow = "1.0.97"
 rustc_version_runtime = "0.3.0"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-reqwest = { version = "0.11", features = ["blocking", "json"] }
+hyper = { version = "1.0", features = ["client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "http2", "tokio"] }
+http-body-util = "0.1"
+tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 base64 = "0.21"
 sha2 = "0.10"
 uuid = { version = "1.11.0", features = ["v4"] }
