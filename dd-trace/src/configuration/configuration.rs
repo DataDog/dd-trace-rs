@@ -24,8 +24,59 @@ pub enum RemoteConfigUpdate {
 }
 
 /// Type alias for remote configuration callback functions
-/// Callbacks receive a RemoteConfigUpdate enum to handle different config types
+/// This reduces type complexity and improves readability
 type RemoteConfigCallback = Box<dyn Fn(&RemoteConfigUpdate) + Send + Sync>;
+
+/// Struct-based callback system for remote configuration updates
+pub struct RemoteConfigCallbacks {
+    pub sampling_rules_update: Option<RemoteConfigCallback>,
+    // Future callback types can be added here as new fields
+    // e.g. pub feature_flags_update: Option<RemoteConfigCallback>,
+}
+
+impl std::fmt::Debug for RemoteConfigCallbacks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteConfigCallbacks")
+            .field(
+                "sampling_rules_update",
+                &self.sampling_rules_update.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
+    }
+}
+
+impl RemoteConfigCallbacks {
+    pub fn new() -> Self {
+        Self {
+            sampling_rules_update: None,
+        }
+    }
+
+    pub fn set_sampling_rules_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
+    {
+        self.sampling_rules_update = Some(Box::new(callback));
+    }
+
+    /// Calls all relevant callbacks for the given update type
+    /// Provides a unified interface for future callback types
+    pub fn notify_update(&self, update: &RemoteConfigUpdate) {
+        match update {
+            RemoteConfigUpdate::SamplingRules(_) => {
+                if let Some(ref callback) = self.sampling_rules_update {
+                    callback(update);
+                }
+            } // Future update types can be handled here
+        }
+    }
+}
+
+impl Default for RemoteConfigCallbacks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -416,7 +467,7 @@ pub struct Config {
 
     /// General callbacks to be called when configuration is updated from remote configuration
     /// Allows components like the DatadogSampler to be updated without circular imports
-    remote_config_callbacks: Arc<Mutex<HashMap<String, RemoteConfigCallback>>>,
+    remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
 }
 
 impl Config {
@@ -527,7 +578,7 @@ impl Config {
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(remote_config_enabled),
             remote_config_enabled,
-            remote_config_callbacks: Arc::new(Mutex::new(HashMap::new())),
+            remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         }
     }
 
@@ -659,15 +710,10 @@ impl Config {
             self.trace_sampling_rules
                 .set_value_source(parsed_rules, ConfigSource::RemoteConfig);
 
-            // Notify the datadog_sampler_on_rules_update callback about the update
-            // This specifically calls the DatadogSampler's on_rules_update method
-            if let Ok(callbacks) = self.remote_config_callbacks.lock() {
-                if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
-                    let update =
-                        RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec());
-                    callback(&update);
-                }
-            }
+            // Notify callbacks about the sampling rules update
+            self.remote_config_callbacks.lock().unwrap().notify_update(
+                &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
+            );
         }
 
         Ok(())
@@ -676,22 +722,16 @@ impl Config {
     pub fn clear_remote_sampling_rules(&mut self) {
         self.trace_sampling_rules.unset_rc();
 
-        if let Ok(callbacks) = self.remote_config_callbacks.lock() {
-            if let Some(callback) = callbacks.get("datadog_sampler_on_rules_update") {
-                // Now that rc_value is cleared, this will return the fallback rules
-                let update =
-                    RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec());
-                callback(&update);
-            }
-        }
+        self.remote_config_callbacks.lock().unwrap().notify_update(
+            &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
+        );
     }
 
-    /// Add a callback to be called when remote configuration is updated
-    /// This allows components to be updated without circular imports
+    /// Add a callback to be called when sampling rules are updated via remote configuration
+    /// This allows components like DatadogSampler to be updated without circular imports
     ///
     /// # Arguments
-    /// * `key` - A unique identifier for this callback (e.g., "datadog_sampler_on_rules_update")
-    /// * `callback` - The function to call when remote config is updated (receives
+    /// * `callback` - The function to call when sampling rules are updated (receives
     ///   RemoteConfigUpdate enum)
     ///
     /// # Example
@@ -699,23 +739,23 @@ impl Config {
     /// use dd_trace::{configuration::RemoteConfigUpdate, Config};
     ///
     /// let config = Config::builder().build();
-    /// config.add_remote_config_callback("my_component_callback".to_string(), |update| {
+    /// config.set_sampling_rules_callback(|update| {
     ///     match update {
     ///         RemoteConfigUpdate::SamplingRules(rules) => {
     ///             println!("Received {} new sampling rules", rules.len());
     ///             // Update your sampler here
-    ///         } // Future remote config types can be added here
-    ///           // as new variants are added to the RemoteConfigUpdate enum
+    ///         }
     ///     }
     /// });
     /// ```
-    pub fn add_remote_config_callback<F>(&self, key: String, callback: F)
+    pub fn set_sampling_rules_callback<F>(&self, callback: F)
     where
         F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
     {
-        if let Ok(mut callbacks) = self.remote_config_callbacks.lock() {
-            callbacks.insert(key, Box::new(callback));
-        }
+        self.remote_config_callbacks
+            .lock()
+            .unwrap()
+            .set_sampling_rules_callback(callback);
     }
 
     /// Add an extra service discovered at runtime
@@ -771,7 +811,7 @@ impl std::fmt::Debug for Config {
             )
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_enabled", &self.remote_config_enabled)
-            .field("remote_config_callbacks", &"<callbacks>")
+            .field("remote_config_callbacks", &self.remote_config_callbacks)
             .finish()
     }
 }
@@ -811,7 +851,7 @@ fn default_config() -> Config {
         trace_propagation_extract_first: false,
         extra_services_tracker: ExtraServicesTracker::new(true),
         remote_config_enabled: true,
-        remote_config_callbacks: Arc::new(Mutex::new(HashMap::new())),
+        remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
     }
 }
 
@@ -1344,15 +1384,12 @@ mod tests {
         let callback_called_clone = callback_called.clone();
         let callback_rules_clone = callback_rules.clone();
 
-        config.add_remote_config_callback(
-            "datadog_sampler_on_rules_update".to_string(),
-            move |update| {
-                *callback_called_clone.lock().unwrap() = true;
-                // Store the rules - for now we only have SamplingRules variant
-                let RemoteConfigUpdate::SamplingRules(rules) = update;
-                *callback_rules_clone.lock().unwrap() = rules.clone();
-            },
-        );
+        config.set_sampling_rules_callback(move |update| {
+            *callback_called_clone.lock().unwrap() = true;
+            // Store the rules - for now we only have SamplingRules variant
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *callback_rules_clone.lock().unwrap() = rules.clone();
+        });
 
         // Initially callback should not be called
         assert!(!*callback_called.lock().unwrap());

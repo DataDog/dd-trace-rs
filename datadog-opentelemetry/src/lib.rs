@@ -291,14 +291,14 @@ fn make_tracer(
         if let Some(sampler_callback) = sampler_callback {
             let sampler_callback = Arc::new(sampler_callback);
             let sampler_callback_clone: SamplerCallback = sampler_callback.clone();
-            shared_config.lock().unwrap().add_remote_config_callback(
-                "datadog_sampler_on_rules_update".to_string(),
-                move |update| match update {
+            shared_config
+                .lock()
+                .unwrap()
+                .set_sampling_rules_callback(move |update| match update {
                     RemoteConfigUpdate::SamplingRules(rules) => {
                         sampler_callback_clone(rules);
                     }
-                },
-            );
+                });
         }
 
         // Create remote config client with shared config
