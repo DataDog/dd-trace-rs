@@ -28,6 +28,6 @@ services:
       # Enable additional telemetry for debugging
       - DD_APM_TELEMETRY_ENABLED=true
       - DD_TRACE_DEBUG=true
-      - DD_SITE=data​d0g.c​om
+      - DD_SITE=datad0g.com
     restart: unless-stopped
     container_name: dd-agent
