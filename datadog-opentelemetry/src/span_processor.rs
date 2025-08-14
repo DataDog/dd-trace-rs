@@ -414,38 +414,6 @@ impl DatadogSpanProcessor {
 
         trace.finished_spans
     }
-
-    /// Extracts the service name from a span and adds it to the config's extra services tracking.
-    /// This allows discovery of all services at runtime for proper remote configuration.
-    fn extract_and_add_service_from_span(&self, span: &SpanData) {
-        // First check span attributes for service.name
-        let service_name = if let Some(service_name) = span.attributes.iter().find_map(|kv| {
-            if kv.key.as_str() == "service.name" {
-                Some(kv.value.to_string())
-            } else {
-                None
-            }
-        }) {
-            service_name
-        } else {
-            // If not found in span attributes, check resource attributes
-            if let Ok(resource) = self.resource.read() {
-                let service_key = opentelemetry::Key::from_static_str("service.name");
-                if let Some(service_attr) = resource.get(&service_key) {
-                    service_attr.to_string()
-                } else {
-                    return; // No service name found anywhere
-                }
-            } else {
-                return; // Could not read resource
-            }
-        };
-
-        // Only add if it's not empty or the default service name
-        if !service_name.is_empty() && service_name != "otlpresourcenoservicename" {
-            self.config.lock().unwrap().add_extra_service(&service_name);
-        }
-    }
 }
 
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
@@ -475,10 +443,6 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
-
-        // Extract service name from span and add to extra services for remote config
-        // This allows discovery of all services at runtime for proper remote configuration
-        self.extract_and_add_service_from_span(&span);
 
         let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
