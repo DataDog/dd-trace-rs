@@ -1,0 +1,14 @@
+[package]
+name = "remote_config_test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "remote_config_test"
+path = "src/main.rs"
+
+[dependencies]
+datadog-opentelemetry = { path = "../.." }
+dd-trace = { path = "../../../dd-trace" }
+opentelemetry = { workspace = true }
+tokio = { workspace = true, features = ["full", "signal"] } 
