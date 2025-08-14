@@ -9,6 +9,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+// HTTP client imports
+use http_body_util::{BodyExt, Full};
+use hyper::{body::Bytes, Method, Request, Uri};
+use hyper_util::client::legacy::{connect::HttpConnector, Client};
+use hyper_util::rt::TokioExecutor;
+
 const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5); // 5 seconds is the highest interval allowed by the spec
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3); // lowest timeout with no failures
 
@@ -236,8 +242,7 @@ pub struct RemoteConfigClient {
     client_id: String,
     config: Arc<Mutex<Config>>,
     agent_url: String,
-    // HTTP client creation deferred to background thread to avoid Tokio panic
-    // Store timeout instead of creating client immediately
+    // HTTP client timeout configuration
     client_timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
@@ -284,15 +289,11 @@ impl RemoteConfigClient {
 
     /// Main polling loop
     fn run(self) {
-        // Create HTTP client in the background thread to avoid blocking client creation in async
-        // context
-        let client = match reqwest::blocking::Client::builder()
-            .timeout(self.client_timeout)
-            .build()
-        {
-            Ok(client) => client,
+        // Create Tokio runtime in the background thread
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(rt) => rt,
             Err(e) => {
-                crate::dd_debug!("RemoteConfigClient: Failed to create HTTP client: {}", e);
+                crate::dd_debug!("RemoteConfigClient: Failed to create Tokio runtime: {}", e);
                 return;
             }
         };
@@ -308,7 +309,7 @@ impl RemoteConfigClient {
             last_poll = Instant::now();
 
             // Fetch and apply configuration
-            match self.fetch_and_apply_config(&client) {
+            match rt.block_on(self.fetch_and_apply_config()) {
                 Ok(_) => {
                     // Clear any previous errors
                     if let Ok(mut state) = self.state.lock() {
@@ -329,14 +330,39 @@ impl RemoteConfigClient {
     }
 
     /// Fetches configuration from the agent and applies it
-    fn fetch_and_apply_config(&self, client: &reqwest::blocking::Client) -> Result<()> {
-        let request = self.build_request()?;
+    async fn fetch_and_apply_config(&self) -> Result<()> {
+        // Create HTTP connector with timeout configuration
+        let mut connector = HttpConnector::new();
+        connector.set_connect_timeout(Some(self.client_timeout));
+
+        // Create HTTP client for this request
+        let client = Client::builder(TokioExecutor::new()).build(connector);
+
+        let request_payload = self.build_request()?;
+
+        // Serialize the request to JSON
+        let json_body = serde_json::to_string(&request_payload)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize request: {}", e))?;
+
+        // Parse the agent URL
+        let uri: Uri = self
+            .agent_url
+            .parse()
+            .map_err(|e| anyhow::anyhow!("Invalid agent URL: {}", e))?;
+
+        // Build HTTP request
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("user-agent", "dd-trace-rs")
+            .body(Full::new(Bytes::from(json_body)))
+            .map_err(|e| anyhow::anyhow!("Failed to build request: {}", e))?;
 
         // Send request to agent
         let response = client
-            .post(&self.agent_url)
-            .json(&request)
-            .send()
+            .request(req)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to send request: {}", e))?;
 
         if !response.status().is_success() {
@@ -346,8 +372,16 @@ impl RemoteConfigClient {
             ));
         }
 
-        let config_response: ConfigResponse = response
-            .json()
+        // Collect the response body
+        let body_bytes = response
+            .into_body()
+            .collect()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read response body: {}", e))?
+            .to_bytes();
+
+        // Parse JSON response
+        let config_response: ConfigResponse = serde_json::from_slice(&body_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to parse response: {}", e))?;
 
         // Process the configuration response
