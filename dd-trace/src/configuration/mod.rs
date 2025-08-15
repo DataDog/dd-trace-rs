@@ -3,6 +3,10 @@
 
 #[allow(clippy::module_inception)]
 mod configuration;
+pub mod remote_config;
 mod sources;
 
-pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};
+pub use configuration::{
+    Config, ConfigBuilder, ConfigItem, ConfigSource, RemoteConfigUpdate, SamplingRuleConfig,
+    TracePropagationStyle,
+};

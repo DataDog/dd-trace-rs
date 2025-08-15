@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, Config};
-use dd_trace_sampling::DatadogSampler;
+use dd_trace_sampling::{DatadogSampler, SamplingRulesCallback};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::{
@@ -24,20 +24,8 @@ impl Sampler {
         resource: Arc<RwLock<Resource>>,
         trace_registry: Arc<TraceRegistry>,
     ) -> Self {
-        let rules = cfg
-            .trace_sampling_rules()
-            .iter()
-            .map(|r| {
-                dd_trace_sampling::SamplingRule::new(
-                    r.sample_rate,
-                    r.service.clone(),
-                    r.name.clone(),
-                    r.resource.clone(),
-                    Some(r.tags.clone()),
-                    Some(r.provenance.clone()),
-                )
-            })
-            .collect::<Vec<_>>();
+        let rules =
+            dd_trace_sampling::SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
         let sampler =
             dd_trace_sampling::DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
         Self {
@@ -48,6 +36,11 @@ impl Sampler {
 
     pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
         self.sampler.on_agent_response()
+    }
+
+    /// Get the callback for updating sampling rules
+    pub fn on_rules_update(&self) -> SamplingRulesCallback {
+        self.sampler.on_rules_update()
     }
 }
 

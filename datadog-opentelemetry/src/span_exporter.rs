@@ -65,6 +65,8 @@ struct Batch {
     last_flush: std::time::Instant,
     span_count: usize,
     max_buffered_spans: usize,
+    /// Configuration for service discovery via remote config
+    config: Arc<dd_trace::Config>,
 }
 
 // Pre-allocate the batch buffer to avoid reallocations on small sizes.
@@ -72,12 +74,13 @@ struct Batch {
 const PRE_ALLOCATE_CHUNKS: usize = 400;
 
 impl Batch {
-    fn new(max_buffered_spans: usize) -> Self {
+    fn new(max_buffered_spans: usize, config: Arc<dd_trace::Config>) -> Self {
         Self {
             chunks: Vec::with_capacity(PRE_ALLOCATE_CHUNKS),
             last_flush: std::time::Instant::now(),
             span_count: 0,
             max_buffered_spans,
+            config,
         }
     }
 
@@ -101,10 +104,37 @@ impl Batch {
         if chunk.is_empty() {
             return Ok(());
         }
+
+        // Extract service names from spans for remote configuration discovery
+        for span in &chunk {
+            self.extract_and_add_service_from_span(span);
+        }
+
         let chunk_len: usize = chunk.len();
         self.chunks.push(TraceChunk { chunk });
         self.span_count += chunk_len;
         Ok(())
+    }
+
+    /// Extracts the service name from a span and adds it to the config's extra services tracking.
+    /// This allows discovery of all services at runtime for proper remote configuration.
+    fn extract_and_add_service_from_span(&self, span: &SpanData) {
+        let service_name = if let Some(service_name) = span.attributes.iter().find_map(|kv| {
+            if kv.key.as_str() == "service.name" {
+                Some(kv.value.to_string())
+            } else {
+                None
+            }
+        }) {
+            service_name
+        } else {
+            return;
+        };
+
+        // Only add if it's not empty or the default service name
+        if !service_name.is_empty() && service_name != "otlpresourcenoservicename" {
+            self.config.add_extra_service(&service_name);
+        }
     }
 
     /// Export the trace chunk and reset the batch
@@ -134,7 +164,11 @@ impl DatadogExporter {
         config: dd_trace::Config,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
-        let (tx, rx) = channel(SPAN_FLUSH_THRESHOLD, MAX_BUFFERED_SPANS);
+        let (tx, rx) = channel(
+            SPAN_FLUSH_THRESHOLD,
+            MAX_BUFFERED_SPANS,
+            Arc::new(config.clone()),
+        );
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
@@ -275,13 +309,17 @@ impl fmt::Debug for DatadogExporter {
     }
 }
 
-fn channel(flush_trigger_number_of_spans: usize, max_number_of_spans: usize) -> (Sender, Receiver) {
+fn channel(
+    flush_trigger_number_of_spans: usize,
+    max_number_of_spans: usize,
+    config: Arc<dd_trace::Config>,
+) -> (Sender, Receiver) {
     let waiter = Arc::new(Waiter {
         state: Mutex::new(SharedState {
             flush_needed: false,
             shutdown_needed: false,
             has_shutdown: false,
-            batch: Batch::new(max_number_of_spans),
+            batch: Batch::new(max_number_of_spans, config),
             set_resource: None,
         }),
         notifier: Condvar::new(),
@@ -589,7 +627,7 @@ struct TraceExporterHandle {
 #[cfg(test)]
 mod tests {
     use core::time;
-    use std::{borrow::Cow, time::Duration};
+    use std::{borrow::Cow, sync::Arc, time::Duration};
 
     use opentelemetry::SpanId;
     use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
@@ -617,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_flush() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data(), empty_span_data()]));
@@ -633,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_batch_drop() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
         for i in 1..=3 {
             tx.add_trace_chunk(vec![empty_span_data(); i]).unwrap();
         }
@@ -655,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_timeout() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
             s.spawn(|| {
@@ -674,7 +712,7 @@ mod tests {
 
     #[test]
     fn test_trigger_shutdown() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]).unwrap());
             s.spawn(|| {
@@ -698,7 +736,7 @@ mod tests {
 
     #[test]
     fn test_wait_for_shutdown() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
 
         std::thread::scope(|s| {
             s.spawn(|| {
@@ -720,8 +758,58 @@ mod tests {
 
     #[test]
     fn test_already_shutdown() {
-        let (tx, rx) = channel(2, 4);
+        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
         drop(rx);
         assert_eq!(tx.trigger_shutdown(), Err(SenderError::AlreadyShutdown));
+    }
+
+    #[test]
+    fn test_service_extraction_from_spans() {
+        use opentelemetry::{Key, KeyValue, Value};
+
+        let config = Arc::new(
+            dd_trace::Config::builder()
+                .set_service("main-service".to_string())
+                .build(),
+        );
+        let (tx, _rx) = channel(2, 10, config.clone());
+
+        // Create a span with a service.name attribute
+        let mut span_with_service = empty_span_data();
+        span_with_service.attributes = vec![KeyValue::new(
+            Key::from_static_str("service.name"),
+            Value::from("discovered-service"),
+        )];
+
+        // Create a span without service.name attribute
+        let span_without_service = empty_span_data();
+
+        // Create a span with the default service name (should be ignored)
+        let mut span_with_default_service = empty_span_data();
+        span_with_default_service.attributes = vec![KeyValue::new(
+            Key::from_static_str("service.name"),
+            Value::from("otlpresourcenoservicename"),
+        )];
+
+        // Add spans to the batch
+        tx.add_trace_chunk(vec![span_with_service]).unwrap();
+        tx.add_trace_chunk(vec![span_without_service]).unwrap();
+        tx.add_trace_chunk(vec![span_with_default_service]).unwrap();
+
+        // Add another span with the same service (should not duplicate)
+        let mut span_duplicate_service = empty_span_data();
+        span_duplicate_service.attributes = vec![KeyValue::new(
+            Key::from_static_str("service.name"),
+            Value::from("discovered-service"),
+        )];
+        tx.add_trace_chunk(vec![span_duplicate_service]).unwrap();
+
+        // Verify that only the discovered service was added (not main-service, not default, no
+        // duplicates)
+        let extra_services = config.get_extra_services();
+        assert_eq!(extra_services.len(), 1);
+        assert!(extra_services.contains(&"discovered-service".to_string()));
+        assert!(!extra_services.contains(&"main-service".to_string()));
+        assert!(!extra_services.contains(&"otlpresourcenoservicename".to_string()));
     }
 }

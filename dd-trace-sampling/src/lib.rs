@@ -8,7 +8,8 @@ pub(crate) mod glob_matcher;
 pub(crate) mod otel_mappings;
 pub(crate) mod rate_limiter;
 pub(crate) mod rate_sampler;
+pub(crate) mod rules_sampler;
 pub(crate) mod utils;
 
 // Re-export key public types
-pub use datadog_sampler::{DatadogSampler, SamplingRule};
+pub use datadog_sampler::{DatadogSampler, SamplingRule, SamplingRulesCallback};
