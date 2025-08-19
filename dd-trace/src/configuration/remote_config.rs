@@ -742,26 +742,13 @@ impl ProductRegistry {
     }
 }
 
-/// Extract product name from remote config path
+/// Extract product name and id from remote config path
 /// Path format is: datadog/2/{PRODUCT}/{config_id}/config
-fn extract_product_from_path(path: &str) -> Option<String> {
-    let parts: Vec<&str> = path.split('/').collect();
-    // Look for pattern: datadog/2/PRODUCT/...
-    if parts.len() >= 3 && parts[0] == "datadog" && parts[1] == "2" {
-        return Some(parts[2].to_string());
-    }
-    None
-}
-
-// Helper to extract config id from known RC path pattern
-fn extract_config_id_from_path(path: &str) -> Option<String> {
-    // Expected: datadog/2/{PRODUCT}/{config_id}/config
-    let parts: Vec<&str> = path.split('/').collect();
-    // Look for pattern: datadog/2/PRODUCT/config_id/config
-    if parts.len() >= 5 && parts[0] == "datadog" && parts[1] == "2" && parts[4] == "config" {
-        return Some(parts[3].to_string());
-    }
-    None
+fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
+    let mut components = path.strip_prefix("datadog/2/")?.strip_suffix("/config")?.split("/");
+    let (product, config_id) = (components.next()?.to_string(), components.next()?.to_string());
+    if !components.remainder().is_empty() { return None }
+   Some((product, config_id))
 }
 
 #[cfg(test)]
