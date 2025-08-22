@@ -11,7 +11,7 @@ use tracecontext::TRACESTATE_KEY;
 pub mod carrier;
 pub mod config;
 pub mod context;
-mod datadog;
+pub mod datadog;
 mod error;
 pub mod trace_propagation_style;
 pub mod tracecontext;
