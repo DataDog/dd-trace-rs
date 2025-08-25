@@ -2,16 +2,81 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
-extern crate rustc_version_runtime;
 use rustc_version_runtime::version;
 
 use crate::dd_warn;
 use crate::log::LevelFilter;
 
 use super::sources::{CompositeConfigSourceResult, CompositeSource};
+
+/// Different types of remote configuration updates that can trigger callbacks
+#[derive(Debug, Clone)]
+pub enum RemoteConfigUpdate {
+    /// Sampling rules were updated from remote configuration
+    SamplingRules(Vec<SamplingRuleConfig>),
+    // Future remote config update types should be added here as new variants.
+    // E.g.
+    // - FeatureFlags(HashMap<String, bool>)
+}
+
+/// Type alias for remote configuration callback functions
+/// This reduces type complexity and improves readability
+type RemoteConfigCallback = Box<dyn Fn(&RemoteConfigUpdate) + Send + Sync>;
+
+/// Struct-based callback system for remote configuration updates
+pub struct RemoteConfigCallbacks {
+    pub sampling_rules_update: Option<RemoteConfigCallback>,
+    // Future callback types can be added here as new fields
+    // e.g. pub feature_flags_update: Option<RemoteConfigCallback>,
+}
+
+impl std::fmt::Debug for RemoteConfigCallbacks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteConfigCallbacks")
+            .field(
+                "sampling_rules_update",
+                &self.sampling_rules_update.as_ref().map(|_| "<callback>"),
+            )
+            .finish()
+    }
+}
+
+impl RemoteConfigCallbacks {
+    pub fn new() -> Self {
+        Self {
+            sampling_rules_update: None,
+        }
+    }
+
+    pub fn set_sampling_rules_callback<F>(&mut self, callback: F)
+    where
+        F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
+    {
+        self.sampling_rules_update = Some(Box::new(callback));
+    }
+
+    /// Calls all relevant callbacks for the given update type
+    /// Provides a unified interface for future callback types
+    pub fn notify_update(&self, update: &RemoteConfigUpdate) {
+        match update {
+            RemoteConfigUpdate::SamplingRules(_) => {
+                if let Some(ref callback) = self.sampling_rules_update {
+                    callback(update);
+                }
+            } // Future update types can be handled here
+        }
+    }
+}
+
+impl Default for RemoteConfigCallbacks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Configuration for a single sampling rule
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -47,7 +112,7 @@ fn default_provenance() -> String {
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ParsedSamplingRules {
     rules: Vec<SamplingRuleConfig>,
 }
@@ -62,6 +127,191 @@ impl FromStr for ParsedSamplingRules {
         // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
         let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
         Ok(ParsedSamplingRules { rules: rules_vec })
+    }
+}
+
+/// Source of a configuration value
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSource {
+    #[allow(dead_code)] // Used in tests, returned by source()
+    Default,
+    EnvVar,
+    #[allow(dead_code)] // Will be used when set_code is called from user code
+    Code,
+    #[allow(dead_code)] // Will be used for remote configuration
+    RemoteConfig,
+}
+
+/// Configuration item that tracks the value of a setting and where it came from
+// This allows us to manage configuration precedence
+#[derive(Debug, Clone)]
+pub struct ConfigItem<T> {
+    name: String,
+    default_value: T,
+    env_value: Option<T>,
+    code_value: Option<T>,
+    rc_value: Option<T>,
+}
+
+impl<T: Clone> ConfigItem<T> {
+    /// Creates a new ConfigItem with a default value
+    pub fn new(name: impl Into<String>, default: T) -> Self {
+        Self {
+            name: name.into(),
+            default_value: default,
+            env_value: None,
+            code_value: None,
+            rc_value: None,
+        }
+    }
+
+    /// Sets a value from a specific source
+    pub fn set_value_source(&mut self, value: T, source: ConfigSource) {
+        match source {
+            ConfigSource::Code => self.code_value = Some(value),
+            ConfigSource::RemoteConfig => self.rc_value = Some(value),
+            ConfigSource::EnvVar => self.env_value = Some(value),
+            ConfigSource::Default => {
+                dd_warn!("Cannot set default value after initialization");
+            }
+        }
+    }
+
+    /// Sets the code value (convenience method)
+    pub fn set_code(&mut self, value: T) {
+        self.code_value = Some(value);
+    }
+
+    /// Unsets the remote config value
+    #[allow(dead_code)] // Will be used when implementing remote configuration
+    pub fn unset_rc(&mut self) {
+        self.rc_value = None;
+    }
+
+    /// Gets the current value based on priority:
+    /// remote_config > code > env_var > default
+    pub fn value(&self) -> &T {
+        self.rc_value
+            .as_ref()
+            .or(self.code_value.as_ref())
+            .or(self.env_value.as_ref())
+            .unwrap_or(&self.default_value)
+    }
+
+    /// Gets the source of the current value
+    #[allow(dead_code)] // Used in tests and will be used for remote configuration
+    pub fn source(&self) -> ConfigSource {
+        if self.rc_value.is_some() {
+            ConfigSource::RemoteConfig
+        } else if self.code_value.is_some() {
+            ConfigSource::Code
+        } else if self.env_value.is_some() {
+            ConfigSource::EnvVar
+        } else {
+            ConfigSource::Default
+        }
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Display for ConfigItem<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "<ConfigItem name={} default={:?} env_value={:?} code_value={:?} rc_value={:?}>",
+            self.name, self.default_value, self.env_value, self.code_value, self.rc_value
+        )
+    }
+}
+
+type SamplingRulesConfigItem = ConfigItem<ParsedSamplingRules>;
+
+/// Manages extra services discovered at runtime
+/// This is used to track services beyond the main service for remote configuration
+#[derive(Debug, Clone)]
+struct ExtraServicesTracker {
+    /// Whether remote configuration is enabled
+    remote_config_enabled: bool,
+    /// Services that have been discovered
+    extra_services: Arc<Mutex<HashSet<String>>>,
+    /// Services that have already been sent to the agent
+    extra_services_sent: Arc<Mutex<HashSet<String>>>,
+    /// Queue of new services to process
+    extra_services_queue: Arc<Mutex<Option<VecDeque<String>>>>,
+}
+
+impl ExtraServicesTracker {
+    fn new(remote_config_enabled: bool) -> Self {
+        Self {
+            extra_services: Arc::new(Mutex::new(HashSet::new())),
+            extra_services_sent: Arc::new(Mutex::new(HashSet::new())),
+            extra_services_queue: Arc::new(Mutex::new(Some(VecDeque::new()))),
+            remote_config_enabled,
+        }
+    }
+
+    fn add_extra_service(&self, service_name: &str, main_service: &str) {
+        if !self.remote_config_enabled {
+            return;
+        }
+
+        if service_name == main_service {
+            return;
+        }
+
+        let mut sent = match self.extra_services_sent.lock() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+
+        if sent.contains(service_name) {
+            return;
+        }
+
+        let mut queue = match self.extra_services_queue.lock() {
+            Ok(q) => q,
+            Err(_) => return,
+        };
+
+        // Add to queue and mark as sent
+        if let Some(ref mut q) = *queue {
+            q.push_back(service_name.to_string());
+        }
+        sent.insert(service_name.to_string());
+    }
+
+    /// Get all extra services, updating from the queue
+    fn get_extra_services(&self) -> Vec<String> {
+        if !self.remote_config_enabled {
+            return Vec::new();
+        }
+
+        let mut queue = match self.extra_services_queue.lock() {
+            Ok(q) => q,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut services = match self.extra_services.lock() {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        // Drain the queue into extra_services
+        if let Some(ref mut q) = *queue {
+            while let Some(service) = q.pop_front() {
+                services.insert(service);
+
+                // Limit to 64 services
+                if services.len() > 64 {
+                    // Remove one arbitrary service (HashSet doesn't guarantee order)
+                    if let Some(to_remove) = services.iter().next().cloned() {
+                        dd_warn!("ExtraServicesTracker:RemoteConfig: Exceeded 64 service limit, removing service: {}", to_remove);
+                        services.remove(&to_remove);
+                    }
+                }
+            }
+        }
+
+        services.iter().cloned().collect()
     }
 }
 
@@ -135,7 +385,7 @@ impl ServiceName {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[non_exhaustive]
 /// Configuration for the Datadog Tracer
 ///
@@ -183,7 +433,7 @@ pub struct Config {
     // # Sampling
     ///  A list of sampling rules. Each rule is matched against the root span of a trace
     /// If a rule matches, the trace is sampled with the associated sample rate.
-    trace_sampling_rules: Vec<SamplingRuleConfig>,
+    trace_sampling_rules: SamplingRulesConfigItem,
 
     /// Maximum number of spans to sample per second
     /// Only applied if trace_sampling_rules are matched
@@ -215,6 +465,17 @@ pub struct Config {
     trace_propagation_style_extract: Option<Vec<TracePropagationStyle>>,
     trace_propagation_style_inject: Option<Vec<TracePropagationStyle>>,
     trace_propagation_extract_first: bool,
+
+    /// Whether remote configuration is enabled
+    remote_config_enabled: bool,
+
+    /// Tracks extra services discovered at runtime
+    /// Used for remote configuration to report all services
+    extra_services_tracker: ExtraServicesTracker,
+
+    /// General callbacks to be called when configuration is updated from remote configuration
+    /// Allows components like the DatadogSampler to be updated without circular imports
+    remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
 }
 
 impl Config {
@@ -266,6 +527,20 @@ impl Config {
         let parsed_sampling_rules_config =
             to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
 
+        let mut sampling_rules_item = ConfigItem::new(
+            "DD_TRACE_SAMPLING_RULES",
+            ParsedSamplingRules::default(), // default is empty rules
+        );
+
+        // Set env value if it was parsed from environment
+        if let Some(rules) = parsed_sampling_rules_config {
+            sampling_rules_item.set_value_source(rules, ConfigSource::EnvVar);
+        }
+
+        // Parse remote configuration enabled flag
+        let remote_config_enabled =
+            to_val(sources.get_parse::<bool>("DD_REMOTE_CONFIGURATION_ENABLED")).unwrap_or(true);
+
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
@@ -295,10 +570,8 @@ impl Config {
                 .unwrap_or(default.dogstatsd_agent_port),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
 
-            // Populate from parsed_sampling_rules_config or defaults
-            trace_sampling_rules: parsed_sampling_rules_config
-                .map(|psc| psc.rules)
-                .unwrap_or(default.trace_sampling_rules),
+            // Use the initialized ConfigItem
+            trace_sampling_rules: sampling_rules_item,
             trace_rate_limit: to_val(sources.get_parse("DD_TRACE_RATE_LIMIT"))
                 .unwrap_or(default.trace_rate_limit),
 
@@ -340,6 +613,9 @@ impl Config {
             .unwrap_or(default.trace_propagation_extract_first),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
+            extra_services_tracker: ExtraServicesTracker::new(remote_config_enabled),
+            remote_config_enabled,
+            remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         }
     }
 
@@ -409,7 +685,7 @@ impl Config {
     }
 
     pub fn trace_sampling_rules(&self) -> &[SamplingRuleConfig] {
-        self.trace_sampling_rules.as_ref()
+        self.trace_sampling_rules.value().rules.as_ref()
     }
 
     pub fn trace_rate_limit(&self) -> i32 {
@@ -467,6 +743,124 @@ impl Config {
     pub fn trace_propagation_extract_first(&self) -> bool {
         self.trace_propagation_extract_first
     }
+
+    pub fn update_sampling_rules_from_remote(&mut self, rules_json: &str) -> Result<(), String> {
+        // Parse the JSON into SamplingRuleConfig objects
+        let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
+            .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
+
+        // If remote config sends empty rules, clear remote config to fall back to local rules
+        if rules.is_empty() {
+            self.clear_remote_sampling_rules();
+        } else {
+            let parsed_rules = ParsedSamplingRules { rules };
+            self.trace_sampling_rules
+                .set_value_source(parsed_rules, ConfigSource::RemoteConfig);
+
+            // Notify callbacks about the sampling rules update
+            self.remote_config_callbacks.lock().unwrap().notify_update(
+                &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn clear_remote_sampling_rules(&mut self) {
+        self.trace_sampling_rules.unset_rc();
+
+        self.remote_config_callbacks.lock().unwrap().notify_update(
+            &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
+        );
+    }
+
+    /// Add a callback to be called when sampling rules are updated via remote configuration
+    /// This allows components like DatadogSampler to be updated without circular imports
+    ///
+    /// # Arguments
+    /// * `callback` - The function to call when sampling rules are updated (receives
+    ///   RemoteConfigUpdate enum)
+    ///
+    /// # Example
+    /// ```
+    /// use dd_trace::{configuration::RemoteConfigUpdate, Config};
+    ///
+    /// let config = Config::builder().build();
+    /// config.set_sampling_rules_callback(|update| {
+    ///     match update {
+    ///         RemoteConfigUpdate::SamplingRules(rules) => {
+    ///             println!("Received {} new sampling rules", rules.len());
+    ///             // Update your sampler here
+    ///         }
+    ///     }
+    /// });
+    /// ```
+    pub fn set_sampling_rules_callback<F>(&self, callback: F)
+    where
+        F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
+    {
+        self.remote_config_callbacks
+            .lock()
+            .unwrap()
+            .set_sampling_rules_callback(callback);
+    }
+
+    /// Add an extra service discovered at runtime
+    /// This is used for remote configuration
+    pub fn add_extra_service(&self, service_name: &str) {
+        self.extra_services_tracker
+            .add_extra_service(service_name, self.service());
+    }
+
+    /// Get all extra services discovered at runtime
+    pub fn get_extra_services(&self) -> Vec<String> {
+        self.extra_services_tracker.get_extra_services()
+    }
+
+    /// Check if remote configuration is enabled
+    pub fn remote_config_enabled(&self) -> bool {
+        self.remote_config_enabled
+    }
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Config")
+            .field("runtime_id", &self.runtime_id)
+            .field("tracer_version", &self.tracer_version)
+            .field("language_version", &self.language_version)
+            .field("service", &self.service)
+            .field("env", &self.env)
+            .field("version", &self.version)
+            .field("global_tags", &self.global_tags)
+            .field("trace_agent_url", &self.trace_agent_url)
+            .field("dogstatsd_agent_url", &self.dogstatsd_agent_url)
+            .field("trace_sampling_rules", &self.trace_sampling_rules)
+            .field("trace_rate_limit", &self.trace_rate_limit)
+            .field("enabled", &self.enabled)
+            .field("log_level_filter", &self.log_level_filter)
+            .field(
+                "trace_stats_computation_enabled",
+                &self.trace_stats_computation_enabled,
+            )
+            .field("trace_propagation_style", &self.trace_propagation_style)
+            .field(
+                "trace_propagation_style_extract",
+                &self.trace_propagation_style_extract,
+            )
+            .field(
+                "trace_propagation_style_inject",
+                &self.trace_propagation_style_inject,
+            )
+            .field(
+                "trace_propagation_extract_first",
+                &self.trace_propagation_extract_first,
+            )
+            .field("extra_services_tracker", &self.extra_services_tracker)
+            .field("remote_config_enabled", &self.remote_config_enabled)
+            .field("remote_config_callbacks", &self.remote_config_callbacks)
+            .finish()
+    }
 }
 
 fn default_config() -> Config {
@@ -484,7 +878,10 @@ fn default_config() -> Config {
         dogstatsd_agent_host: Cow::Borrowed("localhost"),
         dogstatsd_agent_port: 8125,
         dogstatsd_agent_url: Cow::Borrowed(""),
-        trace_sampling_rules: Vec::new(),
+        trace_sampling_rules: ConfigItem::new(
+            "DD_TRACE_SAMPLING_RULES",
+            ParsedSamplingRules::default(), // Empty rules by default
+        ),
         trace_rate_limit: 100,
         enabled: true,
         log_level_filter: LevelFilter::default(),
@@ -503,6 +900,9 @@ fn default_config() -> Config {
         trace_propagation_style_extract: None,
         trace_propagation_style_inject: None,
         trace_propagation_extract_first: false,
+        extra_services_tracker: ExtraServicesTracker::new(true),
+        remote_config_enabled: true,
+        remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
     }
 }
 
@@ -599,7 +999,9 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
-        self.config.trace_sampling_rules = rules;
+        // Create a new ParsedSamplingRules and set it as code value
+        let parsed_rules = ParsedSamplingRules { rules };
+        self.config.trace_sampling_rules.set_code(parsed_rules);
         self
     }
 
@@ -957,6 +1359,298 @@ mod tests {
             .build();
 
         assert!(!config.trace_stats_computation_enabled());
+    }
+
+    #[test]
+    fn test_extra_services_tracking() {
+        let config = Config::builder()
+            .set_service("main-service".to_string())
+            .build();
+
+        // Initially empty
+        assert_eq!(config.get_extra_services().len(), 0);
+
+        // Add some extra services
+        config.add_extra_service("service-1");
+        config.add_extra_service("service-2");
+        config.add_extra_service("service-3");
+
+        // Should not add the main service
+        config.add_extra_service("main-service");
+
+        // Should not add duplicates
+        config.add_extra_service("service-1");
+
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 3);
+        assert!(services.contains(&"service-1".to_string()));
+        assert!(services.contains(&"service-2".to_string()));
+        assert!(services.contains(&"service-3".to_string()));
+        assert!(!services.contains(&"main-service".to_string()));
+    }
+
+    #[test]
+    fn test_extra_services_disabled_when_remote_config_disabled() {
+        // Use environment variable to disable remote config
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources)
+            .set_service("main-service".to_string())
+            .build();
+
+        // Add services when remote config is disabled
+        config.add_extra_service("service-1");
+        config.add_extra_service("service-2");
+
+        // Should return empty since remote config is disabled
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 0);
+    }
+
+    #[test]
+    fn test_extra_services_limit() {
+        let config = Config::builder()
+            .set_service("main-service".to_string())
+            .build();
+
+        // Add more than 64 services
+        for i in 0..70 {
+            config.add_extra_service(&format!("service-{i}"));
+        }
+
+        // Should be limited to 64
+        let services = config.get_extra_services();
+        assert_eq!(services.len(), 64);
+    }
+
+    #[test]
+    fn test_remote_config_enabled_from_env() {
+        // Test with explicit true
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.remote_config_enabled());
+
+        // Test with explicit false
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.remote_config_enabled());
+
+        // Test with invalid value (should default to true)
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_REMOTE_CONFIGURATION_ENABLED", "invalid")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.remote_config_enabled());
+
+        // Test without env var (should use default)
+        let config = Config::builder().build();
+        assert!(config.remote_config_enabled()); // Default is true based on user's change
+    }
+
+    #[test]
+    fn test_sampling_rules_update_callbacks() {
+        let mut config = Config::builder().build();
+
+        // Track callback invocations
+        let callback_called = Arc::new(Mutex::new(false));
+        let callback_rules = Arc::new(Mutex::new(Vec::<SamplingRuleConfig>::new()));
+
+        let callback_called_clone = callback_called.clone();
+        let callback_rules_clone = callback_rules.clone();
+
+        config.set_sampling_rules_callback(move |update| {
+            *callback_called_clone.lock().unwrap() = true;
+            // Store the rules - for now we only have SamplingRules variant
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *callback_rules_clone.lock().unwrap() = rules.clone();
+        });
+
+        // Initially callback should not be called
+        assert!(!*callback_called.lock().unwrap());
+        assert!(callback_rules.lock().unwrap().is_empty());
+
+        // Update rules from remote config
+        let new_rules = vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            service: Some("test-service".to_string()),
+            provenance: "remote".to_string(),
+            ..SamplingRuleConfig::default()
+        }];
+
+        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        config
+            .update_sampling_rules_from_remote(&rules_json)
+            .unwrap();
+
+        // Callback should be called with the new rules
+        assert!(*callback_called.lock().unwrap());
+        assert_eq!(*callback_rules.lock().unwrap(), new_rules);
+
+        // Test clearing rules
+        *callback_called.lock().unwrap() = false;
+        callback_rules.lock().unwrap().clear();
+
+        config.clear_remote_sampling_rules();
+
+        // Callback should be called with fallback rules (empty in this case since no env/code rules
+        // set)
+        assert!(*callback_called.lock().unwrap());
+        assert!(callback_rules.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_config_item_priority() {
+        // Test that ConfigItem respects priority: remote_config > code > env_var > default
+        let mut config_item =
+            ConfigItem::new("DD_TRACE_SAMPLING_RULES", ParsedSamplingRules::default());
+
+        // Default value
+        assert_eq!(config_item.source(), ConfigSource::Default);
+        assert_eq!(config_item.value().rules.len(), 0);
+
+        // Env overrides default
+        config_item.set_value_source(
+            ParsedSamplingRules {
+                rules: vec![SamplingRuleConfig {
+                    sample_rate: 0.3,
+                    ..SamplingRuleConfig::default()
+                }],
+            },
+            ConfigSource::EnvVar,
+        );
+        assert_eq!(config_item.source(), ConfigSource::EnvVar);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.3);
+
+        // Code overrides env
+        config_item.set_code(ParsedSamplingRules {
+            rules: vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                ..SamplingRuleConfig::default()
+            }],
+        });
+        assert_eq!(config_item.source(), ConfigSource::Code);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+
+        // Remote config overrides all
+        config_item.set_value_source(
+            ParsedSamplingRules {
+                rules: vec![SamplingRuleConfig {
+                    sample_rate: 0.8,
+                    ..SamplingRuleConfig::default()
+                }],
+            },
+            ConfigSource::RemoteConfig,
+        );
+        assert_eq!(config_item.source(), ConfigSource::RemoteConfig);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.8);
+
+        // Unset RC falls back to code
+        config_item.unset_rc();
+        assert_eq!(config_item.source(), ConfigSource::Code);
+        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_sampling_rules_with_config_item() {
+        // Test integration: env var is parsed, then overridden by code
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "DD_TRACE_SAMPLING_RULES",
+                r#"[{"sample_rate":0.25,"service":"env-service"}]"#,
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+
+        // First, env var should be used
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.25);
+
+        // Code override should take precedence
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.75,
+                service: Some("code-service".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.75);
+        assert_eq!(
+            config.trace_sampling_rules()[0].service.as_ref().unwrap(),
+            "code-service"
+        );
+    }
+
+    #[test]
+    fn test_empty_remote_rules_fallback_behavior() {
+        let mut config = Config::builder().build();
+
+        // 1. Set up local rules via environment variable simulation
+        let local_rules = ParsedSamplingRules {
+            rules: vec![SamplingRuleConfig {
+                sample_rate: 0.3,
+                service: Some("local-service".to_string()),
+                provenance: "local".to_string(),
+                ..SamplingRuleConfig::default()
+            }],
+        };
+        config
+            .trace_sampling_rules
+            .set_value_source(local_rules.clone(), ConfigSource::EnvVar);
+
+        // Verify local rules are active
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);
+        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
+
+        // 2. Remote config sends non-empty rules
+        let remote_rules_json =
+            r#"[{"sample_rate": 0.8, "service": "remote-service", "provenance": "remote"}]"#;
+        config
+            .update_sampling_rules_from_remote(remote_rules_json)
+            .unwrap();
+
+        // Verify remote rules override local rules
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.8);
+        assert_eq!(
+            config.trace_sampling_rules.source(),
+            ConfigSource::RemoteConfig
+        );
+
+        // 3. Remote config sends empty array []
+        let empty_remote_rules_json = "[]";
+        config
+            .update_sampling_rules_from_remote(empty_remote_rules_json)
+            .unwrap();
+
+        // Empty remote rules automatically fall back to local rules
+        assert_eq!(config.trace_sampling_rules().len(), 1); // Falls back to local rules
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3); // Local rule values
+        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar); // Back to env source!
+
+        // 4. Verify explicit clearing still works (for completeness)
+        // Since we're already on local rules, clear should keep us on local rules
+        config.clear_remote_sampling_rules();
+
+        // Should remain on local rules
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);
+        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
     }
 
     #[test]

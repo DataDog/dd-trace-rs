@@ -4,7 +4,7 @@
 use std::{
     collections::{hash_map, HashMap},
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use dd_trace::{
@@ -296,7 +296,7 @@ pub(crate) struct DatadogSpanProcessor {
     registry: Arc<TraceRegistry>,
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
-    config: dd_trace::Config,
+    config: Arc<Mutex<dd_trace::Config>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -308,14 +308,16 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 impl DatadogSpanProcessor {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
-        config: dd_trace::Config,
+        config: Arc<Mutex<dd_trace::Config>>,
         registry: Arc<TraceRegistry>,
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
+        // Extract config clone before moving the Arc
+        let config_clone = config.lock().unwrap().clone();
         Self {
             registry,
-            span_exporter: DatadogExporter::new(config.clone(), agent_response_handler),
+            span_exporter: DatadogExporter::new(config_clone, agent_response_handler),
             resource,
             config,
         }
@@ -420,7 +422,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) {
-        if !self.config.enabled() || !span.is_recording() || !span.span_context().is_valid() {
+        if !self.config.lock().unwrap().enabled()
+            || !span.is_recording()
+            || !span.span_context().is_valid()
+        {
             return;
         }
 
@@ -441,6 +446,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
+
         let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
@@ -470,7 +476,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        let dd_resource = create_dd_resource(resource.clone(), &self.config);
+        let dd_resource = create_dd_resource(resource.clone(), &self.config.lock().unwrap());
         if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
             dd_trace::dd_error!(
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
@@ -483,13 +489,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        init_telemetry(&self.config, service_name);
+        init_telemetry(&self.config.lock().unwrap(), service_name);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex, RwLock};
 
     use dd_trace::Config;
     use opentelemetry::{Key, KeyValue, Value};
@@ -505,7 +511,12 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
+        let mut processor = DatadogSpanProcessor::new(
+            Arc::new(Mutex::new(config)),
+            registry,
+            resource.clone(),
+            None,
+        );
 
         let otel_resource = Resource::builder()
             // .with_service_name("otel-service")
@@ -534,7 +545,12 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
+        let mut processor = DatadogSpanProcessor::new(
+            Arc::new(Mutex::new(config)),
+            registry,
+            resource.clone(),
+            None,
+        );
 
         let attributes = [KeyValue::new("key_schema", "value_schema")];
 
@@ -572,7 +588,12 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
+        let mut processor = DatadogSpanProcessor::new(
+            Arc::new(Mutex::new(config)),
+            registry,
+            resource.clone(),
+            None,
+        );
 
         let otel_resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("key1", "value1"))
@@ -600,7 +621,12 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
+        let mut processor = DatadogSpanProcessor::new(
+            Arc::new(Mutex::new(config)),
+            registry,
+            resource.clone(),
+            None,
+        );
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
@@ -622,7 +648,12 @@ mod tests {
         let registry = Arc::new(TraceRegistry::new());
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
-        let mut processor = DatadogSpanProcessor::new(config, registry, resource.clone(), None);
+        let mut processor = DatadogSpanProcessor::new(
+            Arc::new(Mutex::new(config)),
+            registry,
+            resource.clone(),
+            None,
+        );
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")

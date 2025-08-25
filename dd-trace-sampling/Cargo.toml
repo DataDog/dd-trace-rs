@@ -14,11 +14,11 @@ description.workspace = true
 [dependencies]
 opentelemetry = { workspace = true, features = ["trace"] }
 opentelemetry_sdk = { workspace = true, features = ["trace"] }
-opentelemetry-semantic-conventions = { version = "0.15.0" }
+opentelemetry-semantic-conventions = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
-lru = "0.10.1"
+lru = "0.12"
 regex = "1.10.3"
 
 dd-trace = { path = "../dd-trace" }
