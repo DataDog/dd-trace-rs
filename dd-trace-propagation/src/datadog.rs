@@ -157,6 +157,8 @@ fn validate_tag_value(value: &str) -> bool {
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+    carrier.get(DATADOG_TRACE_ID_KEY)?;
+
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id,
         Err(e) => {
@@ -224,7 +226,7 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
 fn extract_parent_id(carrier: &dyn Extractor) -> Result<u64, Error> {
     carrier
         .get(DATADOG_PARENT_ID_KEY)
-        .ok_or(Error::extract("`trace_id` not found", "datadog"))?
+        .ok_or(Error::extract("`parent_id` not found", "datadog"))?
         .parse::<u64>()
         .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
 }
