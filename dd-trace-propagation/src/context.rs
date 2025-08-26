@@ -145,6 +145,10 @@ impl Tracestate {
 impl FromStr for Tracestate {
     type Err = String;
     fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
+        if tracestate.is_empty() {
+            return Err(String::from("Empty tracestate"));
+        }
+
         let ts_v = tracestate.split(',');
 
         let mut dd: Option<HashMap<String, String>> = None;
@@ -156,7 +160,7 @@ impl FromStr for Tracestate {
             let value = parts.next().unwrap_or_default();
 
             if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
-                dd_debug!("Received invalid tracestate header value: {v}");
+                dd_debug!("Received invalid tracestate key or header value: {v}");
                 return Err(String::from("Invalid tracestate"));
             }
 
