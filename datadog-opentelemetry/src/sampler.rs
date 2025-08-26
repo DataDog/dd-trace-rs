@@ -15,14 +15,14 @@ use crate::{span_processor::RegisterTracePropagationResult, TraceRegistry};
 #[derive(Debug, Clone)]
 pub struct Sampler {
     sampler: DatadogSampler,
-    trace_registry: Arc<TraceRegistry>,
+    trace_registry: TraceRegistry,
 }
 
 impl Sampler {
     pub fn new(
         cfg: &Config,
         resource: Arc<RwLock<Resource>>,
-        trace_registry: Arc<TraceRegistry>,
+        trace_registry: TraceRegistry,
     ) -> Self {
         let rules =
             dd_trace_sampling::SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
@@ -129,7 +129,7 @@ mod tests {
             .build();
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
-        let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
+        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
 
         let trace_id_bytes = [1; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -154,7 +154,7 @@ mod tests {
         let config = Config::builder().build();
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
+        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
 
         let trace_id_bytes = [2; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -173,7 +173,7 @@ mod tests {
         let config = Config::builder().build();
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(&config, test_resource, Arc::new(TraceRegistry::new()));
+        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
 
         let trace_id = TraceId::from_bytes([2; 16]);
         let span_id = SpanId::from_bytes([3; 8]);

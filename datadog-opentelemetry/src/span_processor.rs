@@ -293,7 +293,7 @@ impl TraceRegistry {
 }
 
 pub(crate) struct DatadogSpanProcessor {
-    registry: Arc<TraceRegistry>,
+    registry: TraceRegistry,
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Mutex<dd_trace::Config>>,
@@ -309,7 +309,7 @@ impl DatadogSpanProcessor {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         config: Arc<Mutex<dd_trace::Config>>,
-        registry: Arc<TraceRegistry>,
+        registry: TraceRegistry,
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
@@ -505,7 +505,7 @@ mod tests {
         let builder = Config::builder();
         let config = builder.build();
 
-        let registry = Arc::new(TraceRegistry::new());
+        let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor = DatadogSpanProcessor::new(
@@ -539,7 +539,7 @@ mod tests {
         builder.set_service("test-service".to_string());
         let config = builder.build();
 
-        let registry = Arc::new(TraceRegistry::new());
+        let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor = DatadogSpanProcessor::new(
@@ -582,7 +582,7 @@ mod tests {
         builder.set_service("test-service".to_string());
         let config = builder.build();
 
-        let registry = Arc::new(TraceRegistry::new());
+        let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor = DatadogSpanProcessor::new(
@@ -615,7 +615,7 @@ mod tests {
         builder.set_service("test-service".to_string());
         let config = builder.build();
 
-        let registry = Arc::new(TraceRegistry::new());
+        let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor = DatadogSpanProcessor::new(
@@ -642,7 +642,7 @@ mod tests {
     fn test_dd_config_default_service() {
         let config = Config::builder().build();
 
-        let registry = Arc::new(TraceRegistry::new());
+        let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor = DatadogSpanProcessor::new(
