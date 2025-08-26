@@ -242,7 +242,7 @@ fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
     Some(origin.to_string())
 }
 
-fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, String> {
+pub fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, String> {
     let mut tags: HashMap<String, String> = HashMap::new();
 
     let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
