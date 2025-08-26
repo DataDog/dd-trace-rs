@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
+use std::{collections::HashMap, str::FromStr, vec};
 
 use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
@@ -222,7 +222,7 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 
 #[cfg(test)]
 pub mod tests {
-    use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
+    use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
     use assert_unordered::assert_eq_unordered;
     use dd_trace::{configuration::TracePropagationStyle, Config};
