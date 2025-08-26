@@ -171,7 +171,9 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let parent_id = match extract_parent_id(carrier) {
         Ok(parent_id) => parent_id,
         Err(e) => {
-            dd_error!("Propagator (datadog): Error extracting parent_id {e}");
+            if let Level::Error = e.log_level {
+                dd_error!("Propagator (datadog): Error extracting parent_id {e}");
+            }
             0
         }
     };
@@ -231,7 +233,11 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
 fn extract_parent_id(carrier: &dyn Extractor) -> Result<u64, Error> {
     carrier
         .get(DATADOG_PARENT_ID_KEY)
-        .ok_or(Error::extract("`parent_id` not found", "datadog"))?
+        .ok_or(Error::extract_with_level(
+            "`parent_id` not found",
+            "datadog",
+            Level::Debug,
+        ))?
         .parse::<u64>()
         .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
 }
