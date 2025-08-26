@@ -145,10 +145,6 @@ impl Tracestate {
 impl FromStr for Tracestate {
     type Err = String;
     fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
-        if tracestate.is_empty() {
-            return Err(String::from("Empty tracestate"));
-        }
-
         let ts_v = tracestate.split(',');
 
         let mut dd: Option<HashMap<String, String>> = None;
