@@ -217,6 +217,7 @@ fn init_tracer() -> SdkTracerProvider {
     let config = dd_trace::Config::builder()
         .set_service("rust-propagator-service-example".to_string())
         .set_env("staging".to_string())
+        .set_log_level_filter(dd_trace::log::LevelFilter::Debug)
         .build();
 
     datadog_opentelemetry::tracing()
