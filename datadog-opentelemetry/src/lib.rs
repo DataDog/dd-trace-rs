@@ -249,7 +249,7 @@ fn make_tracer(
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let registry = Arc::new(TraceRegistry::new());
+    let registry = TraceRegistry::new();
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     // Sampler only needs config for initialization (reads initial sampling rules)
     // Runtime updates come via config callback, so no need for shared config

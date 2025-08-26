@@ -59,11 +59,11 @@ impl DatadogExtractData {
 #[derive(Debug)]
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator,
-    registry: Arc<TraceRegistry>,
+    registry: TraceRegistry,
 }
 
 impl DatadogPropagator {
-    pub(crate) fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
+    pub(crate) fn new(config: &Config, registry: TraceRegistry) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
             registry,
@@ -261,7 +261,7 @@ pub mod tests {
                 .build()
         };
 
-        DatadogPropagator::new(&config, Arc::new(TraceRegistry::new()))
+        DatadogPropagator::new(&config, TraceRegistry::new())
     }
 
     #[derive(Debug)]
@@ -557,7 +557,7 @@ pub mod tests {
     fn extract_inject_w3c() {
         for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
             let builder = Config::builder();
-            let registry = Arc::new(TraceRegistry::new());
+            let registry = TraceRegistry::new();
             let propagator = DatadogPropagator::new(&builder.build(), registry.clone());
 
             let mut extractor = HashMap::new();
