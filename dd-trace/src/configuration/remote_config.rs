@@ -511,18 +511,19 @@ impl RemoteConfigClient {
             let mut any_failure = false;
 
             for file in target_files {
-                // Extract product from path to determine which handler to use
+                // Extract product and config_id from path to determine which handler to use
                 // Path format is like "datadog/2/{PRODUCT}/{config_id}/config"
-                let product = match extract_product_from_path(&file.path) {
-                    Some(p) => p,
-                    None => {
-                        crate::dd_debug!(
-                            "RemoteConfigClient: Failed to extract product from path: {}",
-                            file.path
-                        );
-                        continue;
-                    }
-                };
+                let (product, derived_config_id) =
+                    match extract_product_and_id_from_path(&file.path) {
+                        Some((p, id)) => (p, Some(id)),
+                        None => {
+                            crate::dd_debug!(
+                                "RemoteConfigClient: Failed to extract product from path: {}",
+                                file.path
+                            );
+                            continue;
+                        }
+                    };
 
                 // Check if we have a handler for this product
                 let handler = match self.product_registry.get_handler(&product) {
@@ -542,7 +543,7 @@ impl RemoteConfigClient {
                     .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
 
                 // Determine config id and version for state reporting (do this before applying)
-                let derived_id = extract_config_id_from_path(&file.path);
+                let derived_id = derived_config_id;
                 let (meta_id, meta_version) = path_to_custom
                     .get(&file.path)
                     .cloned()
@@ -742,26 +743,22 @@ impl ProductRegistry {
     }
 }
 
-/// Extract product name from remote config path
+/// Extract product name and id from remote config path
 /// Path format is: datadog/2/{PRODUCT}/{config_id}/config
-fn extract_product_from_path(path: &str) -> Option<String> {
-    let parts: Vec<&str> = path.split('/').collect();
-    // Look for pattern: datadog/2/PRODUCT/...
-    if parts.len() >= 3 && parts[0] == "datadog" && parts[1] == "2" {
-        return Some(parts[2].to_string());
+fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
+    let mut components = path
+        .strip_prefix("datadog/2/")?
+        .strip_suffix("/config")?
+        .split("/");
+    let (product, config_id) = (
+        components.next()?.to_string(),
+        components.next()?.to_string(),
+    );
+    // Check if there are any remaining components after product and config_id
+    if components.next().is_some() {
+        return None;
     }
-    None
-}
-
-// Helper to extract config id from known RC path pattern
-fn extract_config_id_from_path(path: &str) -> Option<String> {
-    // Expected: datadog/2/{PRODUCT}/{config_id}/config
-    let parts: Vec<&str> = path.split('/').collect();
-    // Look for pattern: datadog/2/PRODUCT/config_id/config
-    if parts.len() >= 5 && parts[0] == "datadog" && parts[1] == "2" && parts[4] == "config" {
-        return Some(parts[3].to_string());
-    }
-    None
+    Some((product, config_id))
 }
 
 #[cfg(test)]
@@ -1399,57 +1396,71 @@ mod tests {
     fn test_extract_product_from_path() {
         // Test APM_TRACING path
         assert_eq!(
-            extract_product_from_path("datadog/2/APM_TRACING/config123/config"),
+            extract_product_and_id_from_path("datadog/2/APM_TRACING/config123/config")
+                .map(|(p, _)| p),
             Some("APM_TRACING".to_string())
         );
 
         // Test LIVE_DEBUGGING path
         assert_eq!(
-            extract_product_from_path("datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config"),
+            extract_product_and_id_from_path("datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config")
+                .map(|(p, _)| p),
             Some("LIVE_DEBUGGING".to_string())
         );
 
         // Test AGENT_CONFIG path
         assert_eq!(
-            extract_product_from_path("datadog/2/AGENT_CONFIG/dynamic_rates/config"),
+            extract_product_and_id_from_path("datadog/2/AGENT_CONFIG/dynamic_rates/config")
+                .map(|(p, _)| p),
             Some("AGENT_CONFIG".to_string())
         );
 
         // Test invalid paths
-        assert_eq!(extract_product_from_path("invalid/path"), None);
         assert_eq!(
-            extract_product_from_path("datadog/1/APM_TRACING/config"),
+            extract_product_and_id_from_path("invalid/path").map(|(p, _)| p),
             None
         );
         assert_eq!(
-            extract_product_from_path("datadog/APM_TRACING/config"),
+            extract_product_and_id_from_path("datadog/1/APM_TRACING/config").map(|(p, _)| p),
             None
         );
-        assert_eq!(extract_product_from_path(""), None);
+        assert_eq!(
+            extract_product_and_id_from_path("datadog/APM_TRACING/config").map(|(p, _)| p),
+            None
+        );
+        assert_eq!(extract_product_and_id_from_path("").map(|(p, _)| p), None);
     }
 
     #[test]
     fn test_extract_config_id_from_path() {
         // Test APM_TRACING path
         assert_eq!(
-            extract_config_id_from_path("datadog/2/APM_TRACING/config123/config"),
+            extract_product_and_id_from_path("datadog/2/APM_TRACING/config123/config")
+                .map(|(_, id)| id),
             Some("config123".to_string())
         );
 
         // Test ASM_FEATURES path
         assert_eq!(
-            extract_config_id_from_path("datadog/2/ASM_FEATURES/ASM_FEATURES-base/config"),
+            extract_product_and_id_from_path("datadog/2/ASM_FEATURES/ASM_FEATURES-base/config")
+                .map(|(_, id)| id),
             Some("ASM_FEATURES-base".to_string())
         );
 
         // Test invalid paths
-        assert_eq!(extract_config_id_from_path("invalid/path"), None);
         assert_eq!(
-            extract_config_id_from_path("datadog/2/APM_TRACING/config"),
+            extract_product_and_id_from_path("invalid/path").map(|(_, id)| id),
+            None
+        );
+        assert_eq!(
+            extract_product_and_id_from_path("datadog/2/APM_TRACING/config").map(|(_, id)| id),
             None
         ); // Missing /config at end
-        assert_eq!(extract_config_id_from_path("datadog/2/APM_TRACING"), None); // Too short
-        assert_eq!(extract_config_id_from_path(""), None);
+        assert_eq!(
+            extract_product_and_id_from_path("datadog/2/APM_TRACING").map(|(_, id)| id),
+            None
+        ); // Too short
+        assert_eq!(extract_product_and_id_from_path("").map(|(_, id)| id), None);
     }
 
     #[test]
