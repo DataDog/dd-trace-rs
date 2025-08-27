@@ -23,4 +23,5 @@ jobs:
           max-retries: 30
           polling-interval-seconds: 30
           ignored-name-patterns: |
+            devflow/merge
             parametric.*
