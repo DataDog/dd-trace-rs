@@ -74,7 +74,7 @@ use std::sync::{Arc, RwLock};
 
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
-use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, DEPLOYMENT_ENVIRONMENT_NAME};
+use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
 use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
@@ -294,10 +294,10 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
 
 fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
     let otel_service_name: Option<Value> = resource.get(&Key::from_static_str(SERVICE_NAME));
-    
+
     // Collect attributes to add
     let mut attributes = Vec::new();
-    
+
     // Handle service name
     if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
         // If the OpenTelemetry service name is not set or is "unknown_service",
@@ -313,10 +313,11 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
             Value::from(cfg.service().to_string()),
         ));
     }
-    
+
     // Handle environment - add it if configured and not already present
     if let Some(env) = cfg.env() {
-        let otel_env: Option<Value> = resource.get(&Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME));
+        let otel_env: Option<Value> =
+            resource.get(&Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME));
         if otel_env.is_none() {
             attributes.push((
                 Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME),
@@ -324,7 +325,7 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
             ));
         }
     }
-    
+
     if attributes.is_empty() {
         // If no attributes to add, return the original resource
         resource
