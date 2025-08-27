@@ -73,13 +73,6 @@ fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config, otel_resour
         );
     });
 
-    if let Some(env) = cfg.env() {
-        dd_span.meta.insert(
-            BytesString::from_static("env"),
-            BytesString::from_string(env.to_string()),
-        );
-    }
-
     if let Some(version) = cfg.version() {
         if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
             if dd_span.service.as_str() == service_name.as_str() {
