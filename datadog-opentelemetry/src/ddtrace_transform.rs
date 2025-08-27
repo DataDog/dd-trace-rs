@@ -6,7 +6,7 @@
 
 use std::collections::hash_map;
 
-use datadog_opentelemetry_mappings::SdkSpan;
+use datadog_opentelemetry_mappings::{CachedConfig, SdkSpan, VERSION_KEY};
 use datadog_trace_utils::span::SpanBytes as DdSpan;
 use dd_trace::sampling;
 use opentelemetry::Key;
@@ -38,7 +38,7 @@ fn otel_sampling_to_dd_sampling(
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
 pub fn otel_trace_chunk_to_dd_trace_chunk(
-    cfg: &dd_trace::Config,
+    cached_config: &CachedConfig,
     span_data: Vec<SpanData>,
     otel_resource: &Resource,
 ) -> Vec<DdSpan> {
@@ -54,32 +54,30 @@ pub fn otel_trace_chunk_to_dd_trace_chunk(
             );
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
-            add_config_metadata(&mut dd_span, cfg, otel_resource);
+            add_config_metadata(&mut dd_span, cached_config, otel_resource);
 
             dd_span
         })
         .collect()
 }
 
-fn add_config_metadata(dd_span: &mut DdSpan, cfg: &dd_trace::Config, otel_resource: &Resource) {
+fn add_config_metadata(
+    dd_span: &mut DdSpan,
+    cached_config: &CachedConfig,
+    otel_resource: &Resource,
+) {
     if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
-        dd_span.service = BytesString::from_string(cfg.service().to_string());
+        dd_span.service = cached_config.service().clone();
     }
 
-    cfg.global_tags().for_each(|tag| {
-        dd_span.meta.insert(
-            BytesString::from_string(tag.0.to_string()),
-            BytesString::from_string(tag.1.to_string()),
-        );
-    });
+    for (key, value) in cached_config.global_tags() {
+        dd_span.meta.insert(key, value);
+    }
 
-    if let Some(version) = cfg.version() {
+    if let Some(version) = cached_config.version() {
         if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
             if dd_span.service.as_str() == service_name.as_str() {
-                dd_span.meta.insert(
-                    BytesString::from_static("version"),
-                    BytesString::from_string(version.to_string()),
-                );
+                dd_span.meta.insert(VERSION_KEY, version.clone());
             }
         }
     }
