@@ -1563,15 +1563,17 @@ mod tests {
         // Verify config_states were cleared and only contains the new configs
         {
             let state = client.state.lock().unwrap();
-            // Should have exactly 2 configs (config2 and config3), not 3 (which would include config1)
+            // Should have exactly 2 configs (config2 and config3), not 3 (which would include
+            // config1)
             assert_eq!(state.config_states.len(), 2);
-            
+
             // Check that we only have the new config IDs, not the old one
-            let config_ids: Vec<String> = state.config_states.iter().map(|cs| cs.id.clone()).collect();
+            let config_ids: Vec<String> =
+                state.config_states.iter().map(|cs| cs.id.clone()).collect();
             assert!(config_ids.contains(&"config2".to_string()));
             assert!(config_ids.contains(&"config3".to_string()));
             assert!(!config_ids.contains(&"config1".to_string())); // Should not contain old config
-            
+
             // All should be successful
             for config_state in &state.config_states {
                 assert_eq!(config_state.apply_state, 2); // success
@@ -1596,8 +1598,9 @@ mod tests {
         {
             let state = client.state.lock().unwrap();
             assert_eq!(state.config_states.len(), 2); // Should still have config2 and config3
-            
-            let config_ids: Vec<String> = state.config_states.iter().map(|cs| cs.id.clone()).collect();
+
+            let config_ids: Vec<String> =
+                state.config_states.iter().map(|cs| cs.id.clone()).collect();
             assert!(config_ids.contains(&"config2".to_string()));
             assert!(config_ids.contains(&"config3".to_string()));
         }
@@ -1653,7 +1656,10 @@ mod tests {
 
         // Process second response
         let result = client.process_response(config_response_2);
-        assert!(result.is_ok(), "Second process_response should succeed (even with config errors)");
+        assert!(
+            result.is_ok(),
+            "Second process_response should succeed (even with config errors)"
+        );
 
         // Verify config_states were cleared and only contains the new error config
         {
@@ -1662,7 +1668,7 @@ mod tests {
             assert_eq!(state.config_states[0].id, "bad_config");
             assert_eq!(state.config_states[0].apply_state, 3); // error
             assert!(state.config_states[0].apply_error.is_some());
-            
+
             // Should not contain the previous successful config
             assert_ne!(state.config_states[0].id, "good_config");
         }
