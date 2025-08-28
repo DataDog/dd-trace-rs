@@ -17,11 +17,16 @@ else
     echo
 fi
 
+# Set up defaults if not set
+export DD_TRACE_AGENT_URL="${DD_TRACE_AGENT_URL:-http://localhost:8126}"
+export DD_LOG_LEVEL="${DD_LOG_LEVEL:-INFO}"
+export DD_REMOTE_CONFIGURATION_ENABLED="${DD_REMOTE_CONFIGURATION_ENABLED:-true}"
+
 # Show current environment
 echo "📋 Environment variables:"
-echo "   DD_TRACE_AGENT_URL: ${DD_TRACE_AGENT_URL:-http://localhost:8126}"
-echo "   DD_LOG_LEVEL: ${DD_LOG_LEVEL:-INFO}"
-echo "   DD_REMOTE_CONFIGURATION_ENABLED: ${DD_REMOTE_CONFIGURATION_ENABLED:-true}"
+echo "   DD_TRACE_AGENT_URL: ${DD_TRACE_AGENT_URL}"
+echo "   DD_LOG_LEVEL: ${DD_LOG_LEVEL}"
+echo "   DD_REMOTE_CONFIGURATION_ENABLED: ${DD_REMOTE_CONFIGURATION_ENABLED}"
 echo
 
 echo "🚀 Starting remote config test application..."
@@ -31,4 +36,4 @@ echo "   Press Ctrl+C to stop"
 echo
 
 # Run the application
-exec cargo run -p remote_config_test 
+exec cargo run -p remote_config_test
