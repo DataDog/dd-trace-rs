@@ -509,6 +509,7 @@ impl RemoteConfigClient {
             // Build a new cache
             let mut new_cache = Vec::new();
             let mut any_failure = false;
+            let mut config_states_cleared = false;
 
             for file in target_files {
                 // Extract product and config_id from path to determine which handler to use
@@ -576,6 +577,10 @@ impl RemoteConfigClient {
 
                         // Update state to reflect successful application with accurate id/version
                         if let Ok(mut state) = self.state.lock() {
+                            if !config_states_cleared {
+                                state.config_states.clear();
+                                config_states_cleared = true;
+                            }
                             state.config_states.push(ConfigState {
                                 id: config_id,
                                 version: config_version,
@@ -594,6 +599,10 @@ impl RemoteConfigClient {
                             e
                         );
                         if let Ok(mut state) = self.state.lock() {
+                            if !config_states_cleared {
+                                state.config_states.clear();
+                                config_states_cleared = true;
+                            }
                             // 3 denotes error
                             state.config_states.push(ConfigState {
                                 id: config_id,
@@ -1492,6 +1501,171 @@ mod tests {
         let invalid_json = "invalid json";
         let result = handler.process_config(invalid_json, &config);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_states_cleared_between_processing_cycles() {
+        // Test that config_states are cleared before adding new ones to prevent memory leak
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config).unwrap();
+
+        // First processing cycle - add one config
+        let config_response_1 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMX19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config1/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0xIn1dfQ==".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/config1/config".to_string(),
+            ]),
+        };
+
+        // Process first response
+        let result = client.process_response(config_response_1);
+        assert!(result.is_ok(), "First process_response should succeed");
+
+        // Verify first config state was added
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1);
+            assert_eq!(state.config_states[0].id, "config1");
+            assert_eq!(state.config_states[0].apply_state, 2); // success
+        }
+
+        // Second processing cycle - add different configs
+        let config_response_2 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMn19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config2/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMiJ9XX0=".to_string(),
+                },
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config3/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjI1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMyJ9XX0=".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/config2/config".to_string(),
+                "datadog/2/APM_TRACING/config3/config".to_string(),
+            ]),
+        };
+
+        // Process second response
+        let result = client.process_response(config_response_2);
+        assert!(result.is_ok(), "Second process_response should succeed");
+
+        // Verify config_states were cleared and only contains the new configs
+        {
+            let state = client.state.lock().unwrap();
+            // Should have exactly 2 configs (config2 and config3), not 3 (which would include config1)
+            assert_eq!(state.config_states.len(), 2);
+            
+            // Check that we only have the new config IDs, not the old one
+            let config_ids: Vec<String> = state.config_states.iter().map(|cs| cs.id.clone()).collect();
+            assert!(config_ids.contains(&"config2".to_string()));
+            assert!(config_ids.contains(&"config3".to_string()));
+            assert!(!config_ids.contains(&"config1".to_string())); // Should not contain old config
+            
+            // All should be successful
+            for config_state in &state.config_states {
+                assert_eq!(config_state.apply_state, 2); // success
+                assert_eq!(config_state.product, "APM_TRACING");
+            }
+        }
+
+        // Third processing cycle - empty target files
+        let config_response_3 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogM319Cg==".to_string()),
+            target_files: Some(vec![]), // Empty target files
+            client_configs: Some(vec![]),
+        };
+
+        // Process third response
+        let result = client.process_response(config_response_3);
+        assert!(result.is_ok(), "Third process_response should succeed");
+
+        // Verify config_states remain unchanged when no configs are processed
+        // (since clearing only happens when we're about to add new config states)
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 2); // Should still have config2 and config3
+            
+            let config_ids: Vec<String> = state.config_states.iter().map(|cs| cs.id.clone()).collect();
+            assert!(config_ids.contains(&"config2".to_string()));
+            assert!(config_ids.contains(&"config3".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_config_states_cleared_on_error_configs() {
+        // Test that config_states are cleared even when processing results in errors
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config).unwrap();
+
+        // First processing cycle - add successful config
+        let config_response_1 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMX19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/good_config/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0=".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/good_config/config".to_string(),
+            ]),
+        };
+
+        // Process first response
+        let result = client.process_response(config_response_1);
+        assert!(result.is_ok(), "First process_response should succeed");
+
+        // Verify first config state was added
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1);
+            assert_eq!(state.config_states[0].id, "good_config");
+            assert_eq!(state.config_states[0].apply_state, 2); // success
+        }
+
+        // Second processing cycle - add config with invalid JSON (will cause error)
+        let config_response_2 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMn19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/bad_config/config".to_string(),
+                    raw: "aW52YWxpZCBqc29u".to_string(), // "invalid json" in base64
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/bad_config/config".to_string(),
+            ]),
+        };
+
+        // Process second response
+        let result = client.process_response(config_response_2);
+        assert!(result.is_ok(), "Second process_response should succeed (even with config errors)");
+
+        // Verify config_states were cleared and only contains the new error config
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1); // Should have only the error config
+            assert_eq!(state.config_states[0].id, "bad_config");
+            assert_eq!(state.config_states[0].apply_state, 3); // error
+            assert!(state.config_states[0].apply_error.is_some());
+            
+            // Should not contain the previous successful config
+            assert_ne!(state.config_states[0].id, "good_config");
+        }
     }
 
     #[test]
