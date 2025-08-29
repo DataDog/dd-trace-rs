@@ -1499,7 +1499,8 @@ mod tests {
 
     #[test]
     fn test_end_to_end_lib_config_sampling_rules_processing() {
-        // Test the full end-to-end flow: ConfigResponse -> process_response -> sampling rules applied
+        // Test the full end-to-end flow: ConfigResponse -> process_response -> sampling rules
+        // applied
         let config = Arc::new(Mutex::new(Config::builder().build()));
         let client = RemoteConfigClient::new(config.clone()).unwrap();
 
