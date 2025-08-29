@@ -5,7 +5,7 @@ use crate::context::{SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
 use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
-use dd_trace::{configuration::TracePropagationStyle, Config};
+use dd_trace::{configuration::TracePropagationStyle, dd_debug, Config};
 use tracecontext::TRACESTATE_KEY;
 
 pub mod carrier;
@@ -99,6 +99,7 @@ impl DatadogCompositePropagator {
 
         for propagator in self.extractors.iter() {
             if let Some(context) = propagator.extract(carrier) {
+                dd_debug!("Propagator ({propagator}): extracted {context:#?}");
                 contexts.push((context, *propagator));
             }
         }
@@ -110,6 +111,11 @@ impl DatadogCompositePropagator {
         contexts: Vec<(SpanContext, TracePropagationStyle)>,
         _carrier: &dyn Extractor,
     ) -> SpanContext {
+        dd_debug!(
+            "DatadogCompositePropagator: resolving contexts: received {}",
+            contexts.len()
+        );
+
         let mut primary_context = contexts[0].0.clone();
         let mut links = Vec::<SpanLink>::new();
 
@@ -122,12 +128,20 @@ impl DatadogCompositePropagator {
                 && context.trace_id != primary_context.trace_id
             {
                 links.push(SpanLink::terminated_context(context, style));
+                dd_debug!(
+                    "DatadogCompositePropagator: terminated context (trace_id: {:#?}, span_id: {:#?})",
+                    context.trace_id,
+                    context.span_id
+                );
             } else if style == TracePropagationStyle::TraceContext {
                 if let Some(tracestate) = context.tags.get(TRACESTATE_KEY) {
                     primary_context
                         .tags
                         .insert(TRACESTATE_KEY.to_string(), tracestate.clone());
                     primary_context.tracestate = context.tracestate.clone();
+                    dd_debug!(
+                        "DatadogCompositePropagator: setting tracestate from tracecontext context in the datadog context"
+                    );
                 }
 
                 if primary_context.trace_id == context.trace_id
@@ -148,6 +162,12 @@ impl DatadogCompositePropagator {
                             format!("{:016x}", sc.span_id),
                         );
                     }
+
+                    dd_debug!(
+                        "DatadogCompositePropagator: spanId differences between extrated contexts. (resolved spanId: {}, {DATADOG_LAST_PARENT_ID_KEY}: {} ",
+                            context.span_id,
+                            primary_context.tags.get(DATADOG_LAST_PARENT_ID_KEY).unwrap_or(&"".to_string())
+                    );
 
                     primary_context.span_id = context.span_id;
                 }

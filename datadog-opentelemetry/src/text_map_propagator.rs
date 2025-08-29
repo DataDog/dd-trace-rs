@@ -108,7 +108,12 @@ impl DatadogPropagator {
 
         // otel tracestate only contains 'additional_values'
         // TODO: optimize Tracestate conversion
-        let tracestate = Tracestate::from_str(&otel_span_context.trace_state().header()).ok();
+        let otel_tracestate = otel_span_context.trace_state();
+        let tracestate = if *otel_tracestate == opentelemetry::trace::TraceState::NONE {
+            None
+        } else {
+            Tracestate::from_str(&otel_tracestate.header()).ok()
+        };
 
         let mut tags = HashMap::new();
         if let Some(propagation_tags) = propagation_data.tags {

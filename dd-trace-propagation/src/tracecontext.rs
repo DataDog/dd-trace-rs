@@ -17,6 +17,7 @@ use crate::{
 
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+    dd_debug,
     sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
@@ -57,6 +58,8 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
     if context.trace_id != 0 && context.span_id != 0 {
         inject_traceparent(context, carrier);
         inject_tracestate(context, carrier);
+    } else {
+        dd_debug!("Propagator (tracecontext): skipping inject");
     }
 }
 
@@ -74,6 +77,8 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
         .unwrap_or("00");
 
     let traceparent = format!("00-{trace_id}-{parent_id}-{flags}");
+
+    dd_debug!("Propagator (tracecontext): injecting traceparent: {traceparent}");
 
     carrier.set(TRACEPARENT_KEY, traceparent);
 }
@@ -142,7 +147,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         })
         .unwrap_or_default();
 
-    let parts = vec![("dd".to_string(), dd)];
+    let dd_part = vec![("dd".to_string(), dd)];
 
     let additional_parts = context
         .tracestate
@@ -152,18 +157,19 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 
     // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
     let all_parts = match additional_parts {
-        Some(additional) => [parts, additional.into_iter().take(31).collect()].concat(),
-        None => parts,
+        Some(additional) => [dd_part, additional.into_iter().take(31).collect()].concat(),
+        None => dd_part,
     };
 
-    carrier.set(
-        TRACESTATE_KEY,
-        all_parts
-            .into_iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<_>>()
-            .join(TRACESTATE_VALUES_SEPARATOR),
-    );
+    let tracestate = all_parts
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(TRACESTATE_VALUES_SEPARATOR);
+
+    dd_debug!("Propagator (tracecontext): injecting tracestate: {tracestate}");
+
+    carrier.set(TRACESTATE_KEY, tracestate);
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
@@ -171,6 +177,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
     match extract_traceparent(tp) {
         Ok(traceparent) => {
+            dd_debug!("Propagator (tracecontext): traceparent extracted successfully");
+
             let mut tags = HashMap::new();
             tags.insert(TRACEPARENT_KEY.to_string(), tp.to_string());
 
@@ -179,6 +187,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             let mut mechanism = None;
             let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
                 if let Ok(tracestate) = Tracestate::from_str(ts) {
+                    dd_debug!("Propagator (tracecontext): tracestate header parsed successfully");
+
                     tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
 
                     // Convert from `t.` to `_dd.p.`
@@ -211,9 +221,11 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
                     Some(tracestate)
                 } else {
+                    dd_debug!("Propagator (tracecontext): unable to parse tracestate header");
                     None
                 }
             } else {
+                dd_debug!("Propagator (tracecontext): no tracestate header found");
                 None
             };
 
