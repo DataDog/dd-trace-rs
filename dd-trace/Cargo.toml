@@ -26,6 +26,7 @@ uuid = { version = "1.11.0", features = ["v4"] }
 
 # Libdatadog dependencies
 ddtelemetry = { workspace = true }
+tokio-util = "0.7"
 
 [features]
 test-utils = []
