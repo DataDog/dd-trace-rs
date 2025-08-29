@@ -170,14 +170,12 @@ struct TargetFile {
     raw: String,
 }
 
-/// Configuration payload for APM tracing
-/// Based on the apm-tracing.json schema from dd-go
-/// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
 #[derive(Debug, Clone, Deserialize)]
-struct ApmTracingConfig {
+struct LibConfig {
+    /// Based on the apm-tracing.json schema from dd-go
+    /// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
     #[serde(default, rename = "tracing_sampling_rules")]
     tracing_sampling_rules: Option<serde_json::Value>,
-    // Add other APM tracing config fields as needed (e.g., tracing_header_tags, etc.)
 }
 
 /// TUF targets metadata
@@ -656,7 +654,7 @@ impl RemoteConfigClient {
 /// configuration format
 trait ProductHandler {
     /// Process the configuration for this product
-    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()>;
+    fn process_config(&self, lib_config: &str, config: &Arc<Mutex<Config>>) -> Result<()>;
 
     /// Get the product name this handler supports
     fn product_name(&self) -> &'static str;
@@ -665,13 +663,12 @@ trait ProductHandler {
 struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
-    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()> {
-        // Parse the config to extract sampling rules as raw JSON
-        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
-            .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
+    fn process_config(&self, lib_config: &str, config: &Arc<Mutex<Config>>) -> Result<()> {
+        let lib_config_parsed: LibConfig = serde_json::from_str(lib_config)
+            .map_err(|e| anyhow::anyhow!("Failed to parse lib config: {}", e))?;
 
         // Extract sampling rules if present
-        if let Some(rules_value) = tracing_config.tracing_sampling_rules {
+        if let Some(rules_value) = lib_config_parsed.tracing_sampling_rules {
             if !rules_value.is_null() {
                 // Convert the raw JSON value to string for the config method
                 let rules_json = serde_json::to_string(&rules_value)
@@ -698,12 +695,12 @@ impl ProductHandler for ApmTracingHandler {
                 }
             } else {
                 crate::dd_debug!(
-                    "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
+                    "RemoteConfigClient: Lib config received but tracing_sampling_rules is null"
                 );
             }
         } else {
             crate::dd_debug!(
-                "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules present"
+                "RemoteConfigClient: Lib config received but no tracing_sampling_rules present"
             );
         }
 
@@ -923,7 +920,8 @@ mod tests {
     }
 
     #[test]
-    fn test_apm_tracing_config_parsing() {
+    fn test_lib_config_parsing() {
+        // Test parsing the LibConfig structure
         let json = r#"{
             "tracing_sampling_rules": [
                 {
@@ -934,7 +932,7 @@ mod tests {
             ]
         }"#;
 
-        let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
+        let config: LibConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
         let rules_value = config.tracing_sampling_rules.unwrap();
 
@@ -947,8 +945,8 @@ mod tests {
     }
 
     #[test]
-    fn test_apm_tracing_config_full_schema() {
-        // Test parsing a more complete configuration
+    fn test_lib_config_full_schema() {
+        // Test parsing a more complete LibConfig structure
         let json = r#"{
             "tracing_sampling_rules": [
                 {
@@ -970,7 +968,7 @@ mod tests {
             ]
         }"#;
 
-        let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
+        let config: LibConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_some());
         let rules_value = config.tracing_sampling_rules.unwrap();
 
@@ -995,10 +993,10 @@ mod tests {
     }
 
     #[test]
-    fn test_apm_tracing_config_empty() {
+    fn test_lib_config_empty() {
         let json = r#"{}"#;
 
-        let config: ApmTracingConfig = serde_json::from_str(json).unwrap();
+        let config: LibConfig = serde_json::from_str(json).unwrap();
         assert!(config.tracing_sampling_rules.is_none());
     }
 
@@ -1136,7 +1134,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/apm-tracing-sampling/config".to_string(),
-                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0=".to_string(), // base64 encoded APM config
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0K".to_string(), // base64 encoded lib_config with tracing_sampling_rules at top level
                 },
             ]),
             client_configs: Some(vec![
@@ -1252,7 +1250,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/test-config/config".to_string(),
-                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0=".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0K".to_string(),
                 },
             ]),
             client_configs: Some(vec![
@@ -1481,17 +1479,90 @@ mod tests {
 
         // Test processing config - this should not panic for valid JSON
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let config_json =
+        let lib_config_json =
             r#"{"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}"#;
 
         // This should succeed
-        let result = handler.process_config(config_json, &config);
+        let result = handler.process_config(lib_config_json, &config);
         assert!(result.is_ok());
 
         // Test invalid JSON
         let invalid_json = "invalid json";
         let result = handler.process_config(invalid_json, &config);
         assert!(result.is_err());
+
+        // Test lib_config without tracing_sampling_rules (should succeed but do nothing)
+        let empty_lib_config = r#"{}"#;
+        let result = handler.process_config(empty_lib_config, &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_end_to_end_lib_config_sampling_rules_processing() {
+        // Test the full end-to-end flow: ConfigResponse -> process_response -> sampling rules applied
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let client = RemoteConfigClient::new(config.clone()).unwrap();
+
+        // Create lib_config JSON with sampling rules
+        let lib_config_json = r#"{
+            "tracing_sampling_rules": [
+                {
+                    "sample_rate": 0.75,
+                    "service": "web-service",
+                    "env": "production"
+                },
+                {
+                    "sample_rate": 0.25,
+                    "service": "background-worker",
+                    "operation_name": "process_job"
+                }
+            ]
+        }"#;
+
+        // Base64 encode the lib_config
+        use base64::Engine;
+        let encoded_lib_config =
+            base64::engine::general_purpose::STANDARD.encode(lib_config_json.as_bytes());
+
+        // Create a ConfigResponse with the lib_config
+        let config_response = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogM319Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/test-lib-config/config".to_string(),
+                    raw: encoded_lib_config,
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/test-lib-config/config".to_string(),
+            ]),
+        };
+
+        // Process the response - this should extract and apply the sampling rules
+        let result = client.process_response(config_response);
+        assert!(
+            result.is_ok(),
+            "process_response should succeed: {result:?}"
+        );
+
+        // Verify that the sampling rules were actually applied to the config
+        let config_guard = config.lock().unwrap();
+        let applied_rules = config_guard.trace_sampling_rules();
+
+        // Should have 2 rules applied
+        assert_eq!(applied_rules.len(), 2);
+
+        // Verify the first rule
+        assert_eq!(applied_rules[0].sample_rate, 0.75);
+        assert_eq!(applied_rules[0].service, Some("web-service".to_string()));
+
+        // Verify the second rule
+        assert_eq!(applied_rules[1].sample_rate, 0.25);
+        assert_eq!(
+            applied_rules[1].service,
+            Some("background-worker".to_string())
+        );
     }
 
     #[test]
@@ -1541,7 +1612,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/test-sampling/config".to_string(),
-                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LWFwcC1zZXJ2aWNlIn1dfQ==".to_string(), // base64 encoded sampling rules
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LWFwcC1zZXJ2aWNlIn1dfQo=".to_string(), // base64 encoded lib_config with tracing_sampling_rules at top level
                 },
             ]),
             client_configs: Some(vec![
