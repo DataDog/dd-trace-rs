@@ -6,11 +6,15 @@
 
 use std::collections::hash_map;
 
-use datadog_opentelemetry_mappings::SdkSpan;
+use datadog_opentelemetry_mappings::{CachedConfig, SdkSpan, VERSION_KEY};
 use datadog_trace_utils::span::SpanBytes as DdSpan;
 use dd_trace::sampling;
+use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use tinybytes::BytesString;
+
+static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
 
 /// The OTLP receiver in the agent only receives sampled spans
 /// because others are dropped in the process. In this spirit, we check for the sampling
@@ -34,7 +38,7 @@ fn otel_sampling_to_dd_sampling(
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
 pub fn otel_trace_chunk_to_dd_trace_chunk(
-    cfg: &dd_trace::Config,
+    cached_config: &CachedConfig,
     span_data: Vec<SpanData>,
     otel_resource: &Resource,
 ) -> Vec<DdSpan> {
@@ -49,11 +53,32 @@ pub fn otel_trace_chunk_to_dd_trace_chunk(
                 otel_resource,
             );
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
-            if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
-                dd_span.service = BytesString::from_string(cfg.service().to_string());
-            }
+
+            add_config_metadata(&mut dd_span, cached_config, otel_resource);
 
             dd_span
         })
         .collect()
+}
+
+fn add_config_metadata(
+    dd_span: &mut DdSpan,
+    cached_config: &CachedConfig,
+    otel_resource: &Resource,
+) {
+    if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
+        dd_span.service = cached_config.service().clone();
+    }
+
+    for (key, value) in cached_config.global_tags() {
+        dd_span.meta.insert(key, value);
+    }
+
+    if let Some(version) = cached_config.version() {
+        if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
+            if dd_span.service.as_str() == service_name.as_str() {
+                dd_span.meta.insert(VERSION_KEY, version.clone());
+            }
+        }
+    }
 }

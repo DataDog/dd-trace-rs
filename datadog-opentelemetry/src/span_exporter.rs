@@ -12,13 +12,14 @@ use data_pipeline::trace_exporter::{
     agent_response::AgentResponse, error::TraceExporterError, TraceExporter, TraceExporterBuilder,
     TraceExporterOutputFormat,
 };
+use datadog_opentelemetry_mappings::CachedConfig;
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     trace::SpanData,
     Resource,
 };
 
-use crate::ddtrace_transform;
+use crate::ddtrace_transform::{self};
 
 /// A reasonable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
@@ -487,7 +488,7 @@ struct Waiter {
 }
 
 struct TraceExporterWorker {
-    cfg: dd_trace::Config,
+    cached_config: CachedConfig,
     trace_exporter: TraceExporter,
     rx: Receiver,
     otel_resource: opentelemetry_sdk::Resource,
@@ -519,9 +520,10 @@ impl TraceExporterWorker {
                         return Err(e);
                     }
                 };
+                let cached_config = CachedConfig::new(&cfg);
                 let task = Self {
                     trace_exporter,
-                    cfg,
+                    cached_config,
                     rx,
                     otel_resource,
                     agent_response_handler,
@@ -583,7 +585,7 @@ impl TraceExporterWorker {
             .into_iter()
             .map(|TraceChunk { chunk }| -> Vec<_> {
                 ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
-                    &self.cfg,
+                    &self.cached_config,
                     chunk,
                     &self.otel_resource,
                 )
