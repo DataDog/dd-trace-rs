@@ -7,6 +7,7 @@ mod datadog_test_agent {
         collections::{HashMap, HashSet},
         fmt,
         hash::{Hash, RandomState},
+        sync::{Arc, Mutex},
     };
 
     use datadog_opentelemetry::make_test_tracer;
@@ -54,7 +55,7 @@ mod datadog_test_agent {
 
         let mut config_builder = dd_trace::Config::builder();
         config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        let config = config_builder.build();
+        let config = Arc::new(Mutex::new(config_builder.build()));
 
         let tracer_provider = make_test_tracer(
             config,
@@ -93,7 +94,7 @@ mod datadog_test_agent {
 
         let mut config_builder = dd_trace::Config::builder();
         config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        let config = config_builder.build();
+        let config = Arc::new(Mutex::new(config_builder.build()));
 
         let (tracer_provider, propagator) = make_test_tracer(
             config,
@@ -179,7 +180,7 @@ mod datadog_test_agent {
             ..SamplingRuleConfig::default()
         }]);
         config_builder.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
-        let config = config_builder.build();
+        let config = Arc::new(Mutex::new(config_builder.build()));
 
         let (tracer_provider, propagator) = make_test_tracer(
             config,
@@ -194,7 +195,7 @@ mod datadog_test_agent {
             let span = SpanBuilder::from_name("test_parent")
                 .with_kind(opentelemetry::trace::SpanKind::Server)
                 .start(&tracer);
-            let _ctx = Context::current_with_span(span).attach();
+            let _ctx: opentelemetry::ContextGuard = Context::current_with_span(span).attach();
             {
                 let child_span = SpanBuilder::from_name("test_child")
                     .with_kind(opentelemetry::trace::SpanKind::Client)
@@ -232,6 +233,67 @@ mod datadog_test_agent {
                 format!("00-{trace_id:032x}-{span_id:016x}-01"),
             )],
         );
+    }
+
+    #[tokio::test]
+    #[cfg_attr(miri, ignore)]
+    async fn test_remote_config_sampling_rates() {
+        const SESSION_NAME: &str = "test_remote_config_sampling_rates";
+        let test_agent = make_test_agent(SESSION_NAME).await;
+
+        test_agent
+            .set_remote_config_response(
+                r##"{
+            "path": "datadog/2/APM_TRACING/1234/config",
+            "msg": {
+                "tracing_sampling_rules": [
+                    {
+                        "resource": "test-span",
+                        "sample_rate": 1.0,
+                        "provenance": "customer"
+                    }
+                ]
+            }
+        }"##,
+                None,
+            )
+            .await;
+
+        let config = dd_trace::Config::builder()
+            .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into())
+            .set_trace_sampling_rules(vec![dd_trace::SamplingRuleConfig {
+                resource: Some("test-span".into()),
+                sample_rate: 0.0,
+                ..Default::default()
+            }])
+            .set_log_level_filter(dd_trace::log::LevelFilter::Debug)
+            .build();
+        let config = Arc::new(Mutex::new(config));
+
+        let (tracer_provider, _propagator) = make_test_tracer(
+            config.clone(),
+            opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        );
+        // Wait for the config to be applied
+        // TODO(paullgdc): If this test is flaky this is probably it, fetching the config took more
+        // than 2 seconds  We should probably have a way to sleep until the config is
+        // applied, but this is a bit convoluted
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        assert_eq!(
+            config.lock().unwrap().trace_sampling_rules(),
+            vec![dd_trace::SamplingRuleConfig {
+                resource: Some("test-span".into()),
+                sample_rate: 1.0,
+                provenance: "customer".into(),
+                ..Default::default()
+            }]
+        );
+
+        drop(SpanBuilder::from_name("test-span").start(&tracer_provider.tracer("test")));
+
+        tracer_provider.shutdown().expect("failed to shutdown");
+        test_agent.assert_snapshot(SESSION_NAME).await;
     }
 
     #[track_caller]

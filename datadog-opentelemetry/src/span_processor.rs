@@ -8,7 +8,11 @@ use std::{
 };
 
 use dd_trace::{
-    constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision,
+    configuration::remote_config::{
+        RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
+    },
+    constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+    sampling::SamplingDecision,
     telemetry::init_telemetry,
 };
 use opentelemetry::{
@@ -297,6 +301,7 @@ pub(crate) struct DatadogSpanProcessor {
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Mutex<dd_trace::Config>>,
+    rc_client_handle: Option<RemoteConfigClientHandle>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -313,6 +318,20 @@ impl DatadogSpanProcessor {
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
+        let rc_client_handle = if config.lock().unwrap().remote_config_enabled() {
+            RemoteConfigClientWorker::start(config.clone())
+                .inspect_err(|e| {
+                    dd_trace::dd_error!(
+                        "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
+                        e
+                    );
+                })
+                .ok()
+        } else {
+            None
+        };
+        // Create remote config client with shared config
+
         // Extract config clone before moving the Arc
         let config_clone = config.lock().unwrap().clone();
         Self {
@@ -320,6 +339,7 @@ impl DatadogSpanProcessor {
             span_exporter: DatadogExporter::new(config_clone, agent_response_handler),
             resource,
             config,
+            rc_client_handle,
         }
     }
 
@@ -461,15 +481,43 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         self.span_exporter.force_flush()
     }
 
-    fn shutdown(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        self.span_exporter.shutdown()
-    }
-
     fn shutdown_with_timeout(
         &self,
         timeout: std::time::Duration,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
-        self.span_exporter.shutdown_with_timeout(timeout)
+        let deadline = std::time::Instant::now() + timeout;
+        self.span_exporter.trigger_shutdown();
+        if let Some(rc_client_handle) = &self.rc_client_handle {
+            rc_client_handle.trigger_shutdown();
+        };
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        self.span_exporter
+            .wait_for_shutdown(left)
+            .map_err(|e| match e {
+                opentelemetry_sdk::error::OTelSdkError::Timeout(_) => {
+                    opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+                }
+                _ => e,
+            })?;
+        if let Some(rc_client_handle) = &self.rc_client_handle {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            rc_client_handle
+                .wait_for_shutdown(left)
+                .map_err(|e| match e {
+                    RemoteConfigClientError::HandleMutexPoisoned
+                    | RemoteConfigClientError::WorkerPanicked(_)
+                    | RemoteConfigClientError::InvalidAgentUri => {
+                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
+                            "RemoteConfigClient.shutdown_with_timeout: {}",
+                            e
+                        ))
+                    }
+                    RemoteConfigClientError::ShutdownTimedOut => {
+                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+                    }
+                })?;
+        }
+        Ok(())
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
@@ -502,8 +550,7 @@ mod tests {
 
     #[test]
     fn test_set_resource_from_empty_dd_config() {
-        let builder = Config::builder();
-        let config = builder.build();
+        let config = Config::builder().build();
 
         let registry = TraceRegistry::new();
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));

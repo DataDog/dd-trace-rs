@@ -229,8 +229,6 @@ type SamplingRulesConfigItem = ConfigItem<ParsedSamplingRules>;
 /// This is used to track services beyond the main service for remote configuration
 #[derive(Debug, Clone)]
 struct ExtraServicesTracker {
-    /// Whether remote configuration is enabled
-    remote_config_enabled: bool,
     /// Services that have been discovered
     extra_services: Arc<Mutex<HashSet<String>>>,
     /// Services that have already been sent to the agent
@@ -240,20 +238,15 @@ struct ExtraServicesTracker {
 }
 
 impl ExtraServicesTracker {
-    fn new(remote_config_enabled: bool) -> Self {
+    fn new() -> Self {
         Self {
             extra_services: Arc::new(Mutex::new(HashSet::new())),
             extra_services_sent: Arc::new(Mutex::new(HashSet::new())),
             extra_services_queue: Arc::new(Mutex::new(Some(VecDeque::new()))),
-            remote_config_enabled,
         }
     }
 
     fn add_extra_service(&self, service_name: &str, main_service: &str) {
-        if !self.remote_config_enabled {
-            return;
-        }
-
         if service_name == main_service {
             return;
         }
@@ -281,10 +274,6 @@ impl ExtraServicesTracker {
 
     /// Get all extra services, updating from the queue
     fn get_extra_services(&self) -> Vec<String> {
-        if !self.remote_config_enabled {
-            return Vec::new();
-        }
-
         let mut queue = match self.extra_services_queue.lock() {
             Ok(q) => q,
             Err(_) => return Vec::new(),
@@ -576,7 +565,7 @@ impl Config {
             .unwrap_or(default.trace_propagation_extract_first),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
-            extra_services_tracker: ExtraServicesTracker::new(remote_config_enabled),
+            extra_services_tracker: ExtraServicesTracker::new(),
             remote_config_enabled,
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         }
@@ -761,12 +750,18 @@ impl Config {
     /// Add an extra service discovered at runtime
     /// This is used for remote configuration
     pub fn add_extra_service(&self, service_name: &str) {
+        if !self.remote_config_enabled() {
+            return;
+        }
         self.extra_services_tracker
             .add_extra_service(service_name, self.service());
     }
 
     /// Get all extra services discovered at runtime
     pub fn get_extra_services(&self) -> Vec<String> {
+        if !self.remote_config_enabled() {
+            return Vec::new();
+        }
         self.extra_services_tracker.get_extra_services()
     }
 
@@ -849,7 +844,7 @@ fn default_config() -> Config {
         trace_propagation_style_extract: None,
         trace_propagation_style_inject: None,
         trace_propagation_extract_first: false,
-        extra_services_tracker: ExtraServicesTracker::new(true),
+        extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: true,
         remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
     }
@@ -964,6 +959,11 @@ impl ConfigBuilder {
         trace_stats_computation_enabled: bool,
     ) -> &mut Self {
         self.config.trace_stats_computation_enabled = trace_stats_computation_enabled;
+        self
+    }
+
+    pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.remote_config_enabled = enabled;
         self
     }
 
