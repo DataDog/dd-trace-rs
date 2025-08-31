@@ -26,10 +26,10 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
-data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "38ec3833177daeb3fb6d9fea501d918e5208e62a", default-features = false }
-datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "38ec3833177daeb3fb6d9fea501d918e5208e62a", default-features = false }
-ddtelemetry = { git = "https://github.com/Datadog/libdatadog", rev = "38ec3833177daeb3fb6d9fea501d918e5208e62a", default-features = false }
-tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "38ec3833177daeb3fb6d9fea501d918e5208e62a", default-features = false }
+data-pipeline = { git = "https://github.com/Datadog/libdatadog", rev = "0f88ff8acf5aff557fa9b786383b62b3f51d17a0", default-features = false }
+datadog-trace-utils = { git = "https://github.com/Datadog/libdatadog", rev = "0f88ff8acf5aff557fa9b786383b62b3f51d17a0", default-features = false }
+ddtelemetry = { git = "https://github.com/Datadog/libdatadog", rev = "0f88ff8acf5aff557fa9b786383b62b3f51d17a0", default-features = false }
+tinybytes = { git = "https://github.com/Datadog/libdatadog", rev = "0f88ff8acf5aff557fa9b786383b62b3f51d17a0", default-features = false }
 
 futures = "0.3.31"
 opentelemetry_sdk = { version = "0.30.0", features = [
