@@ -75,7 +75,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use dd_trace::configuration::RemoteConfigUpdate;
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
 use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
@@ -105,8 +105,11 @@ impl DatadogTracingBuilder {
         let config = self
             .config
             .unwrap_or_else(|| dd_trace::Config::builder().build());
-        let (tracer_provider, propagator) =
-            make_tracer(config, self.tracer_provider, self.resource);
+        let (tracer_provider, propagator) = make_tracer(
+            Arc::new(Mutex::new(config)),
+            self.tracer_provider,
+            self.resource,
+        );
 
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -245,11 +248,12 @@ pub fn init_datadog(
 
 /// Create an instance of the tracer provider
 fn make_tracer(
-    config: dd_trace::Config,
+    shared_config: Arc<Mutex<dd_trace::Config>>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let registry = Arc::new(TraceRegistry::new());
+    let config = shared_config.lock().unwrap().clone();
+    let registry = TraceRegistry::new();
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     // Sampler only needs config for initialization (reads initial sampling rules)
     // Runtime updates come via config callback, so no need for shared config
@@ -267,12 +271,6 @@ fn make_tracer(
     } else {
         None
     };
-
-    // Create shared config only for SpanProcessor (needs service discovery) and remote config
-    // Other components get cloned config since they don't use values that can be updated via remote
-    // config (e.g., propagation style, tracer version, language settings are static after
-    // initialization)
-    let shared_config = Arc::new(Mutex::new(config.clone()));
 
     let span_processor = DatadogSpanProcessor::new(
         shared_config.clone(),
@@ -299,17 +297,6 @@ fn make_tracer(
                         sampler_callback_clone(rules);
                     }
                 });
-        }
-
-        // Create remote config client with shared config
-        if let Ok(client) =
-            dd_trace::configuration::remote_config::RemoteConfigClient::new(shared_config)
-        {
-            // Start the client in background
-            let _handle = client.start();
-            dd_trace::dd_debug!("RemoteConfigClient: Started remote configuration client");
-        } else {
-            dd_trace::dd_debug!("RemoteConfigClient: Failed to create remote config client");
         }
     }
 
@@ -341,35 +328,50 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
 
 fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
     let otel_service_name: Option<Value> = resource.get(&Key::from_static_str(SERVICE_NAME));
+
+    // Collect attributes to add
+    let mut attributes = Vec::new();
+
+    // Handle service name
     if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
         // If the OpenTelemetry service name is not set or is "unknown_service",
         // we override it with the Datadog service name.
-        merge_resource(
-            Some(resource),
-            [(
-                Key::from_static_str(SERVICE_NAME),
-                Value::from(cfg.service().to_string()),
-            )],
-        )
+        attributes.push((
+            Key::from_static_str(SERVICE_NAME),
+            Value::from(cfg.service().to_string()),
+        ));
     } else if !cfg.service_is_default() {
         // If the service is configured, we override the OpenTelemetry service name
-        merge_resource(
-            Some(resource),
-            [(
-                Key::from_static_str(SERVICE_NAME),
-                Value::from(cfg.service().to_string()),
-            )],
-        )
-    } else {
-        // If the service is not configured, we keep the OpenTelemetry service name
+        attributes.push((
+            Key::from_static_str(SERVICE_NAME),
+            Value::from(cfg.service().to_string()),
+        ));
+    }
+
+    // Handle environment - add it if configured and not already present
+    if let Some(env) = cfg.env() {
+        let otel_env: Option<Value> =
+            resource.get(&Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME));
+        if otel_env.is_none() {
+            attributes.push((
+                Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME),
+                Value::from(env.to_string()),
+            ));
+        }
+    }
+
+    if attributes.is_empty() {
+        // If no attributes to add, return the original resource
         resource
+    } else {
+        merge_resource(Some(resource), attributes)
     }
 }
 
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(
-    config: dd_trace::Config,
+    shared_config: Arc<Mutex<dd_trace::Config>>,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    make_tracer(config, tracer_provider_builder, None)
+    make_tracer(shared_config, tracer_provider_builder, None)
 }

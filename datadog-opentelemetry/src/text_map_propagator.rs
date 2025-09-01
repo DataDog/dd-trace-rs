@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
+use std::{collections::HashMap, str::FromStr, vec};
 
 use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
@@ -59,11 +59,11 @@ impl DatadogExtractData {
 #[derive(Debug)]
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator,
-    registry: Arc<TraceRegistry>,
+    registry: TraceRegistry,
 }
 
 impl DatadogPropagator {
-    pub(crate) fn new(config: &Config, registry: Arc<TraceRegistry>) -> Self {
+    pub(crate) fn new(config: &Config, registry: TraceRegistry) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
             registry,
@@ -227,7 +227,7 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 
 #[cfg(test)]
 pub mod tests {
-    use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
+    use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
     use assert_unordered::assert_eq_unordered;
     use dd_trace::{configuration::TracePropagationStyle, Config};
@@ -266,7 +266,7 @@ pub mod tests {
                 .build()
         };
 
-        DatadogPropagator::new(&config, Arc::new(TraceRegistry::new()))
+        DatadogPropagator::new(&config, TraceRegistry::new())
     }
 
     #[derive(Debug)]
@@ -562,7 +562,7 @@ pub mod tests {
     fn extract_inject_w3c() {
         for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
             let builder = Config::builder();
-            let registry = Arc::new(TraceRegistry::new());
+            let registry = TraceRegistry::new();
             let propagator = DatadogPropagator::new(&builder.build(), registry.clone());
 
             let mut extractor = HashMap::new();

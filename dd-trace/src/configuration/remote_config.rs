@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::configuration::Config;
+
 use anyhow::Result;
+use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::{self};
 use std::time::{Duration, Instant};
 
 // HTTP client imports
 use http_body_util::{BodyExt, Full};
-use hyper::{body::Bytes, Method, Request, Uri};
+use hyper::{body::Bytes, Method, Request};
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
 use hyper_util::rt::TokioExecutor;
 
@@ -226,6 +228,204 @@ struct SignedTargets {
     version: Option<u64>,
 }
 
+#[derive(Default)]
+struct ShutdownSignaler {
+    shutdown_finished: Mutex<bool>,
+    shutdown_condvar: Condvar,
+}
+
+impl ShutdownSignaler {
+    fn signal_shutdown(&self) {
+        let mut finished = self.shutdown_finished.lock().unwrap();
+        *finished = true;
+        self.shutdown_condvar.notify_all();
+    }
+
+    fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
+        let Ok(finished) = self.shutdown_finished.lock() else {
+            return Ok(());
+        };
+        let Ok((_finished, timeout)) =
+            self.shutdown_condvar
+                .wait_timeout_while(finished, timeout, |f| !*f)
+        else {
+            return Ok(());
+        };
+        if timeout.timed_out() {
+            return Err(RemoteConfigClientError::ShutdownTimedOut);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum RemoteConfigClientError {
+    InvalidAgentUri,
+    HandleMutexPoisoned,
+    WorkerPanicked(String),
+    ShutdownTimedOut,
+}
+
+impl fmt::Display for RemoteConfigClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidAgentUri => write!(f, "invalid agent URI"),
+            Self::HandleMutexPoisoned => write!(f, "handle mutex poisoned"),
+            Self::WorkerPanicked(msg) => write!(f, "remote config worker panicked: {}", msg),
+            Self::ShutdownTimedOut => write!(f, "shutdown timed out"),
+        }
+    }
+}
+
+pub struct RemoteConfigClientHandle {
+    join_handle: Mutex<Option<thread::JoinHandle<()>>>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    shutdown_finished: Arc<ShutdownSignaler>,
+}
+
+impl Drop for RemoteConfigClientHandle {
+    fn drop(&mut self) {
+        self.trigger_shutdown();
+    }
+}
+
+impl RemoteConfigClientHandle {
+    pub fn trigger_shutdown(&self) {
+        self.cancel_token.cancel();
+    }
+
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
+        let Some(handle) = self
+            .join_handle
+            .lock()
+            .map_err(|_| {
+                crate::dd_error!("RemoteConfigClient.wait_for_shutdown: handle mutex poisoned");
+                RemoteConfigClientError::HandleMutexPoisoned
+            })?
+            .take()
+        else {
+            return Ok(());
+        };
+        self.shutdown_finished.wait_for_shutdown(timeout)?;
+        handle.join().map_err(|e| {
+            let err = if let Some(e) = e.downcast_ref::<&'static str>() {
+                e
+            } else if let Some(e) = e.downcast_ref::<String>() {
+                e
+            } else {
+                "unknown panic type"
+            };
+            crate::dd_error!(
+                "RemoteConfigClient.wait_for_shutdown: Worker panicked: {}",
+                err
+            );
+            RemoteConfigClientError::WorkerPanicked(err.to_string())
+        })?;
+        Ok(())
+    }
+}
+
+/// Receiver for shutdown signals through the cancellation token
+///
+/// When this struct is dropped, it will signal that the shutdown is finished to the
+/// handle
+struct RemoteConfigClientShutdownReceiver {
+    cancel_token: tokio_util::sync::CancellationToken,
+    shutdown_finished: Arc<ShutdownSignaler>,
+}
+
+impl Drop for RemoteConfigClientShutdownReceiver {
+    fn drop(&mut self) {
+        self.shutdown_finished.signal_shutdown();
+    }
+}
+
+pub struct RemoteConfigClientWorker {
+    client: RemoteConfigClient,
+    shutdown_receiver: RemoteConfigClientShutdownReceiver,
+}
+
+impl RemoteConfigClientWorker {
+    pub fn start(
+        config: Arc<Mutex<Config>>,
+    ) -> Result<RemoteConfigClientHandle, RemoteConfigClientError> {
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        let shutdown_finished = Arc::new(ShutdownSignaler::default());
+        let shutdown_receiver = RemoteConfigClientShutdownReceiver {
+            cancel_token: cancel_token.clone(),
+            shutdown_finished: shutdown_finished.clone(),
+        };
+        let worker = Self {
+            client: RemoteConfigClient::new(config)?,
+            shutdown_receiver,
+        };
+        let join_handle = thread::spawn(move || worker.run());
+        Ok(RemoteConfigClientHandle {
+            join_handle: Mutex::new(Some(join_handle)),
+            cancel_token,
+            shutdown_finished,
+        })
+    }
+
+    fn run(mut self) {
+        crate::dd_debug!("RemoteConfigClient: started client worker");
+
+        // Create Tokio runtime in the background thread
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                crate::dd_debug!("RemoteConfigClient: Failed to create Tokio runtime: {}", e);
+                return;
+            }
+        };
+
+        let run_loop = async {
+            let mut last_poll = Instant::now();
+
+            loop {
+                // Fetch and apply configuration
+                match self.client.fetch_and_apply_config().await {
+                    Ok(()) => {
+                        crate::dd_debug!(
+                            "RemoteConfigClient: Successfully fetched and applied config"
+                        );
+                        // Clear any previous errors
+                        if let Ok(mut state) = self.client.state.lock() {
+                            state.has_error = false;
+                            state.error = None;
+                        }
+                    }
+                    Err(e) => {
+                        crate::dd_debug!("RemoteConfigClient: Failed to fetch config: {}", e);
+                        // Record error in state
+                        if let Ok(mut state) = self.client.state.lock() {
+                            state.has_error = true;
+                            state.error = Some(format!("{e}"));
+                        }
+                    }
+                }
+
+                // Wait for next poll interval
+                let elapsed = last_poll.elapsed();
+                if elapsed < self.client.poll_interval {
+                    tokio::time::sleep(self.client.poll_interval - elapsed).await
+                }
+                last_poll = Instant::now();
+            }
+        };
+
+        rt.block_on(async {
+            tokio::select! {
+                _ = self.shutdown_receiver.cancel_token.cancelled() => {},
+                _ = run_loop => {},
+            }
+        });
+    }
+}
+
 /// Remote configuration client that polls the Datadog Agent for configuration updates.
 ///
 /// This client is responsible for:
@@ -236,27 +436,37 @@ struct SignedTargets {
 ///
 /// The client currently handles a single product type (APM_TRACING)
 /// that defines sampling rules.
-pub struct RemoteConfigClient {
+struct RemoteConfigClient {
     /// Unique identifier for this client instance
     /// Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
     config: Arc<Mutex<Config>>,
-    agent_url: String,
+    agent_url: hyper::Uri,
     // HTTP client timeout configuration
     client_timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
     // Cache of successfully applied configurations
-    cached_target_files: Arc<Mutex<Vec<CachedTargetFile>>>,
+    cached_target_files: Vec<CachedTargetFile>,
     // Registry of product handlers for processing different config types
     product_registry: ProductRegistry,
 }
 
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
-    pub fn new(config: Arc<Mutex<Config>>) -> Result<Self> {
-        let agent_url = format!("{}/v0.7/config", config.lock().unwrap().trace_agent_url());
+    pub fn new(config: Arc<Mutex<Config>>) -> Result<Self, RemoteConfigClientError> {
+        let agent_url =
+            hyper::Uri::from_maybe_shared(config.lock().unwrap().trace_agent_url().to_string())
+                .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
+        let mut parts = agent_url.into_parts();
+        parts.path_and_query = Some(
+            "/v0.7/config"
+                .parse()
+                .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?,
+        );
+        let agent_url =
+            hyper::Uri::from_parts(parts).map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
 
         let state = Arc::new(Mutex::new(ClientState {
             root_version: 1, // Agent requires >= 1 (base TUF director root)
@@ -275,67 +485,21 @@ impl RemoteConfigClient {
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval: DEFAULT_POLL_INTERVAL,
-            cached_target_files: Arc::new(Mutex::new(Vec::new())),
+            cached_target_files: Vec::new(),
             product_registry: ProductRegistry::new(),
         })
     }
 
-    /// Starts the remote configuration client in a background thread
-    pub fn start(self) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
-            self.run();
-        })
-    }
-
-    /// Main polling loop
-    fn run(self) {
-        // Create Tokio runtime in the background thread
-        let rt = match tokio::runtime::Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                crate::dd_debug!("RemoteConfigClient: Failed to create Tokio runtime: {}", e);
-                return;
-            }
-        };
-
-        let mut last_poll = Instant::now();
-
-        loop {
-            // Wait for next poll interval
-            let elapsed = last_poll.elapsed();
-            if elapsed < self.poll_interval {
-                thread::sleep(self.poll_interval - elapsed);
-            }
-            last_poll = Instant::now();
-
-            // Fetch and apply configuration
-            match rt.block_on(self.fetch_and_apply_config()) {
-                Ok(_) => {
-                    // Clear any previous errors
-                    if let Ok(mut state) = self.state.lock() {
-                        state.has_error = false;
-                        state.error = None;
-                    }
-                }
-                Err(e) => {
-                    crate::dd_debug!("RemoteConfigClient: Failed to fetch config: {}", e);
-                    // Record error in state
-                    if let Ok(mut state) = self.state.lock() {
-                        state.has_error = true;
-                        state.error = Some(format!("{e}"));
-                    }
-                }
-            }
-        }
-    }
-
     /// Fetches configuration from the agent and applies it
-    async fn fetch_and_apply_config(&self) -> Result<()> {
+    async fn fetch_and_apply_config(&mut self) -> Result<()> {
         // Create HTTP connector with timeout configuration
         let mut connector = HttpConnector::new();
         connector.set_connect_timeout(Some(self.client_timeout));
 
         // Create HTTP client for this request
+        // TODO(paullgdc): this doesn't support UDS
+        //  We should instead use the client in ddcommon::hyper_migration and the helper methods
+        //  to encode the URI the way it expects for UDS
         let client = Client::builder(TokioExecutor::new()).build(connector);
 
         let request_payload = self.build_request()?;
@@ -345,15 +509,11 @@ impl RemoteConfigClient {
             .map_err(|e| anyhow::anyhow!("Failed to serialize request: {}", e))?;
 
         // Parse the agent URL
-        let uri: Uri = self
-            .agent_url
-            .parse()
-            .map_err(|e| anyhow::anyhow!("Invalid agent URL: {}", e))?;
 
         // Build HTTP request
         let req = Request::builder()
             .method(Method::POST)
-            .uri(uri)
+            .uri(self.agent_url.clone())
             .header("content-type", "application/json")
             .header("user-agent", "dd-trace-rs")
             .body(Full::new(Bytes::from(json_body)))
@@ -415,16 +575,15 @@ impl RemoteConfigClient {
                 extra_services: config.get_extra_services(),
                 env: config.env().map(|s| s.to_string()),
                 app_version: config.version().map(|s| s.to_string()),
-                tags: config.global_tags().map(|s| s.to_string()).collect(),
+                tags: config
+                    .global_tags()
+                    .map(|(key, value)| format!("{key}:{value}"))
+                    .collect(),
             }),
             capabilities: self.capabilities.encode(),
         };
 
-        let cached_files = self
-            .cached_target_files
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Failed to lock cached files"))?
-            .clone();
+        let cached_files = self.cached_target_files.clone();
 
         Ok(ConfigRequest {
             client: client_info,
@@ -433,7 +592,7 @@ impl RemoteConfigClient {
     }
 
     /// Processes the configuration response
-    fn process_response(&self, response: ConfigResponse) -> Result<()> {
+    fn process_response(&mut self, response: ConfigResponse) -> Result<()> {
         // Process targets metadata to update backend state and version
         let mut path_to_custom: HashMap<String, (Option<String>, Option<u64>)> = HashMap::new();
         let mut signed_targets: Option<serde_json::Value> = None;
@@ -464,20 +623,11 @@ impl RemoteConfigClient {
                 let custom = &desc.custom;
                 let id = custom
                     .as_ref()
-                    .and_then(|c| c.get("id"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .and_then(|c| Some(c.get("id")?.as_str()?.to_owned()));
                 // Datadog RC uses custom.v (int). Fallback to custom.version if needed
-                let version = custom
+                let version: Option<u64> = custom
                     .as_ref()
-                    .and_then(|c| c.get("v"))
-                    .and_then(|v| v.as_u64())
-                    .or_else(|| {
-                        custom
-                            .as_ref()
-                            .and_then(|c| c.get("version"))
-                            .and_then(|v| v.as_u64())
-                    });
+                    .and_then(|c| c.get("v").or_else(|| c.get("version"))?.as_u64());
                 path_to_custom.insert(path.clone(), (id, version));
             }
 
@@ -509,21 +659,19 @@ impl RemoteConfigClient {
             // Build a new cache
             let mut new_cache = Vec::new();
             let mut any_failure = false;
+            let mut config_states_cleared = false;
 
             for file in target_files {
                 // Extract product and config_id from path to determine which handler to use
                 // Path format is like "datadog/2/{PRODUCT}/{config_id}/config"
-                let (product, derived_config_id) =
-                    match extract_product_and_id_from_path(&file.path) {
-                        Some((p, id)) => (p, Some(id)),
-                        None => {
-                            crate::dd_debug!(
-                                "RemoteConfigClient: Failed to extract product from path: {}",
-                                file.path
-                            );
-                            continue;
-                        }
-                    };
+                let Some((product, config_id)) = extract_product_and_id_from_path(&file.path)
+                else {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: Failed to extract product from path: {}",
+                        file.path
+                    );
+                    continue;
+                };
 
                 // Check if we have a handler for this product
                 let handler = match self.product_registry.get_handler(&product) {
@@ -539,18 +687,14 @@ impl RemoteConfigClient {
                     .decode(&file.raw)
                     .map_err(|e| anyhow::anyhow!("Failed to decode config: {}", e))?;
 
-                let config_str = String::from_utf8(decoded.clone())
+                let config_str = String::from_utf8(decoded)
                     .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
 
                 // Determine config id and version for state reporting (do this before applying)
-                let derived_id = derived_config_id;
-                let (meta_id, meta_version) = path_to_custom
+                let (_, meta_version) = path_to_custom
                     .get(&file.path)
                     .cloned()
                     .unwrap_or((None, None));
-                let config_id = derived_id
-                    .or(meta_id)
-                    .unwrap_or_else(|| format!("{}-config", product.to_lowercase()));
                 let config_version = meta_version.unwrap_or(1);
 
                 // Apply the config and record success or failure state
@@ -576,6 +720,10 @@ impl RemoteConfigClient {
 
                         // Update state to reflect successful application with accurate id/version
                         if let Ok(mut state) = self.state.lock() {
+                            if !config_states_cleared {
+                                state.config_states.clear();
+                                config_states_cleared = true;
+                            }
                             state.config_states.push(ConfigState {
                                 id: config_id,
                                 version: config_version,
@@ -594,6 +742,10 @@ impl RemoteConfigClient {
                             e
                         );
                         if let Ok(mut state) = self.state.lock() {
+                            if !config_states_cleared {
+                                state.config_states.clear();
+                                config_states_cleared = true;
+                            }
                             // 3 denotes error
                             state.config_states.push(ConfigState {
                                 id: config_id,
@@ -611,10 +763,8 @@ impl RemoteConfigClient {
 
             // Only update the cache if we successfully processed all configs
             // This ensures we don't lose our previous cache state on errors
-            if let Ok(mut cache) = self.cached_target_files.lock() {
-                if !any_failure {
-                    *cache = new_cache;
-                }
+            if !any_failure {
+                self.cached_target_files = new_cache;
             }
         }
 
@@ -1145,7 +1295,7 @@ mod tests {
         };
 
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let client = RemoteConfigClient::new(config).unwrap();
+        let mut client = RemoteConfigClient::new(config).unwrap();
 
         // For testing purposes, we'll verify the config was updated by checking the rules
 
@@ -1170,7 +1320,7 @@ mod tests {
         assert_eq!(config_state.apply_state, 2); // success
 
         // Verify that APM_TRACING cached files were added
-        let cached_files = client.cached_target_files.lock().unwrap();
+        let cached_files = client.cached_target_files;
         assert_eq!(cached_files.len(), 1);
         assert_eq!(
             cached_files[0].path,
@@ -1216,7 +1366,7 @@ mod tests {
 
         // Create a RemoteConfigClient and process the response
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let client = RemoteConfigClient::new(config).unwrap();
+        let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Process the response - this should update the client's state
         let result = client.process_response(config_response);
@@ -1235,7 +1385,7 @@ mod tests {
         assert_eq!(state.config_states.len(), 0);
 
         // Verify that cached target files were not added since they're not APM_TRACING
-        let cached_files = client.cached_target_files.lock().unwrap();
+        let cached_files = client.cached_target_files;
         assert_eq!(cached_files.len(), 0);
     }
 
@@ -1243,7 +1393,7 @@ mod tests {
     fn test_config_update_from_remote() {
         // Test that the config is updated when sampling rules are received
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let client = RemoteConfigClient::new(config).unwrap();
+        let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Process a config response with sampling rules
         let config_response = ConfigResponse {
@@ -1495,10 +1645,181 @@ mod tests {
     }
 
     #[test]
+    fn test_config_states_cleared_between_processing_cycles() {
+        // Test that config_states are cleared before adding new ones to prevent memory leak
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let mut client = RemoteConfigClient::new(config).unwrap();
+
+        // First processing cycle - add one config
+        let config_response_1 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMX19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config1/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0xIn1dfQ==".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/config1/config".to_string(),
+            ]),
+        };
+
+        // Process first response
+        let result = client.process_response(config_response_1);
+        assert!(result.is_ok(), "First process_response should succeed");
+
+        // Verify first config state was added
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1);
+            assert_eq!(state.config_states[0].id, "config1");
+            assert_eq!(state.config_states[0].apply_state, 2); // success
+        }
+
+        // Second processing cycle - add different configs
+        let config_response_2 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMn19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config2/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMiJ9XX0=".to_string(),
+                },
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/config3/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjI1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMyJ9XX0=".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/config2/config".to_string(),
+                "datadog/2/APM_TRACING/config3/config".to_string(),
+            ]),
+        };
+
+        // Process second response
+        let result = client.process_response(config_response_2);
+        assert!(result.is_ok(), "Second process_response should succeed");
+
+        // Verify config_states were cleared and only contains the new configs
+        {
+            let state = client.state.lock().unwrap();
+            // Should have exactly 2 configs (config2 and config3), not 3 (which would include
+            // config1)
+            assert_eq!(state.config_states.len(), 2);
+
+            // Check that we only have the new config IDs, not the old one
+            let config_ids: Vec<String> =
+                state.config_states.iter().map(|cs| cs.id.clone()).collect();
+            assert!(config_ids.contains(&"config2".to_string()));
+            assert!(config_ids.contains(&"config3".to_string()));
+            assert!(!config_ids.contains(&"config1".to_string())); // Should not contain old config
+
+            // All should be successful
+            for config_state in &state.config_states {
+                assert_eq!(config_state.apply_state, 2); // success
+                assert_eq!(config_state.product, "APM_TRACING");
+            }
+        }
+
+        // Third processing cycle - empty target files
+        let config_response_3 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogM319Cg==".to_string()),
+            target_files: Some(vec![]), // Empty target files
+            client_configs: Some(vec![]),
+        };
+
+        // Process third response
+        let result = client.process_response(config_response_3);
+        assert!(result.is_ok(), "Third process_response should succeed");
+
+        // Verify config_states remain unchanged when no configs are processed
+        // (since clearing only happens when we're about to add new config states)
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 2); // Should still have config2 and config3
+
+            let config_ids: Vec<String> =
+                state.config_states.iter().map(|cs| cs.id.clone()).collect();
+            assert!(config_ids.contains(&"config2".to_string()));
+            assert!(config_ids.contains(&"config3".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_config_states_cleared_on_error_configs() {
+        // Test that config_states are cleared even when processing results in errors
+        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let mut client = RemoteConfigClient::new(config).unwrap();
+
+        // First processing cycle - add successful config
+        let config_response_1 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMX19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/good_config/config".to_string(),
+                    raw: "eyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX0=".to_string(),
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/good_config/config".to_string(),
+            ]),
+        };
+
+        // Process first response
+        let result = client.process_response(config_response_1);
+        assert!(result.is_ok(), "First process_response should succeed");
+
+        // Verify first config state was added
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1);
+            assert_eq!(state.config_states[0].id, "good_config");
+            assert_eq!(state.config_states[0].apply_state, 2); // success
+        }
+
+        // Second processing cycle - add config with invalid JSON (will cause error)
+        let config_response_2 = ConfigResponse {
+            roots: None,
+            targets: Some("eyJzaWduZWQiOiB7Il90eXBlIjogInRhcmdldHMiLCAiY3VzdG9tIjogeyJvcGFxdWVfYmFja2VuZF9zdGF0ZSI6ICJleUpmb29JT2lBaVltRm9JbjA9In0sICJleHBpcmVzIjogIjIwMjQtMTItMzFUMjM6NTk6NTlaIiwgInNwZWNfdmVyc2lvbiI6ICIxLjAuMCIsICJ0YXJnZXRzIjoge30sICJ2ZXJzaW9uIjogMn19Cg==".to_string()),
+            target_files: Some(vec![
+                TargetFile {
+                    path: "datadog/2/APM_TRACING/bad_config/config".to_string(),
+                    raw: "aW52YWxpZCBqc29u".to_string(), // "invalid json" in base64
+                },
+            ]),
+            client_configs: Some(vec![
+                "datadog/2/APM_TRACING/bad_config/config".to_string(),
+            ]),
+        };
+
+        // Process second response
+        let result = client.process_response(config_response_2);
+        assert!(
+            result.is_ok(),
+            "Second process_response should succeed (even with config errors)"
+        );
+
+        // Verify config_states were cleared and only contains the new error config
+        {
+            let state = client.state.lock().unwrap();
+            assert_eq!(state.config_states.len(), 1); // Should have only the error config
+            assert_eq!(state.config_states[0].id, "bad_config");
+            assert_eq!(state.config_states[0].apply_state, 3); // error
+            assert!(state.config_states[0].apply_error.is_some());
+
+            // Should not contain the previous successful config
+            assert_ne!(state.config_states[0].id, "good_config");
+        }
+    }
+
+    #[test]
     fn test_tuf_targets_integration_with_remote_config() {
         // Test that we can process a TUF targets response through the remote config system
         let config = Arc::new(Mutex::new(Config::builder().build()));
-        let client = RemoteConfigClient::new(config).unwrap();
+        let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Create a realistic TUF targets JSON and base64 encode it
         let tuf_targets_json = r#"{
