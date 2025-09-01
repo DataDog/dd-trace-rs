@@ -145,7 +145,7 @@ enum ConfigItemRef<'a, T> {
     ArcRef(arc_swap::Guard<Option<Arc<T>>>),
 }
 
-impl<'a, T: Deref> Deref for ConfigItemRef<'a, T> {
+impl<T: Deref> Deref for ConfigItemRef<'_, T> {
     type Target = T::Target;
 
     fn deref(&self) -> &Self::Target {
