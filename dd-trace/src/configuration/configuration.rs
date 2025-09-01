@@ -416,9 +416,17 @@ pub struct Config {
     // # Agent
     /// A list of default tags to be added to every span
     /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
-    global_tags: Vec<String>,
+    global_tags: Vec<(String, String)>,
+    /// host of the trace agent
+    agent_host: Cow<'static, str>,
+    /// port of the trace agent
+    trace_agent_port: u32,
     /// url of the trace agent
     trace_agent_url: Cow<'static, str>,
+    /// host of the dogstatsd agent
+    dogstatsd_agent_host: Cow<'static, str>,
+    /// port of the dogstatsd agent
+    dogstatsd_agent_port: u32,
     /// url of the dogstatsd agent
     dogstatsd_agent_url: Cow<'static, str>,
 
@@ -497,6 +505,25 @@ impl Config {
             }
         }
 
+        /// Wrapper to parse "," separated key:value tags to vector<(key, value)>
+        /// discarding tags without ":" delimiter
+        struct DdKeyValueTags(Vec<(String, String)>);
+
+        impl FromStr for DdKeyValueTags {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(DdKeyValueTags(
+                    s.split(',')
+                        .filter_map(|s| {
+                            s.split_once(':')
+                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                        })
+                        .collect(),
+                ))
+            }
+        }
+
         let parsed_sampling_rules_config =
             to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
 
@@ -525,12 +552,22 @@ impl Config {
             env: to_val(sources.get("DD_ENV")).or(default.env),
             version: to_val(sources.get("DD_VERSION")).or(default.version),
             // TODO(paullgdc): tags should be merged, not replaced
-            global_tags: to_val(sources.get_parse::<DdTags>("DD_TAGS"))
-                .map(|DdTags(tags)| tags)
+            global_tags: to_val(sources.get_parse::<DdKeyValueTags>("DD_TAGS"))
+                .map(|DdKeyValueTags(tags)| tags)
                 .unwrap_or(default.global_tags),
+            agent_host: to_val(sources.get("DD_AGENT_HOST"))
+                .map(Cow::Owned)
+                .unwrap_or(default.agent_host),
+            trace_agent_port: to_val(sources.get_parse("DD_TRACE_AGENT_PORT"))
+                .unwrap_or(default.trace_agent_port),
             trace_agent_url: to_val(sources.get("DD_TRACE_AGENT_URL"))
                 .map(Cow::Owned)
                 .unwrap_or(default.trace_agent_url),
+            dogstatsd_agent_host: to_val(sources.get("DD_DOGSTATSD_HOST"))
+                .map(Cow::Owned)
+                .unwrap_or(default.dogstatsd_agent_host),
+            dogstatsd_agent_port: to_val(sources.get_parse("DD_DOGSTATSD_PORT"))
+                .unwrap_or(default.dogstatsd_agent_port),
             dogstatsd_agent_url: default.dogstatsd_agent_url,
 
             // Use the initialized ConfigItem
@@ -625,12 +662,22 @@ impl Config {
         self.version.as_deref()
     }
 
-    pub fn global_tags(&self) -> impl Iterator<Item = &str> {
-        self.global_tags.iter().map(String::as_str)
+    pub fn global_tags(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.global_tags
+            .iter()
+            .map(|tag| (tag.0.as_str(), tag.1.as_str()))
     }
 
     pub fn trace_agent_url(&self) -> &Cow<'static, str> {
         &self.trace_agent_url
+    }
+
+    pub fn dogstatsd_agent_host(&self) -> &Cow<'static, str> {
+        &self.dogstatsd_agent_host
+    }
+
+    pub fn dogstatsd_agent_port(&self) -> &u32 {
+        &self.dogstatsd_agent_port
     }
 
     pub fn dogstatsd_agent_url(&self) -> &Cow<'static, str> {
@@ -825,8 +872,12 @@ fn default_config() -> Config {
         version: None,
         global_tags: Vec::new(),
 
-        trace_agent_url: Cow::Borrowed("http://localhost:8126"),
-        dogstatsd_agent_url: Cow::Borrowed("http://localhost:8125"),
+        agent_host: Cow::Borrowed("localhost"),
+        trace_agent_port: 8126,
+        trace_agent_url: Cow::Borrowed(""),
+        dogstatsd_agent_host: Cow::Borrowed("localhost"),
+        dogstatsd_agent_port: 8125,
+        dogstatsd_agent_url: Cow::Borrowed(""),
         trace_sampling_rules: ConfigItem::new(
             "DD_TRACE_SAMPLING_RULES",
             ParsedSamplingRules::default(), // Empty rules by default
@@ -863,7 +914,23 @@ impl ConfigBuilder {
     /// Finalizes the builder and returns the configuration
     pub fn build(&self) -> Config {
         crate::log::set_max_level(self.config.log_level_filter);
-        self.config.clone()
+        let mut config = self.config.clone();
+
+        // resolve trace_agent_url
+        if config.trace_agent_url.is_empty() {
+            let host = &config.agent_host;
+            let port = config.trace_agent_port;
+            config.trace_agent_url = format!("http://{host}:{port}").into()
+        }
+
+        // resolve dogstatsd_agent_url
+        if config.dogstatsd_agent_url.is_empty() {
+            let host = &config.dogstatsd_agent_host;
+            let port = config.dogstatsd_agent_port;
+            config.dogstatsd_agent_url = format!("http://{host}:{port}").into()
+        }
+
+        config
     }
 
     pub fn set_service(&mut self, service: String) -> &mut Self {
@@ -881,12 +948,12 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_global_tags(&mut self, tags: Vec<String>) -> &mut Self {
+    pub fn set_global_tags(&mut self, tags: Vec<(String, String)>) -> &mut Self {
         self.config.global_tags = tags;
         self
     }
 
-    pub fn add_global_tag(&mut self, tag: String) -> &mut Self {
+    pub fn add_global_tag(&mut self, tag: (String, String)) -> &mut Self {
         self.config.global_tags.push(tag);
         self
     }
@@ -906,8 +973,28 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn set_agent_host(&mut self, host: Cow<'static, str>) -> &mut Self {
+        self.config.agent_host = Cow::Owned(host.to_string());
+        self
+    }
+
+    pub fn set_trace_agent_port(&mut self, port: u32) -> &mut Self {
+        self.config.trace_agent_port = port;
+        self
+    }
+
     pub fn set_trace_agent_url(&mut self, url: Cow<'static, str>) -> &mut Self {
         self.config.trace_agent_url = Cow::Owned(url.to_string());
+        self
+    }
+
+    pub fn set_dogstatsd_agent_host(&mut self, host: Cow<'static, str>) -> &mut Self {
+        self.config.dogstatsd_agent_host = Cow::Owned(host.to_string());
+        self
+    }
+
+    pub fn set_dogstatsd_agent_port(&mut self, port: u32) -> &mut Self {
+        self.config.dogstatsd_agent_port = port;
         self
     }
 
@@ -1607,5 +1694,127 @@ mod tests {
         assert!(config.telemetry_enabled());
         assert!(config.telemetry_log_collection_enabled());
         assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
+    }
+
+    #[test]
+    fn test_dd_tags() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TAGS", "key1   :value1          ,   key2:,key3")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let tags: Vec<(&str, &str)> = config.global_tags().collect();
+
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
+    }
+
+    #[test]
+    fn test_dd_agent_url_default() {
+        let config = Config::builder().build();
+
+        assert_eq!(config.trace_agent_url(), "http://localhost:8126");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_host_and_port() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_AGENT_URL", "https://test-host"),
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_agent_url(), "https://test-host");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url_empty() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_AGENT_URL", ""),
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("agent-host".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("agent-host".into())
+            .set_trace_agent_port(4242)
+            .set_trace_agent_url("https://test-host".into())
+            .build();
+
+        assert_eq!(config.trace_agent_url(), "https://test-host");
+    }
+
+    #[test]
+    fn test_dogstatsd_agent_url_default() {
+        let config = Config::builder().build();
+
+        assert_eq!(config.dogstatsd_agent_url(), "http://localhost:8125");
+    }
+
+    #[test]
+    fn test_dogstatsd_agent_url_from_host_and_port() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_DOGSTATSD_HOST", "dogstatsd-host"),
+                ("DD_DOGSTATSD_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+    }
+
+    #[test]
+    fn test_dogstatsd_agent_url_from_url_using_builder() {
+        let config = Config::builder()
+            .set_dogstatsd_agent_host("dogstatsd-host".into())
+            .set_dogstatsd_agent_port(4242)
+            .build();
+
+        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
     }
 }

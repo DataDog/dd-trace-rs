@@ -415,7 +415,10 @@ impl RemoteConfigClient {
                 extra_services: config.get_extra_services(),
                 env: config.env().map(|s| s.to_string()),
                 app_version: config.version().map(|s| s.to_string()),
-                tags: config.global_tags().map(|s| s.to_string()).collect(),
+                tags: config
+                    .global_tags()
+                    .map(|(key, value)| format!("{key}:{value}"))
+                    .collect(),
             }),
             capabilities: self.capabilities.encode(),
         };
