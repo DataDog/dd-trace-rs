@@ -3,11 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 use rustc_version_runtime::version;
 
+use crate::configuration::sources::ConfigSourceOrigin;
 use crate::dd_warn;
 use crate::log::LevelFilter;
 
@@ -117,6 +119,14 @@ struct ParsedSamplingRules {
     rules: Vec<SamplingRuleConfig>,
 }
 
+impl Deref for ParsedSamplingRules {
+    type Target = [SamplingRuleConfig];
+
+    fn deref(&self) -> &Self::Target {
+        &self.rules
+    }
+}
+
 impl FromStr for ParsedSamplingRules {
     type Err = serde_json::Error;
 
@@ -130,85 +140,113 @@ impl FromStr for ParsedSamplingRules {
     }
 }
 
-/// Source of a configuration value
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigSource {
-    #[allow(dead_code)] // Used in tests, returned by source()
-    Default,
-    EnvVar,
-    #[allow(dead_code)] // Will be used when set_code is called from user code
-    Code,
-    #[allow(dead_code)] // Will be used for remote configuration
-    RemoteConfig,
+enum ConfigItemRef<'a, T> {
+    Ref(&'a T),
+    ArcRef(arc_swap::Guard<Option<Arc<T>>>),
+}
+
+impl<'a, T: Deref> Deref for ConfigItemRef<'a, T> {
+    type Target = T::Target;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ConfigItemRef::Ref(t) => t,
+            ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap(),
+        }
+    }
 }
 
 /// Configuration item that tracks the value of a setting and where it came from
 // This allows us to manage configuration precedence
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ConfigItem<T> {
-    name: String,
+    name: &'static str,
     default_value: T,
     env_value: Option<T>,
     code_value: Option<T>,
-    rc_value: Option<T>,
+    rc_value: arc_swap::ArcSwapOption<T>,
+}
+
+impl<T: Clone> Clone for ConfigItem<T> {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name,
+            default_value: self.default_value.clone(),
+            env_value: self.env_value.clone(),
+            code_value: self.code_value.clone(),
+            rc_value: arc_swap::ArcSwapOption::new(self.rc_value.load_full()),
+        }
+    }
 }
 
 impl<T: Clone> ConfigItem<T> {
     /// Creates a new ConfigItem with a default value
-    pub fn new(name: impl Into<String>, default: T) -> Self {
+    fn new(name: &'static str, default: T) -> Self {
         Self {
-            name: name.into(),
+            name,
             default_value: default,
             env_value: None,
             code_value: None,
-            rc_value: None,
+            rc_value: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
+    fn set_rc(&self, value: T) {
+        self.rc_value.store(Some(Arc::new(value)));
+    }
+
     /// Sets a value from a specific source
-    pub fn set_value_source(&mut self, value: T, source: ConfigSource) {
+    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
         match source {
-            ConfigSource::Code => self.code_value = Some(value),
-            ConfigSource::RemoteConfig => self.rc_value = Some(value),
-            ConfigSource::EnvVar => self.env_value = Some(value),
-            ConfigSource::Default => {
+            ConfigSourceOrigin::Code => self.code_value = Some(value),
+            ConfigSourceOrigin::RemoteConfig => {
+                self.set_rc(value);
+            }
+            ConfigSourceOrigin::EnvVar => self.env_value = Some(value),
+            ConfigSourceOrigin::Default => {
                 dd_warn!("Cannot set default value after initialization");
             }
         }
     }
 
     /// Sets the code value (convenience method)
-    pub fn set_code(&mut self, value: T) {
+    fn set_code(&mut self, value: T) {
         self.code_value = Some(value);
     }
 
     /// Unsets the remote config value
     #[allow(dead_code)] // Will be used when implementing remote configuration
-    pub fn unset_rc(&mut self) {
-        self.rc_value = None;
+    fn unset_rc(&self) {
+        self.rc_value.store(None);
     }
 
     /// Gets the current value based on priority:
     /// remote_config > code > env_var > default
-    pub fn value(&self) -> &T {
-        self.rc_value
-            .as_ref()
-            .or(self.code_value.as_ref())
-            .or(self.env_value.as_ref())
-            .unwrap_or(&self.default_value)
+    fn value(&self) -> ConfigItemRef<'_, T> {
+        let rc = self.rc_value.load();
+        if rc.is_some() {
+            ConfigItemRef::ArcRef(rc)
+        } else {
+            ConfigItemRef::Ref(
+                self.code_value
+                    .as_ref()
+                    .or(self.env_value.as_ref())
+                    .unwrap_or(&self.default_value),
+            )
+        }
     }
 
     /// Gets the source of the current value
     #[allow(dead_code)] // Used in tests and will be used for remote configuration
-    pub fn source(&self) -> ConfigSource {
-        if self.rc_value.is_some() {
-            ConfigSource::RemoteConfig
+    fn source(&self) -> ConfigSourceOrigin {
+        if self.rc_value.load().is_some() {
+            ConfigSourceOrigin::RemoteConfig
         } else if self.code_value.is_some() {
-            ConfigSource::Code
+            ConfigSourceOrigin::Code
         } else if self.env_value.is_some() {
-            ConfigSource::EnvVar
+            ConfigSourceOrigin::EnvVar
         } else {
-            ConfigSource::Default
+            ConfigSourceOrigin::Default
         }
     }
 }
@@ -514,16 +552,16 @@ impl Config {
         }
 
         let parsed_sampling_rules_config =
-            to_val(sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES"));
+            sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES");
 
         let mut sampling_rules_item = ConfigItem::new(
-            "DD_TRACE_SAMPLING_RULES",
+            parsed_sampling_rules_config.name,
             ParsedSamplingRules::default(), // default is empty rules
         );
 
         // Set env value if it was parsed from environment
-        if let Some(rules) = parsed_sampling_rules_config {
-            sampling_rules_item.set_value_source(rules, ConfigSource::EnvVar);
+        if let Some(rules) = parsed_sampling_rules_config.value {
+            sampling_rules_item.set_value_source(rules.value, rules.origin);
         }
 
         // Parse remote configuration enabled flag
@@ -673,8 +711,8 @@ impl Config {
         &self.dogstatsd_agent_url
     }
 
-    pub fn trace_sampling_rules(&self) -> &[SamplingRuleConfig] {
-        self.trace_sampling_rules.value().rules.as_ref()
+    pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
+        self.trace_sampling_rules.value()
     }
 
     pub fn trace_rate_limit(&self) -> i32 {
@@ -733,7 +771,7 @@ impl Config {
         self.trace_propagation_extract_first
     }
 
-    pub fn update_sampling_rules_from_remote(&mut self, rules_json: &str) -> Result<(), String> {
+    pub fn update_sampling_rules_from_remote(&self, rules_json: &str) -> Result<(), String> {
         // Parse the JSON into SamplingRuleConfig objects
         let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
             .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
@@ -742,9 +780,8 @@ impl Config {
         if rules.is_empty() {
             self.clear_remote_sampling_rules();
         } else {
-            let parsed_rules = ParsedSamplingRules { rules };
             self.trace_sampling_rules
-                .set_value_source(parsed_rules, ConfigSource::RemoteConfig);
+                .set_rc(ParsedSamplingRules { rules });
 
             // Notify callbacks about the sampling rules update
             self.remote_config_callbacks.lock().unwrap().notify_update(
@@ -755,7 +792,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn clear_remote_sampling_rules(&mut self) {
+    pub fn clear_remote_sampling_rules(&self) {
         self.trace_sampling_rules.unset_rc();
 
         self.remote_config_callbacks.lock().unwrap().notify_update(
@@ -994,9 +1031,9 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
-        // Create a new ParsedSamplingRules and set it as code value
-        let parsed_rules = ParsedSamplingRules { rules };
-        self.config.trace_sampling_rules.set_code(parsed_rules);
+        self.config
+            .trace_sampling_rules
+            .set_code(ParsedSamplingRules { rules });
         self
     }
 
@@ -1462,7 +1499,7 @@ mod tests {
 
     #[test]
     fn test_sampling_rules_update_callbacks() {
-        let mut config = Config::builder().build();
+        let config = Config::builder().build();
 
         // Track callback invocations
         let callback_called = Arc::new(Mutex::new(false));
@@ -1518,8 +1555,8 @@ mod tests {
             ConfigItem::new("DD_TRACE_SAMPLING_RULES", ParsedSamplingRules::default());
 
         // Default value
-        assert_eq!(config_item.source(), ConfigSource::Default);
-        assert_eq!(config_item.value().rules.len(), 0);
+        assert_eq!(config_item.source(), ConfigSourceOrigin::Default);
+        assert_eq!(config_item.value().len(), 0);
 
         // Env overrides default
         config_item.set_value_source(
@@ -1529,10 +1566,10 @@ mod tests {
                     ..SamplingRuleConfig::default()
                 }],
             },
-            ConfigSource::EnvVar,
+            ConfigSourceOrigin::EnvVar,
         );
-        assert_eq!(config_item.source(), ConfigSource::EnvVar);
-        assert_eq!(config_item.value().rules[0].sample_rate, 0.3);
+        assert_eq!(config_item.source(), ConfigSourceOrigin::EnvVar);
+        assert_eq!(config_item.value()[0].sample_rate, 0.3);
 
         // Code overrides env
         config_item.set_code(ParsedSamplingRules {
@@ -1541,8 +1578,8 @@ mod tests {
                 ..SamplingRuleConfig::default()
             }],
         });
-        assert_eq!(config_item.source(), ConfigSource::Code);
-        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+        assert_eq!(config_item.source(), ConfigSourceOrigin::Code);
+        assert_eq!(config_item.value()[0].sample_rate, 0.5);
 
         // Remote config overrides all
         config_item.set_value_source(
@@ -1552,15 +1589,15 @@ mod tests {
                     ..SamplingRuleConfig::default()
                 }],
             },
-            ConfigSource::RemoteConfig,
+            ConfigSourceOrigin::RemoteConfig,
         );
-        assert_eq!(config_item.source(), ConfigSource::RemoteConfig);
-        assert_eq!(config_item.value().rules[0].sample_rate, 0.8);
+        assert_eq!(config_item.source(), ConfigSourceOrigin::RemoteConfig);
+        assert_eq!(config_item.value()[0].sample_rate, 0.8);
 
         // Unset RC falls back to code
         config_item.unset_rc();
-        assert_eq!(config_item.source(), ConfigSource::Code);
-        assert_eq!(config_item.value().rules[0].sample_rate, 0.5);
+        assert_eq!(config_item.source(), ConfigSourceOrigin::Code);
+        assert_eq!(config_item.value()[0].sample_rate, 0.5);
     }
 
     #[test]
@@ -1610,12 +1647,15 @@ mod tests {
         };
         config
             .trace_sampling_rules
-            .set_value_source(local_rules.clone(), ConfigSource::EnvVar);
+            .set_value_source(local_rules.clone(), ConfigSourceOrigin::EnvVar);
 
         // Verify local rules are active
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);
-        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
+        assert_eq!(
+            config.trace_sampling_rules.source(),
+            ConfigSourceOrigin::EnvVar
+        );
 
         // 2. Remote config sends non-empty rules
         let remote_rules_json =
@@ -1629,7 +1669,7 @@ mod tests {
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.8);
         assert_eq!(
             config.trace_sampling_rules.source(),
-            ConfigSource::RemoteConfig
+            ConfigSourceOrigin::RemoteConfig
         );
 
         // 3. Remote config sends empty array []
@@ -1641,7 +1681,10 @@ mod tests {
         // Empty remote rules automatically fall back to local rules
         assert_eq!(config.trace_sampling_rules().len(), 1); // Falls back to local rules
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3); // Local rule values
-        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar); // Back to env source!
+        assert_eq!(
+            config.trace_sampling_rules.source(),
+            ConfigSourceOrigin::EnvVar
+        ); // Back to env source!
 
         // 4. Verify explicit clearing still works (for completeness)
         // Since we're already on local rules, clear should keep us on local rules
@@ -1650,7 +1693,10 @@ mod tests {
         // Should remain on local rules
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.3);
-        assert_eq!(config.trace_sampling_rules.source(), ConfigSource::EnvVar);
+        assert_eq!(
+            config.trace_sampling_rules.source(),
+            ConfigSourceOrigin::EnvVar
+        );
     }
 
     #[test]

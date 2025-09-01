@@ -346,9 +346,7 @@ pub struct RemoteConfigClientWorker {
 }
 
 impl RemoteConfigClientWorker {
-    pub fn start(
-        config: Arc<Mutex<Config>>,
-    ) -> Result<RemoteConfigClientHandle, RemoteConfigClientError> {
+    pub fn start(config: Arc<Config>) -> Result<RemoteConfigClientHandle, RemoteConfigClientError> {
         let cancel_token = tokio_util::sync::CancellationToken::new();
         let shutdown_finished = Arc::new(ShutdownSignaler::default());
         let shutdown_receiver = RemoteConfigClientShutdownReceiver {
@@ -440,7 +438,7 @@ struct RemoteConfigClient {
     /// Unique identifier for this client instance
     /// Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
-    config: Arc<Mutex<Config>>,
+    config: Arc<Config>,
     agent_url: hyper::Uri,
     // HTTP client timeout configuration
     client_timeout: Duration,
@@ -455,10 +453,9 @@ struct RemoteConfigClient {
 
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
-    pub fn new(config: Arc<Mutex<Config>>) -> Result<Self, RemoteConfigClientError> {
-        let agent_url =
-            hyper::Uri::from_maybe_shared(config.lock().unwrap().trace_agent_url().to_string())
-                .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
+    pub fn new(config: Arc<Config>) -> Result<Self, RemoteConfigClientError> {
+        let agent_url = hyper::Uri::from_maybe_shared(config.trace_agent_url().to_string())
+            .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
         let mut parts = agent_url.into_parts();
         parts.path_and_query = Some(
             "/v0.7/config"
@@ -557,10 +554,7 @@ impl RemoteConfigClient {
             .lock()
             .map_err(|_| anyhow::anyhow!("Failed to lock state"))?;
 
-        let config = self
-            .config
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Failed to lock config"))?;
+        let config = &self.config;
 
         let client_info = ClientInfo {
             state: Some(state.clone()),
@@ -806,7 +800,7 @@ impl RemoteConfigClient {
 /// configuration format
 trait ProductHandler {
     /// Process the configuration for this product
-    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()>;
+    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()>;
 
     /// Get the product name this handler supports
     fn product_name(&self) -> &'static str;
@@ -815,7 +809,7 @@ trait ProductHandler {
 struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
-    fn process_config(&self, config_json: &str, config: &Arc<Mutex<Config>>) -> Result<()> {
+    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()> {
         // Parse the config to extract sampling rules as raw JSON
         let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
@@ -827,24 +821,18 @@ impl ProductHandler for ApmTracingHandler {
                 let rules_json = serde_json::to_string(&rules_value)
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                if let Ok(mut cfg) = config.lock() {
-                    match cfg.update_sampling_rules_from_remote(&rules_json) {
-                        Ok(()) => {
-                            crate::dd_debug!(
-                                "RemoteConfigClient: Applied sampling rules from remote config"
-                            );
-                        }
-                        Err(e) => {
-                            crate::dd_debug!(
-                                "RemoteConfigClient: Failed to update sampling rules: {}",
-                                e
-                            );
-                        }
+                match config.update_sampling_rules_from_remote(&rules_json) {
+                    Ok(()) => {
+                        crate::dd_debug!(
+                            "RemoteConfigClient: Applied sampling rules from remote config"
+                        );
                     }
-                } else {
-                    crate::dd_debug!(
-                        "RemoteConfigClient: Failed to lock config to update sampling rules"
-                    );
+                    Err(e) => {
+                        crate::dd_debug!(
+                            "RemoteConfigClient: Failed to update sampling rules: {}",
+                            e
+                        );
+                    }
                 }
             } else {
                 crate::dd_debug!(
@@ -1188,7 +1176,7 @@ mod tests {
     #[test]
     fn test_validate_signed_target_files() {
         // Create a mock RemoteConfigClient for testing
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let client = RemoteConfigClient::new(config).unwrap();
 
         // Test case 1: Target file exists in signed targets
@@ -1294,7 +1282,7 @@ mod tests {
             ]),
         };
 
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // For testing purposes, we'll verify the config was updated by checking the rules
@@ -1331,7 +1319,7 @@ mod tests {
         assert_eq!(cached_files[0].hashes[0].algorithm, "sha256");
 
         // Verify that the config was updated with the processed rules
-        let config = client.config.lock().unwrap();
+        let config = client.config;
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.5);
@@ -1365,7 +1353,7 @@ mod tests {
         };
 
         // Create a RemoteConfigClient and process the response
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Process the response - this should update the client's state
@@ -1392,7 +1380,7 @@ mod tests {
     #[test]
     fn test_config_update_from_remote() {
         // Test that the config is updated when sampling rules are received
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Process a config response with sampling rules
@@ -1414,7 +1402,7 @@ mod tests {
         assert!(result.is_ok(), "process_response should succeed");
 
         // Verify that the config was updated with the sampling rules
-        let config = client.config.lock().unwrap();
+        let config = client.config;
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.5);
@@ -1630,7 +1618,7 @@ mod tests {
         assert_eq!(handler.product_name(), "APM_TRACING");
 
         // Test processing config - this should not panic for valid JSON
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let config_json =
             r#"{"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}"#;
 
@@ -1647,7 +1635,7 @@ mod tests {
     #[test]
     fn test_config_states_cleared_between_processing_cycles() {
         // Test that config_states are cleared before adding new ones to prevent memory leak
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // First processing cycle - add one config
@@ -1750,7 +1738,7 @@ mod tests {
     #[test]
     fn test_config_states_cleared_on_error_configs() {
         // Test that config_states are cleared even when processing results in errors
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // First processing cycle - add successful config
@@ -1818,7 +1806,7 @@ mod tests {
     #[test]
     fn test_tuf_targets_integration_with_remote_config() {
         // Test that we can process a TUF targets response through the remote config system
-        let config = Arc::new(Mutex::new(Config::builder().build()));
+        let config = Arc::new(Config::builder().build());
         let mut client = RemoteConfigClient::new(config).unwrap();
 
         // Create a realistic TUF targets JSON and base64 encode it
@@ -1893,7 +1881,7 @@ mod tests {
         assert_eq!(config_state.product, "APM_TRACING");
 
         // Verify that the sampling rules were applied to the config
-        let config = client.config.lock().unwrap();
+        let config = client.config;
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.75);

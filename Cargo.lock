@@ -790,6 +790,7 @@ name = "dd-trace"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "base64 0.21.7",
  "ddtelemetry",
  "http-body-util",

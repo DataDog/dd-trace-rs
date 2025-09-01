@@ -70,7 +70,7 @@ mod span_processor;
 mod text_map_propagator;
 mod trace_id;
 
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use dd_trace::configuration::RemoteConfigUpdate;
 use opentelemetry::{Key, KeyValue, Value};
@@ -105,11 +105,8 @@ impl DatadogTracingBuilder {
         let config = self
             .config
             .unwrap_or_else(|| dd_trace::Config::builder().build());
-        let (tracer_provider, propagator) = make_tracer(
-            Arc::new(Mutex::new(config)),
-            self.tracer_provider,
-            self.resource,
-        );
+        let (tracer_provider, propagator) =
+            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
 
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
@@ -248,11 +245,11 @@ pub fn init_datadog(
 
 /// Create an instance of the tracer provider
 fn make_tracer(
-    shared_config: Arc<Mutex<dd_trace::Config>>,
+    shared_config: Arc<dd_trace::Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let config = shared_config.lock().unwrap().clone();
+    let config = shared_config.clone();
     let registry = TraceRegistry::new();
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     // Sampler only needs config for initialization (reads initial sampling rules)
@@ -289,14 +286,11 @@ fn make_tracer(
         if let Some(sampler_callback) = sampler_callback {
             let sampler_callback = Arc::new(sampler_callback);
             let sampler_callback_clone: SamplerCallback = sampler_callback.clone();
-            shared_config
-                .lock()
-                .unwrap()
-                .set_sampling_rules_callback(move |update| match update {
-                    RemoteConfigUpdate::SamplingRules(rules) => {
-                        sampler_callback_clone(rules);
-                    }
-                });
+            shared_config.set_sampling_rules_callback(move |update| match update {
+                RemoteConfigUpdate::SamplingRules(rules) => {
+                    sampler_callback_clone(rules);
+                }
+            });
         }
     }
 
@@ -370,7 +364,7 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
 
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(
-    shared_config: Arc<Mutex<dd_trace::Config>>,
+    shared_config: Arc<dd_trace::Config>,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> (SdkTracerProvider, DatadogPropagator) {
     make_tracer(shared_config, tracer_provider_builder, None)

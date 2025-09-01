@@ -3,20 +3,19 @@
 
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 
+/// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-/// TODO(paullgdc): remove the lint skip once we start reporting origins of the configurations
 pub enum ConfigSourceOrigin {
-    Code,
-    EnvVar,
     Default,
+    EnvVar,
+    Code,
+    RemoteConfig,
 }
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct ConfigKey<T> {
-    name: &'static str,
     pub(crate) value: T,
-    origin: ConfigSourceOrigin,
+    pub(crate) origin: ConfigSourceOrigin,
 }
 
 /// Compose multiple sources of configuration together.
@@ -55,6 +54,7 @@ pub(crate) struct CompositeParseError {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct CompositeConfigSourceResult<T> {
+    pub name: &'static str,
     pub value: Option<ConfigKey<T>>,
     #[allow(unused)]
     // TODO: log errors in debug mode, and send them through telemetry
@@ -90,8 +90,8 @@ impl CompositeSource {
             }) {
                 Ok(v) => {
                     return CompositeConfigSourceResult {
+                        name,
                         value: Some(ConfigKey {
-                            name,
                             value: v,
                             origin: s.origin(),
                         }),
@@ -114,6 +114,7 @@ impl CompositeSource {
             }
         }
         CompositeConfigSourceResult {
+            name,
             value: None,
             errors,
         }
@@ -210,8 +211,8 @@ mod tests {
             (
                 "DD_SERVICE",
                 CompositeConfigSourceResult {
+                    name: "DD_SERVICE",
                     value: Some(super::ConfigKey {
-                        name: "DD_SERVICE",
                         value: "test-service".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
                     }),
@@ -221,8 +222,8 @@ mod tests {
             (
                 "DD_ENV",
                 CompositeConfigSourceResult {
+                    name: "DD_ENV",
                     value: Some(super::ConfigKey {
-                        name: "DD_ENV",
                         value: "test-env".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
                     }),
@@ -232,6 +233,7 @@ mod tests {
             (
                 "DD_VERSION",
                 CompositeConfigSourceResult {
+                    name: "DD_VERSION",
                     value: None,
                     errors: vec![],
                 },
@@ -261,8 +263,8 @@ mod tests {
             (
                 "DD_SERVICE",
                 CompositeConfigSourceResult {
+                    name: "DD_SERVICE",
                     value: Some(super::ConfigKey {
-                        name: "DD_SERVICE",
                         value: "test-service-env_var".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
                     }),
@@ -272,8 +274,8 @@ mod tests {
             (
                 "DD_ENV",
                 CompositeConfigSourceResult {
+                    name: "DD_ENV",
                     value: Some(super::ConfigKey {
-                        name: "DD_ENV",
                         value: "test-env-default".to_string(),
                         origin: ConfigSourceOrigin::Default,
                     }),
@@ -283,6 +285,7 @@ mod tests {
             (
                 "DD_VERSION",
                 CompositeConfigSourceResult {
+                    name: "DD_VERSION",
                     value: None,
                     errors: vec![],
                 },
@@ -313,8 +316,8 @@ mod tests {
         assert_eq!(
             result,
             CompositeConfigSourceResult {
+                name: "DD_TRACE_ENABLED",
                 value: Some(ConfigKey {
-                    name: "DD_TRACE_ENABLED",
                     value: true,
                     origin: ConfigSourceOrigin::EnvVar,
                 }),
@@ -361,8 +364,8 @@ mod tests {
         assert_eq!(
             result,
             CompositeConfigSourceResult {
+                name: "DD_COMPLEX_STRUCT",
                 value: Some(ConfigKey {
-                    name: "DD_COMPLEX_STRUCT",
                     value: ComplexConfig(vec![
                         ComplexStruct {
                             key: "value".to_string()
