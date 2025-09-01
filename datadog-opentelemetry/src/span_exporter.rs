@@ -213,11 +213,12 @@ impl DatadogExporter {
             Err(SenderError::AlreadyShutdown) => {
                 self.join()?;
                 Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter: trace exporter has already shutdown".to_string(),
+                    "DatadogExporter.export_chunk_no_wait: trace exporter has already shutdown"
+                        .to_string(),
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to add trace chunk: {e:?}",
+                "DatadogExporter.export_chunk_no_wait: failed to add trace chunk: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -228,11 +229,11 @@ impl DatadogExporter {
             Err(SenderError::AlreadyShutdown) => {
                 self.join()?;
                 Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter: trace exporter has already shutdown".to_string(),
+                    "DatadogExporter.set_resource: trace exporter has already shutdown".to_string(),
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to set resource: {e:?}",
+                "DatadogExporter.set_resource: failed to set resource: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
@@ -243,40 +244,48 @@ impl DatadogExporter {
             Err(SenderError::AlreadyShutdown) => {
                 self.join()?;
                 Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter: trace exporter has already shutdown".to_string(),
+                    "DatadogExporter.force_flush: trace exporter has already shutdown".to_string(),
                 ))
             }
             Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter: failed to trigger flush: {e:?}",
+                "DatadogExporter.force_flush: failed to trigger flush: {e:?}",
             ))),
             Ok(()) => Ok(()),
         }
     }
 
-    pub fn shutdown(&self) -> OTelSdkResult {
-        self.shutdown_with_timeout(SPAN_EXPORTER_SHUTDOWN_TIMEOUT)
+    pub fn trigger_shutdown(&self) {
+        use SenderError::*;
+        match self.tx.trigger_shutdown() {
+            Err(AlreadyShutdown | MutexPoisonned) => {}
+            Err(e @ (TimedOut | BatchFull(_))) => {
+                // This should logically never happen, so log an error and continue
+                dd_trace::dd_error!(
+                    "DatadogExporter.trigger_shutdown: unexpected error failed to trigger shutdown: {:?}",
+                    e,
+                );
+            }
+            Ok(()) => {}
+        }
     }
 
-    pub fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
-        match self
-            .tx
-            .trigger_shutdown()
-            .and_then(|()| self.tx.wait_shutdown_done(timeout))
-        {
-            Ok(()) | Err(SenderError::BatchFull(_)) => {}
-            Err(SenderError::AlreadyShutdown) => {
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> OTelSdkResult {
+        use SenderError::*;
+        match self.tx.wait_shutdown_done(timeout) {
+            Err(AlreadyShutdown) => {
                 self.join()?;
-                return Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter: trace exporter has already shutdown".to_string(),
-                ));
+                Err(OTelSdkError::InternalFailure(
+                    "DatadogExporter.wait_for_shutdown: trace exporter has already shutdown"
+                        .to_string(),
+                ))
             }
-            Err(e) => {
-                return Err(OTelSdkError::InternalFailure(format!(
-                    "DatadogExporter: trace exporter shutdown failed {e:?}",
-                )));
-            }
-        };
-        self.join()
+            Err(TimedOut) => Err(OTelSdkError::Timeout(timeout)),
+            Err(BatchFull(_)) => Err(OTelSdkError::InternalFailure(
+                "DatadogExporter.wait_for_shutdown: unexpected error waiting for shutdown"
+                    .to_string(),
+            )),
+            Ok(()) | Err(MutexPoisonned) => self.join(),
+        }
     }
 
     fn join(&self) -> OTelSdkResult {
@@ -285,21 +294,19 @@ impl DatadogExporter {
             .lock()
             .map_err(|_| {
                 OTelSdkError::InternalFailure(
-                    "DatadogExporter: can't access worker task join handle".to_string(),
+                    "DatadogExporter.join: can't access worker task join handle".to_string(),
                 )
             })?
             .take()
-            .ok_or_else(|| {
-                OTelSdkError::InternalFailure(
-                    "Trace exporter thread has already been stopped".to_string(),
-                )
-            })?
+            .ok_or(OTelSdkError::AlreadyShutdown)?
             .join()
             .map_err(|_| {
-                OTelSdkError::InternalFailure("Trace exporter thread panicked".to_string())
+                OTelSdkError::InternalFailure("DatadogExporter.join: worker panicked".to_string())
             })?
             .map_err(|e| {
-                OTelSdkError::InternalFailure(format!("Trace exporter exited with error: {e}"))
+                OTelSdkError::InternalFailure(format!(
+                    "DatadogExporter.join: worker exited with error: {e}"
+                ))
             })
     }
 }
@@ -458,9 +465,7 @@ impl Receiver {
                 state.flush_needed = false;
                 return Ok((TraceExporterMessage::FlushTraceChunks, state.batch.export()));
             }
-            let leftover = deadline
-                .checked_duration_since(Instant::now())
-                .unwrap_or(Duration::ZERO);
+            let leftover = deadline.saturating_duration_since(Instant::now());
             let timeout_result;
             (state, timeout_result) = self.waiter.notifier.wait_timeout(state, leftover).unwrap();
             if timeout_result.timed_out() {
