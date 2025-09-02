@@ -7,7 +7,8 @@ mod datadog_test_agent {
         collections::{HashMap, HashSet},
         fmt,
         hash::{Hash, RandomState},
-        sync::{Arc, Mutex},
+        ops::Deref,
+        sync::Arc,
     };
 
     use datadog_opentelemetry::make_test_tracer;
@@ -55,7 +56,7 @@ mod datadog_test_agent {
 
         let mut config_builder = dd_trace::Config::builder();
         config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        let config = Arc::new(Mutex::new(config_builder.build()));
+        let config = Arc::new(config_builder.build());
 
         let tracer_provider = make_test_tracer(
             config,
@@ -94,7 +95,7 @@ mod datadog_test_agent {
 
         let mut config_builder = dd_trace::Config::builder();
         config_builder.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
-        let config = Arc::new(Mutex::new(config_builder.build()));
+        let config = Arc::new(config_builder.build());
 
         let (tracer_provider, propagator) = make_test_tracer(
             config,
@@ -180,7 +181,7 @@ mod datadog_test_agent {
             ..SamplingRuleConfig::default()
         }]);
         config_builder.set_trace_propagation_style(vec![TracePropagationStyle::TraceContext]);
-        let config = Arc::new(Mutex::new(config_builder.build()));
+        let config = Arc::new(config_builder.build());
 
         let (tracer_provider, propagator) = make_test_tracer(
             config,
@@ -268,7 +269,7 @@ mod datadog_test_agent {
             }])
             .set_log_level_filter(dd_trace::log::LevelFilter::Debug)
             .build();
-        let config = Arc::new(Mutex::new(config));
+        let config = Arc::new(config);
 
         let (tracer_provider, _propagator) = make_test_tracer(
             config.clone(),
@@ -281,7 +282,7 @@ mod datadog_test_agent {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         assert_eq!(
-            config.lock().unwrap().trace_sampling_rules(),
+            config.trace_sampling_rules().deref(),
             vec![dd_trace::SamplingRuleConfig {
                 resource: Some("test-span".into()),
                 sample_rate: 1.0,

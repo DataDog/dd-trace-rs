@@ -23,6 +23,7 @@ tokio = { version = "1.0", features = ["rt", "rt-multi-thread"] }
 base64 = "0.21"
 sha2 = "0.10"
 uuid = { version = "1.11.0", features = ["v4"] }
+arc-swap = "1.7.1"
 
 # Libdatadog dependencies
 ddtelemetry = { workspace = true }
