@@ -91,32 +91,58 @@ pub struct DatadogTracingBuilder {
 }
 
 impl DatadogTracingBuilder {
+    /// Sets the datadog specific configuration
+    ///
+    /// Default: dd_trace::Config::builder().build()
     pub fn with_config(mut self, config: dd_trace::Config) -> Self {
         self.config = Some(config);
         self
     }
 
+    /// Sets the resource passed to the SDK. See [opentelemetry_sdk::Resource]
+    ///
+    /// Default: Config::builder().build()
     pub fn with_resource(mut self, resource: opentelemetry_sdk::Resource) -> Self {
         self.resource = Some(resource);
         self
     }
 
+    /// Initializes the Tracer Provider, and the Text Map Propagator and install
+    /// them globally
     pub fn init(self) -> SdkTracerProvider {
-        let config = self
-            .config
-            .unwrap_or_else(|| dd_trace::Config::builder().build());
-        let (tracer_provider, propagator) =
-            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
+        let (tracer_provider, propagator) = self.init_local();
 
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
         tracer_provider
+    }
+
+    /// Initialize the Tracer Provider, and the Text Map Propagator without doing a global
+    /// installation
+    ///
+    /// You will need to set them up yourself, at a latter point if you want to use global tracing
+    /// methods and library integrations
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let (tracer_provider, propagator) = datadog_opentelemetry::tracing().init_local();
+    ///
+    /// opentelemetry::global::set_text_map_propagator(propagator);
+    /// opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+    /// ```
+    pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator) {
+        let config = self
+            .config
+            .unwrap_or_else(|| dd_trace::Config::builder().build());
+        make_tracer(Arc::new(config), self.tracer_provider, self.resource)
     }
 }
 
 impl DatadogTracingBuilder {
     // Methods forwarded to the otel tracer provider builder
 
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_span_processor]
     pub fn with_span_processor<T: opentelemetry_sdk::trace::SpanProcessor + 'static>(
         mut self,
         processor: T,
@@ -126,12 +152,14 @@ impl DatadogTracingBuilder {
     }
 
     /// Specify the number of events to be recorded per span.
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_max_events_per_span]
     pub fn with_max_events_per_span(mut self, max_events: u32) -> Self {
         self.tracer_provider = self.tracer_provider.with_max_events_per_span(max_events);
         self
     }
 
     /// Specify the number of attributes to be recorded per span.
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_max_attributes_per_span]
     pub fn with_max_attributes_per_span(mut self, max_attributes: u32) -> Self {
         self.tracer_provider = self
             .tracer_provider
@@ -140,12 +168,14 @@ impl DatadogTracingBuilder {
     }
 
     /// Specify the number of events to be recorded per span.
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_max_links_per_span]
     pub fn with_max_links_per_span(mut self, max_links: u32) -> Self {
         self.tracer_provider = self.tracer_provider.with_max_links_per_span(max_links);
         self
     }
 
     /// Specify the number of attributes one event can have.
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_max_attributes_per_event]
     pub fn with_max_attributes_per_event(mut self, max_attributes: u32) -> Self {
         self.tracer_provider = self
             .tracer_provider
@@ -154,6 +184,7 @@ impl DatadogTracingBuilder {
     }
 
     /// Specify the number of attributes one link can have.
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_max_attributes_per_link]
     pub fn with_max_attributes_per_link(mut self, max_attributes: u32) -> Self {
         self.tracer_provider = self
             .tracer_provider
@@ -162,6 +193,7 @@ impl DatadogTracingBuilder {
     }
 
     /// Specify all limit via the span_limits
+    /// See [opentelemetry_sdk::trace::TracerProviderBuilder::with_span_limits]
     pub fn with_span_limits(mut self, span_limits: opentelemetry_sdk::trace::SpanLimits) -> Self {
         self.tracer_provider = self.tracer_provider.with_span_limits(span_limits);
         self
