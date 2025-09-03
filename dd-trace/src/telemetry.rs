@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Error;
 use ddtelemetry::{
-    data::{self},
+    data,
     worker::{self, TelemetryWorkerHandle},
 };
 
@@ -24,7 +24,7 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error>;
 
-    fn send_start(&self) -> Result<(), anyhow::Error>;
+    fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
@@ -41,7 +41,17 @@ impl TelemetryHandle for TelemetryWorkerHandle {
         self.add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
     }
 
-    fn send_start(&self) -> Result<(), anyhow::Error> {
+    fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
+        if let Some(config) = config {
+            config
+                .get_config_items()
+                .into_iter()
+                .for_each(|config_item| {
+                    self.try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+                        .ok();
+                });
+        }
+
         self.send_start()
     }
 
@@ -74,7 +84,7 @@ fn init_telemetry_inner(
     telemetry_cell.get_or_init(|| {
         match make_telemetry_worker(config, service_name, custom_handle) {
             Ok(handle) => {
-                handle.send_start().ok();
+                handle.send_start(Some(config)).ok();
                 Arc::new(Mutex::new(Telemetry {
                     handle: Some(handle),
                     enabled: config.telemetry_enabled(),
@@ -192,7 +202,7 @@ mod tests {
             Ok(())
         }
 
-        fn send_start(&self) -> Result<(), anyhow::Error> {
+        fn send_start(&self, _config: Option<&Config>) -> Result<(), anyhow::Error> {
             Ok(())
         }
 

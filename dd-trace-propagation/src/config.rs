@@ -11,22 +11,22 @@ lazy_static! {
     ];
 }
 
-pub fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
+pub fn get_extractors(config: &Config) -> Vec<TracePropagationStyle> {
     if let Some(extractors) = config.trace_propagation_style_extract() {
         extractors
-    } else if let Some(styles) = &config.trace_propagation_style() {
+    } else if let Some(styles) = config.trace_propagation_style() {
         styles
     } else {
-        &DEFAULT_PROPAGATION_STYLES
+        DEFAULT_PROPAGATION_STYLES.to_vec()
     }
 }
 
-pub fn get_injectors(config: &Config) -> &[TracePropagationStyle] {
+pub fn get_injectors(config: &Config) -> Vec<TracePropagationStyle> {
     if let Some(injectors) = config.trace_propagation_style_inject() {
         injectors
     } else if let Some(styles) = config.trace_propagation_style() {
         styles
     } else {
-        &DEFAULT_PROPAGATION_STYLES
+        DEFAULT_PROPAGATION_STYLES.to_vec()
     }
 }
