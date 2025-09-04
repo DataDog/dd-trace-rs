@@ -16,7 +16,7 @@ use crate::{
 
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-    dd_error, dd_warn,
+    dd_debug, dd_error, dd_warn,
     sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
@@ -55,6 +55,10 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
 
     inject_trace_id(context.trace_id, carrier, tags);
 
+    dd_debug!(
+        "Propagator (datadog): injecting {DATADOG_PARENT_ID_KEY}: {}",
+        context.span_id
+    );
     carrier.set(DATADOG_PARENT_ID_KEY, context.span_id.to_string());
 
     if let Some(origin) = &context.origin {
@@ -67,6 +71,8 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
 
 fn inject_trace_id(trace_id: u128, carrier: &mut dyn Injector, tags: &mut HashMap<String, String>) {
     let (higher, lower) = split_trace_id(trace_id);
+
+    dd_debug!("Propagator (datadog): injecting {DATADOG_TRACE_ID_KEY}: {lower}");
 
     carrier.set(DATADOG_TRACE_ID_KEY, lower.to_string());
 
@@ -87,6 +93,10 @@ fn inject_sampling(
 ) {
     if let Some(sampling) = sampling {
         if let Some(priority) = sampling.priority {
+            dd_debug!(
+                "Propagator (datadog): injecting {DATADOG_SAMPLING_PRIORITY_KEY}: {priority}"
+            );
+
             carrier.set(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string())
         }
 
@@ -111,6 +121,7 @@ fn inject_tags(tags: &mut HashMap<String, String>, carrier: &mut dyn Injector, m
     match get_propagation_tags(tags, max_length) {
         Ok(propagation_tags) => {
             if !propagation_tags.is_empty() {
+                dd_debug!("Propagator (datadog): injecting {DATADOG_TAGS_KEY}: {propagation_tags}");
                 carrier.set(DATADOG_TAGS_KEY, propagation_tags);
             }
         }
@@ -158,7 +169,7 @@ fn validate_tag_value(value: &str) -> bool {
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let lower_trace_id = match extract_trace_id(carrier) {
-        Ok(trace_id) => trace_id,
+        Ok(trace_id) => trace_id?,
         Err(e) => {
             dd_error!("Propagator (datadog): Error extracting trace_id {e}");
             return None;
@@ -166,7 +177,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     };
 
     let parent_id = match extract_parent_id(carrier) {
-        Ok(parent_id) => parent_id,
+        Ok(parent_id) => parent_id.unwrap_or_default(),
         Err(e) => {
             dd_error!("Propagator (datadog): Error extracting parent_id {e}");
             0
@@ -207,10 +218,11 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     })
 }
 
-fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
-    let trace_id = carrier
-        .get(DATADOG_TRACE_ID_KEY)
-        .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
+fn extract_trace_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
+    let trace_id = match carrier.get(DATADOG_TRACE_ID_KEY) {
+        Some(trace_id) => trace_id,
+        None => return Ok(None),
+    };
 
     if INVALID_SEGMENT_REGEX.is_match(trace_id) {
         return Err(Error::extract("Invalid `trace_id` found", "datadog"));
@@ -218,14 +230,19 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
 
     trace_id
         .parse::<u64>()
+        .map(Some)
         .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
 }
 
-fn extract_parent_id(carrier: &dyn Extractor) -> Result<u64, Error> {
-    carrier
-        .get(DATADOG_PARENT_ID_KEY)
-        .ok_or(Error::extract("`trace_id` not found", "datadog"))?
+fn extract_parent_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
+    let parent_id = match carrier.get(DATADOG_PARENT_ID_KEY) {
+        Some(parent_id) => parent_id,
+        None => return Ok(None),
+    };
+
+    parent_id
         .parse::<u64>()
+        .map(Some)
         .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
 }
 

@@ -156,7 +156,7 @@ impl FromStr for Tracestate {
             let value = parts.next().unwrap_or_default();
 
             if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
-                dd_debug!("Received invalid tracestate header value: {v}");
+                dd_debug!("Tracestate: invalid key or header value: {v}");
                 return Err(String::from("Invalid tracestate"));
             }
 
