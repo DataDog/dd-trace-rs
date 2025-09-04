@@ -1,23 +1,16 @@
-use axum::{
-    extract::{Path, Request},
-    http::Method,
-    response::Json,
-    routing::{get, post},
-    Router,
-};
+use axum::{extract::Request, http::Method, response::Json, routing::get, Router};
 use datadog_opentelemetry;
 use dd_trace::Config;
-use opentelemetry::trace::{Span, Tracer, TracerProvider};
-use opentelemetry_sdk::trace::Tracer as SdkTracer;
+use opentelemetry::trace::TracerProvider;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
-use tracing::{field::Empty, info, instrument, Level};
+use tracing::{field::Empty, info, instrument, level_filters::LevelFilter, Level};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct User {
@@ -61,7 +54,6 @@ async fn root() -> &'static str {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     info!("Starting Datadog OpenTelemetry example application...");
 
     // Initialize Datadog OpenTelemetry pipeline
@@ -72,14 +64,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .set_service("dd-trace-example".to_string())
                 .set_version("1.0.0".to_string())
                 .set_env("development".to_string())
-                .set_log_level_filter(dd_trace::log::LevelFilter::Debug)
+                .set_log_level_filter(dd_trace::log::LevelFilter::Info)
                 .build(),
         )
         .init();
 
     info!("Datadog pipeline initialized successfully");
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_filter(LevelFilter::DEBUG))
         .with(
             tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("dd-trace-example")),
         )
