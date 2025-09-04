@@ -1017,8 +1017,12 @@ impl Config {
         *self.telemetry_heartbeat_interval.value()
     }
 
-    pub fn trace_propagation_style(&self) -> Option<Vec<TracePropagationStyle>> {
-        self.trace_propagation_style.value().0.clone()
+    pub fn trace_propagation_style(&self) -> Vec<TracePropagationStyle> {
+        self.trace_propagation_style
+            .value()
+            .0
+            .clone()
+            .unwrap_or_default()
     }
 
     pub fn trace_propagation_style_extract(&self) -> Option<Vec<TracePropagationStyle>> {
@@ -1198,7 +1202,10 @@ fn default_config() -> Config {
 
         trace_propagation_style: ConfigItem::new(
             "DD_TRACE_PROPAGATION_STYLE",
-            TracePropagationStyleList(None),
+            TracePropagationStyleList(Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ])),
         ),
         trace_propagation_style_extract: ConfigItem::new(
             "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
@@ -1532,7 +1539,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]));
+        assert_eq!(config.trace_propagation_style(), vec![]);
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
@@ -1574,10 +1581,10 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style(),
-            Some(vec![
+            vec![
                 TracePropagationStyle::TraceContext,
                 TracePropagationStyle::Datadog
-            ])
+            ]
         );
         assert_eq!(
             config.trace_propagation_style_extract(),
@@ -1606,10 +1613,10 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style(),
-            Some(vec![
+            vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ])
+            ]
         );
         assert_eq!(config.trace_propagation_style_extract(), Some(vec![]));
         assert_eq!(
@@ -1632,7 +1639,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]));
+        assert_eq!(config.trace_propagation_style(), vec![]);
         assert_eq!(config.trace_propagation_style_extract(), Some(vec![]));
         assert_eq!(
             config.trace_propagation_style_inject(),
@@ -1653,7 +1660,13 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), None);
+        assert_eq!(
+            config.trace_propagation_style(),
+            vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ]
+        );
         assert_eq!(config.trace_propagation_style_extract(), None);
         assert_eq!(
             config.trace_propagation_style_inject(),
@@ -2187,7 +2200,7 @@ mod tests {
         let cisu = ConfigItemSourceUpdater { sources: &sources };
 
         assert_eq!(default.env(), None);
-        assert_eq!(default.enabled(), true);
+        assert!(default.enabled());
         assert_eq!(default.global_tags().collect::<Vec<_>>(), vec![]);
 
         let env = cisu.update_string("DD_ENV", default.env, OptionalString::Some);
@@ -2199,7 +2212,7 @@ mod tests {
         assert_eq!(env.code_value, None);
 
         let enabled = cisu.update_parsed("DD_ENABLED", default.enabled);
-        assert_eq!(enabled.default_value, true);
+        assert!(enabled.default_value);
         assert_eq!(enabled.env_value, None);
         assert_eq!(enabled.code_value, None);
 
@@ -2252,7 +2265,8 @@ mod tests {
         let configuration = &config.trace_sampling_rules.get_configuration();
         assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
 
-        // Converting configuration value to json helps with comparison as serialized properties may differ from their original order
+        // Converting configuration value to json helps with comparison as serialized properties may
+        // differ from their original order
         assert_eq!(
             ParsedSamplingRules::from_str(&configuration.value).unwrap(),
             expected.clone()
