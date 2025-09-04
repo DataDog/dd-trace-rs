@@ -596,6 +596,7 @@ impl TraceExporterWorker {
                 )
             })
             .collect();
+        dbg!(&trace_chunks);
         match self.trace_exporter.send_trace_chunks(trace_chunks) {
             Ok(agent_response) => {
                 self.handle_agent_response(agent_response);

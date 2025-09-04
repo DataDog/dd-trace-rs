@@ -40,6 +40,7 @@ struct Trace {
     tags: Option<HashMap<String, String>>,
 }
 
+#[derive(Debug)]
 pub(crate) struct TracePropagationData {
     pub sampling_decision: Option<SamplingDecision>,
     pub origin: Option<String>,
@@ -403,6 +404,7 @@ impl DatadogSpanProcessor {
     /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root
     /// span
     fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
+        dbg!(&trace);
         let origin = trace.origin.unwrap_or_default();
 
         for span in trace.finished_spans.iter_mut() {
@@ -427,6 +429,7 @@ impl DatadogSpanProcessor {
                     "_sampling_priority_v1",
                     sampling_decision.priority.into_i8() as i64,
                 ));
+                dbg!(&sampling_decision, u64::from_be_bytes(span.span_context.span_id().to_bytes()));
 
                 span.attributes.push(KeyValue::new(
                     SAMPLING_DECISION_MAKER_TAG_KEY,
@@ -454,6 +457,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         if parent_ctx.span().span_context().is_remote() {
             let propagation_data = self.get_remote_propagation_data(span, parent_ctx);
+            dbg!(&propagation_data);
             self.registry
                 .register_span(trace_id, span_id, propagation_data);
         } else if !parent_ctx.has_active_span() {
