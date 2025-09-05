@@ -237,3 +237,39 @@ async fn test_remote_config_sampling_rates() {
     tracer_provider.shutdown().expect("failed to shutdown");
     test_agent.assert_snapshot(SESSION_NAME).await;
 }
+
+#[tokio::test]
+/// if we extract a span without a sampling decision, we should sample it
+async fn test_decision_less_extraction() {
+    const SESSION_NAME: &str = "opentelemetry_api/test_decision_less_extraction";
+    let mut cfg = dd_trace::Config::builder();
+    cfg.set_trace_sampling_rules(vec![dd_trace::SamplingRuleConfig {
+        sample_rate: 0.0,
+        ..Default::default()
+    }])
+    .set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        let extractor = make_extractor([
+            ("x-datadog-trace-id", "321"),
+            ("x-datadog-parent-id", "654"),
+            ("x-datadog-origin", "rum"),
+        ]);
+
+        let _cx = propagator.extract(&extractor).attach();
+
+        let _cx = Context::current()
+            .with_span(SpanBuilder::from_name("test-span").start(&tracer_provider.tracer("test")))
+            .attach();
+        let mut injected = HashMap::new();
+        propagator.inject(&mut injected);
+
+        assert_subset(
+            injected.iter().map(|(k, v)| (k.as_ref(), v.as_ref())),
+            [
+                ("x-datadog-sampling-priority", "-1"),
+                ("x-datadog-origin", "rum"),
+            ],
+        );
+    })
+    .await;
+}

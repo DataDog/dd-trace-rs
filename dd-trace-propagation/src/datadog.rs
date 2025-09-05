@@ -17,7 +17,7 @@ use crate::{
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
     dd_debug, dd_error, dd_warn,
-    sampling::{priority, SamplingMechanism, SamplingPriority},
+    sampling::{SamplingMechanism, SamplingPriority},
 };
 
 // Datadog Keys
@@ -185,11 +185,14 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
     let sampling = match extract_sampling_priority(carrier) {
         Ok(sampling_priority) => Sampling {
-            priority: Some(sampling_priority),
-            mechanism: tags
-                .get(SAMPLING_DECISION_MAKER_TAG_KEY)
-                .map(|sm| SamplingMechanism::from_str(sm).ok())
-                .unwrap_or_default(),
+            priority: sampling_priority,
+            mechanism: if sampling_priority.is_some() {
+                tags.get(SAMPLING_DECISION_MAKER_TAG_KEY)
+                    .map(|sm| SamplingMechanism::from_str(sm).ok())
+                    .unwrap_or_default()
+            } else {
+                None
+            },
         },
         Err(e) => {
             dd_warn!("Propagator (datadog): Error extracting sampling priority {e}");
@@ -245,11 +248,11 @@ fn extract_parent_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
         .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
 }
 
-fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<SamplingPriority, Error> {
+fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<Option<SamplingPriority>, Error> {
     carrier
         .get(DATADOG_SAMPLING_PRIORITY_KEY)
         .map(SamplingPriority::from_str)
-        .unwrap_or_else(|| Ok(priority::USER_KEEP))
+        .transpose()
         .map_err(|_| Error::extract("Failed to decode `sampling_priority`", "datadog"))
 }
 
@@ -345,7 +348,10 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use dd_trace::{configuration::TracePropagationStyle, sampling::mechanism};
+    use dd_trace::{
+        configuration::TracePropagationStyle,
+        sampling::{mechanism, priority},
+    };
 
     use crate::{context::split_trace_id, Propagator};
 
@@ -509,7 +515,7 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(context.sampling.priority, Some(priority::USER_KEEP));
+        assert_eq!(context.sampling.priority, None);
     }
 
     #[test]

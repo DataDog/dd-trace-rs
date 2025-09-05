@@ -5,14 +5,11 @@ use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDec
 use dd_trace_sampling::{DatadogSampler, SamplingRulesCallback};
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
 
 use crate::{
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
-    text_map_propagator::DatadogExtractData,
+    text_map_propagator::{self, DatadogExtractData},
     TraceRegistry,
 };
 
@@ -58,25 +55,47 @@ impl ShouldSample for Sampler {
         attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
-        let result = self.sampler.sample(
-            parent_context
-                .filter(|c| c.has_active_span())
-                .map(|c| c.span().span_context().is_sampled()),
-            trace_id,
-            name,
-            span_kind,
-            attributes,
-        );
+        // If we have a deferred sampling decision on the parent span, we ignored the parent
+        // sampling decision and let the sampler decide.
+        let is_parent_deferred = parent_context
+            .map(|c| {
+                c.span().span_context().trace_flags() == text_map_propagator::TRACE_FLAG_DEFERRED
+            })
+            .unwrap_or(false);
+
+        let is_parent_sampled = parent_context
+            .filter(|c| !is_parent_deferred && c.has_active_span())
+            .map(|c| c.span().span_context().trace_flags().is_sampled());
+
+        let result = self
+            .sampler
+            .sample(is_parent_sampled, trace_id, name, span_kind, attributes);
         let trace_propagation_data = if let Some(trace_root_info) = &result.trace_root_info {
-            let tags = trace_root_info.decision.mechanism.map(|m| {
-                HashMap::from_iter([(
+            // If the parent was deferred, we try to merge propagation tags with what we extracted
+            let (mut tags, origin) = if is_parent_deferred {
+                if let Some(DatadogExtractData {
+                    internal_tags,
+                    origin,
+                    ..
+                }) = parent_context.and_then(|c| c.get())
+                {
+                    (Some(internal_tags.clone()), origin.clone())
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+            if let Some(m) = trace_root_info.decision.mechanism {
+                let tags = tags.get_or_insert_default();
+                tags.insert(
                     SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
                     m.to_cow().into_owned(),
-                )])
-            });
+                );
+            }
             Some(TracePropagationData {
                 sampling_decision: trace_root_info.decision,
-                origin: None,
+                origin,
                 tags,
             })
         } else if let Some(remote_ctx) =
@@ -147,7 +166,7 @@ mod tests {
         Context, SpanId, TraceFlags,
     };
     use opentelemetry_sdk::trace::ShouldSample;
-    use std::env;
+    use std::{collections::HashMap, env};
 
     #[test]
     fn test_create_sampler_with_sampling_rules() {

@@ -16,7 +16,8 @@ use dd_trace_propagation::{
 
 use crate::TraceRegistry;
 
-const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags::new(0x02);
+pub(crate) const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags =
+    opentelemetry::TraceFlags::new(0x02);
 
 #[derive(Clone, Default, Debug)]
 pub struct DatadogExtractData {

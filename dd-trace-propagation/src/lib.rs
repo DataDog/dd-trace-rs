@@ -394,7 +394,7 @@ pub mod tests {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Sampling {
-                    priority: Some(priority::USER_KEEP),
+                    priority: None,
                     mechanism: None,
                 },
                 origin: Some("synthetics".to_string()),
@@ -692,7 +692,7 @@ pub mod tests {
                 trace_id: 9_291_375_655_657_946_024,
                 span_id: 10,
                 sampling: Sampling {
-                    priority: Some(priority::USER_KEEP),
+                    priority: None,
                     mechanism: None,
                 },
                 origin: None,
