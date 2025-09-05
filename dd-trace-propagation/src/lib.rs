@@ -257,6 +257,7 @@ pub mod tests {
             ("x-datadog-parent-id".to_string(), "5678".to_string(),),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
             ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            ("x-datadog-tags".to_string(), "_dd.p.dm=-4".to_string())
         ]);
         static ref VALID_DATADOG_HEADERS_NO_PRIORITY: HashMap<String, String> = HashMap::from([
             (
@@ -373,13 +374,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![],
                 is_remote: true,
@@ -392,14 +393,12 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::USER_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: None,
+                },
                 origin: Some("synthetics".to_string()),
-                tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
-                ]),
+                tags: HashMap::new(),
                 links: vec![],
                 is_remote: true,
                 tracestate: None
@@ -411,11 +410,12 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 0,
-                sampling: None,
+                sampling: Sampling {
+                    priority: None,
+                    mechanism: None,
+                },
                 origin: None,
-                tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
-                ]),
+                tags: HashMap::new(),
                 links: vec![],
                 is_remote: true,
                 tracestate: None
@@ -427,13 +427,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![],
                 is_remote: true,
@@ -465,10 +465,10 @@ pub mod tests {
             SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::USER_KEEP),
                     mechanism: None,
-                }),
+                },
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("tracestate".to_string(), "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string()),
@@ -486,10 +486,10 @@ pub mod tests {
             SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_REJECT),
                     mechanism: None,
-                }),
+                },
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("tracestate".to_string(), "dd=o:rum".to_string()),
@@ -511,13 +511,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![
                     SpanLink {
@@ -542,13 +542,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![
                     SpanLink {
@@ -574,13 +574,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![],
                 is_remote: true,
@@ -601,13 +601,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![],
                 is_remote: true,
@@ -626,13 +626,12 @@ pub mod tests {
             SpanContext {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: None,
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string()),
                     ("_dd.parent_id".to_string(), "000000000000162e".to_string()),
                     (TRACESTATE_KEY.to_string(), "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMzE".to_string())
                 ]),
@@ -649,13 +648,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![
                     SpanLink {
@@ -692,14 +691,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 9_291_375_655_657_946_024,
                 span_id: 10,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::USER_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: None,
+                },
                 origin: None,
                 tags: HashMap::from([
                     ("_dd.parent_id".to_string(), "000000000000000f".to_string()),
-                    ("_dd.p.dm".to_string(), "-3".to_string()),
                 ]),
                 links: vec![],
                 is_remote: true,
@@ -713,10 +711,10 @@ pub mod tests {
             SpanContext {
                 trace_id: 7_277_407_061_855_694_839,
                 span_id: 67_667_974_448_284_343,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::USER_KEEP),
                     mechanism: Some(mechanism::MANUAL),
-                }),
+                },
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-4".to_string()),
@@ -747,10 +745,10 @@ pub mod tests {
             SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 67_667_974_448_284_343,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::USER_KEEP),
                     mechanism: Some(mechanism::MANUAL),
-                }),
+                },
                 origin: Some("rum".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-4".to_string()),
@@ -788,13 +786,13 @@ pub mod tests {
             SpanContext {
                 trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
-                    mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                    mechanism: Some(mechanism::MANUAL),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
-                    ("_dd.p.dm".to_string(), "-3".to_string())
+                    ("_dd.p.dm".to_string(), "-4".to_string())
                 ]),
                 links: vec![
                     SpanLink {
@@ -1075,10 +1073,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID_LOWER_ORDER_BITS as u128,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1095,10 +1093,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1115,10 +1113,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: Some(mechanism::LOCAL_USER_TRACE_SAMPLING_RULE),
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1135,10 +1133,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1155,10 +1153,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1175,10 +1173,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())
@@ -1195,10 +1193,10 @@ pub mod tests {
             &mut SpanContext {
                 trace_id: *TRACE_ID,
                 span_id: 5678,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(priority::AUTO_KEEP),
                     mechanism: None,
-                }),
+                },
                 origin: Some("synthetics".to_string()),
                 tags: HashMap::from([
                     ("_dd.p.dm".to_string(), "-3".to_string())

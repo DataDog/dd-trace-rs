@@ -17,7 +17,7 @@ use crate::{
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
     dd_debug, dd_error, dd_warn,
-    sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
+    sampling::{priority, SamplingMechanism, SamplingPriority},
 };
 
 // Datadog Keys
@@ -87,25 +87,21 @@ fn inject_trace_id(trace_id: u128, carrier: &mut dyn Injector, tags: &mut HashMa
 }
 
 fn inject_sampling(
-    sampling: Option<Sampling>,
+    sampling: Sampling,
     carrier: &mut dyn Injector,
     tags: &mut HashMap<String, String>,
 ) {
-    if let Some(sampling) = sampling {
-        if let Some(priority) = sampling.priority {
-            dd_debug!(
-                "Propagator (datadog): injecting {DATADOG_SAMPLING_PRIORITY_KEY}: {priority}"
-            );
+    if let Some(priority) = sampling.priority {
+        dd_debug!("Propagator (datadog): injecting {DATADOG_SAMPLING_PRIORITY_KEY}: {priority}");
 
-            carrier.set(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string())
-        }
+        carrier.set(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string())
+    }
 
-        if let Some(mechanism) = sampling.mechanism {
-            tags.insert(
-                SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
-                mechanism.to_cow().into_owned(),
-            );
-        }
+    if let Some(mechanism) = sampling.mechanism {
+        tags.insert(
+            SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+            mechanism.to_cow().into_owned(),
+        );
     }
 }
 
@@ -188,16 +184,19 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let tags = extract_tags(carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
 
     let sampling = match extract_sampling_priority(carrier) {
-        Ok(sampling_priority) => Some(Sampling {
+        Ok(sampling_priority) => Sampling {
             priority: Some(sampling_priority),
             mechanism: tags
                 .get(SAMPLING_DECISION_MAKER_TAG_KEY)
                 .map(|sm| SamplingMechanism::from_str(sm).ok())
                 .unwrap_or_default(),
-        }),
+        },
         Err(e) => {
             dd_warn!("Propagator (datadog): Error extracting sampling priority {e}");
-            None
+            Sampling {
+                priority: None,
+                mechanism: None,
+            }
         }
     };
 
@@ -290,26 +289,15 @@ fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, S
     }
 
     // Handle 128bit trace ID
-    if !tags.is_empty() {
-        if let Some(trace_id_higher_order_bits) = tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY) {
-            if !higher_order_bits_valid(trace_id_higher_order_bits) {
-                dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
-                tags.insert(
-                    DATADOG_PROPAGATION_ERROR_KEY.to_string(),
-                    format!("malformed_tid {trace_id_higher_order_bits}"),
-                );
-                tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
-            }
+    if let Some(trace_id_higher_order_bits) = tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY) {
+        if !higher_order_bits_valid(trace_id_higher_order_bits) {
+            dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
+            tags.insert(
+                DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+                format!("malformed_tid {trace_id_higher_order_bits}"),
+            );
+            tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
         }
-    }
-
-    if !tags.contains_key(SAMPLING_DECISION_MAKER_TAG_KEY) {
-        tags.insert(
-            SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
-            mechanism::LOCAL_USER_TRACE_SAMPLING_RULE
-                .to_cow()
-                .into_owned(),
-        );
     }
 
     validate_sampling_decision(&mut tags);
@@ -357,7 +345,7 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use dd_trace::configuration::TracePropagationStyle;
+    use dd_trace::{configuration::TracePropagationStyle, sampling::mechanism};
 
     use crate::{context::split_trace_id, Propagator};
 
@@ -384,15 +372,12 @@ mod test {
 
         assert_eq!(context.trace_id, 317_007_296_906_698_644_522_194);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::AUTO_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::AUTO_KEEP));
         assert_eq!(context.origin, Some("synthetics".to_string()));
 
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "0000000000004321");
-        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+        assert_eq!(context.tags.get("_dd.p.dm"), None);
 
         let (higher, lower) = split_trace_id(context.trace_id);
         assert_eq!(higher, u64::from_str_radix("0000000000004321", 16).ok());
@@ -420,14 +405,11 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::AUTO_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::AUTO_KEEP));
         assert_eq!(context.origin, Some("synthetics".to_string()));
         println!("{:?}", context.tags);
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
-        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+        assert_eq!(context.tags.get("_dd.p.dm"), None);
     }
 
     #[test]
@@ -451,15 +433,12 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::AUTO_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::AUTO_KEEP));
         assert_eq!(context.origin, Some("synthetics".to_string()));
         println!("{:?}", context.tags);
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.tid"), None);
-        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+        assert_eq!(context.tags.get("_dd.p.dm"), None);
     }
 
     #[test]
@@ -483,10 +462,7 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::AUTO_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::AUTO_KEEP));
         assert_eq!(context.origin, Some("synthetics".to_string()));
 
         assert_eq!(
@@ -514,7 +490,8 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(context.sampling, None);
+        assert_eq!(context.sampling.priority, None);
+        assert_eq!(context.sampling.mechanism, None);
     }
 
     #[test]
@@ -532,10 +509,7 @@ mod test {
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::USER_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::USER_KEEP));
     }
 
     #[test]
@@ -547,10 +521,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: 1234,
             span_id: 5678,
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::AUTO_KEEP),
                 mechanism: None,
-            }),
+            },
             origin: Some("synthetics".to_string()),
             tags,
             links: vec![],
@@ -577,10 +551,10 @@ mod test {
         SpanContext {
             trace_id,
             span_id: 5678,
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::AUTO_KEEP),
                 mechanism: None,
-            }),
+            },
             origin: Some("synthetics".to_string()),
             tags,
             links: vec![],
@@ -613,10 +587,10 @@ mod test {
     #[test]
     fn test_inject_datadog_decision_marker() {
         let mut context = get_span_context(Some(42));
-        context.sampling = Some(Sampling {
+        context.sampling = Sampling {
             priority: Some(priority::AUTO_KEEP),
             mechanism: Some(mechanism::MANUAL),
-        });
+        };
 
         let propagator = TracePropagationStyle::Datadog;
 

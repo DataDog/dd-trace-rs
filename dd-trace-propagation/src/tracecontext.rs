@@ -72,7 +72,7 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 
     let flags = context
         .sampling
-        .and_then(|sampling| sampling.priority)
+        .priority
         .map(|priority| if priority.is_keep() { "01" } else { "00" })
         .unwrap_or("00");
 
@@ -86,10 +86,7 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let mut tracestate_parts = vec![];
 
-    let priority = context
-        .sampling
-        .and_then(|sampling| sampling.priority)
-        .unwrap_or(priority::USER_KEEP);
+    let priority = context.sampling.priority.unwrap_or(priority::USER_KEEP);
 
     tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{priority}"));
 
@@ -232,10 +229,10 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             Some(SpanContext {
                 trace_id: traceparent.trace_id,
                 span_id: traceparent.span_id,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(sampling_priority),
                     mechanism,
-                }),
+                },
                 origin,
                 tags,
                 links: Vec::new(),
@@ -413,10 +410,7 @@ mod test {
             171_395_628_812_617_415_352_188_477_958_425_669_623
         );
         assert_eq!(context.span_id, 67_667_974_448_284_343);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::USER_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::USER_KEEP));
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(
             context.tags.get("traceparent").unwrap(),
@@ -553,12 +547,8 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert!(context.sampling.is_some());
-        assert!(context.sampling.unwrap().priority.is_some());
-        assert_eq!(
-            context.sampling.unwrap().priority.unwrap(),
-            priority::AUTO_REJECT
-        );
+        assert!(context.sampling.priority.is_some());
+        assert_eq!(context.sampling.priority.unwrap(), priority::AUTO_REJECT);
     }
 
     #[test]
@@ -602,10 +592,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("foo,bar=".to_string()),
             tags: HashMap::from([(
                 "_dd.p.foo bar,baz=".to_string(),
@@ -635,10 +625,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("abc".repeat(200)),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             links: vec![],
@@ -670,10 +660,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("rum".to_string()),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             links: vec![],
