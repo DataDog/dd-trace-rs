@@ -454,7 +454,7 @@ struct RemoteConfigClient {
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
     pub fn new(config: Arc<Config>) -> Result<Self, RemoteConfigClientError> {
-        let agent_url = hyper::Uri::from_maybe_shared(config.trace_agent_url().to_string())
+        let agent_url = hyper::Uri::from_maybe_shared(config.trace_agent_url())
             .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
         let mut parts = agent_url.into_parts();
         parts.path_and_query = Some(
