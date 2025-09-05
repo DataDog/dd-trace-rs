@@ -30,25 +30,27 @@ use crate::{
 
 #[derive(Debug)]
 struct Trace {
-    root_span_id: [u8; 8],
+    local_root_span_id: [u8; 8],
     /// Root span will always be the first span in this vector if it is present
     finished_spans: Vec<SpanData>,
     open_span_count: usize,
 
-    sampling_decision: Option<SamplingDecision>,
-    origin: Option<String>,
-    tags: Option<HashMap<String, String>>,
+    propagation_data: TracePropagationData,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct TracePropagationData {
-    pub sampling_decision: Option<SamplingDecision>,
+    pub sampling_decision: SamplingDecision,
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
 }
 
 const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
     origin: None,
-    sampling_decision: None,
+    sampling_decision: SamplingDecision {
+        priority: None,
+        mechanism: None,
+    },
     tags: None,
 };
 
@@ -63,56 +65,66 @@ pub enum RegisterTracePropagationResult {
 }
 
 impl InnerTraceRegistry {
-    fn register_trace_propagation_data(
+    fn register_local_root_trace_propagation_data(
         &mut self,
         trace_id: [u8; 16],
-        sampling_decision: SamplingDecision,
-        origin: Option<String>,
-        tags: Option<HashMap<String, String>>,
+        propagation_data: TracePropagationData,
     ) -> RegisterTracePropagationResult {
         match self.registry.entry(trace_id) {
             hash_map::Entry::Occupied(mut occupied_entry) => {
-                if let Some(existing_sampling_decision) = occupied_entry.get().sampling_decision {
-                    RegisterTracePropagationResult::Existing(existing_sampling_decision)
+                if occupied_entry
+                    .get()
+                    .propagation_data
+                    .sampling_decision
+                    .priority
+                    .is_some()
+                {
+                    RegisterTracePropagationResult::Existing(
+                        occupied_entry.get().propagation_data.sampling_decision,
+                    )
                 } else {
                     let trace = occupied_entry.get_mut();
-                    trace.sampling_decision = Some(sampling_decision);
-                    trace.origin = origin;
-                    trace.tags = tags;
+                    trace.propagation_data = propagation_data;
                     RegisterTracePropagationResult::New
                 }
             }
             hash_map::Entry::Vacant(vacant_entry) => {
                 vacant_entry.insert(Trace {
-                    root_span_id: [0; 8], // This will be set when the first span is registered
+                    local_root_span_id: [0; 8], /* This will be set when the first span is
+                                                 * registered */
                     finished_spans: Vec::new(),
-                    open_span_count: 0,
-                    sampling_decision: Some(sampling_decision),
-                    origin,
-                    tags,
+                    // We set the open span count to 1 to take into account the local root span
+                    // then once we register it, we don't actually increment the open span count
+                    // We have to do this because the tracing-otel bridge doesn't actually
+                    // materialize spans until they are closed.
+                    // Which means that if we don't consider the local root span as "opened" when we
+                    // register it's propagation data, then child spans might be
+                    // sent flushed prematurely
+                    open_span_count: 1,
+                    propagation_data,
                 });
                 RegisterTracePropagationResult::New
             }
         }
     }
 
-    fn register_root_span(&mut self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
+    /// Set the root span ID for a given trace ID.
+    ///
+    /// This should be paired, after a call to `register_local_root_trace_propagation_data`
+    fn register_local_root_span(&mut self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
         let trace = self.registry.entry(trace_id).or_insert_with(|| Trace {
-            root_span_id: [0; 8], // This will be set when the first span is registered
+            local_root_span_id: [0; 8], // This will be set when the first span is registered
             finished_spans: Vec::new(),
-            open_span_count: 0,
-            sampling_decision: None,
-            origin: None,
-            tags: None,
+            open_span_count: 1,
+            propagation_data: EMPTY_PROPAGATION_DATA,
         });
-        if trace.root_span_id == [0; 8] {
-            trace.root_span_id = root_span_id;
-            trace.open_span_count = 1;
+        if trace.local_root_span_id == [0; 8] {
+            trace.local_root_span_id = root_span_id;
         } else {
             dd_trace::dd_debug!(
-                "trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Ignoring the new root_span_id={:?}",
+                "TraceRegistry.register_local_root_span: trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Ignoring the new root_span_id={:?}",
                 trace_id,
-                trace.root_span_id,
+                trace.local_root_span_id,
                 root_span_id
             );
         }
@@ -125,21 +137,15 @@ impl InnerTraceRegistry {
         &mut self,
         trace_id: [u8; 16],
         span_id: [u8; 8],
-        TracePropagationData {
-            origin,
-            sampling_decision,
-            tags,
-        }: TracePropagationData,
+        propagation_data: TracePropagationData,
     ) {
         self.registry
             .entry(trace_id)
             .or_insert_with(|| Trace {
-                root_span_id: span_id,
+                local_root_span_id: span_id,
                 finished_spans: Vec::new(),
                 open_span_count: 0,
-                sampling_decision,
-                origin,
-                tags,
+                propagation_data,
             })
             .open_span_count += 1;
     }
@@ -162,7 +168,7 @@ impl InnerTraceRegistry {
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
             if !trace.finished_spans.is_empty()
-                && span_data.span_context.span_id().to_bytes() == trace.root_span_id
+                && span_data.span_context.span_id().to_bytes() == trace.local_root_span_id
             {
                 let swapped_span = std::mem::replace(&mut trace.finished_spans[0], span_data);
                 trace.finished_spans.push(swapped_span);
@@ -177,30 +183,26 @@ impl InnerTraceRegistry {
             }
         } else {
             // if we somehow don't have the trace registered, we just flush the span...
-            // this is probably a bug, so we should log telemetry
+
+            dd_trace::dd_debug!(
+                "TraceRegistry.finish_span: trace with trace_id={:?} has a finished span span_id={:?}, but hasn't been registered first. This is probably a bug.",
+                u128::from_be_bytes(trace_id),
+                u64::from_be_bytes(span_data.span_context.span_id().to_bytes())
+
+            );
             Some(Trace {
-                root_span_id: span_data.span_context.span_id().to_bytes(),
+                local_root_span_id: span_data.span_context.span_id().to_bytes(),
                 finished_spans: vec![span_data],
                 open_span_count: 0,
-                sampling_decision: None,
-                origin: None,
-                tags: None,
+                propagation_data: EMPTY_PROPAGATION_DATA,
             })
         }
     }
 
-    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
+    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> &TracePropagationData {
         match self.registry.get(&trace_id) {
-            Some(trace) => TracePropagationData {
-                sampling_decision: trace.sampling_decision,
-                origin: trace.origin.clone(),
-                tags: trace.tags.clone(),
-            },
-            None => TracePropagationData {
-                sampling_decision: None,
-                origin: None,
-                tags: None,
-            },
+            Some(trace) => &trace.propagation_data,
+            None => &EMPTY_PROPAGATION_DATA,
         }
     }
 }
@@ -231,34 +233,33 @@ impl TraceRegistry {
         }
     }
 
-    /// Register trace propagation data for a given trace ID.
-    /// This does not set the root span ID or increment the open span count.
+    /// Register the trace propagation data for a given trace ID
+    /// This increases the open span count for the trace by 1, but does not set the root span ID.
+    /// You will then need to call `register_local_root_span` to set the root span ID
     ///
     /// If the trace is already registered with a non None sampling decision,
     /// it will return the existing sampling decision instead
-    pub fn register_trace_propagation_data(
+    pub fn register_local_root_trace_propagation_data(
         &self,
         trace_id: [u8; 16],
-        sampling_decision: SamplingDecision,
-        origin: Option<String>,
-        tags: Option<HashMap<String, String>>,
+        propagation_data: TracePropagationData,
     ) -> RegisterTracePropagationResult {
         let mut inner = self
             .inner
             .write()
             .expect("Failed to acquire lock on trace registry");
-        inner.register_trace_propagation_data(trace_id, sampling_decision, origin, tags)
+        inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
     }
 
     /// Set the root span ID for a given trace ID.
     /// This will also increment the open span count for the trace.
     /// If the trace is already registered, it will ignore the new root span ID and log a warning.
-    pub fn register_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
+    pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
         let mut inner = self
             .inner
             .write()
             .expect("Failed to acquire lock on trace registry");
-        inner.register_root_span(trace_id, root_span_id);
+        inner.register_local_root_span(trace_id, root_span_id);
     }
 
     /// Register a new span with the given trace ID and span ID.
@@ -292,7 +293,7 @@ impl TraceRegistry {
             .read()
             .expect("Failed to acquire lock on trace registry");
 
-        inner.get_trace_propagation_data(trace_id)
+        inner.get_trace_propagation_data(trace_id).clone()
     }
 }
 
@@ -349,18 +350,12 @@ impl DatadogSpanProcessor {
     /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
     /// - links generated during extraction are added to the root span as span links.
     /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
-    fn get_remote_propagation_data(
+    fn add_remote_links(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
-    ) -> TracePropagationData {
-        if let Some(DatadogExtractData {
-            links,
-            internal_tags,
-            origin,
-            sampling,
-        }) = parent_ctx.get::<DatadogExtractData>().cloned()
-        {
+    ) {
+        if let Some(DatadogExtractData { links, .. }) = parent_ctx.get::<DatadogExtractData>() {
             links.iter().for_each(|link| {
                 let link_ctx = SpanContext::new(
                     TraceId::from(link.trace_id as u128),
@@ -383,31 +378,18 @@ impl DatadogSpanProcessor {
 
                 span.add_link(link_ctx, attributes);
             });
-
-            let sampling_decision = sampling.and_then(|sampling| {
-                Some(SamplingDecision {
-                    priority: sampling.priority?,
-                    mechanism: sampling.mechanism.unwrap_or_default(),
-                })
-            });
-            return TracePropagationData {
-                origin,
-                sampling_decision,
-                tags: Some(internal_tags),
-            };
         }
-
-        EMPTY_PROPAGATION_DATA
     }
 
     /// If [`Trace`] contains origin, tags or sampling_decision add them as attributes of the root
     /// span
     fn add_trace_propagation_data(&self, mut trace: Trace) -> Vec<SpanData> {
-        let origin = trace.origin.unwrap_or_default();
+        let propagation_data = trace.propagation_data;
+        let origin = propagation_data.origin.unwrap_or_default();
 
         for span in trace.finished_spans.iter_mut() {
-            if span.span_context.span_id().to_bytes() == trace.root_span_id {
-                if let Some(ref tags) = trace.tags {
+            if span.span_context.span_id().to_bytes() == trace.local_root_span_id {
+                if let Some(ref tags) = propagation_data.tags {
                     tags.iter().for_each(|(key, value)| {
                         span.attributes
                             .push(KeyValue::new(key.clone(), value.clone()))
@@ -422,15 +404,17 @@ impl DatadogSpanProcessor {
 
             // TODO: is this correct? What if _sampling_priority_v1 or _dd.p.dm were extracted?
             // they shouldn't be overridden
-            if let Some(sampling_decision) = trace.sampling_decision {
+            if let Some(priority) = propagation_data.sampling_decision.priority {
                 span.attributes.push(KeyValue::new(
                     "_sampling_priority_v1",
-                    sampling_decision.priority.into_i8() as i64,
+                    priority.into_i8() as i64,
                 ));
+            }
 
+            if let Some(mechanism) = propagation_data.sampling_decision.mechanism {
                 span.attributes.push(KeyValue::new(
                     SAMPLING_DECISION_MAKER_TAG_KEY,
-                    sampling_decision.mechanism.to_cow(),
+                    mechanism.to_cow(),
                 ));
             }
         }
@@ -453,11 +437,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let span_id = span.span_context().span_id().to_bytes();
 
         if parent_ctx.span().span_context().is_remote() {
-            let propagation_data = self.get_remote_propagation_data(span, parent_ctx);
-            self.registry
-                .register_span(trace_id, span_id, propagation_data);
+            self.add_remote_links(span, parent_ctx);
+            self.registry.register_local_root_span(trace_id, span_id);
         } else if !parent_ctx.has_active_span() {
-            self.registry.register_root_span(trace_id, span_id);
+            self.registry.register_local_root_span(trace_id, span_id);
         } else {
             self.registry
                 .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);

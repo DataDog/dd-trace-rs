@@ -60,7 +60,7 @@ impl SpanLink {
 
         let flags = context
             .sampling
-            .and_then(|sampling| sampling.priority)
+            .priority
             .map(|priority| u32::from(priority.is_keep()));
 
         SpanLink {
@@ -77,7 +77,7 @@ impl SpanLink {
 pub struct SpanContext {
     pub trace_id: u128,
     pub span_id: u64,
-    pub sampling: Option<Sampling>,
+    pub sampling: Sampling,
     pub origin: Option<String>,
     pub tags: HashMap<String, String>,
     pub links: Vec<SpanLink>,

@@ -51,7 +51,7 @@ use datadog_trace_utils::span::{
 };
 use opentelemetry::{
     trace::{Link, SpanKind},
-    Key, KeyValue, SpanId, Value,
+    Key, KeyValue, Value,
 };
 use opentelemetry_sdk::Resource;
 pub use opentelemetry_semantic_conventions as semconv;
@@ -460,7 +460,7 @@ impl OtelSpan for SpanExtractArgs<'_> {
 /// * `IgnoreMissingDatadogFields` => default to false
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
 pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdSpan {
-    // There is a performance otpimization possible here:
+    // There is a performance optimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
     // 2. The rest of the fields
@@ -469,9 +469,9 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
     // being sent...
 
     let span_extracted = SpanExtractArgs::new(&otel_span, otel_resource);
-    let is_top_level = otel_span.parent_span_id == SpanId::INVALID
-        || matches!(otel_span.span_kind, SpanKind::Server | SpanKind::Consumer);
 
+    // Top level spans are computed latter
+    let is_top_level = false;
     let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, is_top_level);
 
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {

@@ -5,8 +5,8 @@ use std::{borrow::Cow, fmt, str::FromStr};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SamplingDecision {
-    pub priority: SamplingPriority,
-    pub mechanism: SamplingMechanism,
+    pub priority: Option<SamplingPriority>,
+    pub mechanism: Option<SamplingMechanism>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

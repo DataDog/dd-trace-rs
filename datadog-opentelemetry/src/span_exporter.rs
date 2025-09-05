@@ -180,7 +180,6 @@ impl DatadogExporter {
                 .set_language_version(config.language_version())
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
-                .set_client_computed_top_level()
                 .enable_agent_rates_payload_version();
 
             if config.trace_stats_computation_enabled() {

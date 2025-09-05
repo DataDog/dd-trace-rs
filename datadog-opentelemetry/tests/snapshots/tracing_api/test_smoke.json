@@ -1,0 +1,95 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "test_span",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+      "code.namespace": "tests::integration_tests::tracing_api",
+      "otel.scope.name": "test",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "68bb004800000000ddaa3e7f24b7bbe9",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.version": "0.30.0",
+      "thread.name": "integration_tests::tracing_api::test_smoke"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "busy_ns": 68959.0,
+      "code.lineno": 25.0,
+      "idle_ns": 39208.0,
+      "thread.id": 2.0
+    },
+    "duration": 100000,
+    "start": 1757085768494925000
+  },
+     {
+       "name": "internal",
+       "service": "unnamed-rust-service",
+       "resource": "child_span_1",
+       "trace_id": 0,
+       "span_id": 2,
+       "parent_id": 1,
+       "type": "custom",
+       "meta": {
+         "_dd.p.dm": "-0",
+         "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+         "code.namespace": "tests::integration_tests::tracing_api",
+         "otel.scope.name": "test",
+         "otel.status_code": "Unset",
+         "otel.trace_id": "68bb004800000000ddaa3e7f24b7bbe9",
+         "span.kind": "internal",
+         "telemetry.sdk.language": "rust",
+         "telemetry.sdk.name": "opentelemetry",
+         "telemetry.sdk.version": "0.30.0",
+         "thread.name": "integration_tests::tracing_api::test_smoke"
+       },
+       "metrics": {
+         "_sampling_priority_v1": 1.0,
+         "busy_ns": 0.0,
+         "code.lineno": 28.0,
+         "idle_ns": 0.0,
+         "thread.id": 2.0
+       },
+       "duration": 12000,
+       "start": 1757085768494996000
+     },
+     {
+       "name": "internal",
+       "service": "unnamed-rust-service",
+       "resource": "child_span_2",
+       "trace_id": 0,
+       "span_id": 3,
+       "parent_id": 1,
+       "type": "custom",
+       "meta": {
+         "_dd.p.dm": "-0",
+         "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+         "code.namespace": "tests::integration_tests::tracing_api",
+         "otel.scope.name": "test",
+         "otel.status_code": "Unset",
+         "otel.trace_id": "68bb004800000000ddaa3e7f24b7bbe9",
+         "span.kind": "internal",
+         "telemetry.sdk.language": "rust",
+         "telemetry.sdk.name": "opentelemetry",
+         "telemetry.sdk.version": "0.30.0",
+         "thread.name": "integration_tests::tracing_api::test_smoke"
+       },
+       "metrics": {
+         "_sampling_priority_v1": 1.0,
+         "busy_ns": 0.0,
+         "code.lineno": 31.0,
+         "idle_ns": 0.0,
+         "thread.id": 2.0
+       },
+       "duration": 5000,
+       "start": 1757085768495017000
+     }]]

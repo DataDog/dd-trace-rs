@@ -16,18 +16,19 @@ use dd_trace_propagation::{
 
 use crate::TraceRegistry;
 
-const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags = opentelemetry::TraceFlags::new(0x02);
+pub(crate) const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags =
+    opentelemetry::TraceFlags::new(0x02);
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct DatadogExtractData {
     pub links: Vec<SpanLink>,
     pub origin: Option<String>,
     pub internal_tags: HashMap<String, String>,
-    pub sampling: Option<Sampling>,
+    pub sampling: Sampling,
 }
 
 impl DatadogExtractData {
-    fn from(
+    fn from_span_context(
         SpanContext {
             origin,
             tags,
@@ -90,20 +91,20 @@ impl DatadogPropagator {
 
         // get Trace's sampling decision and if it is not present obtain it from otel's SpanContext
         // flags
-        let sampling = if let Some(sampling) = propagation_data.sampling_decision {
-            Some(Sampling {
-                priority: Some(sampling.priority),
-                mechanism: Some(sampling.mechanism),
-            })
+        let sampling = if let Some(priority) = propagation_data.sampling_decision.priority {
+            Sampling {
+                priority: Some(priority),
+                mechanism: propagation_data.sampling_decision.mechanism,
+            }
         } else {
-            Some(Sampling {
+            Sampling {
                 priority: Some(if otel_span_context.trace_flags().is_sampled() {
                     priority::AUTO_KEEP
                 } else {
                     priority::AUTO_REJECT
                 }),
                 mechanism: None,
-            })
+            }
         };
 
         // otel tracestate only contains 'additional_values'
@@ -164,7 +165,7 @@ impl DatadogPropagator {
                 );
 
                 cx.with_remote_span_context(otel_span_context)
-                    .with_value(DatadogExtractData::from(dd_span_context))
+                    .with_value(DatadogExtractData::from_span_context(dd_span_context))
             })
             .unwrap_or_else(|| cx.clone())
     }
@@ -196,17 +197,14 @@ impl TextMapPropagator for DatadogPropagator {
 }
 
 fn extract_trace_flags(sc: &SpanContext) -> opentelemetry::TraceFlags {
-    match sc.sampling {
-        Some(sampling) => match sampling.priority {
-            Some(priority) => {
-                if priority.is_keep() {
-                    opentelemetry::TraceFlags::SAMPLED
-                } else {
-                    opentelemetry::TraceFlags::default()
-                }
+    match sc.sampling.priority {
+        Some(priority) => {
+            if priority.is_keep() {
+                opentelemetry::TraceFlags::SAMPLED
+            } else {
+                opentelemetry::TraceFlags::default()
             }
-            None => TRACE_FLAG_DEFERRED,
-        },
+        }
         None => TRACE_FLAG_DEFERRED,
     }
 }
@@ -230,7 +228,7 @@ pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr};
 
     use assert_unordered::assert_eq_unordered;
-    use dd_trace::{configuration::TracePropagationStyle, Config};
+    use dd_trace::{configuration::TracePropagationStyle, sampling::SamplingDecision, Config};
     use opentelemetry::{
         propagation::{Extractor, TextMapPropagator},
         trace::{Span, SpanContext as OtelSpanContext, Status, TraceContextExt, TraceState},
@@ -590,7 +588,10 @@ pub mod tests {
                 span_id,
                 TracePropagationData {
                     origin,
-                    sampling_decision: None,
+                    sampling_decision: SamplingDecision {
+                        priority: None,
+                        mechanism: None,
+                    },
                     tags: Some(tags),
                 },
             );
