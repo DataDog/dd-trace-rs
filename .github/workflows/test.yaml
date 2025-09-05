@@ -55,13 +55,13 @@ jobs:
       - name: "[${{ steps.rust-version.outputs.version}}] test agent integration tests"
         if: runner.os == 'Linux'
         shell: bash
-        run: cargo nextest run --workspace  --profile ci --locked -E 'test(datadog_test_agent::)'
+        run: cargo nextest run --workspace  --profile ci --locked -E 'test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
       - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci --locked"
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
-        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(datadog_test_agent::)'
+        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
       - name: Report Test Results
