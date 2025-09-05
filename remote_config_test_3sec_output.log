@@ -1,0 +1,27 @@
+Starting remote config test application
+Service name: dd-trace-rs-rc-test-service
+Agent URL: http://localhost:8126
+Debug logging enabled
+Config - Service: dd-trace-rs-rc-test-service
+Config - Environment: Some("dd-trace-rs-test-env")
+Config - Version: Some("1.0.0")
+[93mDEBUG[0m datadog-opentelemetry/src/lib.rs:310 - RemoteConfigClient: Started remote configuration client
+Tracer initialized with remote config enabled
+Starting to emit spans continuously...
+You can now create sampling rules in the Datadog backend for service: dd-trace-rs-rc-test-service
+Press Ctrl+C to stop
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:333 - RemoteConfigClient: Sending request to http://localhost:8126/v0.7/config with 1 products
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:342 - RemoteConfigClient: Received response with status: 200 OK
+Emitted 10 traces so far
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:333 - RemoteConfigClient: Sending request to http://localhost:8126/v0.7/config with 1 products
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:342 - RemoteConfigClient: Received response with status: 200 OK
+Emitted 20 traces so far
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:333 - RemoteConfigClient: Sending request to http://localhost:8126/v0.7/config with 1 products
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:342 - RemoteConfigClient: Received response with status: 200 OK
+Emitted 30 traces so far
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:333 - RemoteConfigClient: Sending request to http://localhost:8126/v0.7/config with 1 products
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:342 - RemoteConfigClient: Received response with status: 200 OK
+Emitted 40 traces so far
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:333 - RemoteConfigClient: Sending request to http://localhost:8126/v0.7/config with 1 products
+[93mDEBUG[0m dd-trace/src/configuration/remote_config.rs:342 - RemoteConfigClient: Received response with status: 200 OK
+Emitted 50 traces so far

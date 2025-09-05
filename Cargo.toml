@@ -6,6 +6,7 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
+    "datadog-opentelemetry/examples/remote_config_test",
     "datadog-opentelemetry-mappings",
     "dd-trace",
     "dd-trace-propagation",
