@@ -187,17 +187,27 @@ impl<T: std::fmt::Display> std::fmt::Display for ConfigItemRef<'_, T> {
     }
 }
 
+trait ConfigurationValueProvider {
+    fn get_configuration_value(&self) -> String;
+}
+
+// impl<T: std::fmt::Display> ConfigurationValueProvider for T {
+//     fn get_value(&self) -> String {
+//         self.to_string()
+//     }
+// }
+
 /// Configuration item that tracks the value of a setting and where it came from
 // This allows us to manage configuration precedence
 #[derive(Debug)]
-pub struct ConfigItem<T: Display> {
+struct ConfigItem<T: ConfigurationValueProvider> {
     name: &'static str,
     default_value: T,
     env_value: Option<T>,
     code_value: Option<T>,
 }
 
-impl<T: Clone + Display> Clone for ConfigItem<T> {
+impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
     fn clone(&self) -> Self {
         Self {
             name: self.name,
@@ -208,7 +218,7 @@ impl<T: Clone + Display> Clone for ConfigItem<T> {
     }
 }
 
-impl<T: Clone + Display> ConfigItem<T> {
+impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     /// Creates a new ConfigItem with a default value
     fn new(name: &'static str, default: T) -> Self {
         Self {
@@ -260,7 +270,7 @@ impl<T: Clone + Display> ConfigItem<T> {
     fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.name.to_string(),
-            value: self.value().to_string(),
+            value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id: None,
         }
@@ -270,12 +280,12 @@ impl<T: Clone + Display> ConfigItem<T> {
 /// Configuration item that tracks the value of a setting and where it came from
 // This allows us to manage configuration precedence
 #[derive(Debug)]
-pub struct ConfigItemRc<T: Display> {
+struct ConfigItemRc<T: ConfigurationValueProvider> {
     config_item: ConfigItem<T>,
     rc_value: arc_swap::ArcSwapOption<T>,
 }
 
-impl<T: Clone + Display> Clone for ConfigItemRc<T> {
+impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItemRc<T> {
     fn clone(&self) -> Self {
         Self {
             config_item: self.config_item.clone(),
@@ -284,7 +294,7 @@ impl<T: Clone + Display> Clone for ConfigItemRc<T> {
     }
 }
 
-impl<T: Clone + Display> ConfigItemRc<T> {
+impl<T: Clone + ConfigurationValueProvider> ConfigItemRc<T> {
     /// Creates a new ConfigItemRc with a default value
     fn new(name: &'static str, default: T) -> Self {
         Self {
@@ -341,19 +351,8 @@ impl<T: Clone + Display> ConfigItemRc<T> {
     fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.config_item.name.to_string(),
-            value: self.value().to_string(),
+            value: self.value().get_configuration_value(),
             origin: self.source().into(),
-            config_id: None,
-        }
-    }
-}
-
-impl<T: Clone + Display> From<ConfigItemRc<T>> for Configuration {
-    fn from(value: ConfigItemRc<T>) -> Configuration {
-        Configuration {
-            name: value.config_item.name.to_string(),
-            value: value.value().to_string(),
-            origin: value.source().into(),
             config_id: None,
         }
     }
@@ -372,7 +371,7 @@ impl ConfigItemSourceUpdater<'_> {
         transform: F,
     ) -> ConfigItem<T>
     where
-        T: Clone + Display,
+        T: Clone + ConfigurationValueProvider,
         F: FnOnce(U) -> T,
     {
         if !result.errors.is_empty() {
@@ -391,7 +390,7 @@ impl ConfigItemSourceUpdater<'_> {
     /// Updates a ConfigItem from sources with parsed value (no transformation)
     fn update_parsed<T>(&self, item_name: &'static str, default: ConfigItem<T>) -> ConfigItem<T>
     where
-        T: Clone + FromStr + Display,
+        T: Clone + FromStr + ConfigurationValueProvider,
         T::Err: std::fmt::Display,
     {
         let result = self.sources.get_parse::<T>(item_name);
@@ -406,7 +405,7 @@ impl ConfigItemSourceUpdater<'_> {
         transform: F,
     ) -> ConfigItem<T>
     where
-        T: Clone + Display,
+        T: Clone + ConfigurationValueProvider,
         F: FnOnce(String) -> T,
     {
         let result = self.sources.get(item_name);
@@ -421,7 +420,7 @@ impl ConfigItemSourceUpdater<'_> {
         transform: F,
     ) -> ConfigItem<T>
     where
-        T: Clone + Display,
+        T: Clone + ConfigurationValueProvider,
         U: FromStr,
         U::Err: std::fmt::Display,
         F: FnOnce(U) -> T,
@@ -520,8 +519,8 @@ pub enum TracePropagationStyle {
 }
 
 impl TracePropagationStyle {
-    fn from_tags(tags: Option<Vec<String>>) -> TracePropagationStyleList {
-        TracePropagationStyleList(match tags {
+    fn from_tags(tags: Option<Vec<String>>) -> Option<Vec<TracePropagationStyle>> {
+        match tags {
             Some(tags) if !tags.is_empty() => Some(
                 tags.iter()
                     .filter_map(|value| match TracePropagationStyle::from_str(value) {
@@ -535,7 +534,7 @@ impl TracePropagationStyle {
             ),
             Some(_) => None,
             None => None,
-        })
+        }
     }
 }
 
@@ -560,24 +559,6 @@ impl Display for TracePropagationStyle {
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
-    }
-}
-
-#[derive(Clone, Debug)]
-struct TracePropagationStyleList(Option<Vec<TracePropagationStyle>>);
-
-impl Display for TracePropagationStyleList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let joined = match &self.0 {
-            Some(styles) => styles
-                .iter()
-                .map(|style| style.to_string())
-                .collect::<Vec<_>>()
-                .join(","),
-            None => "".to_string(),
-        };
-
-        write!(f, "{joined}")
     }
 }
 
@@ -606,45 +587,57 @@ impl Display for ServiceName {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum OptionalString {
-    None,
-    Some(String),
+macro_rules! impl_config_value_provider {
+    // Handle Option<T> specially
+    (option: $($type:ty),* $(,)?) => {
+        $(
+            impl ConfigurationValueProvider for Option<$type> {
+                fn get_configuration_value(&self) -> String {
+                    match self {
+                        Some(value) => value.to_string(),
+                        None => String::new(),
+                    }
+                }
+            }
+        )*
+    };
+
+    // Handle regular types
+    (simple: $($type:ty),* $(,)?) => {
+        $(
+            impl ConfigurationValueProvider for $type {
+                fn get_configuration_value(&self) -> String {
+                    self.to_string()
+                }
+            }
+        )*
+    };
 }
 
-impl Display for OptionalString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            OptionalString::Some(str) => str,
-            OptionalString::None => &"".to_string(),
-        };
-        write!(f, "{str}")
+impl ConfigurationValueProvider for Vec<(String, String)> {
+    fn get_configuration_value(&self) -> String {
+        self.iter()
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
-impl From<OptionalString> for Option<String> {
-    fn from(val: OptionalString) -> Option<String> {
-        match val {
-            OptionalString::None => None,
-            OptionalString::Some(value) => Some(value),
+impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
+    fn get_configuration_value(&self) -> String {
+        match &self {
+            Some(styles) => styles
+                .iter()
+                .map(|style| style.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            None => "".to_string(),
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct GlobalTags(Vec<(String, String)>);
-
-impl Display for GlobalTags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tags = self
-            .0
-            .iter()
-            .map(|(key, value)| format!("{key}:{value}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        write!(f, "{tags}")
-    }
-}
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
+impl_config_value_provider!(option: String);
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -671,13 +664,13 @@ pub struct Config {
 
     // # Service tagging
     service: ConfigItem<ServiceName>,
-    env: ConfigItem<OptionalString>,
-    version: ConfigItem<OptionalString>,
+    env: ConfigItem<Option<String>>,
+    version: ConfigItem<Option<String>>,
 
     // # Agent
     /// A list of default tags to be added to every span
     /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
-    global_tags: ConfigItem<GlobalTags>,
+    global_tags: ConfigItem<Vec<(String, String)>>,
     /// host of the trace agent
     agent_host: ConfigItem<Cow<'static, str>>,
     /// port of the trace agent
@@ -722,9 +715,9 @@ pub struct Config {
     telemetry_heartbeat_interval: ConfigItem<f64>,
 
     /// Trace propagation configuration
-    trace_propagation_style: ConfigItem<TracePropagationStyleList>,
-    trace_propagation_style_extract: ConfigItem<TracePropagationStyleList>,
-    trace_propagation_style_inject: ConfigItem<TracePropagationStyleList>,
+    trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
+    trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
+    trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_extract_first: ConfigItem<bool>,
 
     /// Whether remote configuration is enabled
@@ -796,13 +789,13 @@ impl Config {
             language_version: default.language_version,
             language: default.language,
             service: cisu.update_string("DD_SERVICE", default.service, ServiceName::Configured),
-            env: cisu.update_string("DD_ENV", default.env, OptionalString::Some),
-            version: cisu.update_string("DD_VERSION", default.version, OptionalString::Some),
+            env: cisu.update_string("DD_ENV", default.env, Some),
+            version: cisu.update_string("DD_VERSION", default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu.update_parsed_with_transform(
                 "DD_TAGS",
                 default.global_tags,
-                |DdKeyValueTags(tags)| GlobalTags(tags),
+                |DdKeyValueTags(tags)| tags,
             ),
             agent_host: cisu.update_string("DD_AGENT_HOST", default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed("DD_TRACE_AGENT_PORT", default.trace_agent_port),
@@ -932,7 +925,7 @@ impl Config {
     }
 
     pub fn service(&self) -> String {
-        self.service.value().as_str().to_string()
+        self.service.value().to_string()
     }
 
     pub fn service_is_default(&self) -> bool {
@@ -940,21 +933,15 @@ impl Config {
     }
 
     pub fn env(&self) -> Option<String> {
-        match self.env.value() {
-            OptionalString::None => None,
-            OptionalString::Some(value) => Some(value.clone()),
-        }
+        self.env.value().clone()
     }
 
     pub fn version(&self) -> Option<String> {
-        match self.version.value() {
-            OptionalString::None => None,
-            OptionalString::Some(value) => Some(value.clone()),
-        }
+        self.version.value().clone()
     }
 
     pub fn global_tags(&self) -> impl Iterator<Item = (String, String)> {
-        self.global_tags.value().0.clone().into_iter()
+        self.global_tags.value().clone().into_iter()
     }
 
     pub fn trace_agent_url(&self) -> String {
@@ -1020,17 +1007,16 @@ impl Config {
     pub fn trace_propagation_style(&self) -> Vec<TracePropagationStyle> {
         self.trace_propagation_style
             .value()
-            .0
             .clone()
             .unwrap_or_default()
     }
 
     pub fn trace_propagation_style_extract(&self) -> Option<Vec<TracePropagationStyle>> {
-        self.trace_propagation_style_extract.value().0.clone()
+        self.trace_propagation_style_extract.value().clone()
     }
 
     pub fn trace_propagation_style_inject(&self) -> Option<Vec<TracePropagationStyle>> {
-        self.trace_propagation_style_inject.value().0.clone()
+        self.trace_propagation_style_inject.value().clone()
     }
 
     pub fn trace_propagation_extract_first(&self) -> bool {
@@ -1164,11 +1150,11 @@ impl std::fmt::Debug for Config {
 fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
-        env: ConfigItem::new("DD_ENV", OptionalString::None),
+        env: ConfigItem::new("DD_ENV", None),
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItem::new("DD_SERVICE", ServiceName::Default),
-        version: ConfigItem::new("DD_VERSION", OptionalString::None),
-        global_tags: ConfigItem::new("DD_TAGS", GlobalTags(Vec::new())),
+        version: ConfigItem::new("DD_VERSION", None),
+        global_tags: ConfigItem::new("DD_TAGS", Vec::new()),
 
         agent_host: ConfigItem::new("DD_AGENT_HOST", Cow::Borrowed("localhost")),
         trace_agent_port: ConfigItem::new("DD_TRACE_AGENT_PORT", 8126),
@@ -1202,19 +1188,16 @@ fn default_config() -> Config {
 
         trace_propagation_style: ConfigItem::new(
             "DD_TRACE_PROPAGATION_STYLE",
-            TracePropagationStyleList(Some(vec![
+            Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ])),
+            ]),
         ),
         trace_propagation_style_extract: ConfigItem::new(
             "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
-            TracePropagationStyleList(None),
+            None,
         ),
-        trace_propagation_style_inject: ConfigItem::new(
-            "DD_TRACE_PROPAGATION_STYLE_INJECT",
-            TracePropagationStyleList(None),
-        ),
+        trace_propagation_style_inject: ConfigItem::new("DD_TRACE_PROPAGATION_STYLE_INJECT", None),
         trace_propagation_extract_first: ConfigItem::new(
             "DD_TRACE_PROPAGATION_EXTRACT_FIRST",
             false,
@@ -1264,23 +1247,23 @@ impl ConfigBuilder {
     }
 
     pub fn set_env(&mut self, env: String) -> &mut Self {
-        self.config.env.set_code(OptionalString::Some(env));
+        self.config.env.set_code(Some(env));
         self
     }
 
     pub fn set_version(&mut self, version: String) -> &mut Self {
-        self.config.version.set_code(OptionalString::Some(version));
+        self.config.version.set_code(Some(version));
         self
     }
 
     pub fn set_global_tags(&mut self, tags: Vec<(String, String)>) -> &mut Self {
-        self.config.global_tags.set_code(GlobalTags(tags));
+        self.config.global_tags.set_code(tags);
         self
     }
 
     pub fn add_global_tag(&mut self, tag: (String, String)) -> &mut Self {
         let mut current_tags = self.config.global_tags.value().clone();
-        current_tags.0.push(tag);
+        current_tags.push(tag);
         self.config.global_tags.set_code(current_tags);
         self
     }
@@ -1346,9 +1329,7 @@ impl ConfigBuilder {
     }
 
     pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &mut Self {
-        self.config
-            .trace_propagation_style
-            .set_code(TracePropagationStyleList(Some(styles)));
+        self.config.trace_propagation_style.set_code(Some(styles));
         self
     }
 
@@ -1358,7 +1339,7 @@ impl ConfigBuilder {
     ) -> &mut Self {
         self.config
             .trace_propagation_style_extract
-            .set_code(TracePropagationStyleList(Some(styles)));
+            .set_code(Some(styles));
         self
     }
 
@@ -1368,7 +1349,7 @@ impl ConfigBuilder {
     ) -> &mut Self {
         self.config
             .trace_propagation_style_inject
-            .set_code(TracePropagationStyleList(Some(styles)));
+            .set_code(Some(styles));
         self
     }
 
@@ -2203,12 +2184,9 @@ mod tests {
         assert!(default.enabled());
         assert_eq!(default.global_tags().collect::<Vec<_>>(), vec![]);
 
-        let env = cisu.update_string("DD_ENV", default.env, OptionalString::Some);
-        assert_eq!(env.default_value, OptionalString::None);
-        assert_eq!(
-            env.env_value,
-            Some(OptionalString::Some("test-env".to_string()))
-        );
+        let env = cisu.update_string("DD_ENV", default.env, Some);
+        assert_eq!(env.default_value, None);
+        assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
         let enabled = cisu.update_parsed("DD_ENABLED", default.enabled);
@@ -2232,17 +2210,15 @@ mod tests {
         }
 
         let tags =
-            cisu.update_parsed_with_transform("DD_TAGS", default.global_tags, |Tags(tags)| {
-                GlobalTags(tags)
-            });
-        assert_eq!(tags.default_value, GlobalTags(vec![]));
+            cisu.update_parsed_with_transform("DD_TAGS", default.global_tags, |Tags(tags)| tags);
+        assert_eq!(tags.default_value, vec![]);
         assert_eq!(tags.env_value, None);
         assert_eq!(
             tags.code_value,
-            Some(GlobalTags(vec![
+            Some(vec![
                 ("0".to_string(), "v1".to_string()),
                 ("1".to_string(), "v2".to_string())
-            ]))
+            ])
         );
     }
 
