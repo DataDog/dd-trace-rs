@@ -970,32 +970,35 @@ impl Config {
         self.service.value().is_default()
     }
 
-    pub fn env(&self) -> Option<String> {
-        self.env.value().clone()
+    pub fn env(&self) -> Option<&str> {
+        self.env.value().as_deref()
     }
 
-    pub fn version(&self) -> Option<String> {
-        self.version.value().clone()
+    pub fn version(&self) -> Option<&str> {
+        self.version.value().as_deref()
     }
 
-    pub fn global_tags(&self) -> impl Iterator<Item = (String, String)> {
-        self.global_tags.value().clone().into_iter()
+    pub fn global_tags(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.global_tags
+            .value()
+            .iter()
+            .map(|tag| (tag.0.as_str(), tag.1.as_str()))
     }
 
-    pub fn trace_agent_url(&self) -> String {
-        self.trace_agent_url.value().to_string()
+    pub fn trace_agent_url(&self) -> &Cow<'static, str> {
+        self.trace_agent_url.value()
     }
 
-    pub fn dogstatsd_agent_host(&self) -> String {
-        self.dogstatsd_agent_host.value().to_string()
+    pub fn dogstatsd_agent_host(&self) -> &Cow<'static, str> {
+        self.dogstatsd_agent_host.value()
     }
 
-    pub fn dogstatsd_agent_port(&self) -> u32 {
-        *self.dogstatsd_agent_port.value()
+    pub fn dogstatsd_agent_port(&self) -> &u32 {
+        self.dogstatsd_agent_port.value()
     }
 
-    pub fn dogstatsd_agent_url(&self) -> String {
-        self.dogstatsd_agent_url.value().to_string()
+    pub fn dogstatsd_agent_url(&self) -> &Cow<'static, str> {
+        self.dogstatsd_agent_url.value()
     }
 
     pub fn trace_sampling_rules(&self) -> Vec<SamplingRuleConfig> {
@@ -1010,8 +1013,8 @@ impl Config {
         *self.enabled.value()
     }
 
-    pub fn log_level_filter(&self) -> LevelFilter {
-        *self.log_level_filter.value()
+    pub fn log_level_filter(&self) -> &LevelFilter {
+        self.log_level_filter.value()
     }
 
     pub fn trace_stats_computation_enabled(&self) -> bool {
@@ -1042,19 +1045,16 @@ impl Config {
         *self.telemetry_heartbeat_interval.value()
     }
 
-    pub fn trace_propagation_style(&self) -> Vec<TracePropagationStyle> {
-        self.trace_propagation_style
-            .value()
-            .clone()
-            .unwrap_or_default()
+    pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style.value().as_deref()
     }
 
-    pub fn trace_propagation_style_extract(&self) -> Option<Vec<TracePropagationStyle>> {
-        self.trace_propagation_style_extract.value().clone()
+    pub fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style_extract.value().as_deref()
     }
 
-    pub fn trace_propagation_style_inject(&self) -> Option<Vec<TracePropagationStyle>> {
-        self.trace_propagation_style_inject.value().clone()
+    pub fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+        self.trace_propagation_style_inject.value().as_deref()
     }
 
     pub fn trace_propagation_extract_first(&self) -> bool {
@@ -1468,7 +1468,7 @@ mod tests {
         let config = Config::builder_with_sources(&sources).build();
 
         assert_eq!(config.service(), "test-service");
-        assert_eq!(config.env(), Some("test-env".to_string()));
+        assert_eq!(config.env(), Some("test-env"));
         assert_eq!(config.trace_rate_limit(), 123);
         let rules = config.trace_sampling_rules();
         assert_eq!(rules.len(), 1, "Should have one rule");
@@ -1483,7 +1483,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level_filter(), super::LevelFilter::Debug);
+        assert_eq!(*config.log_level_filter(), super::LevelFilter::Debug);
     }
 
     #[test]
@@ -1549,7 +1549,7 @@ mod tests {
         );
 
         assert!(config.enabled());
-        assert_eq!(config.log_level_filter(), super::LevelFilter::Warn);
+        assert_eq!(*config.log_level_filter(), super::LevelFilter::Warn);
     }
 
     #[test]
@@ -1569,17 +1569,18 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), vec![]);
+        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext
             ])
+            .as_deref()
         );
         assert_eq!(
             config.trace_propagation_style_inject(),
-            Some(vec![TracePropagationStyle::TraceContext])
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first())
     }
@@ -1611,18 +1612,19 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style(),
-            vec![
+            Some(vec![
                 TracePropagationStyle::TraceContext,
                 TracePropagationStyle::Datadog
-            ]
+            ])
+            .as_deref()
         );
         assert_eq!(
             config.trace_propagation_style_extract(),
-            Some(vec![TracePropagationStyle::TraceContext])
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert_eq!(
             config.trace_propagation_style_inject(),
-            Some(vec![TracePropagationStyle::Datadog])
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
         );
         assert!(!config.trace_propagation_extract_first());
     }
@@ -1643,15 +1645,19 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style(),
-            vec![
+            Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ]
+            ])
+            .as_deref()
         );
-        assert_eq!(config.trace_propagation_style_extract(), Some(vec![]));
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![]).as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_inject(),
-            Some(vec![TracePropagationStyle::TraceContext])
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
     }
@@ -1669,11 +1675,14 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), vec![]);
-        assert_eq!(config.trace_propagation_style_extract(), Some(vec![]));
+        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![]).as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_inject(),
-            Some(vec![TracePropagationStyle::TraceContext])
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
     }
@@ -1692,15 +1701,16 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style(),
-            vec![
+            Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
-            ]
+            ])
+            .as_deref()
         );
         assert_eq!(config.trace_propagation_style_extract(), None);
         assert_eq!(
             config.trace_propagation_style_inject(),
-            Some(vec![TracePropagationStyle::TraceContext])
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
     }
@@ -2093,16 +2103,10 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        let tags: Vec<(String, String)> = config.global_tags().collect();
+        let tags: Vec<(&str, &str)> = config.global_tags().collect();
 
         assert_eq!(tags.len(), 2);
-        assert_eq!(
-            tags,
-            vec![
-                ("key1".to_string(), "value1".to_string()),
-                ("key2".to_string(), "".to_string())
-            ]
-        );
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
     }
 
     #[test]

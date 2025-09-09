@@ -3,18 +3,18 @@
 
 use dd_trace::{configuration::TracePropagationStyle, Config};
 
-pub fn get_extractors(config: &Config) -> Vec<TracePropagationStyle> {
+pub fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
     if let Some(extractors) = config.trace_propagation_style_extract() {
         extractors
     } else {
-        config.trace_propagation_style()
+        config.trace_propagation_style().unwrap_or_default()
     }
 }
 
-pub fn get_injectors(config: &Config) -> Vec<TracePropagationStyle> {
+pub fn get_injectors(config: &Config) -> &[TracePropagationStyle] {
     if let Some(injectors) = config.trace_propagation_style_inject() {
         injectors
     } else {
-        config.trace_propagation_style()
+        config.trace_propagation_style().unwrap_or_default()
     }
 }
