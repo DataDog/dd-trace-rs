@@ -39,5 +39,10 @@ dd-trace-sampling = { path = "../dd-trace-sampling" }
 # Depend on ourselves to have APIs exposed only during tests
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
+# Testing the tracing API
+tracing = { version = "0.1.4" }
+tracing-opentelemetry = { version = "0.31" }
+tracing-subscriber = { version = "0.3" }
+
 [features]
 test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]

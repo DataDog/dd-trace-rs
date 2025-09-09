@@ -5,7 +5,7 @@ use dd_trace::constants::{
     RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
     SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
-use dd_trace::sampling::{mechanism, SamplingDecision as DdSamplingDecision, SamplingMechanism};
+use dd_trace::sampling::{mechanism, SamplingMechanism, SamplingPriority};
 
 /// Type alias for sampling rules update callback
 /// Consolidated callback type used across crates for remote config sampling updates
@@ -449,10 +449,8 @@ impl DatadogSampler {
         DdSamplingResult {
             is_keep,
             trace_root_info: Some(TraceRootSamplingInfo {
-                decision: DdSamplingDecision {
-                    mechanism,
-                    priority: mechanism.to_priority(is_keep),
-                },
+                mechanism,
+                priority: mechanism.to_priority(is_keep),
                 rate: sample_rate,
                 rl_effective_rate,
             }),
@@ -466,7 +464,8 @@ pub struct DdSamplingResult {
 }
 
 pub struct TraceRootSamplingInfo {
-    pub decision: DdSamplingDecision,
+    pub priority: SamplingPriority,
+    pub mechanism: SamplingMechanism,
     pub rate: f64,
     pub rl_effective_rate: Option<i32>,
 }
@@ -494,18 +493,14 @@ impl DdSamplingResult {
         }
 
         // Add the sampling decision trace tag with the mechanism
+        let mechanism = root_info.mechanism;
         result.push(KeyValue::new(
             SAMPLING_DECISION_MAKER_TAG_KEY,
-            root_info.decision.mechanism.to_cow(),
-        ));
-
-        result.push(KeyValue::new(
-            SAMPLING_PRIORITY_TAG_KEY,
-            root_info.decision.priority.into_i8() as i64,
+            mechanism.to_cow(),
         ));
 
         // Add the sample rate tag with the correct key based on the mechanism
-        match root_info.decision.mechanism {
+        match mechanism {
             mechanism::AGENT_RATE_BY_SERVICE => {
                 result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
             }
@@ -516,6 +511,12 @@ impl DdSamplingResult {
             }
             _ => {}
         }
+
+        let priority = root_info.priority;
+        result.push(KeyValue::new(
+            SAMPLING_PRIORITY_TAG_KEY,
+            priority.into_i8() as i64,
+        ));
 
         result
     }
@@ -923,10 +924,8 @@ mod tests {
         let sampling_result = DdSamplingResult {
             is_keep: true,
             trace_root_info: Some(TraceRootSamplingInfo {
-                decision: DdSamplingDecision {
-                    priority: mechanism.to_priority(is_sampled),
-                    mechanism,
-                },
+                priority: mechanism.to_priority(is_sampled),
+                mechanism,
                 rate: 0.5,
                 rl_effective_rate: None,
             }),
@@ -986,10 +985,8 @@ mod tests {
         let sampling_result = DdSamplingResult {
             is_keep: false,
             trace_root_info: Some(TraceRootSamplingInfo {
-                decision: DdSamplingDecision {
-                    priority: mechanism.to_priority(is_sampled),
-                    mechanism,
-                },
+                priority: mechanism.to_priority(is_sampled),
+                mechanism,
                 rate: 0.5,
                 rl_effective_rate: Some(rate_limit),
             }),
@@ -1023,10 +1020,8 @@ mod tests {
         let sampling_result = DdSamplingResult {
             is_keep: false,
             trace_root_info: Some(TraceRootSamplingInfo {
-                decision: DdSamplingDecision {
-                    priority: mechanism.to_priority(is_sampled),
-                    mechanism,
-                },
+                priority: mechanism.to_priority(is_sampled),
+                mechanism,
                 rate: agent_rate,
                 rl_effective_rate: None,
             }),

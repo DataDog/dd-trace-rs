@@ -9,7 +9,8 @@
     "type": "web",
     "meta": {
       "_dd.origin": "rum",
-      "_dd.p.dm": "-0",
+      "_dd.p.dm": "-4",
+      "_dd.p.usr.id": "baz64",
       "_dd.parent_id": "00f067aa0ba902b7",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
@@ -23,8 +24,8 @@
       "_sampling_priority_v1": 2.0,
       "_top_level": 1.0
     },
-    "duration": 2191000,
-    "start": 1748951431412730000
+    "duration": 1797000,
+    "start": 1757082800675683000
   },
      {
        "name": "client.request",
@@ -36,7 +37,7 @@
        "type": "http",
        "meta": {
          "_dd.origin": "rum",
-         "_dd.p.dm": "-0",
+         "_dd.p.dm": "-4",
          "otel.scope.name": "test",
          "otel.status_code": "Unset",
          "otel.trace_id": "80f198ee56343ba864fe8b2a57d3eff7",
@@ -49,6 +50,6 @@
          "_dd.measured": 1.0,
          "_sampling_priority_v1": 2.0
        },
-       "duration": 2155000,
-       "start": 1748951431412759000
+       "duration": 1781000,
+       "start": 1757082800675691000
      }]]
