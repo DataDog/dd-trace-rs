@@ -191,14 +191,8 @@ trait ConfigurationValueProvider {
     fn get_configuration_value(&self) -> String;
 }
 
-// impl<T: std::fmt::Display> ConfigurationValueProvider for T {
-//     fn get_value(&self) -> String {
-//         self.to_string()
-//     }
-// }
-
 /// Configuration item that tracks the value of a setting and where it came from
-// This allows us to manage configuration precedence
+/// This allows us to manage configuration precedence
 #[derive(Debug)]
 struct ConfigItem<T: ConfigurationValueProvider> {
     name: &'static str,
@@ -248,6 +242,8 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         self.code_value = Some(value);
     }
 
+    /// Gets the current value based on priority:
+    /// code > env_var > default
     fn value(&self) -> &T {
         self.code_value
             .as_ref()
@@ -267,6 +263,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         }
     }
 
+    /// Gets a Configuration object used as telemetry payload
     fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.name.to_string(),
@@ -278,7 +275,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 }
 
 /// Configuration item that tracks the value of a setting and where it came from
-// This allows us to manage configuration precedence
+/// And allows to update rc_value
 #[derive(Debug)]
 struct ConfigItemRc<T: ConfigurationValueProvider> {
     config_item: ConfigItem<T>,
@@ -348,6 +345,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItemRc<T> {
         self.config_item.code_value = Some(value);
     }
 
+    /// Gets a Configuration object used as telemetry payload
     fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.config_item.name.to_string(),
@@ -587,6 +585,7 @@ impl Display for ServiceName {
     }
 }
 
+/// Macro to implement ConfigurationValueProvider trait for types that implement Display
 macro_rules! impl_config_value_provider {
     // Handle Option<T> specially
     (option: $($type:ty),* $(,)?) => {
