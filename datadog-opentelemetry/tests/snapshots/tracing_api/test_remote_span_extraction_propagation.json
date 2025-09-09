@@ -8,6 +8,8 @@
     "parent_id": 5678,
     "type": "custom",
     "meta": {
+      "_dd.origin": "my_origin",
+      "_dd.p.foo": "bar",
       "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
       "code.namespace": "tests::integration_tests::tracing_api",
       "otel.scope.name": "test",
@@ -22,13 +24,13 @@
     "metrics": {
       "_sampling_priority_v1": 2.0,
       "_top_level": 1.0,
-      "busy_ns": 48959.0,
-      "code.lineno": 50.0,
-      "idle_ns": 248791.0,
-      "thread.id": 7.0
+      "busy_ns": 1860000.0,
+      "code.lineno": 58.0,
+      "idle_ns": 222000.0,
+      "thread.id": 2.0
     },
-    "duration": 294000,
-    "start": 1757081985751986000
+    "duration": 2077000,
+    "start": 1757431543016916000
   },
      {
        "name": "internal",
@@ -39,6 +41,7 @@
        "parent_id": 1,
        "type": "custom",
        "meta": {
+         "_dd.origin": "my_origin",
          "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
          "code.namespace": "tests::integration_tests::tracing_api",
          "otel.scope.name": "test",
@@ -53,10 +56,10 @@
        "metrics": {
          "_sampling_priority_v1": 2.0,
          "busy_ns": 0.0,
-         "code.lineno": 54.0,
+         "code.lineno": 62.0,
          "idle_ns": 0.0,
-         "thread.id": 7.0
+         "thread.id": 2.0
        },
-       "duration": 16000,
-       "start": 1757081985752255000
+       "duration": 1834000,
+       "start": 1757431543017149000
      }]]

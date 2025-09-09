@@ -49,6 +49,8 @@ async fn test_remote_span_extraction_propagation() {
             ("x-datadog-trace-id", "1234"),
             ("x-datadog-parent-id", "5678"),
             ("x-datadog-sampling-priority", "2"),
+            ("x-datadog-tags", "_dd.p.foo=bar"),
+            ("x-datadog-origin", "my_origin"),
         ]);
         let mut injected = HashMap::new();
         let mut child_span_id = 0;
@@ -76,6 +78,8 @@ async fn test_remote_span_extraction_propagation() {
                 ("x-datadog-trace-id", "1234"),
                 ("x-datadog-parent-id", expected_parent_id.as_str()),
                 ("x-datadog-sampling-priority", "2"),
+                ("x-datadog-tags", "_dd.p.foo=bar"),
+                ("x-datadog-origin", "my_origin"),
             ],
         );
     })
