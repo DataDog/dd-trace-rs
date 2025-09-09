@@ -126,12 +126,10 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@a675fcc0b1d582485c57c4ab0c30cf2f9eb217ea # igor/rust-the-germ
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@65bd7a6cd426f30bcabab6616fecdac7a882654e  # main
     secrets: inherit
     with:
       library: rust
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: igor/rust-the-germ
-      _experimental_runs_on: '{ "group": "Large Runner Shared Public" }'
