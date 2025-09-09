@@ -181,12 +181,6 @@ impl<T> Deref for ConfigItemRef<'_, T> {
     }
 }
 
-impl<T: std::fmt::Display> std::fmt::Display for ConfigItemRef<'_, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        (**self).fmt(f)
-    }
-}
-
 /// A trait for converting configuration values to their string representation for telemetry.
 ///
 /// This trait is used to serialize configuration values into strings that can be sent
@@ -1001,8 +995,8 @@ impl Config {
         self.dogstatsd_agent_url.value()
     }
 
-    pub fn trace_sampling_rules(&self) -> Vec<SamplingRuleConfig> {
-        self.trace_sampling_rules.value().clone().into()
+    pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
+        self.trace_sampling_rules.value().to_vec()
     }
 
     pub fn trace_rate_limit(&self) -> i32 {
