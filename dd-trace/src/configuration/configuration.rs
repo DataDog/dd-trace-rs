@@ -196,7 +196,8 @@ impl<T: std::fmt::Display> std::fmt::Display for ConfigItemRef<'_, T> {
 ///
 /// # Auto-Implementation
 ///
-/// The trait is automatically implemented for common types using the `impl_config_value_provider!` macro:
+/// The trait is automatically implemented for common types using the `impl_config_value_provider!`
+/// macro:
 /// - Basic types: `bool`, `u32`, `i32`, `f64`, `Cow<'static, str>`, etc.
 /// - Option wrappers: `Option<String>`, etc.
 /// - Custom types: `ServiceName`, `LevelFilter`, `ParsedSamplingRules`, etc.
