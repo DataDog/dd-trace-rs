@@ -86,15 +86,17 @@ impl ShouldSample for Sampler {
             } else {
                 (None, None)
             };
-            if let Some(m) = trace_root_info.decision.mechanism {
-                let tags = tags.get_or_insert_default();
-                tags.insert(
-                    SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
-                    m.to_cow().into_owned(),
-                );
-            }
+            let mechanism = trace_root_info.mechanism;
+            tags.get_or_insert_default().insert(
+                SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                mechanism.to_cow().into_owned(),
+            );
+
             Some(TracePropagationData {
-                sampling_decision: trace_root_info.decision,
+                sampling_decision: SamplingDecision {
+                    priority: Some(trace_root_info.priority),
+                    mechanism: Some(mechanism),
+                },
                 origin,
                 tags,
             })
@@ -132,6 +134,10 @@ impl ShouldSample for Sampler {
                 ) {
                 RegisterTracePropagationResult::Existing(sampling_decision) => {
                     return opentelemetry::trace::SamplingResult {
+                        // If at this point the sampling decision is still None, we will
+                        // end up sending the span to the agent without a sampling priority, which
+                        // will latter take a decision.
+                        // So the span is marked as RecordAndSample because we treat it as such
                         decision: if sampling_decision.priority.is_none_or(|p| p.is_keep()) {
                             opentelemetry::trace::SamplingDecision::RecordAndSample
                         } else {
@@ -141,7 +147,7 @@ impl ShouldSample for Sampler {
                         trace_state: parent_context
                             .map(|c| c.span().span_context().trace_state().clone())
                             .unwrap_or_default(),
-                    }
+                    };
                 }
                 RegisterTracePropagationResult::New => {}
             }
