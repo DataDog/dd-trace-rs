@@ -126,7 +126,7 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@65bd7a6cd426f30bcabab6616fecdac7a882654e  # main
     secrets: inherit
     with:
       library: rust
