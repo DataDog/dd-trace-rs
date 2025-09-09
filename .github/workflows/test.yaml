@@ -107,7 +107,7 @@ jobs:
           rust_version: cross-centos7
       - run: cargo install cross || true
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
-      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "datadog_test_agent::"
+      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "integration_tests::"
 
   # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch of run-parametric.yml
   build-artifacts:
