@@ -128,14 +128,13 @@ impl PartialOrd<LevelFilter> for Level {
     }
 }
 
-pub fn print_log<I: Into<String>>(
+pub fn print_log(
     lvl: crate::log::Level,
-    log: I,
+    log: fmt::Arguments,
     file: &str,
     line: u32,
     template: Option<&str>,
 ) {
-    let log = log.into();
     if lvl == crate::log::LevelFilter::Error {
         eprintln!("\x1b[91m{lvl}\x1b[0m {file}:{line} - {log}");
 
@@ -188,14 +187,16 @@ macro_rules! dd_log {
     ($lvl:expr, $first:expr, $($rest:tt)*) => {{
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
-        $crate::log::print_log(lvl, format!($first, $($rest)*), file!(), line!(), Some($first));
+        let loc = std::panic::Location::caller();
+        $crate::log::print_log(lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first));
       }
     }};
 
     ($lvl:expr, $first:expr) => {
       let lvl = $lvl;
       if lvl <= $crate::log::max_level() {
-        $crate::log::print_log(lvl, format!($first), file!(), line!(), Some($first));
+        let loc = std::panic::Location::caller();
+        $crate::log::print_log(lvl, format_args!($first), loc.file(), loc.line(), Some($first));
       }
     };
 }
