@@ -187,7 +187,30 @@ impl<T: std::fmt::Display> std::fmt::Display for ConfigItemRef<'_, T> {
     }
 }
 
+/// A trait for converting configuration values to their string representation for telemetry.
+///
+/// This trait is used to serialize configuration values into strings that can be sent
+/// as part of telemetry data to Datadog. It provides a standardized way to convert
+/// various configuration types (primitives, enums, collections, etc.) into a string
+/// format suitable for the `ddtelemetry::data::payloads::Configuration` payload.
+///
+/// # Auto-Implementation
+///
+/// The trait is automatically implemented for common types using the `impl_config_value_provider!` macro:
+/// - Basic types: `bool`, `u32`, `i32`, `f64`, `Cow<'static, str>`, etc.
+/// - Option wrappers: `Option<String>`, etc.
+/// - Custom types: `ServiceName`, `LevelFilter`, `ParsedSamplingRules`, etc.
+///
+/// # Usage in Configuration System
+///
+/// This trait is primarily used by `ConfigItem<T>` and `ConfigItemWithOverride<T>`
+/// to serialize their current values for telemetry reporting, regardless of the value's source
+/// (default, environment variable, programmatic setting, or remote configuration).
 trait ConfigurationValueProvider {
+    /// Returns the string representation of this configuration value for telemetry reporting.
+    ///
+    /// This method should produce a concise, human-readable string that represents
+    /// the current value in a format suitable for debugging and telemetry analysis.
     fn get_configuration_value(&self) -> String;
 }
 
@@ -288,7 +311,7 @@ impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItemWithOverride<T> 
         Self {
             config_item: self.config_item.clone(),
             override_value: arc_swap::ArcSwapOption::new(self.override_value.load_full()),
-            source_type: self.source_type.clone(),
+            source_type: self.source_type,
         }
     }
 }
