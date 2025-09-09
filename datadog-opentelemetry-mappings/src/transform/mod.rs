@@ -470,7 +470,7 @@ pub fn otel_span_to_dd_span(otel_span: SdkSpan, otel_resource: &Resource) -> DdS
 
     let span_extracted = SpanExtractArgs::new(&otel_span, otel_resource);
 
-    // Top level spans are computed latter
+    // Top level spans are computed later
     let is_top_level = false;
     let mut dd_span = otel_span_to_dd_span_minimal(&span_extracted, is_top_level);
 
