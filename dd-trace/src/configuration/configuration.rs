@@ -275,45 +275,70 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 }
 
 /// Configuration item that tracks the value of a setting and where it came from
-/// And allows to update rc_value
+/// And allows to update the corresponding value with a ConfigSourceOrigin
 #[derive(Debug)]
-struct ConfigItemRc<T: ConfigurationValueProvider> {
+struct ConfigItemWithOverride<T: ConfigurationValueProvider> {
     config_item: ConfigItem<T>,
-    rc_value: arc_swap::ArcSwapOption<T>,
+    override_value: arc_swap::ArcSwapOption<T>,
+    source_type: ConfigSourceOrigin,
 }
 
-impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItemRc<T> {
+impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItemWithOverride<T> {
     fn clone(&self) -> Self {
         Self {
             config_item: self.config_item.clone(),
-            rc_value: arc_swap::ArcSwapOption::new(self.rc_value.load_full()),
+            override_value: arc_swap::ArcSwapOption::new(self.override_value.load_full()),
+            source_type: self.source_type.clone(),
         }
     }
 }
 
-impl<T: Clone + ConfigurationValueProvider> ConfigItemRc<T> {
-    /// Creates a new ConfigItemRc with a default value
-    fn new(name: &'static str, default: T) -> Self {
+impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
+    fn new_code(name: &'static str, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
-            rc_value: arc_swap::ArcSwapOption::const_empty(),
+            override_value: arc_swap::ArcSwapOption::const_empty(),
+            source_type: ConfigSourceOrigin::Code,
         }
     }
 
-    fn set_rc(&self, value: T) {
-        self.rc_value.store(Some(Arc::new(value)));
+    fn new_rc(name: &'static str, default: T) -> Self {
+        Self {
+            config_item: ConfigItem::new(name, default),
+            override_value: arc_swap::ArcSwapOption::const_empty(),
+            source_type: ConfigSourceOrigin::RemoteConfig,
+        }
     }
 
-    /// Unsets the remote config value
-    #[allow(dead_code)] // Will be used when implementing remote configuration
-    fn unset_rc(&self) {
-        self.rc_value.store(None);
+    fn source(&self) -> ConfigSourceOrigin {
+        if self.override_value.load().is_some() {
+            self.source_type
+        } else {
+            self.config_item.source()
+        }
+    }
+
+    /// Replaces override value only if origin matches source_type
+    fn set_override_value(&self, value: T, source: ConfigSourceOrigin) {
+        if source == self.source_type {
+            self.override_value.store(Some(Arc::new(value)));
+        }
+    }
+
+    /// Unsets the override value
+    fn unset_override_value(&self) {
+        self.override_value.store(None);
+    }
+
+    /// Sets Code value only if source_type is Code
+    fn set_code(&mut self, value: T) {
+        self.set_value_source(value, ConfigSourceOrigin::Code);
     }
 
     /// Sets a value from a specific source
     fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
-        if source == ConfigSourceOrigin::RemoteConfig {
-            self.set_rc(value);
+        if source == self.source_type {
+            self.set_override_value(value, source);
         } else {
             self.config_item.set_value_source(value, source);
         }
@@ -322,27 +347,12 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItemRc<T> {
     /// Gets the current value based on priority:
     /// remote_config > code > env_var > default
     fn value(&self) -> ConfigItemRef<'_, T> {
-        let rc = self.rc_value.load();
-        if rc.is_some() {
-            ConfigItemRef::ArcRef(rc)
+        let override_value = self.override_value.load();
+        if override_value.is_some() {
+            ConfigItemRef::ArcRef(override_value)
         } else {
             ConfigItemRef::Ref(self.config_item.value())
         }
-    }
-
-    /// Gets the source of the current value
-    #[allow(dead_code)] // Used in tests and will be used for remote configuration
-    fn source(&self) -> ConfigSourceOrigin {
-        if self.rc_value.load().is_some() {
-            ConfigSourceOrigin::RemoteConfig
-        } else {
-            self.config_item.source()
-        }
-    }
-
-    /// Sets the code value (convenience method)
-    fn set_code(&mut self, value: T) {
-        self.config_item.code_value = Some(value);
     }
 
     /// Gets a Configuration object used as telemetry payload
@@ -428,7 +438,7 @@ impl ConfigItemSourceUpdater<'_> {
     }
 }
 
-type SamplingRulesConfigItem = ConfigItemRc<ParsedSamplingRules>;
+type SamplingRulesConfigItem = ConfigItemWithOverride<ParsedSamplingRules>;
 
 /// Manages extra services discovered at runtime
 /// This is used to track services beyond the main service for remote configuration
@@ -662,7 +672,7 @@ pub struct Config {
     language: &'static str,
 
     // # Service tagging
-    service: ConfigItem<ServiceName>,
+    service: ConfigItemWithOverride<ServiceName>,
     env: ConfigItem<Option<String>>,
     version: ConfigItem<Option<String>>,
 
@@ -770,7 +780,7 @@ impl Config {
         let parsed_sampling_rules_config =
             sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES");
 
-        let mut sampling_rules_item = ConfigItemRc::new(
+        let mut sampling_rules_item = ConfigItemWithOverride::new_rc(
             parsed_sampling_rules_config.name,
             ParsedSamplingRules::default(), // default is empty rules
         );
@@ -782,12 +792,17 @@ impl Config {
 
         let cisu = ConfigItemSourceUpdater { sources };
 
+        let mut service = default.service;
+        if let Some(ConfigKey { value, .. }) = sources.get("DD_SERVICE").value {
+            service.set_value_source(ServiceName::Configured(value), ConfigSourceOrigin::EnvVar);
+        }
+
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string("DD_SERVICE", default.service, ServiceName::Configured),
+            service,
             env: cisu.update_string("DD_ENV", default.env, Some),
             version: cisu.update_string("DD_VERSION", default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -1031,8 +1046,10 @@ impl Config {
         if rules.is_empty() {
             self.clear_remote_sampling_rules();
         } else {
-            self.trace_sampling_rules
-                .set_rc(ParsedSamplingRules { rules });
+            self.trace_sampling_rules.set_override_value(
+                ParsedSamplingRules { rules },
+                ConfigSourceOrigin::RemoteConfig,
+            );
 
             // Notify callbacks about the sampling rules update
             self.remote_config_callbacks.lock().unwrap().notify_update(
@@ -1043,8 +1060,17 @@ impl Config {
         Ok(())
     }
 
+    pub fn update_service_name(&self, service_name: Option<String>) {
+        if let Some(service_name) = service_name {
+            self.service.set_override_value(
+                ServiceName::Configured(service_name),
+                ConfigSourceOrigin::Code,
+            );
+        }
+    }
+
     pub fn clear_remote_sampling_rules(&self) {
-        self.trace_sampling_rules.unset_rc();
+        self.trace_sampling_rules.unset_override_value();
 
         self.remote_config_callbacks.lock().unwrap().notify_update(
             &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
@@ -1151,7 +1177,7 @@ fn default_config() -> Config {
         runtime_id: Config::process_runtime_id(),
         env: ConfigItem::new("DD_ENV", None),
         // TODO(paullgdc): Default service naming detection, probably from arg0
-        service: ConfigItem::new("DD_SERVICE", ServiceName::Default),
+        service: ConfigItemWithOverride::new_code("DD_SERVICE", ServiceName::Default),
         version: ConfigItem::new("DD_VERSION", None),
         global_tags: ConfigItem::new("DD_TAGS", Vec::new()),
 
@@ -1161,7 +1187,7 @@ fn default_config() -> Config {
         dogstatsd_agent_host: ConfigItem::new("DD_DOGSTATSD_HOST", Cow::Borrowed("localhost")),
         dogstatsd_agent_port: ConfigItem::new("DD_DOGSTATSD_PORT", 8125),
         dogstatsd_agent_url: ConfigItem::new("DD_DOGSTATSD_URL", Cow::Borrowed("")),
-        trace_sampling_rules: ConfigItemRc::new(
+        trace_sampling_rules: ConfigItemWithOverride::new_rc(
             "DD_TRACE_SAMPLING_RULES",
             ParsedSamplingRules::default(), // Empty rules by default
         ),
@@ -1841,8 +1867,10 @@ mod tests {
     #[test]
     fn test_config_item_priority() {
         // Test that ConfigItem respects priority: remote_config > code > env_var > default
-        let mut config_item =
-            ConfigItemRc::new("DD_TRACE_SAMPLING_RULES", ParsedSamplingRules::default());
+        let mut config_item = ConfigItemWithOverride::new_rc(
+            "DD_TRACE_SAMPLING_RULES",
+            ParsedSamplingRules::default(),
+        );
 
         // Default value
         assert_eq!(config_item.source(), ConfigSourceOrigin::Default);
@@ -1885,7 +1913,7 @@ mod tests {
         assert_eq!(config_item.value()[0].sample_rate, 0.8);
 
         // Unset RC falls back to code
-        config_item.unset_rc();
+        config_item.unset_override_value();
         assert_eq!(config_item.source(), ConfigSourceOrigin::Code);
         assert_eq!(config_item.value()[0].sample_rate, 0.5);
     }
@@ -2249,7 +2277,9 @@ mod tests {
 
         // Update ConfigItemRc via RC
         let expected_rc = ParsedSamplingRules::from_str(r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#).unwrap();
-        config.trace_sampling_rules.set_rc(expected_rc.clone());
+        config
+            .trace_sampling_rules
+            .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);
 
         let configuration_after_rc = &config.trace_sampling_rules.get_configuration();
         assert_eq!(
@@ -2262,7 +2292,7 @@ mod tests {
         );
 
         // Reset ConfigItemRc RC previous value
-        config.trace_sampling_rules.unset_rc();
+        config.trace_sampling_rules.unset_override_value();
 
         let configuration = &config.trace_sampling_rules.get_configuration();
         assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
