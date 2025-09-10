@@ -922,7 +922,7 @@ impl Config {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
 
-    pub fn get_config_items(&self) -> Vec<Configuration> {
+    pub fn get_telemetry_configuration(&self) -> Vec<Configuration> {
         vec![
             self.service.get_configuration(),
             self.env.get_configuration(),

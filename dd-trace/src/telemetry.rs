@@ -44,7 +44,7 @@ impl TelemetryHandle for TelemetryWorkerHandle {
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
         if let Some(config) = config {
             config
-                .get_config_items()
+                .get_telemetry_configuration()
                 .into_iter()
                 .for_each(|config_item| {
                     self.try_send_msg(worker::TelemetryActions::AddConfig(config_item))
