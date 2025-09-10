@@ -10,11 +10,11 @@ use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 use rustc_version_runtime::version;
 
-use crate::configuration::sources::{ConfigKey, ConfigSourceOrigin};
+use crate::configuration::sources::{
+    CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
+};
 use crate::log::LevelFilter;
 use crate::{dd_error, dd_warn};
-
-use super::sources::{CompositeConfigSourceResult, CompositeSource};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -209,6 +209,18 @@ trait ConfigurationValueProvider {
     fn get_configuration_value(&self) -> String;
 }
 
+/// A trait for updating configuration values while tracking their origin source.
+///
+/// This trait provides a standardized interface for setting configuration values on
+/// configuration items while preserving information about where the value came from
+/// (environment variables, programmatic code, remote configuration, etc.). This source
+/// tracking is essential for implementing proper configuration precedence rules and
+/// for telemetry reporting.
+trait ValueSourceUpdater<T> {
+    /// Updates the configuration value while recording its source origin.
+    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin);
+}
+
 /// Configuration item that tracks the value of a setting and where it came from
 /// This allows us to manage configuration precedence
 #[derive(Debug)]
@@ -238,20 +250,6 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             default_value: default,
             env_value: None,
             code_value: None,
-        }
-    }
-
-    /// Sets a value from a specific source
-    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
-        match source {
-            ConfigSourceOrigin::Code => self.code_value = Some(value),
-            ConfigSourceOrigin::EnvVar => self.env_value = Some(value),
-            ConfigSourceOrigin::RemoteConfig => {
-                dd_warn!("Cannot set a value from RC");
-            }
-            ConfigSourceOrigin::Default => {
-                dd_warn!("Cannot set default value after initialization");
-            }
         }
     }
 
@@ -288,6 +286,22 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id: None,
+        }
+    }
+}
+
+impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
+    /// Sets a value from a specific source
+    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
+        match source {
+            ConfigSourceOrigin::Code => self.code_value = Some(value),
+            ConfigSourceOrigin::EnvVar => self.env_value = Some(value),
+            ConfigSourceOrigin::RemoteConfig => {
+                dd_warn!("Cannot set a value from RC");
+            }
+            ConfigSourceOrigin::Default => {
+                dd_warn!("Cannot set default value after initialization");
+            }
         }
     }
 }
@@ -353,15 +367,6 @@ impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
         self.set_value_source(value, ConfigSourceOrigin::Code);
     }
 
-    /// Sets a value from a specific source
-    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
-        if source == self.source_type {
-            self.set_override_value(value, source);
-        } else {
-            self.config_item.set_value_source(value, source);
-        }
-    }
-
     /// Gets the current value based on priority:
     /// remote_config > code > env_var > default
     fn value(&self) -> ConfigItemRef<'_, T> {
@@ -384,20 +389,32 @@ impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
     }
 }
 
+impl<T: Clone + ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItemWithOverride<T> {
+    /// Sets a value from a specific source
+    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
+        if source == self.source_type {
+            self.set_override_value(value, source);
+        } else {
+            self.config_item.set_value_source(value, source);
+        }
+    }
+}
+
 struct ConfigItemSourceUpdater<'a> {
     sources: &'a CompositeSource,
 }
 
 impl ConfigItemSourceUpdater<'_> {
-    fn apply_result<T, U, F>(
+    fn apply_result<T, U, V, F>(
         &self,
         item_name: &'static str,
-        mut item: ConfigItem<T>,
+        mut item: V,
         result: CompositeConfigSourceResult<U>,
         transform: F,
-    ) -> ConfigItem<T>
+    ) -> V
     where
         T: Clone + ConfigurationValueProvider,
+        V: ValueSourceUpdater<T>,
         F: FnOnce(U) -> T,
     {
         if !result.errors.is_empty() {
@@ -414,24 +431,21 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value (no transformation)
-    fn update_parsed<T>(&self, item_name: &'static str, default: ConfigItem<T>) -> ConfigItem<T>
+    fn update_parsed<T, V>(&self, item_name: &'static str, default: V) -> V
     where
         T: Clone + FromStr + ConfigurationValueProvider,
         T::Err: std::fmt::Display,
+        V: ValueSourceUpdater<T>,
     {
         let result = self.sources.get_parse::<T>(item_name);
         self.apply_result(item_name, default, result, |value| value)
     }
 
     /// Updates a ConfigItem from sources string with transformation
-    fn update_string<T, F>(
-        &self,
-        item_name: &'static str,
-        default: ConfigItem<T>,
-        transform: F,
-    ) -> ConfigItem<T>
+    pub fn update_string<T, V, F>(&self, item_name: &'static str, default: V, transform: F) -> V
     where
         T: Clone + ConfigurationValueProvider,
+        V: ValueSourceUpdater<T>,
         F: FnOnce(String) -> T,
     {
         let result = self.sources.get(item_name);
@@ -439,21 +453,50 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
-    fn update_parsed_with_transform<T, U, F>(
+    pub fn update_parsed_with_transform<T, U, V, F>(
         &self,
         item_name: &'static str,
-        default: ConfigItem<T>,
+        default: V,
         transform: F,
-    ) -> ConfigItem<T>
+    ) -> V
     where
         T: Clone + ConfigurationValueProvider,
         U: FromStr,
         U::Err: std::fmt::Display,
+        V: ValueSourceUpdater<T>,
         F: FnOnce(U) -> T,
     {
         let result = self.sources.get_parse::<U>(item_name);
         self.apply_result(item_name, default, result, transform)
     }
+}
+
+/// Macro to implement ConfigurationValueProvider trait for types that implement Display
+macro_rules! impl_config_value_provider {
+  // Handle Option<T> specially
+  (option: $($type:ty),* $(,)?) => {
+      $(
+          impl ConfigurationValueProvider for Option<$type> {
+              fn get_configuration_value(&self) -> String {
+                  match self {
+                      Some(value) => value.to_string(),
+                      None => String::new(),
+                  }
+              }
+          }
+      )*
+  };
+
+  // Handle regular types
+  (simple: $($type:ty),* $(,)?) => {
+      $(
+          impl ConfigurationValueProvider for $type {
+              fn get_configuration_value(&self) -> String {
+                  self.to_string()
+              }
+          }
+      )*
+  };
 }
 
 type SamplingRulesConfigItem = ConfigItemWithOverride<ParsedSamplingRules>;
@@ -611,34 +654,6 @@ impl Display for ServiceName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
-}
-
-/// Macro to implement ConfigurationValueProvider trait for types that implement Display
-macro_rules! impl_config_value_provider {
-    // Handle Option<T> specially
-    (option: $($type:ty),* $(,)?) => {
-        $(
-            impl ConfigurationValueProvider for Option<$type> {
-                fn get_configuration_value(&self) -> String {
-                    match self {
-                        Some(value) => value.to_string(),
-                        None => String::new(),
-                    }
-                }
-            }
-        )*
-    };
-
-    // Handle regular types
-    (simple: $($type:ty),* $(,)?) => {
-        $(
-            impl ConfigurationValueProvider for $type {
-                fn get_configuration_value(&self) -> String {
-                    self.to_string()
-                }
-            }
-        )*
-    };
 }
 
 impl ConfigurationValueProvider for Vec<(String, String)> {
@@ -810,17 +825,12 @@ impl Config {
 
         let cisu = ConfigItemSourceUpdater { sources };
 
-        let mut service = default.service;
-        if let Some(ConfigKey { value, .. }) = sources.get("DD_SERVICE").value {
-            service.set_value_source(ServiceName::Configured(value), ConfigSourceOrigin::EnvVar);
-        }
-
         Self {
             runtime_id: default.runtime_id,
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service,
+            service: cisu.update_string("DD_SERVICE", default.service, ServiceName::Configured),
             env: cisu.update_string("DD_ENV", default.env, Some),
             version: cisu.update_string("DD_VERSION", default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
