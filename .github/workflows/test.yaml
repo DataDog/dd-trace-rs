@@ -55,13 +55,13 @@ jobs:
       - name: "[${{ steps.rust-version.outputs.version}}] test agent integration tests"
         if: runner.os == 'Linux'
         shell: bash
-        run: cargo nextest run --workspace  --profile ci --locked -E 'test(datadog_test_agent::)'
+        run: cargo nextest run --workspace  --profile ci --locked -E 'test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
       - name: "[${{ steps.rust-version.outputs.version}}] cargo nextest run --workspace  --profile ci --locked"
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
-        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(datadog_test_agent::)'
+        run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
       - name: Report Test Results
@@ -107,7 +107,7 @@ jobs:
           rust_version: cross-centos7
       - run: cargo install cross || true
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
-      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "datadog_test_agent::"
+      - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "integration_tests::"
 
   # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch of run-parametric.yml
   build-artifacts:
@@ -126,12 +126,10 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@a675fcc0b1d582485c57c4ab0c30cf2f9eb217ea # igor/rust-the-germ
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@65bd7a6cd426f30bcabab6616fecdac7a882654e  # main
     secrets: inherit
     with:
       library: rust
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: igor/rust-the-germ
-      _experimental_runs_on: '{ "group": "Large Runner Shared Public" }'

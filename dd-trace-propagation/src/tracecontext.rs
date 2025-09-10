@@ -17,6 +17,7 @@ use crate::{
 
 use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+    dd_debug,
     sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
 };
 
@@ -57,6 +58,8 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
     if context.trace_id != 0 && context.span_id != 0 {
         inject_traceparent(context, carrier);
         inject_tracestate(context, carrier);
+    } else {
+        dd_debug!("Propagator (tracecontext): skipping inject");
     }
 }
 
@@ -69,11 +72,13 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 
     let flags = context
         .sampling
-        .and_then(|sampling| sampling.priority)
+        .priority
         .map(|priority| if priority.is_keep() { "01" } else { "00" })
         .unwrap_or("00");
 
     let traceparent = format!("00-{trace_id}-{parent_id}-{flags}");
+
+    dd_debug!("Propagator (tracecontext): injecting traceparent: {traceparent}");
 
     carrier.set(TRACEPARENT_KEY, traceparent);
 }
@@ -81,10 +86,7 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let mut tracestate_parts = vec![];
 
-    let priority = context
-        .sampling
-        .and_then(|sampling| sampling.priority)
-        .unwrap_or(priority::USER_KEEP);
+    let priority = context.sampling.priority.unwrap_or(priority::USER_KEEP);
 
     tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{priority}"));
 
@@ -142,7 +144,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         })
         .unwrap_or_default();
 
-    let parts = vec![("dd".to_string(), dd)];
+    let dd_part = vec![("dd".to_string(), dd)];
 
     let additional_parts = context
         .tracestate
@@ -152,18 +154,19 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 
     // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
     let all_parts = match additional_parts {
-        Some(additional) => [parts, additional.into_iter().take(31).collect()].concat(),
-        None => parts,
+        Some(additional) => [dd_part, additional.into_iter().take(31).collect()].concat(),
+        None => dd_part,
     };
 
-    carrier.set(
-        TRACESTATE_KEY,
-        all_parts
-            .into_iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<_>>()
-            .join(TRACESTATE_VALUES_SEPARATOR),
-    );
+    let tracestate = all_parts
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join(TRACESTATE_VALUES_SEPARATOR);
+
+    dd_debug!("Propagator (tracecontext): injecting tracestate: {tracestate}");
+
+    carrier.set(TRACESTATE_KEY, tracestate);
 }
 
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
@@ -171,6 +174,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
     match extract_traceparent(tp) {
         Ok(traceparent) => {
+            dd_debug!("Propagator (tracecontext): traceparent extracted successfully");
+
             let mut tags = HashMap::new();
             tags.insert(TRACEPARENT_KEY.to_string(), tp.to_string());
 
@@ -179,6 +184,8 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             let mut mechanism = None;
             let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
                 if let Ok(tracestate) = Tracestate::from_str(ts) {
+                    dd_debug!("Propagator (tracecontext): tracestate header parsed successfully");
+
                     tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
 
                     // Convert from `t.` to `_dd.p.`
@@ -211,19 +218,21 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 
                     Some(tracestate)
                 } else {
+                    dd_debug!("Propagator (tracecontext): unable to parse tracestate header");
                     None
                 }
             } else {
+                dd_debug!("Propagator (tracecontext): no tracestate header found");
                 None
             };
 
             Some(SpanContext {
                 trace_id: traceparent.trace_id,
                 span_id: traceparent.span_id,
-                sampling: Some(Sampling {
+                sampling: Sampling {
                     priority: Some(sampling_priority),
                     mechanism,
-                }),
+                },
                 origin,
                 tags,
                 links: Vec::new(),
@@ -401,10 +410,7 @@ mod test {
             171_395_628_812_617_415_352_188_477_958_425_669_623
         );
         assert_eq!(context.span_id, 67_667_974_448_284_343);
-        assert_eq!(
-            context.sampling.unwrap().priority,
-            Some(priority::USER_KEEP)
-        );
+        assert_eq!(context.sampling.priority, Some(priority::USER_KEEP));
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(
             context.tags.get("traceparent").unwrap(),
@@ -541,12 +547,8 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert!(context.sampling.is_some());
-        assert!(context.sampling.unwrap().priority.is_some());
-        assert_eq!(
-            context.sampling.unwrap().priority.unwrap(),
-            priority::AUTO_REJECT
-        );
+        assert!(context.sampling.priority.is_some());
+        assert_eq!(context.sampling.priority.unwrap(), priority::AUTO_REJECT);
     }
 
     #[test]
@@ -590,10 +592,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("foo,bar=".to_string()),
             tags: HashMap::from([(
                 "_dd.p.foo bar,baz=".to_string(),
@@ -623,10 +625,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("abc".repeat(200)),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             links: vec![],
@@ -658,10 +660,10 @@ mod test {
         let mut context = SpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
-            sampling: Some(Sampling {
+            sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
-            }),
+            },
             origin: Some("rum".to_string()),
             tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             links: vec![],
