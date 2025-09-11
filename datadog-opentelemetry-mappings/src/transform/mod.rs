@@ -36,8 +36,8 @@ pub mod attribute_keys;
 pub mod otel_util;
 pub mod semconv_shim;
 
-#[cfg(test)]
-mod transform_tests;
+#[cfg(feature = "test-utils")]
+pub mod transform_tests;
 
 use attribute_keys::*;
 use otel_util::*;

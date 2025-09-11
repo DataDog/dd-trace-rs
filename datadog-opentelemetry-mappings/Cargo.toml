@@ -20,3 +20,17 @@ datadog-trace-utils = { workspace = true }
 tinybytes = { workspace = true }
 
 dd-trace = { path = "../dd-trace" }
+
+[dev-dependencies]
+criterion = "0.5.1"
+datadog-opentelemetry-mappings = { path = "./", features = ["test-utils"] }
+stats_alloc = { version = "0.1.10" }
+
+[features]
+test-utils = []
+
+[[bench]]
+name = "main"
+harness = false
+path = "benches/main.rs"
+features = ["test-utils"]
