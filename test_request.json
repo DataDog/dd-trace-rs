@@ -1,0 +1,25 @@
+{
+  "client": {
+    "state": {
+      "root_version": 1,
+      "targets_version": 0,
+      "config_states": [],
+      "has_error": false
+    },
+    "id": "test-client-id",
+    "products": ["APM_TRACING"],
+    "is_tracer": true,
+    "client_tracer": {
+      "runtime_id": "test-runtime-id",
+      "language": "rust",
+      "tracer_version": "0.0.1",
+      "service": "dd-trace-rs-rc-test-service",
+      "extra_services": [],
+      "env": "dd-trace-rs-test-env",
+      "app_version": "1.0.0",
+      "tags": []
+    },
+    "capabilities": "AAAAAAAQAAA="
+  },
+  "cached_target_files": []
+}
