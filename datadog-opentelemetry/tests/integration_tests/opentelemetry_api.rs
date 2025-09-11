@@ -191,13 +191,15 @@ async fn test_remote_config_sampling_rates() {
             r##"{
             "path": "datadog/2/APM_TRACING/1234/config",
             "msg": {
-                "tracing_sampling_rules": [
-                    {
-                        "resource": "test-span",
-                        "sample_rate": 1.0,
-                        "provenance": "customer"
-                    }
-                ]
+                "lib_config": {
+                    "tracing_sampling_rules": [
+                        {
+                            "resource": "test-span",
+                            "sample_rate": 1.0,
+                            "provenance": "customer"
+                        }
+                    ]
+                }
             }
         }"##,
             None,
