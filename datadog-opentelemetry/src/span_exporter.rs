@@ -9,8 +9,8 @@ use std::{
 };
 
 use data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error::TraceExporterError, TraceExporter, TraceExporterBuilder,
-    TraceExporterOutputFormat,
+    agent_response::AgentResponse, error as trace_exporter_error, error::TraceExporterError,
+    TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use datadog_opentelemetry_mappings::CachedConfig;
 use opentelemetry_sdk::{
@@ -180,7 +180,6 @@ impl DatadogExporter {
                 .set_language_version(config.language_version())
                 .set_service(config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
-                .set_client_computed_top_level()
                 .enable_agent_rates_payload_version();
 
             if config.trace_stats_computation_enabled() {
@@ -300,13 +299,32 @@ impl DatadogExporter {
             .take()
             .ok_or(OTelSdkError::AlreadyShutdown)?
             .join()
-            .map_err(|_| {
-                OTelSdkError::InternalFailure("DatadogExporter.join: worker panicked".to_string())
+            .map_err(|p| {
+                if let Some(panic) = p
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| p.downcast_ref::<&str>().copied())
+                {
+                    OTelSdkError::InternalFailure(format!(
+                        "DatadogExporter.join: worker panicked: {}",
+                        panic
+                    ))
+                } else {
+                    OTelSdkError::InternalFailure(
+                        "DatadogExporter.join: worker panicked: error message unknown".to_string(),
+                    )
+                }
             })?
             .map_err(|e| {
-                OTelSdkError::InternalFailure(format!(
-                    "DatadogExporter.join: worker exited with error: {e}"
-                ))
+                log_trace_exporter_error(&e);
+                match e {
+                    TraceExporterError::Shutdown(
+                        trace_exporter_error::ShutdownError::TimedOut(t),
+                    ) => OTelSdkError::Timeout(t),
+                    _ => OTelSdkError::InternalFailure(format!(
+                        "DatadogExporter.join: worker exited with error: {e}"
+                    )),
+                }
             })
     }
 }
@@ -554,22 +572,7 @@ impl TraceExporterWorker {
             if !data.is_empty() {
                 match self.export_trace_chunks(data) {
                     Ok(()) => {}
-                    Err(e) => {
-                        match e {
-                            OTelSdkError::AlreadyShutdown => dd_trace::dd_error!(
-                                "DatadogExporter: Export error - Shutdown already invoked {}",
-                                e,
-                            ),
-                            OTelSdkError::Timeout(_) => dd_trace::dd_error!(
-                                "DatadogExporter: Export error - Operation timed out {}",
-                                e,
-                            ),
-                            OTelSdkError::InternalFailure(_) => dd_trace::dd_error!(
-                                "DatadogExporter: Export error - Operation failed {}",
-                                e,
-                            ),
-                        };
-                    }
+                    Err(e) => log_trace_exporter_error(&e),
                 };
             }
             match message {
@@ -585,7 +588,10 @@ impl TraceExporterWorker {
             .shutdown(Some(SPAN_EXPORTER_SHUTDOWN_TIMEOUT))
     }
 
-    fn export_trace_chunks(&mut self, trace_chunks: Vec<TraceChunk>) -> OTelSdkResult {
+    fn export_trace_chunks(
+        &mut self,
+        trace_chunks: Vec<TraceChunk>,
+    ) -> Result<(), TraceExporterError> {
         let trace_chunks = trace_chunks
             .into_iter()
             .map(|TraceChunk { chunk }| -> Vec<_> {
@@ -596,13 +602,10 @@ impl TraceExporterWorker {
                 )
             })
             .collect();
-        match self.trace_exporter.send_trace_chunks(trace_chunks) {
-            Ok(agent_response) => {
-                self.handle_agent_response(agent_response);
-                Ok(())
-            }
-            Err(e) => Err(OTelSdkError::InternalFailure(e.to_string())),
-        }
+
+        let agent_response = self.trace_exporter.send_trace_chunks(trace_chunks)?;
+        self.handle_agent_response(agent_response);
+        Ok(())
     }
 
     fn handle_agent_response(&self, agent_response: AgentResponse) {
@@ -615,6 +618,64 @@ impl TraceExporterWorker {
             }
         }
     }
+}
+
+#[track_caller]
+fn log_trace_exporter_error(e: &TraceExporterError) {
+    match e {
+        // Exceptional errors
+        TraceExporterError::Builder(e) => {
+            dd_trace::dd_error!("DatadogExporter: Export error: Builder error: {}", e);
+        }
+        TraceExporterError::Internal(
+            trace_exporter_error::InternalErrorKind::InvalidWorkerState(state),
+        ) => {
+            dd_trace::dd_error!(
+                "DatadogExporter: Export error: Internal error: Invalid worker state: {}",
+                state
+            );
+        }
+
+        // Runtime errors
+        TraceExporterError::Deserialization(e) => {
+            dd_trace::dd_debug!(
+                "DatadogExporter: Export error: Deserialization error: {}",
+                e
+            );
+        }
+        TraceExporterError::Io(error) => {
+            dd_trace::dd_debug!("DatadogExporter: Export error: IO error: {}", error);
+        }
+        TraceExporterError::Network(e) => {
+            dd_trace::dd_debug!("DatadogExporter: Export error: Network error: {}", e);
+        }
+        TraceExporterError::Request(e) => {
+            dd_trace::dd_debug!("DatadogExporter: Export error: Request error: {}", e);
+        }
+        TraceExporterError::Serialization(error) => {
+            dd_trace::dd_debug!(
+                "DatadogExporter: Export error: Serialization error: {}",
+                error
+            );
+        }
+        TraceExporterError::Agent(trace_exporter_error::AgentErrorKind::EmptyResponse) => {
+            dd_trace::dd_debug!("DatadogExporter: Export error: Agent error: empty response");
+        }
+        TraceExporterError::Shutdown(
+            data_pipeline::trace_exporter::error::ShutdownError::TimedOut(duration),
+        ) => {
+            dd_trace::dd_debug!(
+                "DatadogExporter: Export error: Shutdown error: timed out after {}ms",
+                duration.as_millis()
+            );
+        }
+        TraceExporterError::Telemetry(e) => {
+            dd_trace::dd_debug!(
+                "DatadogExporter: Export error: Instrumentation telemetry error: {}",
+                e
+            );
+        }
+    };
 }
 
 #[derive(Debug, PartialEq)]

@@ -397,7 +397,10 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(
     shared_config: Arc<dd_trace::Config>,
-    tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    make_tracer(shared_config, tracer_provider_builder, None)
+    make_tracer(
+        shared_config,
+        opentelemetry_sdk::trace::TracerProviderBuilder::default(),
+        None,
+    )
 }
