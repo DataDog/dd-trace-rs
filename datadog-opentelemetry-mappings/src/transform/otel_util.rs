@@ -5,34 +5,31 @@ use std::borrow::Cow;
 
 use super::{attribute_keys::*, semconv_shim};
 
-use opentelemetry::{trace::SpanKind, StringValue, Value};
+use opentelemetry::{trace::SpanKind, Value};
 use opentelemetry_semantic_conventions::{self as semconv};
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
-pub trait OtelSpan {
-    fn name(&self) -> Cow<'static, str>;
+pub trait OtelSpan<'a> {
+    fn name(&self) -> &'a str;
     fn span_kind(&self) -> SpanKind;
     fn has_attr(&self, attr_key: AttributeKey) -> bool;
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'static, str>>;
+    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'a, str>>;
     fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T>;
 
-    fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'static, str> {
+    fn attr_len(&self) -> usize;
+
+    fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'a, str> {
         self.get_attr_str_opt(attr_key).unwrap_or_default()
     }
 
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<Value>;
-
-    fn get_res_attribute(&self, attr_key: AttributeKey) -> Value {
-        self.get_res_attribute_opt(attr_key)
-            .map(|v| v.to_string().into())
-            .unwrap_or(Value::String(StringValue::from("")))
-    }
+    fn res_len(&self) -> usize;
 }
 
 /// Returns the datadog operation name from the otel span
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
-pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
+pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
         return name;
     }
@@ -134,7 +131,7 @@ pub fn get_otel_operation_name_v2(span: &impl OtelSpan) -> Cow<'static, str> {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
-pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
+pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     let m = get_res_span_attributes(span, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
@@ -197,11 +194,11 @@ pub fn get_otel_resource_v2(span: &impl OtelSpan) -> Cow<'static, str> {
             return db_query;
         }
     }
-    span.name()
+    Cow::Borrowed(span.name())
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
-pub fn get_otel_status_code(span: &impl OtelSpan) -> u32 {
+pub fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> u32 {
     if let Some(code) = span.get_attr_num(HTTP_RESPONSE_STATUS_CODE) {
         return code;
     }
@@ -306,7 +303,7 @@ fn check_db_type(db_type: &str) -> &'static str {
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L250
-pub fn get_otel_span_type(span: &impl OtelSpan) -> Cow<'static, str> {
+pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     let typ = get_res_span_attributes(span, &[SPAN_TYPE]);
     if !typ.is_empty() {
         return typ;
@@ -326,7 +323,7 @@ pub fn get_otel_span_type(span: &impl OtelSpan) -> Cow<'static, str> {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
-pub fn get_otel_env(span: &impl OtelSpan) -> Cow<'static, str> {
+pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
     if !datadog_env.is_empty() {
         return datadog_env;
@@ -337,7 +334,7 @@ pub fn get_otel_env(span: &impl OtelSpan) -> Cow<'static, str> {
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
-pub fn get_otel_service(span: &impl OtelSpan) -> Cow<'static, str> {
+pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     // First, try to extract service from the span's attributes.
     if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
         if !service.is_empty() {
@@ -380,49 +377,32 @@ fn is_datadog_convention_key(k: &str) -> bool {
     ) || k.starts_with("datadog.")
 }
 
-pub enum BorrowedString<'a> {
-    Static(&'static str),
-    Owned(String),
-    Borrowed(&'a str),
-}
-
-impl BorrowedString<'_> {
-    pub fn as_str(&self) -> &str {
-        match self {
-            BorrowedString::Static(s) => s,
-            BorrowedString::Owned(s) => s,
-            BorrowedString::Borrowed(s) => s,
-        }
-    }
-
-    pub fn into_static_cow(self) -> Cow<'static, str> {
-        match self {
-            BorrowedString::Static(s) => Cow::Borrowed(s),
-            BorrowedString::Owned(s) => Cow::Owned(s),
-            BorrowedString::Borrowed(s) => Cow::Owned(s.to_string()),
-        }
-    }
-}
-
-pub fn get_dd_key_for_otlp_attribute(k: &str) -> BorrowedString<'_> {
+pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
     if let Some(mapped_key) = http_mappings(k) {
-        return BorrowedString::Static(mapped_key);
+        return Cow::Borrowed(mapped_key);
     }
     if let Some(suffix) = k.strip_prefix("http.request.header.") {
-        return BorrowedString::Owned(format!("http.request.headers.{suffix}"));
+        return Cow::Owned(format!("http.request.headers.{suffix}"));
     }
     if is_datadog_convention_key(k) {
-        return BorrowedString::Static("");
+        return Cow::Borrowed("");
     }
-    BorrowedString::Borrowed(k)
+    Cow::Borrowed(k)
 }
 
-fn get_res_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow<'static, str> {
+fn get_res_span_attributes<'a>(
+    span: &impl OtelSpan<'a>,
+    attributes: &[AttributeKey],
+) -> Cow<'a, str> {
     for &attr_key in attributes {
-        let res_attr = span.get_res_attribute(attr_key);
-        if !res_attr.as_str().is_empty() {
-            return Cow::Owned(res_attr.to_string());
+        let Some(res_attr) = span.get_res_attribute_opt(attr_key) else {
+            continue;
+        };
+        let res_attr = res_attr.to_string();
+        if !res_attr.is_empty() {
+            return Cow::Owned(res_attr);
         }
+
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             return attr;
         }
@@ -430,7 +410,7 @@ fn get_res_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) ->
     Cow::Borrowed("")
 }
 
-fn get_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow<'static, str> {
+fn get_span_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> Cow<'a, str> {
     for &attr_key in attributes {
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             if !attr.is_empty() {
@@ -441,7 +421,7 @@ fn get_span_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow
     Cow::Borrowed("")
 }
 
-fn get_res_attributes(span: &impl OtelSpan, attributes: &[AttributeKey]) -> Cow<'static, str> {
+fn get_res_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> Cow<'a, str> {
     for &attr_key in attributes {
         let Some(res_attr) = span.get_res_attribute_opt(attr_key) else {
             continue;

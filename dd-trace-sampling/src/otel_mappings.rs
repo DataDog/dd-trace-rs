@@ -33,9 +33,9 @@ impl<'a> PreSampledSpan<'a> {
     }
 }
 
-impl OtelSpan for PreSampledSpan<'_> {
-    fn name(&self) -> Cow<'static, str> {
-        Cow::Owned(self.name.to_string())
+impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
+    fn name(&self) -> &'a str {
+        self.name
     }
 
     fn span_kind(&self) -> opentelemetry::trace::SpanKind {
@@ -63,7 +63,15 @@ impl OtelSpan for PreSampledSpan<'_> {
         T::try_from(i).ok()
     }
 
+    fn attr_len(&self) -> usize {
+        self.attributes.len()
+    }
+
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<opentelemetry::Value> {
         self.resource.get(&Key::from_static_str(attr_key.key()))
+    }
+
+    fn res_len(&self) -> usize {
+        self.resource.len()
     }
 }

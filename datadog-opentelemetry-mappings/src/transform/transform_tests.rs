@@ -3,15 +3,13 @@
 
 use std::{
     collections::HashMap,
-    fmt::{Debug, Write},
     str::FromStr,
     time::{Duration, SystemTime},
     vec,
 };
 
 use datadog_trace_utils::span::{
-    AttributeAnyValue as Any, AttributeArrayValue as Scalar, SpanBytes, SpanEvent, SpanEventBytes,
-    SpanLink, SpanLinkBytes,
+    AttributeAnyValue as Any, AttributeArrayValue as Scalar, SpanText,
 };
 
 use dd_trace::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
@@ -19,16 +17,24 @@ use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
 };
-use opentelemetry_sdk::Resource;
-use tinybytes::BytesString;
 
-use crate::{sdk_span::SdkSpan, transform::otel_span_to_dd_span};
+use crate::{
+    sdk_span::SdkSpan,
+    transform::{CowStr, DdSpanEvent, DdSpanLink},
+    DdSpan,
+};
 
 fn timestamp_nano(nanos: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)
 }
 
-fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
+impl From<&'static str> for CowStr<'static> {
+    fn from(s: &'static str) -> Self {
+        CowStr::from_static_str(s)
+    }
+}
+
+fn make_test_span_events() -> (Vec<Event>, Vec<DdSpanEvent<'static>>) {
     (
         vec![
             Event::new(
@@ -52,7 +58,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
             ),
         ],
         vec![
-            SpanEvent {
+            DdSpanEvent {
                 time_unix_nano: 100,
                 name: "boom".into(),
                 attributes: HashMap::from_iter([
@@ -63,7 +69,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
                     ("accuracy".into(), Any::SingleValue(Scalar::Double(2.4))),
                 ]),
             },
-            SpanEvent {
+            DdSpanEvent {
                 time_unix_nano: 400,
                 name: "exception".into(),
                 attributes: HashMap::from_iter([
@@ -85,7 +91,7 @@ fn make_test_span_events() -> (Vec<Event>, Vec<SpanEventBytes>) {
     )
 }
 
-fn make_test_span_links() -> (Vec<Link>, Vec<SpanLinkBytes>) {
+fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
     (
         vec![
             Link::new(
@@ -123,7 +129,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<SpanLinkBytes>) {
             ),
         ],
         vec![
-            SpanLink {
+            DdSpanLink {
                 trace_id: 81985529216486895,
                 trace_id_high: 18364758544493064720,
                 span_id: 12379813738877118345,
@@ -134,7 +140,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<SpanLinkBytes>) {
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
                 flags: 0,
             },
-            SpanLink {
+            DdSpanLink {
                 trace_id: 12379813738877118345,
                 trace_id_high: 12379813738877118345,
                 span_id: 18364758544493064720,
@@ -142,7 +148,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<SpanLinkBytes>) {
                 tracestate: "".into(),
                 flags: 0,
             },
-            SpanLink {
+            DdSpanLink {
                 trace_id: 12379813738877118345,
                 trace_id_high: 12379813738877118345,
                 span_id: 18364758544493064720,
@@ -154,25 +160,64 @@ fn make_test_span_links() -> (Vec<Link>, Vec<SpanLinkBytes>) {
     )
 }
 
-#[test]
-fn test_otel_span_to_dd_span() {
+pub struct TestSpan {
+    span_context: opentelemetry::trace::SpanContext,
+    parent_span_id: opentelemetry::trace::SpanId,
+    span_kind: opentelemetry::trace::SpanKind,
+    name: String,
+    start_time: SystemTime,
+    end_time: SystemTime,
+    attributes: Vec<opentelemetry::KeyValue>,
+    #[allow(dead_code)]
+    dropped_attributes_count: u32,
+    events: Vec<opentelemetry::trace::Event>,
+    #[allow(dead_code)]
+    dropped_event_count: u32,
+    links: Vec<opentelemetry::trace::Link>,
+    #[allow(dead_code)]
+    dropped_links_count: u32,
+    status: opentelemetry::trace::Status,
+    instrumentation_scope: opentelemetry::InstrumentationScope,
+}
+
+pub fn test_span_to_sdk_span(test_span: &TestSpan) -> SdkSpan<'_> {
+    SdkSpan {
+        span_context: &test_span.span_context,
+        parent_span_id: test_span.parent_span_id,
+        span_kind: test_span.span_kind.clone(),
+        name: &test_span.name,
+        start_time: test_span.start_time,
+        end_time: test_span.end_time,
+        attributes: &test_span.attributes,
+        dropped_attributes_count: test_span.dropped_attributes_count,
+        events: &test_span.events,
+        dropped_event_count: test_span.dropped_event_count,
+        links: &test_span.links,
+        dropped_links_count: test_span.dropped_links_count,
+        status: &test_span.status,
+        instrumentation_scope: &test_span.instrumentation_scope,
+    }
+}
+
+pub struct Test<'a> {
+    pub name: &'static str,
+    pub input_resource: Vec<(&'static str, &'static str)>,
+    pub input_span: TestSpan,
+    pub expected_out: DdSpan<'a>,
+}
+
+pub fn test_cases() -> Vec<Test<'static>> {
     const TEST_TRACE_ID: opentelemetry::TraceId = TraceId::from_bytes([
         0x72, 0xdf, 0x52, 0xa, 0xf2, 0xbd, 0xe7, 0xa5, 0x24, 0x0, 0x31, 0xea, 0xd7, 0x50, 0xe5,
         0xf3,
     ]);
     const TEST_SPAN_ID: opentelemetry::SpanId =
         SpanId::from_bytes([0x24, 0x0, 0x31, 0xea, 0xd7, 0x50, 0xe5, 0xf3]);
-    struct Test {
-        name: &'static str,
-        input_resource: Vec<(&'static str, &'static str)>,
-        input_span: SdkSpan,
-        expected_out: SpanBytes,
-    }
 
     let start_time = SystemTime::now();
     let end_time = start_time + std::time::Duration::from_nanos(200000000);
 
-    let tests: Vec<Test> = vec![
+    vec![
         Test {
             name: "basic",
             input_resource: vec![
@@ -180,7 +225,7 @@ fn test_otel_span_to_dd_span() {
                 ("service.version", "v1.2.3"),
                 ("env", "staging"),
             ],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -210,7 +255,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "server.request".into(),
                 resource: "/path".into(),
                 service: "pylons".into(),
@@ -256,7 +301,7 @@ fn test_otel_span_to_dd_span() {
                 ("service.name", "myservice"),
                 ("peer.service", "mypeerservice"),
             ],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -291,7 +336,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "myservice".into(),
@@ -351,7 +396,7 @@ fn test_otel_span_to_dd_span() {
                 ("user_agent.original", "sample_useragent"),
                 ("http.request.header.example", "test"),
             ],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -385,7 +430,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "pylons".into(),
@@ -450,7 +495,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "db_attributes",
             input_resource: vec![("env", "staging"), ("service.name", "mongo")],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -486,7 +531,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "READ".into(),
                 resource: "/path".into(),
                 service: "mongo".into(),
@@ -529,7 +574,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "http_naming_old_semconv",
             input_resource: vec![("env", "staging"), ("service.name", "document-uploader")],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -563,7 +608,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
@@ -604,7 +649,7 @@ fn test_otel_span_to_dd_span() {
         Test {
             name: "http_naming",
             input_resource: vec![("env", "staging"), ("service.name", "document-uploader")],
-            input_span: SdkSpan {
+            input_span: TestSpan {
                 span_context: SpanContext::new(
                     TEST_TRACE_ID,
                     TEST_SPAN_ID,
@@ -638,7 +683,7 @@ fn test_otel_span_to_dd_span() {
                     .with_version("v2")
                     .build(),
             },
-            expected_out: SpanBytes {
+            expected_out: DdSpan {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
@@ -676,68 +721,88 @@ fn test_otel_span_to_dd_span() {
                 meta_struct: HashMap::new(),
             },
         },
-    ];
-
-    for test in tests {
-        let input_resource = Resource::builder_empty()
-            .with_attributes(
-                test.input_resource
-                    .into_iter()
-                    .map(|(k, v)| KeyValue::new(k, v)),
-            )
-            .build();
-        let output = otel_span_to_dd_span(test.input_span, &input_resource);
-        hashmap_diff(&output.meta, &test.expected_out.meta);
-        hashmap_diff(&output.metrics, &test.expected_out.metrics);
-        assert_eq!(output, test.expected_out, "Test {} failed", test.name);
-    }
+    ]
 }
 
-#[track_caller]
-fn hashmap_diff<V: PartialEq + Debug>(
-    output: &HashMap<BytesString, V>,
-    expected: &HashMap<BytesString, V>,
-) {
-    let mut a = Vec::from_iter(output);
-    let mut b = Vec::from_iter(expected);
-    a.sort_by_key(|(k, _)| k.as_str());
-    b.sort_by_key(|(k, _)| k.as_str());
-    let mut a = a.into_iter().peekable();
-    let mut b = b.into_iter().peekable();
-    let mut message = String::new();
-    loop {
-        match (a.peek(), b.peek()) {
-            (Some(a_v), Some(b_v)) => match a_v.0.as_str().cmp(b_v.0.as_str()) {
-                std::cmp::Ordering::Less => {
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        fmt::{Debug, Write},
+    };
+
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::Resource;
+
+    use crate::transform::{otel_span_to_dd_span, CowStr};
+
+    use crate::transform::transform_tests::{test_cases, test_span_to_sdk_span};
+
+    #[test]
+    fn test_otel_span_to_dd_span() {
+        let tests = test_cases();
+        for test in tests {
+            let input_resource = Resource::builder_empty()
+                .with_attributes(
+                    test.input_resource
+                        .into_iter()
+                        .map(|(k, v)| KeyValue::new(k, v)),
+                )
+                .build();
+            let output =
+                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            hashmap_diff(&output.meta, &test.expected_out.meta);
+            hashmap_diff(&output.metrics, &test.expected_out.metrics);
+            assert_eq!(output, test.expected_out, "Test {} failed", test.name);
+        }
+    }
+
+    #[track_caller]
+    fn hashmap_diff<'a, V: PartialEq + Debug>(
+        output: &HashMap<CowStr<'a>, V>,
+        expected: &HashMap<CowStr<'a>, V>,
+    ) {
+        let mut a = Vec::from_iter(output);
+        let mut b = Vec::from_iter(expected);
+        a.sort_by_key(|(k, _)| k.as_str());
+        b.sort_by_key(|(k, _)| k.as_str());
+        let mut a = a.into_iter().peekable();
+        let mut b = b.into_iter().peekable();
+        let mut message = String::new();
+        loop {
+            match (a.peek(), b.peek()) {
+                (Some(a_v), Some(b_v)) => match a_v.0.as_str().cmp(b_v.0.as_str()) {
+                    std::cmp::Ordering::Less => {
+                        writeln!(&mut message, "a  :+{a_v:?}").unwrap();
+                        a.next();
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if a_v.1 != b_v.1 {
+                            writeln!(&mut message, "a!b: {a_v:?} != {b_v:?}").unwrap();
+                        } else {
+                            writeln!(&mut message, "a b: {b_v:?}").unwrap();
+                        }
+                        a.next();
+                        b.next();
+                    }
+                    std::cmp::Ordering::Greater => {
+                        writeln!(&mut message, "  b:+{b_v:?}").unwrap();
+                        b.next();
+                    }
+                },
+                (None, None) => break,
+                (Some(a_v), None) => {
                     writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                     a.next();
                 }
-                std::cmp::Ordering::Equal => {
-                    if a_v.1 != b_v.1 {
-                        writeln!(&mut message, "a!b: {a_v:?} != {b_v:?}").unwrap();
-                    } else {
-                        writeln!(&mut message, "a b: {b_v:?}").unwrap();
-                    }
-                    a.next();
-                    b.next();
-                }
-                std::cmp::Ordering::Greater => {
+                (None, Some(b_v)) => {
                     writeln!(&mut message, "  b:+{b_v:?}").unwrap();
                     b.next();
                 }
-            },
-            (None, None) => break,
-            (Some(a_v), None) => {
-                writeln!(&mut message, "a  :+{a_v:?}").unwrap();
-                a.next();
-            }
-            (None, Some(b_v)) => {
-                writeln!(&mut message, "  b:+{b_v:?}").unwrap();
-                b.next();
             }
         }
-    }
-    if output != expected {
-        eprintln!("Hashmaps are not equal :\n{message}");
+        if output != expected {
+            eprintln!("Hashmaps are not equal :\n{message}");
+        }
     }
 }
