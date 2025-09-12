@@ -12,6 +12,9 @@ pub use error::{Error, Result};
 pub mod log;
 pub mod telemetry;
 
+#[cfg(feature = "test-utils")]
+pub mod test_utils;
+
 /// Macro to catch panics and return a fallback value with error logging
 /// The fallback is only evaluated if a panic occurs
 #[macro_export]
