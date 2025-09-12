@@ -6,13 +6,12 @@
 
 use std::collections::hash_map;
 
-use datadog_opentelemetry_mappings::{CachedConfig, SdkSpan, VERSION_KEY};
-use datadog_trace_utils::span::SpanBytes as DdSpan;
+use datadog_opentelemetry_mappings::{CachedConfig, DdSpan, SdkSpan, SpanStr, VERSION_KEY};
+use datadog_trace_utils::span::SpanText;
 use dd_trace::sampling;
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-use tinybytes::BytesString;
 
 static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
 
@@ -26,7 +25,7 @@ fn otel_sampling_to_dd_sampling(
 ) {
     if let hash_map::Entry::Vacant(e) = dd_span
         .metrics
-        .entry(BytesString::from_static("_sampling_priority_v1"))
+        .entry(SpanStr::from_static_str("_sampling_priority_v1"))
     {
         if otel_trace_flags.is_sampled() {
             e.insert(sampling::priority::AUTO_KEEP.into_i8() as f64);
@@ -37,21 +36,20 @@ fn otel_sampling_to_dd_sampling(
 }
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_trace_chunk_to_dd_trace_chunk(
-    cached_config: &CachedConfig,
-    span_data: Vec<SpanData>,
-    otel_resource: &Resource,
-) -> Vec<DdSpan> {
+pub fn otel_trace_chunk_to_dd_trace_chunk<'a>(
+    cached_config: &'a CachedConfig,
+    span_data: &'a [SpanData],
+    otel_resource: &'a Resource,
+) -> Vec<DdSpan<'a>> {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
     span_data
-        .into_iter()
+        .iter()
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
-            let mut dd_span = datadog_opentelemetry_mappings::otel_span_to_dd_span(
-                SdkSpan::from_sdk_span_data(s),
-                otel_resource,
-            );
+            let sdk_span = SdkSpan::from_sdk_span_data(s);
+            let mut dd_span =
+                datadog_opentelemetry_mappings::otel_span_to_dd_span(&sdk_span, otel_resource);
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);
@@ -61,23 +59,28 @@ pub fn otel_trace_chunk_to_dd_trace_chunk(
         .collect()
 }
 
-fn add_config_metadata(
-    dd_span: &mut DdSpan,
-    cached_config: &CachedConfig,
-    otel_resource: &Resource,
+fn add_config_metadata<'a>(
+    dd_span: &mut DdSpan<'a>,
+    cached_config: &'a CachedConfig,
+    otel_resource: &'a Resource,
 ) {
-    if dd_span.service == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
-        dd_span.service = cached_config.service().clone();
+    if dd_span.service.as_str() == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
+        dd_span.service = SpanStr::from_str(cached_config.service());
     }
 
     for (key, value) in cached_config.global_tags() {
-        dd_span.meta.insert(key, value);
+        dd_span
+            .meta
+            .insert(SpanStr::from_str(key), SpanStr::from_str(value));
     }
 
     if let Some(version) = cached_config.version() {
         if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
             if dd_span.service.as_str() == service_name.as_str() {
-                dd_span.meta.insert(VERSION_KEY, version.clone());
+                dd_span.meta.insert(
+                    SpanStr::from_static_str(VERSION_KEY),
+                    SpanStr::from_str(version),
+                );
             }
         }
     }

@@ -847,11 +847,14 @@ dependencies = [
 name = "datadog-opentelemetry-mappings"
 version = "0.0.1"
 dependencies = [
+ "criterion",
+ "datadog-opentelemetry-mappings",
  "datadog-trace-utils",
  "dd-trace",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "serde",
  "tinybytes",
 ]
 

@@ -177,7 +177,7 @@ impl SamplingRule {
                 if rule_tag_key_str.starts_with("http.") {
                     let tag_match = span.attributes.iter().any(|kv| {
                         let dd_key_from_otel_attr = get_dd_key_for_otlp_attribute(kv.key.as_str());
-                        if dd_key_from_otel_attr.as_str() == rule_tag_key_str {
+                        if dd_key_from_otel_attr == rule_tag_key_str {
                             return self
                                 .match_attribute_value(&kv.value, matcher)
                                 .unwrap_or(false);
@@ -335,7 +335,7 @@ impl DatadogSampler {
     }
 
     /// Computes a key for service-based sampling
-    fn service_key(&self, span: &impl OtelSpan) -> String {
+    fn service_key<'a>(&self, span: &impl OtelSpan<'a>) -> String {
         // Get service directly from resource
         let service = get_otel_service(span).into_owned();
         // Get env from attributes
@@ -1540,12 +1540,13 @@ mod tests {
             Value::String("GET".into()),
         )];
 
+        let empty_resource: SdkResource = create_empty_resource();
         // Print the operation name that will be generated
         let http_client_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
             "",
             SpanKind::Client,
             &http_client_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             http_client_op_name, "http.client.request",
@@ -1574,7 +1575,7 @@ mod tests {
             "",
             SpanKind::Server,
             &http_server_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             http_server_op_name, "http.server.request",
@@ -1603,7 +1604,7 @@ mod tests {
             "",
             SpanKind::Client,
             &db_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             db_op_name, "postgresql.query",
@@ -1638,7 +1639,7 @@ mod tests {
             "",
             SpanKind::Consumer,
             &messaging_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             messaging_op_name, "kafka.process",
@@ -1664,7 +1665,7 @@ mod tests {
             "",
             SpanKind::Internal,
             &internal_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             internal_op_name, "internal",
@@ -1693,7 +1694,7 @@ mod tests {
             "",
             SpanKind::Server,
             &server_protocol_attrs,
-            &create_empty_resource(),
+            &empty_resource,
         ));
         assert_eq!(
             server_protocol_op_name, "http.server.request",

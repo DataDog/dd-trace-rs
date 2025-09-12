@@ -593,7 +593,7 @@ impl TraceExporterWorker {
         trace_chunks: Vec<TraceChunk>,
     ) -> Result<(), TraceExporterError> {
         let trace_chunks = trace_chunks
-            .into_iter()
+            .iter()
             .map(|TraceChunk { chunk }| -> Vec<_> {
                 ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
                     &self.cached_config,
