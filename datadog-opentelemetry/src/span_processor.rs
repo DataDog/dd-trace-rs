@@ -516,11 +516,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // set the shared resource in the DatadogSpanProcessor
         *self.resource.write().unwrap() = dd_resource.clone();
 
-        // init telemetry once service name has been resolved
+        // update config's service name and init telemetry once service name has been resolved
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        init_telemetry(&self.config, service_name);
+        self.config.update_service_name(service_name);
+
+        init_telemetry(&self.config);
     }
 }
 

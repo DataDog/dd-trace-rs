@@ -7,6 +7,5 @@ pub mod remote_config;
 mod sources;
 
 pub use configuration::{
-    Config, ConfigBuilder, ConfigItem, RemoteConfigUpdate, SamplingRuleConfig,
-    TracePropagationStyle,
+    Config, ConfigBuilder, RemoteConfigUpdate, SamplingRuleConfig, TracePropagationStyle,
 };
