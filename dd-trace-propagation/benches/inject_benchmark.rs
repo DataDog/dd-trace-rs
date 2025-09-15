@@ -1,3 +1,6 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use dd_trace::{
     configuration::TracePropagationStyle,
