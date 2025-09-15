@@ -395,14 +395,12 @@ fn get_res_span_attributes<'a>(
     attributes: &[AttributeKey],
 ) -> Cow<'a, str> {
     for &attr_key in attributes {
-        let Some(res_attr) = span.get_res_attribute_opt(attr_key) else {
-            continue;
+        if let Some(res_attr) = span.get_res_attribute_opt(attr_key) {
+            let res_attr = res_attr.to_string();
+            if !res_attr.is_empty() {
+                return Cow::Owned(res_attr);
+            }
         };
-        let res_attr = res_attr.to_string();
-        if !res_attr.is_empty() {
-            return Cow::Owned(res_attr);
-        }
-
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             return attr;
         }

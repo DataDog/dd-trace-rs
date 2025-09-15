@@ -102,7 +102,7 @@ fn set_meta_otlp_with_semconv_mappings<'a>(
         && !dd_span
             .meta
             .get(&mapped_key)
-            .map(|v| !v.as_str().is_empty())
+            .map(|v| v.as_str().is_empty())
             .unwrap_or(true)
     {
         return;
