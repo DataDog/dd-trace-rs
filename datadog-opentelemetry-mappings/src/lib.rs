@@ -16,7 +16,12 @@ pub use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
     otel_span_to_dd_span,
     otel_util::{OtelSpan, DEFAULT_OTLP_SERVICE_NAME},
+    DdSpan, SpanStr,
 };
+
+#[cfg(feature = "test-utils")]
+pub use transform::transform_tests;
+
 // Exposed for testing in the sampler
 pub use transform::semconv;
 pub use transform::semconv_shim;
