@@ -380,7 +380,7 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use dd_trace::{configuration::TracePropagationStyle, sampling::priority};
+    use dd_trace::{configuration::TracePropagationStyle, sampling::priority, Config};
 
     use crate::Propagator;
 
@@ -402,7 +402,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(
@@ -442,7 +442,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags["_dd.p.dm"], "-0");
@@ -464,7 +464,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags["_dd.p.dm"], "-0");
@@ -486,7 +486,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
@@ -508,7 +508,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
@@ -523,7 +523,7 @@ mod test {
 
         let propagator = TracePropagationStyle::TraceContext;
 
-        let context = propagator.extract(&headers);
+        let context = propagator.extract(&headers, &Config::builder().build());
 
         assert!(context.is_none());
     }
@@ -544,7 +544,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert!(context.sampling.priority.is_some());
@@ -567,7 +567,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let tracestate = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context")
             .tracestate
             .expect("tracestate should be extracted");
@@ -607,7 +607,11 @@ mod test {
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
-        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(
             carrier[TRACEPARENT_KEY],
@@ -637,7 +641,11 @@ mod test {
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
-        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(
             carrier[TRACEPARENT_KEY],
@@ -672,7 +680,11 @@ mod test {
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
-        TracePropagationStyle::TraceContext.inject(&mut context, &mut carrier);
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(
             carrier[TRACEPARENT_KEY],
