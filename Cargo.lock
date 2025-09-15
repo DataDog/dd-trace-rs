@@ -934,7 +934,9 @@ name = "dd-trace-propagation"
 version = "0.0.1"
 dependencies = [
  "assert_unordered",
+ "criterion",
  "dd-trace",
+ "dd-trace-propagation",
  "lazy_static",
  "opentelemetry",
  "pretty_assertions",
