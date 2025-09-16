@@ -181,7 +181,7 @@ impl<T: Deref> Deref for ConfigItemRef<'_, T> {
     }
 }
 
-impl<'a, T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef<'a, T> {
+impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef<'_, T> {
     fn get_configuration_value(&self) -> String {
         match self {
             ConfigItemRef::Ref(t) => t.get_configuration_value(),
