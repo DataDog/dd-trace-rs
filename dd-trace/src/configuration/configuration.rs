@@ -1003,13 +1003,8 @@ impl Config {
         self.language_version.as_str()
     }
 
-    pub fn service(&self) -> Cow<'_, str> {
-        match self.service.value() {
-            ConfigItemRef::Ref(t) => Cow::Borrowed(t.as_str()),
-            ConfigItemRef::ArcRef(guard) => {
-                Cow::Owned(guard.as_ref().unwrap().as_str().to_string())
-            }
-        }
+    pub fn service(&self) -> impl Deref<Target = str> + use<'_> {
+        self.service.value()
     }
 
     pub fn service_is_default(&self) -> bool {
@@ -1538,7 +1533,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.service(), "test-service");
+        assert_eq!(&*config.service(), "test-service");
         assert_eq!(config.env(), Some("test-env"));
         assert_eq!(config.trace_rate_limit(), 123);
         let rules = config.trace_sampling_rules();
