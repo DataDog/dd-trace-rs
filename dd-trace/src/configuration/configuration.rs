@@ -14,7 +14,7 @@ use crate::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
 use crate::log::LevelFilter;
-use crate::{dd_error, dd_warn};
+use crate::{dd_error, dd_warn, telemetry};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -1136,6 +1136,8 @@ impl Config {
             self.remote_config_callbacks.lock().unwrap().notify_update(
                 &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
             );
+
+            telemetry::notify_update_configuration(self.trace_sampling_rules.get_configuration());
         }
 
         Ok(())
@@ -1156,6 +1158,8 @@ impl Config {
         self.remote_config_callbacks.lock().unwrap().notify_update(
             &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
         );
+
+        telemetry::notify_update_configuration(self.trace_sampling_rules.get_configuration());
     }
 
     /// Add a callback to be called when sampling rules are updated via remote configuration

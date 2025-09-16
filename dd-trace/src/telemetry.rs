@@ -9,11 +9,11 @@ use std::{
 
 use anyhow::Error;
 use ddtelemetry::{
-    data,
+    data::{self, Configuration},
     worker::{self, TelemetryWorkerHandle},
 };
 
-use crate::{dd_error, dd_info, Config};
+use crate::{dd_debug, dd_error, dd_info, dd_warn, Config};
 
 static TELEMETRY: OnceLock<Arc<Mutex<Telemetry>>> = OnceLock::new();
 
@@ -27,6 +27,8 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
+
+    fn send_configuration(&self, configuration: Configuration) -> Result<(), anyhow::Error>;
 
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
@@ -57,6 +59,10 @@ impl TelemetryHandle for TelemetryWorkerHandle {
 
     fn send_stop(&self) -> Result<(), anyhow::Error> {
         self.send_stop()
+    }
+
+    fn send_configuration(&self, config_item: Configuration) -> Result<(), anyhow::Error> {
+        self.try_send_msg(worker::TelemetryActions::AddConfig(config_item))
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -164,6 +170,26 @@ fn add_log_error_inner<I: Into<String>>(
     handle.add_error_log(message.into(), stack).ok();
 }
 
+pub fn notify_update_configuration(configuration: Configuration) {
+    let Some(telemetry) = TELEMETRY.get() else {
+        return;
+    };
+    let Ok(mut telemetry) = telemetry.lock() else {
+        return;
+    };
+    if !telemetry.enabled || !telemetry.log_collection_enabled {
+        return;
+    }
+    let Some(handle) = telemetry.handle.as_mut() else {
+        return;
+    };
+    if let Err(err) = handle.send_configuration(configuration) {
+        dd_warn!("Telemetry: error sending configuration item {err}");
+    } else {
+        dd_debug!("Telemetry: configuration update sent sucessfully");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ddtelemetry::data;
@@ -203,6 +229,13 @@ mod tests {
         }
 
         fn send_stop(&self) -> Result<(), anyhow::Error> {
+            Ok(())
+        }
+
+        fn send_configuration(
+            &self,
+            _configuration: data::Configuration,
+        ) -> Result<(), anyhow::Error> {
             Ok(())
         }
 
