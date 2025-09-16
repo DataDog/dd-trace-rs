@@ -18,6 +18,7 @@ use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
     dd_debug, dd_error, dd_warn,
     sampling::{SamplingMechanism, SamplingPriority},
+    Config,
 };
 
 // Datadog Keys
@@ -29,9 +30,6 @@ const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
 const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
 pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
-
-// TODO: get max_length from config: DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH
-pub const DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH: usize = 512;
 
 lazy_static! {
     pub static ref INVALID_SEGMENT_REGEX: Regex =
@@ -50,7 +48,7 @@ lazy_static! {
     ];
 }
 
-pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
+pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config) {
     let tags = &mut context.tags;
 
     inject_trace_id(context.trace_id, carrier, tags);
@@ -66,7 +64,7 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
     }
 
     inject_sampling(context.sampling, carrier, tags);
-    inject_tags(tags, carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
+    inject_tags(tags, carrier, config.datadog_tags_max_length());
 }
 
 fn inject_trace_id(trace_id: u128, carrier: &mut dyn Injector, tags: &mut HashMap<String, String>) {
@@ -163,7 +161,7 @@ fn validate_tag_value(value: &str) -> bool {
     TAG_VALUE_REGEX.is_match(value)
 }
 
-pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+pub fn extract(carrier: &dyn Extractor, config: &Config) -> Option<SpanContext> {
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id?,
         Err(e) => {
@@ -181,7 +179,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     };
 
     let origin = extract_origin(carrier);
-    let tags = extract_tags(carrier, DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH);
+    let tags = extract_tags(carrier, config.datadog_tags_max_length());
 
     let sampling = match extract_sampling_priority(carrier) {
         Ok(sampling_priority) => Sampling {
@@ -373,7 +371,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 317_007_296_906_698_644_522_194);
@@ -406,7 +404,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -434,7 +432,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -456,14 +454,17 @@ mod test {
             ("x-datadog-origin".to_string(), "synthetics".to_string()),
             (
                 "x-datadog-tags".to_string(),
-                "_dd.p.test=value,any=tag".repeat(200).to_string(),
+                "_dd.p.test=value,any=tag".to_string(),
             ),
         ]);
 
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(
+                &headers,
+                &Config::builder().set_datadog_tags_max_length(5).build(),
+            )
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -491,7 +492,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -510,7 +511,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers)
+            .extract(&headers, &Config::builder().build())
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -541,7 +542,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], "1234");
         assert_eq!(carrier[DATADOG_PARENT_ID_KEY], "5678");
@@ -580,7 +581,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], lower.to_string());
         assert_eq!(carrier[DATADOG_ORIGIN_KEY], "synthetics");
@@ -601,7 +602,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.dm=-4");
     }
@@ -616,7 +617,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -632,7 +633,25 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+
+        assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
+    }
+
+    #[test]
+    fn test_inject_datadog_tags_disabled() {
+        let mut context = get_span_context(None);
+
+        context.tags.set("_dd.p.foo", "valid".to_string());
+
+        let propagator = TracePropagationStyle::Datadog;
+
+        let mut carrier = HashMap::new();
+        propagator.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().set_datadog_tags_max_length(0).build(),
+        );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -646,7 +665,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -661,7 +680,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier);
+        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.other=test");
     }

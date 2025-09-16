@@ -11,9 +11,9 @@ use dd_trace::{
 use dd_trace_propagation::{
     carrier::Injector,
     context::{Sampling, SpanContext},
-    DatadogCompositePropagator, Propagator,
+    DatadogCompositePropagator,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 #[global_allocator]
 static GLOBAL: ReportingAllocator<std::alloc::System> = ReportingAllocator::new(std::alloc::System);
@@ -89,8 +89,9 @@ fn bench_datadog_only_inject<M: criterion::measurement::Measurement + Measuremen
 ) {
     let config = Config::builder()
         .set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog])
+        .set_datadog_tags_max_length_with_no_limit(20000)
         .build();
-    let propagator = DatadogCompositePropagator::new(&config);
+    let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
     c.bench_function(&format!("inject_datadog_only_simple/{}", M::name()), |b| {
         b.iter_batched(
@@ -121,7 +122,7 @@ fn bench_tracecontext_only_inject<
     let config = Config::builder()
         .set_trace_propagation_style_inject(vec![TracePropagationStyle::TraceContext])
         .build();
-    let propagator = DatadogCompositePropagator::new(&config);
+    let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
     c.bench_function(
         &format!("inject_tracecontext_only_simple/{}", M::name()),

@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::Arc;
+
 use crate::context::{SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
 use config::{get_extractors, get_injectors};
@@ -17,47 +19,23 @@ pub mod trace_propagation_style;
 pub mod tracecontext;
 
 pub trait Propagator {
-    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
-    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector);
+    fn extract(&self, carrier: &dyn Extractor, config: &Config) -> Option<SpanContext>;
+    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config);
     fn keys(&self) -> &[String];
 }
 
 #[derive(Debug)]
 pub struct DatadogCompositePropagator {
-    #[allow(dead_code)]
+    config: Arc<Config>,
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
     keys: Vec<String>,
 }
 
-#[allow(clippy::never_loop)]
-impl Propagator for DatadogCompositePropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
-        let contexts = self.extract_available_contexts(carrier);
-        if contexts.is_empty() {
-            return None;
-        }
-
-        let context = Self::resolve_contexts(contexts, carrier);
-
-        Some(context)
-    }
-
-    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
-        self.injectors
-            .iter()
-            .for_each(|propagator| propagator.inject(context, carrier));
-    }
-
-    fn keys(&self) -> &[String] {
-        &self.keys
-    }
-}
-
 impl DatadogCompositePropagator {
     #[must_use]
-    pub fn new(config: &Config) -> Self {
-        let extractors = get_extractors(config);
+    pub fn new(config: Arc<Config>) -> Self {
+        let extractors = get_extractors(&config);
         let mut num_propagators = extractors.len();
         if config.trace_propagation_extract_first() {
             num_propagators = 1;
@@ -70,7 +48,7 @@ impl DatadogCompositePropagator {
             .copied()
             .collect();
 
-        let injectors: Vec<TracePropagationStyle> = get_injectors(config)
+        let injectors: Vec<TracePropagationStyle> = get_injectors(&config)
             .iter()
             .filter(|style| **style != TracePropagationStyle::None)
             .copied()
@@ -85,20 +63,43 @@ impl DatadogCompositePropagator {
         });
 
         Self {
+            config,
             extractors,
             injectors,
             keys,
         }
     }
 
+    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        let contexts = self.extract_available_contexts(carrier, &self.config);
+        if contexts.is_empty() {
+            return None;
+        }
+
+        let context = Self::resolve_contexts(contexts, carrier);
+
+        Some(context)
+    }
+
+    pub fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
+        self.injectors
+            .iter()
+            .for_each(|propagator| propagator.inject(context, carrier, &self.config));
+    }
+
+    pub fn keys(&self) -> &[String] {
+        &self.keys
+    }
+
     fn extract_available_contexts(
         &self,
         carrier: &dyn Extractor,
+        config: &Config,
     ) -> Vec<(SpanContext, TracePropagationStyle)> {
         let mut contexts = vec![];
 
         for propagator in self.extractors.iter() {
-            if let Some(context) = propagator.extract(carrier) {
+            if let Some(context) = propagator.extract(carrier, config) {
                 dd_debug!("Propagator ({propagator}): extracted {context:#?}");
                 contexts.push((context, *propagator));
             }
@@ -340,7 +341,7 @@ pub mod tests {
                         Config::builder().build()
                     };
 
-                    let propagator = DatadogCompositePropagator::new(&config);
+                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
                     let context = propagator.extract(&carrier).unwrap_or_default();
                     assert_eq!(context.trace_id, expected.trace_id);
                     assert_eq!(context.span_id, expected.span_id);
@@ -817,10 +818,10 @@ pub mod tests {
     fn get_config(
         extract: Option<Vec<TracePropagationStyle>>,
         _: Option<Vec<TracePropagationStyle>>,
-    ) -> Config {
+    ) -> Arc<Config> {
         let mut builder = Config::builder();
         builder.set_trace_propagation_style_extract(extract.unwrap_or_default());
-        builder.build()
+        Arc::new(builder.build())
     }
 
     #[test]
@@ -830,7 +831,7 @@ pub mod tests {
             TracePropagationStyle::TraceContext,
         ]);
         let config = get_config(extract, None);
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(propagator.extractors.len(), 2);
     }
@@ -839,7 +840,7 @@ pub mod tests {
     fn test_new_filter_empty_list_propagators() {
         let extract = Some(vec![]);
         let config = get_config(extract, None);
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(propagator.extractors.len(), 0);
     }
@@ -848,7 +849,7 @@ pub mod tests {
     fn test_new_no_propagators() {
         let extract = Some(vec![TracePropagationStyle::None]);
         let config = get_config(extract, None);
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(propagator.extractors.len(), 0);
     }
@@ -861,7 +862,7 @@ pub mod tests {
         ]);
         let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config.clone());
 
         let carrier = HashMap::from([
             (
@@ -887,7 +888,7 @@ pub mod tests {
                 "_dd.p.test=value,_dd.p.tid=9291375655657946024,any=tag".to_string(),
             ),
         ]);
-        let contexts = propagator.extract_available_contexts(&carrier);
+        let contexts = propagator.extract_available_contexts(&carrier, &config);
 
         assert_eq!(contexts.len(), 2);
     }
@@ -897,7 +898,7 @@ pub mod tests {
         let extract = Some(vec![TracePropagationStyle::Datadog]);
         let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config.clone());
 
         let carrier = HashMap::from([
             (
@@ -909,7 +910,7 @@ pub mod tests {
                 "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
             ),
         ]);
-        let contexts = propagator.extract_available_contexts(&carrier);
+        let contexts = propagator.extract_available_contexts(&carrier, &config);
 
         assert_eq!(contexts.len(), 0);
     }
@@ -924,9 +925,9 @@ pub mod tests {
         let mut builder = Config::builder();
         builder.set_trace_propagation_style_extract(extract);
         builder.set_trace_propagation_extract_first(true);
-        let config = builder.build();
+        let config = Arc::new(builder.build());
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         let carrier = HashMap::from([
             (
@@ -990,8 +991,8 @@ pub mod tests {
                         Config::builder()
                     };
 
-                    let config = builder.build();
-                    let propagator = DatadogCompositePropagator::new(&config);
+                    let config = Arc::new(builder.build());
+                    let propagator = DatadogCompositePropagator::new(config);
 
                     let mut carrier = HashMap::new();
                     propagator.inject(context, &mut carrier);
@@ -999,7 +1000,7 @@ pub mod tests {
                     assert_hashmap_keys(&expected, &carrier);
                     assert_hashmap_keys(&carrier, &expected);
                 }
-                            )*
+            )*
         }
     }
 
@@ -1217,7 +1218,7 @@ pub mod tests {
         ]);
         let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(
             vec![
@@ -1238,7 +1239,7 @@ pub mod tests {
         let extract = Some(vec![TracePropagationStyle::TraceContext]);
         let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(vec!["traceparent", "tracestate"], propagator.keys())
     }
@@ -1248,7 +1249,7 @@ pub mod tests {
         let extract = Some(vec![TracePropagationStyle::Datadog]);
         let config = get_config(extract, None);
 
-        let propagator = DatadogCompositePropagator::new(&config);
+        let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(
             vec![

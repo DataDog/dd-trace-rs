@@ -114,6 +114,8 @@ fn default_provenance() -> String {
 
 pub const TRACER_VERSION: &str = "0.0.1";
 
+const DATADOG_TAGS_MAX_LENGTH: usize = 512;
+
 #[derive(Debug, Default, Clone)]
 struct ParsedSamplingRules {
     rules: Vec<SamplingRuleConfig>,
@@ -503,6 +505,10 @@ pub struct Config {
     /// General callbacks to be called when configuration is updated from remote configuration
     /// Allows components like the DatadogSampler to be updated without circular imports
     remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
+
+    /// Max length of x-datadog-tags header. It only accepts values between 0 and 512.
+    /// The default value is 512 and x-datadog-tags header is not injected if value is 0.
+    datadog_tags_max_length: usize,
 }
 
 impl Config {
@@ -643,6 +649,17 @@ impl Config {
             extra_services_tracker: ExtraServicesTracker::new(),
             remote_config_enabled,
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
+            datadog_tags_max_length: to_val(
+                sources.get_parse("DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"),
+            )
+            .map(|max| {
+                if max > default.datadog_tags_max_length {
+                    default.datadog_tags_max_length
+                } else {
+                    max
+                }
+            })
+            .unwrap_or(default.datadog_tags_max_length),
         }
     }
 
@@ -853,6 +870,11 @@ impl Config {
     pub fn remote_config_enabled(&self) -> bool {
         self.remote_config_enabled
     }
+
+    /// Return tags max length
+    pub fn datadog_tags_max_length(&self) -> usize {
+        self.datadog_tags_max_length
+    }
 }
 
 impl std::fmt::Debug for Config {
@@ -935,6 +957,7 @@ fn default_config() -> Config {
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: true,
         remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
+        datadog_tags_max_length: DATADOG_TAGS_MAX_LENGTH,
     }
 }
 
@@ -1088,6 +1111,21 @@ impl ConfigBuilder {
 
     pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.remote_config_enabled = enabled;
+        self
+    }
+
+    pub fn set_datadog_tags_max_length(&mut self, length: usize) -> &mut Self {
+        self.config.datadog_tags_max_length = if length > DATADOG_TAGS_MAX_LENGTH {
+            DATADOG_TAGS_MAX_LENGTH
+        } else {
+            length
+        };
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
+        self.config.datadog_tags_max_length = length;
         self
     }
 
@@ -1862,5 +1900,28 @@ mod tests {
             .build();
 
         assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+    }
+
+    #[test]
+    fn test_datadog_tags_max_length() {
+        let config = Config::builder().set_datadog_tags_max_length(4242).build();
+
+        assert_eq!(config.datadog_tags_max_length(), DATADOG_TAGS_MAX_LENGTH);
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH", "4242")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.datadog_tags_max_length(), DATADOG_TAGS_MAX_LENGTH);
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH", "42")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.datadog_tags_max_length(), 42);
     }
 }
