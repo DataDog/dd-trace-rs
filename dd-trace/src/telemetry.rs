@@ -103,7 +103,7 @@ fn make_telemetry_worker(
     if custom_handle.is_none() {
         let mut builder = worker::TelemetryWorkerBuilder::new(
             config.trace_agent_url().to_string(),
-            config.service(),
+            config.service().to_string(),
             config.language().to_string(),
             config.language_version().to_string(),
             config.tracer_version().to_string(),

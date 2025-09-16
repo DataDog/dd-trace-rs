@@ -155,13 +155,11 @@ impl FromStr for ParsedSamplingRules {
 
 impl Display for ParsedSamplingRules {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let rules = self
-            .rules
-            .iter()
-            .map(|rule| rule.to_string())
-            .collect::<Vec<_>>()
-            .join(",");
-        write!(f, "[{rules}]")
+        write!(
+            f,
+            "{}",
+            serde_json::to_string(&self.rules).unwrap_or_default()
+        )
     }
 }
 
@@ -170,13 +168,22 @@ enum ConfigItemRef<'a, T> {
     ArcRef(arc_swap::Guard<Option<Arc<T>>>),
 }
 
-impl<T> Deref for ConfigItemRef<'_, T> {
-    type Target = T;
+impl<T: Deref> Deref for ConfigItemRef<'_, T> {
+    type Target = T::Target;
 
     fn deref(&self) -> &Self::Target {
         match self {
             ConfigItemRef::Ref(t) => t,
             ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap(),
+        }
+    }
+}
+
+impl<'a, T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef<'a, T> {
+    fn get_configuration_value(&self) -> String {
+        match self {
+            ConfigItemRef::Ref(t) => t.get_configuration_value(),
+            ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap().get_configuration_value(),
         }
     }
 }
@@ -309,28 +316,28 @@ impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
 /// Configuration item that tracks the value of a setting and where it came from
 /// And allows to update the corresponding value with a ConfigSourceOrigin
 #[derive(Debug)]
-struct ConfigItemWithOverride<T: ConfigurationValueProvider> {
+struct ConfigItemWithOverride<T: ConfigurationValueProvider + Deref> {
     config_item: ConfigItem<T>,
     override_value: arc_swap::ArcSwapOption<T>,
-    source_type: ConfigSourceOrigin,
+    override_origin: ConfigSourceOrigin,
 }
 
-impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItemWithOverride<T> {
+impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOverride<T> {
     fn clone(&self) -> Self {
         Self {
             config_item: self.config_item.clone(),
             override_value: arc_swap::ArcSwapOption::new(self.override_value.load_full()),
-            source_type: self.source_type,
+            override_origin: self.override_origin,
         }
     }
 }
 
-impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
+impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
     fn new_code(name: &'static str, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
-            source_type: ConfigSourceOrigin::Code,
+            override_origin: ConfigSourceOrigin::Code,
         }
     }
 
@@ -338,13 +345,13 @@ impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
-            source_type: ConfigSourceOrigin::RemoteConfig,
+            override_origin: ConfigSourceOrigin::RemoteConfig,
         }
     }
 
     fn source(&self) -> ConfigSourceOrigin {
         if self.override_value.load().is_some() {
-            self.source_type
+            self.override_origin
         } else {
             self.config_item.source()
         }
@@ -352,7 +359,7 @@ impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
 
     /// Replaces override value only if origin matches source_type
     fn set_override_value(&self, value: T, source: ConfigSourceOrigin) {
-        if source == self.source_type {
+        if source == self.override_origin {
             self.override_value.store(Some(Arc::new(value)));
         }
     }
@@ -389,10 +396,12 @@ impl<T: ConfigurationValueProvider + Clone> ConfigItemWithOverride<T> {
     }
 }
 
-impl<T: Clone + ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItemWithOverride<T> {
+impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater<T>
+    for ConfigItemWithOverride<T>
+{
     /// Sets a value from a specific source
     fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
-        if source == self.source_type {
+        if source == self.override_origin {
             self.set_override_value(value, source);
         } else {
             self.config_item.set_value_source(value, source);
@@ -405,17 +414,17 @@ struct ConfigItemSourceUpdater<'a> {
 }
 
 impl ConfigItemSourceUpdater<'_> {
-    fn apply_result<T, U, V, F>(
+    fn apply_result<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
         item_name: &'static str,
-        mut item: V,
-        result: CompositeConfigSourceResult<U>,
+        mut item: ConfigItemType,
+        result: CompositeConfigSourceResult<RawConfig>,
         transform: F,
-    ) -> V
+    ) -> ConfigItemType
     where
-        T: Clone + ConfigurationValueProvider,
-        V: ValueSourceUpdater<T>,
-        F: FnOnce(U) -> T,
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(RawConfig) -> ParsedConfig,
     {
         if !result.errors.is_empty() {
             dd_error!(
@@ -431,42 +440,51 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value (no transformation)
-    fn update_parsed<T, V>(&self, item_name: &'static str, default: V) -> V
+    fn update_parsed<ParsedConfig, ConfigItemType>(
+        &self,
+        item_name: &'static str,
+        default: ConfigItemType,
+    ) -> ConfigItemType
     where
-        T: Clone + FromStr + ConfigurationValueProvider,
-        T::Err: std::fmt::Display,
-        V: ValueSourceUpdater<T>,
+        ParsedConfig: Clone + FromStr + ConfigurationValueProvider,
+        ParsedConfig::Err: std::fmt::Display,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
     {
-        let result = self.sources.get_parse::<T>(item_name);
+        let result = self.sources.get_parse::<ParsedConfig>(item_name);
         self.apply_result(item_name, default, result, |value| value)
     }
 
     /// Updates a ConfigItem from sources string with transformation
-    pub fn update_string<T, V, F>(&self, item_name: &'static str, default: V, transform: F) -> V
+    pub fn update_string<ParsedConfig, ConfigItemType, F>(
+        &self,
+        item_name: &'static str,
+        default: ConfigItemType,
+        transform: F,
+    ) -> ConfigItemType
     where
-        T: Clone + ConfigurationValueProvider,
-        V: ValueSourceUpdater<T>,
-        F: FnOnce(String) -> T,
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
     {
         let result = self.sources.get(item_name);
         self.apply_result(item_name, default, result, transform)
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
-    pub fn update_parsed_with_transform<T, U, V, F>(
+    pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
         item_name: &'static str,
-        default: V,
+        default: ConfigItemType,
         transform: F,
-    ) -> V
+    ) -> ConfigItemType
     where
-        T: Clone + ConfigurationValueProvider,
-        U: FromStr,
-        U::Err: std::fmt::Display,
-        V: ValueSourceUpdater<T>,
-        F: FnOnce(U) -> T,
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        RawConfig: FromStr,
+        RawConfig::Err: std::fmt::Display,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(RawConfig) -> ParsedConfig,
     {
-        let result = self.sources.get_parse::<U>(item_name);
+        let result = self.sources.get_parse::<RawConfig>(item_name);
         self.apply_result(item_name, default, result, transform)
     }
 }
@@ -647,6 +665,14 @@ impl ServiceName {
             ServiceName::Default => "unnamed-rust-service",
             ServiceName::Configured(name) => name,
         }
+    }
+}
+
+impl std::ops::Deref for ServiceName {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
     }
 }
 
@@ -966,12 +992,20 @@ impl Config {
         self.language_version.as_str()
     }
 
-    pub fn service(&self) -> String {
-        self.service.value().to_string()
+    pub fn service(&self) -> Cow<'_, str> {
+        match self.service.value() {
+            ConfigItemRef::Ref(t) => Cow::Borrowed(t.as_str()),
+            ConfigItemRef::ArcRef(guard) => {
+                Cow::Owned(guard.as_ref().unwrap().as_str().to_string())
+            }
+        }
     }
 
     pub fn service_is_default(&self) -> bool {
-        self.service.value().is_default()
+        match self.service.value() {
+            ConfigItemRef::Ref(t) => t.is_default(),
+            ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap().is_default(),
+        }
     }
 
     pub fn env(&self) -> Option<&str> {
@@ -1006,7 +1040,7 @@ impl Config {
     }
 
     pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
-        self.trace_sampling_rules.value().to_vec()
+        self.trace_sampling_rules.value()
     }
 
     pub fn trace_rate_limit(&self) -> i32 {
