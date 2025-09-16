@@ -240,8 +240,12 @@ fn decode_tag_value(value: &str) -> String {
     value.replace('~', "=")
 }
 
-pub fn encode_tag_value(value: Cow<'_, str>) -> String {
-    value.replace('=', "~")
+pub fn encode_tag_value(tag: &str) -> Cow<'_, str> {
+    if tag.as_bytes().contains(&b'=') {
+        Cow::Owned(tag.replace('=', "~"))
+    } else {
+        Cow::Borrowed(tag)
+    }
 }
 
 pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {

@@ -3,7 +3,7 @@
 
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fmt::Write, str::FromStr};
 
 use crate::{
     carrier::{Extractor, Injector},
@@ -95,9 +95,9 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 
     // Build origin part if present
     if let Some(origin) = context.origin.as_ref() {
-        let origin_encoded = encode_tag_value(
-            TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT),
-        );
+        let origin_encoded =
+            TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT);
+        let origin_encoded = encode_tag_value(&origin_encoded);
 
         if dd_parts.len()
             + TRACESTATE_DD_PAIR_SEPARATOR.len()
@@ -126,10 +126,10 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
             if let Some(id) = context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
                 dd_parts.push_str(id);
             } else {
-                dd_parts.push_str(&format!("{:016x}", context.span_id));
+                let _ = write!(&mut dd_parts, "{:016x}", context.span_id);
             }
         } else {
-            dd_parts.push_str(&format!("{:016x}", context.span_id));
+            let _ = write!(&mut dd_parts, "{:016x}", context.span_id);
         }
     }
 
@@ -144,9 +144,9 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 
         let t_key_suffix =
             TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT);
-        let encoded_value = encode_tag_value(
-            TRACESTATE_TAG_VALUE_FILTER_REGEX.replace_all(value, INVALID_CHAR_REPLACEMENT),
-        );
+        let encoded_value =
+            TRACESTATE_TAG_VALUE_FILTER_REGEX.replace_all(value, INVALID_CHAR_REPLACEMENT);
+        let encoded_value = encode_tag_value(&encoded_value);
 
         let entry_size = if first_tag {
             0
