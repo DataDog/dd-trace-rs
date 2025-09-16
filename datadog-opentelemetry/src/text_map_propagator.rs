@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, vec};
+use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
 
 use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
@@ -11,7 +11,7 @@ use opentelemetry::{
 
 use dd_trace_propagation::{
     context::{Sampling, SpanContext, SpanLink, Tracestate},
-    DatadogCompositePropagator, Propagator,
+    DatadogCompositePropagator,
 };
 
 use crate::TraceRegistry;
@@ -64,7 +64,7 @@ pub struct DatadogPropagator {
 }
 
 impl DatadogPropagator {
-    pub(crate) fn new(config: &Config, registry: TraceRegistry) -> Self {
+    pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config),
             registry,
@@ -225,7 +225,7 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 
 #[cfg(test)]
 pub mod tests {
-    use std::{borrow::Cow, collections::HashMap, str::FromStr};
+    use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
     use assert_unordered::assert_eq_unordered;
     use dd_trace::{configuration::TracePropagationStyle, sampling::SamplingDecision, Config};
@@ -264,7 +264,7 @@ pub mod tests {
                 .build()
         };
 
-        DatadogPropagator::new(&config, TraceRegistry::new())
+        DatadogPropagator::new(Arc::new(config), TraceRegistry::new())
     }
 
     #[derive(Debug)]
@@ -561,7 +561,7 @@ pub mod tests {
         for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
             let builder = Config::builder();
             let registry = TraceRegistry::new();
-            let propagator = DatadogPropagator::new(&builder.build(), registry.clone());
+            let propagator = DatadogPropagator::new(Arc::new(builder.build()), registry.clone());
 
             let mut extractor = HashMap::new();
             extractor.insert(TRACEPARENT_KEY.to_string(), trace_parent.to_string());

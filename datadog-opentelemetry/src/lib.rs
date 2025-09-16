@@ -292,7 +292,7 @@ fn make_tracer(
 
     let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
-    let propagator = DatadogPropagator::new(&config, registry.clone());
+    let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
     // Get sampler callback before moving sampler into tracer provider
     let sampler_callback = if config.remote_config_enabled() {

@@ -30,8 +30,17 @@ opentelemetry = { workspace = true, optional = true }
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 assert_unordered = "0.3"
+criterion = "0.5"
+
+dd-trace = { path = "../dd-trace", features = ["test-utils"] }
+dd-trace-propagation = { path = ".", features = ["test-utils"] }
+
+[[bench]]
+name = "inject_benchmark"
+harness = false
 
 [features]
 default = ["opentelemetry"]
 serde_config = ["serde", "serde_json"]
 opentelemetry = ["dep:opentelemetry"]
+test-utils = []

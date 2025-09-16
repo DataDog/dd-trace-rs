@@ -14,9 +14,23 @@ description.workspace = true
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+serde = { workspace = true }
 
 # Libdatadog dependencies
 datadog-trace-utils = { workspace = true }
 tinybytes = { workspace = true }
 
 dd-trace = { path = "../dd-trace" }
+
+[dev-dependencies]
+criterion = "0.5.1"
+dd-trace = { path = "../dd-trace", features = ["test-utils"] }
+datadog-opentelemetry-mappings = { path = "./", features = ["test-utils"] }
+
+[features]
+test-utils = []
+
+[[bench]]
+name = "main"
+harness = false
+path = "benches/main.rs"
