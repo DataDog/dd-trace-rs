@@ -84,85 +84,117 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
 }
 
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
-    let mut tracestate_parts = vec![];
+    // Use a single String buffer to build the entire tracestate, avoiding intermediate allocations
+    let mut dd_parts = String::new();
 
+    // Build sampling priority part
     let priority = context.sampling.priority.unwrap_or(priority::USER_KEEP);
+    dd_parts.push_str(TRACESTATE_SAMPLING_PRIORITY_KEY);
+    dd_parts.push(':');
+    dd_parts.push_str(&priority.to_string());
 
-    tracestate_parts.push(format!("{TRACESTATE_SAMPLING_PRIORITY_KEY}:{priority}"));
-
-    if let Some(origin) = context.origin.as_ref().map(|origin| {
-        encode_tag_value(
+    // Build origin part if present
+    if let Some(origin) = context.origin.as_ref() {
+        let origin_encoded = encode_tag_value(
             TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT),
-        )
-    }) {
-        tracestate_parts.push(format!("{TRACESTATE_ORIGIN_KEY}:{origin}"));
-    };
+        );
 
-    let last_parent_id = if context.is_remote {
-        match context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
-            Some(id) => id.to_string(),
-            None => format!("{:016x}", context.span_id), // TODO: is this correct?
+        if dd_parts.len()
+            + TRACESTATE_DD_PAIR_SEPARATOR.len()
+            + TRACESTATE_ORIGIN_KEY.len()
+            + 1
+            + origin_encoded.len()
+            < TRACESTATE_DD_KEY_MAX_LENGTH
+        {
+            dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
+            dd_parts.push_str(TRACESTATE_ORIGIN_KEY);
+            dd_parts.push(':');
+            dd_parts.push_str(&origin_encoded);
         }
-    } else {
-        format!("{:016x}", context.span_id)
-    };
-
-    tracestate_parts.push(format!("{TRACESTATE_LAST_PARENT_KEY}:{last_parent_id}"));
-
-    let tags = context
-        .tags
-        .keys()
-        .filter(|key| key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
-        .map(|key| {
-            let t_key = format!(
-                "{TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX}{}",
-                TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT)
-            );
-
-            let value = encode_tag_value(
-                TRACESTATE_TAG_VALUE_FILTER_REGEX
-                    .replace_all(&context.tags[key], INVALID_CHAR_REPLACEMENT),
-            );
-
-            format!("{t_key}:{value}")
-        })
-        .collect::<Vec<String>>()
-        .join(TRACESTATE_DD_PAIR_SEPARATOR);
-
-    if !tags.is_empty() {
-        tracestate_parts.push(tags);
     }
 
-    let dd = tracestate_parts
-        .into_iter()
-        .reduce(|dd, part| {
-            if dd.len() + part.len() + 1 < TRACESTATE_DD_KEY_MAX_LENGTH {
-                format!("{dd}{TRACESTATE_DD_PAIR_SEPARATOR}{part}")
+    // Build last parent id part
+    let last_parent_id_part_start =
+        dd_parts.len() + TRACESTATE_DD_PAIR_SEPARATOR.len() + TRACESTATE_LAST_PARENT_KEY.len() + 1;
+    if last_parent_id_part_start + 16 < TRACESTATE_DD_KEY_MAX_LENGTH {
+        // 16 chars for hex span_id
+        dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
+        dd_parts.push_str(TRACESTATE_LAST_PARENT_KEY);
+        dd_parts.push(':');
+
+        if context.is_remote {
+            if let Some(id) = context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
+                dd_parts.push_str(id);
             } else {
-                dd
+                dd_parts.push_str(&format!("{:016x}", context.span_id));
             }
-        })
-        .unwrap_or_default();
+        } else {
+            dd_parts.push_str(&format!("{:016x}", context.span_id));
+        }
+    }
 
-    let dd_part = vec![("dd".to_string(), dd)];
+    // Build propagation tags part
+    let mut tags_buffer = String::new();
+    let mut first_tag = true;
 
-    let additional_parts = context
-        .tracestate
-        .as_ref()
-        .map(|tracestate| tracestate.additional_values.clone())
-        .unwrap_or_default();
+    for (key, value) in context.tags.iter() {
+        if !key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX) {
+            continue;
+        }
 
-    // If the resulting tracestate exceeds 32 list-members, remove the rightmost list-member
-    let all_parts = match additional_parts {
-        Some(additional) => [dd_part, additional.into_iter().take(31).collect()].concat(),
-        None => dd_part,
-    };
+        let t_key_suffix =
+            TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT);
+        let encoded_value = encode_tag_value(
+            TRACESTATE_TAG_VALUE_FILTER_REGEX.replace_all(value, INVALID_CHAR_REPLACEMENT),
+        );
 
-    let tracestate = all_parts
-        .into_iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(TRACESTATE_VALUES_SEPARATOR);
+        let entry_size = if first_tag {
+            0
+        } else {
+            TRACESTATE_DD_PAIR_SEPARATOR.len()
+        } + TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX.len()
+            + t_key_suffix.len()
+            + 1
+            + encoded_value.len();
+
+        if tags_buffer.len() + entry_size > TRACESTATE_DD_KEY_MAX_LENGTH / 2 {
+            break;
+        }
+
+        if !first_tag {
+            tags_buffer.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
+        }
+        tags_buffer.push_str(TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX);
+        tags_buffer.push_str(&t_key_suffix);
+        tags_buffer.push(':');
+        tags_buffer.push_str(&encoded_value);
+        first_tag = false;
+    }
+
+    // Add tags part to dd_parts if there's room
+    if !tags_buffer.is_empty()
+        && dd_parts.len() + TRACESTATE_DD_PAIR_SEPARATOR.len() + tags_buffer.len()
+            < TRACESTATE_DD_KEY_MAX_LENGTH
+    {
+        dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
+        dd_parts.push_str(&tags_buffer);
+    }
+
+    let mut tracestate = String::with_capacity(256);
+    tracestate.push_str("dd=");
+    tracestate.push_str(&dd_parts);
+
+    // Add additional tracestate values if present
+    if let Some(ref ts) = context.tracestate {
+        if let Some(ref additional) = ts.additional_values {
+            for (key, value) in additional.iter().take(31) {
+                tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
+                tracestate.push_str(key);
+                tracestate.push('=');
+                tracestate.push_str(value);
+            }
+        }
+    }
 
     dd_debug!("Propagator (tracecontext): injecting tracestate: {tracestate}");
 
