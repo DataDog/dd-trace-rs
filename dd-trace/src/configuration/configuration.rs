@@ -122,6 +122,7 @@ fn default_provenance() -> String {
 pub const TRACER_VERSION: &str = "0.0.1";
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
+const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
 
 #[derive(Debug, Default, Clone, PartialEq)]
 struct ParsedSamplingRules {
@@ -793,6 +794,10 @@ pub struct Config {
     /// Whether remote configuration is enabled
     remote_config_enabled: ConfigItem<bool>,
 
+    /// Interval by with remote configuration is polled (seconds)
+    /// 5 seconds is the highest interval allowed by the spec
+    remote_config_poll_interval: ConfigItem<f64>,
+
     /// Tracks extra services discovered at runtime
     /// Used for remote configuration to report all services
     extra_services_tracker: ExtraServicesTracker,
@@ -909,9 +914,10 @@ impl Config {
                 "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
                 default.telemetry_log_collection_enabled,
             ),
-            telemetry_heartbeat_interval: cisu.update_parsed(
+            telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
                 "DD_TELEMETRY_HEARTBEAT_INTERVAL",
                 default.telemetry_heartbeat_interval,
+                |interval: f64| interval.abs(),
             ),
             trace_propagation_style: cisu.update_parsed_with_transform(
                 "DD_TRACE_PROPAGATION_STYLE",
@@ -938,6 +944,11 @@ impl Config {
             remote_config_enabled: cisu.update_parsed(
                 "DD_REMOTE_CONFIGURATION_ENABLED",
                 default.remote_config_enabled,
+            ),
+            remote_config_poll_interval: cisu.update_parsed_with_transform(
+                "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
+                default.remote_config_poll_interval,
+                |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
             datadog_tags_max_length: cisu.update_parsed_with_transform(
@@ -984,6 +995,8 @@ impl Config {
             self.trace_propagation_style_inject.get_configuration(),
             self.trace_propagation_extract_first.get_configuration(),
             self.remote_config_enabled.get_configuration(),
+            self.remote_config_poll_interval.get_configuration(),
+            self.datadog_tags_max_length.get_configuration(),
         ]
     }
 
@@ -1199,6 +1212,11 @@ impl Config {
         *self.remote_config_enabled.value()
     }
 
+    /// Get RC poll interval (seconds)
+    pub fn remote_config_poll_interval(&self) -> f64 {
+        *self.remote_config_poll_interval.value()
+    }
+
     /// Return tags max length
     pub fn datadog_tags_max_length(&self) -> usize {
         *self.datadog_tags_max_length.value()
@@ -1240,6 +1258,10 @@ impl std::fmt::Debug for Config {
             )
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_enabled", &self.remote_config_enabled)
+            .field(
+                "remote_config_poll_interval",
+                &self.remote_config_poll_interval,
+            )
             .field("remote_config_callbacks", &self.remote_config_callbacks)
             .finish()
     }
@@ -1302,6 +1324,10 @@ fn default_config() -> Config {
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: ConfigItem::new("DD_REMOTE_CONFIG_ENABLED", true),
+        remote_config_poll_interval: ConfigItem::new(
+            "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
+            RC_DEFAULT_POLL_INTERVAL,
+        ),
         remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         datadog_tags_max_length: ConfigItem::new(
             "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
@@ -1383,7 +1409,9 @@ impl ConfigBuilder {
     }
 
     pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
-        self.config.telemetry_heartbeat_interval.set_code(seconds);
+        self.config
+            .telemetry_heartbeat_interval
+            .set_code(seconds.abs());
         self
     }
 
@@ -1482,6 +1510,13 @@ impl ConfigBuilder {
 
     pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.remote_config_enabled.set_code(enabled);
+        self
+    }
+
+    pub fn set_remote_config_poll_interval(&mut self, seconds: f64) -> &mut Self {
+        self.config
+            .remote_config_poll_interval
+            .set_code(seconds.abs().min(RC_DEFAULT_POLL_INTERVAL));
         self
     }
 
@@ -2417,5 +2452,20 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
         assert_eq!(config.datadog_tags_max_length(), 42);
+    }
+
+    #[test]
+    fn test_remote_config_poll_interval() {
+        let config = Config::builder()
+            .set_remote_config_poll_interval(42.0)
+            .build();
+
+        assert_eq!(config.remote_config_poll_interval(), 5.0);
+
+        let config = Config::builder()
+            .set_remote_config_poll_interval(-0.2)
+            .build();
+
+        assert_eq!(config.remote_config_poll_interval(), 0.2);
     }
 }
