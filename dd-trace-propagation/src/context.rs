@@ -170,7 +170,10 @@ impl FromStr for Tracestate {
                                 None
                             } else {
                                 let mut parts = item.splitn(2, ':');
-                                Some((parts.next()?.to_string(), decode_tag_value(parts.next()?)))
+                                Some((
+                                    parts.next()?.to_string(),
+                                    decode_tag_value(parts.next()?).to_string(),
+                                ))
                             }
                         })
                         .collect(),
@@ -236,8 +239,12 @@ impl FromStr for Tracestate {
     }
 }
 
-fn decode_tag_value(value: &str) -> String {
-    value.replace('~', "=")
+fn decode_tag_value(value: &str) -> Cow<'_, str> {
+    if value.as_bytes().contains(&b'~') {
+        Cow::Owned(value.replace('~', "="))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 pub fn encode_tag_value(tag: &str) -> Cow<'_, str> {
