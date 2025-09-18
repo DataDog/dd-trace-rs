@@ -17,7 +17,6 @@ use hyper::{body::Bytes, Method, Request};
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
 use hyper_util::rt::TokioExecutor;
 
-const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(5); // 5 seconds is the highest interval allowed by the spec
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3); // lowest timeout with no failures
 
 /// Capabilities that the client supports
@@ -479,6 +478,8 @@ impl RemoteConfigClient {
             backend_client_state: None,
         }));
 
+        let poll_interval = Duration::from_secs_f64(config.remote_config_poll_interval());
+
         Ok(Self {
             client_id: uuid::Uuid::new_v4().to_string(),
             config,
@@ -486,7 +487,7 @@ impl RemoteConfigClient {
             client_timeout: DEFAULT_TIMEOUT,
             state,
             capabilities: ClientCapabilities::new(),
-            poll_interval: DEFAULT_POLL_INTERVAL,
+            poll_interval,
             cached_target_files: Vec::new(),
             product_registry: ProductRegistry::new(),
         })
