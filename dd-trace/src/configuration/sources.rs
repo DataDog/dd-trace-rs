@@ -3,6 +3,8 @@
 
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 
+use ddtelemetry::data::ConfigurationOrigin;
+
 /// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSourceOrigin {
@@ -10,6 +12,17 @@ pub enum ConfigSourceOrigin {
     EnvVar,
     Code,
     RemoteConfig,
+}
+
+impl From<ConfigSourceOrigin> for ConfigurationOrigin {
+    fn from(val: ConfigSourceOrigin) -> Self {
+        match val {
+            ConfigSourceOrigin::Default => ConfigurationOrigin::Default,
+            ConfigSourceOrigin::Code => ConfigurationOrigin::Code,
+            ConfigSourceOrigin::EnvVar => ConfigurationOrigin::EnvVar,
+            ConfigSourceOrigin::RemoteConfig => ConfigurationOrigin::RemoteConfig,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

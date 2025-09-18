@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::Error;
 use ddtelemetry::{
-    data::{self},
+    data,
     worker::{self, TelemetryWorkerHandle},
 };
 
@@ -24,7 +24,7 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error>;
 
-    fn send_start(&self) -> Result<(), anyhow::Error>;
+    fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
@@ -41,7 +41,17 @@ impl TelemetryHandle for TelemetryWorkerHandle {
         self.add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
     }
 
-    fn send_start(&self) -> Result<(), anyhow::Error> {
+    fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
+        if let Some(config) = config {
+            config
+                .get_telemetry_configuration()
+                .into_iter()
+                .for_each(|config_item| {
+                    self.try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+                        .ok();
+                });
+        }
+
         self.send_start()
     }
 
@@ -61,43 +71,39 @@ struct Telemetry {
     log_collection_enabled: bool,
 }
 
-pub fn init_telemetry(config: &Config, service_name: Option<String>) {
-    init_telemetry_inner(config, service_name, None, &TELEMETRY);
+pub fn init_telemetry(config: &Config) {
+    init_telemetry_inner(config, None, &TELEMETRY);
 }
 
 fn init_telemetry_inner(
     config: &Config,
-    service_name: Option<String>,
     custom_handle: Option<Box<dyn TelemetryHandle>>,
     telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
 ) {
-    telemetry_cell.get_or_init(|| {
-        match make_telemetry_worker(config, service_name, custom_handle) {
-            Ok(handle) => {
-                handle.send_start().ok();
-                Arc::new(Mutex::new(Telemetry {
-                    handle: Some(handle),
-                    enabled: config.telemetry_enabled(),
-                    log_collection_enabled: config.telemetry_log_collection_enabled(),
-                }))
-            }
-            Err(err) => {
-                dd_error!("Telemetry: Error initializing worker: {err:?}");
-                Arc::new(Mutex::new(Telemetry::default()))
-            }
+    telemetry_cell.get_or_init(|| match make_telemetry_worker(config, custom_handle) {
+        Ok(handle) => {
+            handle.send_start(Some(config)).ok();
+            Arc::new(Mutex::new(Telemetry {
+                handle: Some(handle),
+                enabled: config.telemetry_enabled(),
+                log_collection_enabled: config.telemetry_log_collection_enabled(),
+            }))
+        }
+        Err(err) => {
+            dd_error!("Telemetry: Error initializing worker: {err:?}");
+            Arc::new(Mutex::new(Telemetry::default()))
         }
     });
 }
 
 fn make_telemetry_worker(
     config: &Config,
-    service_name: Option<String>,
     custom_handle: Option<Box<dyn TelemetryHandle>>,
 ) -> Result<Box<dyn TelemetryHandle>, Error> {
     if custom_handle.is_none() {
         let mut builder = worker::TelemetryWorkerBuilder::new(
             config.trace_agent_url().to_string(),
-            service_name.unwrap_or(config.service().to_string()),
+            config.service().to_string(),
             config.language().to_string(),
             config.language_version().to_string(),
             config.tracer_version().to_string(),
@@ -192,7 +198,7 @@ mod tests {
             Ok(())
         }
 
-        fn send_start(&self) -> Result<(), anyhow::Error> {
+        fn send_start(&self, _config: Option<&Config>) -> Result<(), anyhow::Error> {
             Ok(())
         }
 
@@ -212,7 +218,6 @@ mod tests {
         let telemetry_cell = OnceLock::new();
         init_telemetry_inner(
             &config,
-            None,
             Some(Box::new(TestTelemetryHandle::new())),
             &telemetry_cell,
         );
@@ -242,7 +247,6 @@ mod tests {
         let telemetry_cell = OnceLock::new();
         init_telemetry_inner(
             &config,
-            None,
             Some(Box::new(TestTelemetryHandle::new())),
             &telemetry_cell,
         );
@@ -274,7 +278,6 @@ mod tests {
         let telemetry_cell = OnceLock::new();
         init_telemetry_inner(
             &config,
-            None,
             Some(Box::new(TestTelemetryHandle::new())),
             &telemetry_cell,
         );
@@ -305,7 +308,6 @@ mod tests {
 
         init_telemetry_inner(
             &config,
-            None,
             Some(Box::new(TestTelemetryHandle::new())),
             &TELEMETRY,
         );
