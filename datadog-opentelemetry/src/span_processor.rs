@@ -167,15 +167,19 @@ impl InnerTraceRegistry {
     fn finish_span(&mut self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
-            if !trace.finished_spans.is_empty()
+            let span = if !trace.finished_spans.is_empty()
                 && span_data.span_context.span_id().to_bytes() == trace.local_root_span_id
             {
-                let swapped_span = std::mem::replace(&mut trace.finished_spans[0], span_data);
-                trace.finished_spans.push(swapped_span);
+                std::mem::replace(&mut trace.finished_spans[0], span_data)
             } else {
-                trace.finished_spans.push(span_data);
-            }
-            trace.open_span_count -= 1;
+                span_data
+            };
+
+            // Reserve enough space to store all currently open spans in the chunk,
+            trace.finished_spans.reserve(trace.open_span_count);
+            trace.finished_spans.push(span);
+
+            trace.open_span_count = trace.open_span_count.saturating_sub(1);
             if trace.open_span_count == 0 {
                 Some(slot.remove())
             } else {
