@@ -9,8 +9,9 @@ use std::{
 };
 
 use data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error as trace_exporter_error, error::TraceExporterError,
-    TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse,
+    error::{self as trace_exporter_error, TraceExporterError},
+    TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use datadog_opentelemetry_mappings::CachedConfig;
 use opentelemetry_sdk::{
@@ -190,6 +191,13 @@ impl DatadogExporter {
             }
             if let Some(version) = config.version() {
                 builder.set_app_version(version);
+            }
+            if config.telemetry_enabled() {
+                builder.enable_telemetry(Some(TelemetryConfig {
+                    heartbeat: (config.telemetry_heartbeat_interval() * 1000.0) as u64,
+                    runtime_id: Some(config.runtime_id().to_string()),
+                    debug_enabled: false,
+                }));
             }
             TraceExporterWorker::spawn(
                 config,
