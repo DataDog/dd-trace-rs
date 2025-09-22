@@ -108,6 +108,7 @@ fn make_telemetry_worker(
             config.language_version().to_string(),
             config.tracer_version().to_string(),
         );
+        builder.runtime_id = Some(config.runtime_id().to_string());
         builder.config = ddtelemetry::config::Config::from_env();
         builder.config.telemetry_heartbeat_interval =
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
