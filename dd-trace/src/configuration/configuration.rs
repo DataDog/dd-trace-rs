@@ -198,14 +198,14 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
 /// It enables the configuration system to report configuration values, their
 /// origins, and associated metadata to Datadog.
 pub trait ConfigurationProvider {
-    /// Returns a telemetry configuration object representing the current state of this configuration item.
+    /// Returns a telemetry configuration object representing the current state of this
+    /// configuration item.
     ///
     /// # Parameters
     ///
-    /// - `config_id`: Optional identifier for remote configuration scenarios.
-    ///   When provided, this ID is included in the returned `Configuration` to
-    ///   track which remote configuration is responsible for the current value.
-    ///
+    /// - `config_id`: Optional identifier for remote configuration scenarios. When provided, this
+    ///   ID is included in the returned `Configuration` to track which remote configuration is
+    ///   responsible for the current value.
     fn get_configuration(&self, config_id: Option<String>) -> Configuration;
 }
 
