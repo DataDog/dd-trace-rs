@@ -171,6 +171,17 @@ struct TargetFile {
     raw: String,
 }
 
+// Custom deserializer that preserves explicit null as Some(Value::Null)
+fn missing_field_and_null_value<'de, D>(
+    deserializer: D,
+) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize as Value directly, which preserves null
+    Ok(Some(serde_json::Value::deserialize(deserializer)?))
+}
+
 /// Configuration payload for APM tracing
 /// Based on the apm-tracing.json schema from dd-go
 /// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
@@ -181,7 +192,11 @@ struct ApmTracingConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct LibConfig {
-    #[serde(default, rename = "tracing_sampling_rules")]
+    #[serde(
+        deserialize_with = "missing_field_and_null_value",
+        default,
+        rename = "tracing_sampling_rules"
+    )]
     tracing_sampling_rules: Option<serde_json::Value>,
     // Add other APM tracing config fields as needed (e.g., tracing_header_tags, etc.)
 }
@@ -844,6 +859,7 @@ impl ProductHandler for ApmTracingHandler {
                 crate::dd_debug!(
                     "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
                 );
+                config.clear_remote_sampling_rules();
             }
         } else {
             crate::dd_debug!(
@@ -1895,5 +1911,28 @@ mod tests {
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.75);
         assert_eq!(rules[0].service, Some("test-app-service".to_string()));
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rules_null() {
+        let config_json = r#"{"lib_config": {"tracing_sampling_rules": null}}"#;
+        let tracing_config: ApmTracingConfig =
+            serde_json::from_str(config_json).expect("Json should be parsed");
+
+        assert!(tracing_config.lib_config.tracing_sampling_rules.is_some());
+        assert!(tracing_config
+            .lib_config
+            .tracing_sampling_rules
+            .unwrap()
+            .is_null());
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rules_missing() {
+        let config_json = r#"{"lib_config": {}}"#;
+        let tracing_config: ApmTracingConfig =
+            serde_json::from_str(config_json).expect("Json should be parsed");
+
+        assert!(tracing_config.lib_config.tracing_sampling_rules.is_none());
     }
 }
