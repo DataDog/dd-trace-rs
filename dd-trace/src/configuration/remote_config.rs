@@ -179,10 +179,7 @@ where
     D: serde::Deserializer<'de>,
 {
     // Deserialize as Value directly, which preserves null
-    match serde_json::Value::deserialize(deserializer) {
-        Ok(value) => Ok(Some(value)),
-        Err(_) => Ok(None), // Field missing
-    }
+    Ok(Some(serde_json::Value::deserialize(deserializer)?))
 }
 
 /// Configuration payload for APM tracing
