@@ -191,6 +191,7 @@ async fn test_remote_config_sampling_rates() {
             r##"{
             "path": "datadog/2/APM_TRACING/1234/config",
             "msg": {
+                "id": "42",
                 "lib_config": {
                     "tracing_sampling_rules": [
                         {
