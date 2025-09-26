@@ -321,7 +321,11 @@ fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
     let should_remove =
         tags.get(SAMPLING_DECISION_MAKER_TAG_KEY)
             .is_some_and(|sampling_decision| {
-                let is_invalid = !matches!(sampling_decision.parse::<i8>().ok(), Some(-9..=-0));
+                let is_invalid = sampling_decision
+                    .parse::<i8>()
+                    .ok()
+                    .map(|m| m > 0)
+                    .unwrap_or(true);
                 if is_invalid {
                     dd_warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
                 }
