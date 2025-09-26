@@ -56,7 +56,7 @@ To trace functions, you can either use the `opentelemetry` crate's [API](https:/
 * `DD_LOG_LEVEL`
     - format: "ERROR|WARN|INFO|DEBUG"    
 * `DD_TRACE_PROPAGATION_STYLE`
-    - format: "datadog,w3c,B3" 
+    - format: "datadog,tracecontext" 
 
 ### Features
 
