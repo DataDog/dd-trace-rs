@@ -1,10 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr};
-
-use lazy_static::lazy_static;
-use regex::Regex;
+use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 
 use crate::{
     carrier::{Extractor, Injector},
@@ -31,22 +28,15 @@ const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
 pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
 
-lazy_static! {
-    pub static ref INVALID_SEGMENT_REGEX: Regex =
-        Regex::new(r"^0+$").expect("failed creating regex");
-    static ref VALID_SAMPLING_DECISION_REGEX: Regex =
-        Regex::new(r"^-([0-9])$").expect("failed creating regex");
-    static ref TAG_KEY_REGEX: Regex = Regex::new(r"^_dd\.p\.[\x21-\x2b\x2d-\x7e]+$").expect("failed creating regex"); // ASCII minus spaces and commas
-    static ref TAG_VALUE_REGEX: Regex = Regex::new(r"^[\x20-\x2b\x2d-\x7e]*$").expect("failed creating regex"); // ASCII minus commas
-
-    static ref DATADOG_HEADER_KEYS: [String; 5] = [
+static DATADOG_HEADER_KEYS: LazyLock<[String; 5]> = LazyLock::new(|| {
+    [
         DATADOG_TRACE_ID_KEY.to_owned(),
         DATADOG_ORIGIN_KEY.to_owned(),
         DATADOG_PARENT_ID_KEY.to_owned(),
         DATADOG_SAMPLING_PRIORITY_KEY.to_owned(),
-        DATADOG_TAGS_KEY.to_owned()
-    ];
-}
+        DATADOG_TAGS_KEY.to_owned(),
+    ]
+});
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config) {
     let tags = &mut context.tags;
@@ -168,11 +158,19 @@ fn get_propagation_tags(
 }
 
 fn validate_tag_key(key: &str) -> bool {
-    TAG_KEY_REGEX.is_match(key)
+    let Some(tail) = key.strip_prefix("_dd.p.") else {
+        return false;
+    };
+    tail.as_bytes()
+        .iter()
+        .all(|c| matches!(c, b'!'..=b'+' | b'-'..=b'~'))
 }
 
 fn validate_tag_value(value: &str) -> bool {
-    TAG_VALUE_REGEX.is_match(value)
+    value
+        .as_bytes()
+        .iter()
+        .all(|c| matches!(c, b' '..=b'+' | b'-'..=b'~'))
 }
 
 pub fn extract(carrier: &dyn Extractor, config: &Config) -> Option<SpanContext> {
@@ -238,14 +236,13 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
         None => return Ok(None),
     };
 
-    if INVALID_SEGMENT_REGEX.is_match(trace_id) {
+    let trace_id = trace_id
+        .parse::<u64>()
+        .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))?;
+    if trace_id == 0 {
         return Err(Error::extract("Invalid `trace_id` found", "datadog"));
     }
-
-    trace_id
-        .parse::<u64>()
-        .map(Some)
-        .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
+    Ok(Some(trace_id))
 }
 
 fn extract_parent_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
@@ -324,7 +321,11 @@ fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
     let should_remove =
         tags.get(SAMPLING_DECISION_MAKER_TAG_KEY)
             .is_some_and(|sampling_decision| {
-                let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
+                let is_invalid = sampling_decision
+                    .parse::<i8>()
+                    .ok()
+                    .map(|m| m > 0)
+                    .unwrap_or(true);
                 if is_invalid {
                     dd_warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
                 }

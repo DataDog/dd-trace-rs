@@ -1,8 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use lazy_static::lazy_static;
-use regex::Regex;
 use std::{borrow::Cow, collections::HashMap, str::FromStr, vec};
 
 use dd_trace::{
@@ -12,11 +10,6 @@ use dd_trace::{
 };
 
 use crate::tracecontext::TRACESTATE_KEY;
-
-lazy_static! {
-    static ref INVALID_ASCII_CHARACTERS_REGEX: Regex =
-        Regex::new(r"[^\x20-\x7E]+").expect("failed creating regex");
-}
 
 pub const DATADOG_PROPAGATION_TAG_PREFIX: &str = "_dd.p.";
 
@@ -166,7 +159,7 @@ impl FromStr for Tracestate {
                         .trim()
                         .split(';')
                         .filter_map(|item| {
-                            if INVALID_ASCII_CHARACTERS_REGEX.is_match(item) {
+                            if !item.as_bytes().iter().all(|c| matches!(c, b' '..=b'~')) {
                                 None
                             } else {
                                 let mut parts = item.splitn(2, ':');
