@@ -1,9 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use lazy_static::lazy_static;
-use regex::Regex;
-use std::{collections::HashMap, fmt::Write, str::FromStr};
+use std::{borrow::Cow, collections::HashMap, fmt::Write, str::FromStr, sync::LazyLock};
 
 use crate::{
     carrier::{Extractor, Injector},
@@ -11,7 +9,7 @@ use crate::{
         encode_tag_value, Sampling, SpanContext, Traceparent, Tracestate,
         DATADOG_PROPAGATION_TAG_PREFIX,
     },
-    datadog::{DATADOG_LAST_PARENT_ID_KEY, INVALID_SEGMENT_REGEX},
+    datadog::DATADOG_LAST_PARENT_ID_KEY,
     error::Error,
 };
 
@@ -34,24 +32,47 @@ const TRACESTATE_SAMPLING_PRIORITY_KEY: &str = "s";
 const TRACESTATE_ORIGIN_KEY: &str = "o";
 const TRACESTATE_LAST_PARENT_KEY: &str = "p";
 const TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX: &str = "t.";
-const INVALID_CHAR_REPLACEMENT: &str = "_";
+const INVALID_CHAR_REPLACEMENT: char = '_';
 
-lazy_static! {
-    static ref TRACEPARENT_REGEX: Regex =
-        Regex::new(r"^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
-            .expect("failed creating regex");
+static TRACECONTEXT_HEADER_KEYS: LazyLock<[String; 2]> =
+    LazyLock::new(|| [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()]);
 
-    // Origin value in tracestate replaces '~', ',' and ';' with '_"
-    static ref TRACESTATE_ORIGIN_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
+/// Replace all characters in s that are either non ascii, or matched by f
+fn replace_chars<MatchFn: Fn(u8) -> bool>(
+    s: &str,
+    f: MatchFn,
+    replacement_char: char,
+) -> Cow<'_, str> {
+    let mut replaced = String::new();
+    let mut tail = s;
+    loop {
+        let Some((pos, _)) = tail
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .find(|(_, c)| !c.is_ascii() || f(**c))
+        else {
+            replaced.push_str(tail);
+            break;
+        };
 
-    static ref TRACESTATE_TAG_KEY_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x21-\x2b\x2d-\x3c\x3e-\x7e]").expect("failed creating regex");
-
-    static ref TRACESTATE_TAG_VALUE_FILTER_REGEX: Regex =
-        Regex::new(r"[^\x20-\x2b\x2d-\x3a\x3c-\x7d]").expect("failed creating regex");
-
-    static ref TRACECONTEXT_HEADER_KEYS: [String; 2] = [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()];
+        replaced.push_str(&tail[..pos]);
+        replaced.push(replacement_char);
+        let offset = if !tail.as_bytes()[pos].is_ascii() {
+            match tail[pos..].char_indices().nth(1) {
+                Some((i, _)) => i,
+                None => break,
+            }
+        } else {
+            1
+        };
+        tail = &tail[pos + offset..];
+    }
+    if replaced.is_empty() {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(replaced)
+    }
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -95,9 +116,12 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
 
     // Build origin part if present
     if let Some(origin) = context.origin.as_ref() {
-        let origin_encoded =
-            TRACESTATE_ORIGIN_FILTER_REGEX.replace_all(origin.as_ref(), INVALID_CHAR_REPLACEMENT);
-        let origin_encoded = encode_tag_value(&origin_encoded);
+        let origin_encoded = replace_chars(
+            origin.as_ref(),
+            |c| !matches!(c, b' '..=b'+' | b'-'..=b':' | b'<'..=b'}'),
+            INVALID_CHAR_REPLACEMENT,
+        );
+        let origin_encoded = replace_chars(origin_encoded.as_ref(), |c| c == b'=', '~');
 
         if dd_parts.len()
             + TRACESTATE_DD_PAIR_SEPARATOR.len()
@@ -138,14 +162,20 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     let mut first_tag = true;
 
     for (key, value) in context.tags.iter() {
-        if !key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX) {
+        let Some(key_suffix) = key.strip_prefix(DATADOG_PROPAGATION_TAG_PREFIX) else {
             continue;
-        }
+        };
 
-        let t_key_suffix =
-            TRACESTATE_TAG_KEY_FILTER_REGEX.replace_all(&key[6..], INVALID_CHAR_REPLACEMENT);
-        let encoded_value =
-            TRACESTATE_TAG_VALUE_FILTER_REGEX.replace_all(value, INVALID_CHAR_REPLACEMENT);
+        let t_key_suffix = replace_chars(
+            key_suffix,
+            |c| !matches!(c, b'!'..=b'+' | b'-'..=b'<' | b'>'..=b'~'),
+            INVALID_CHAR_REPLACEMENT,
+        );
+        let encoded_value = replace_chars(
+            value,
+            |c| !matches!(c, b' '..=b'+' | b'-'..=b':' | b'<'..=b'}'),
+            INVALID_CHAR_REPLACEMENT,
+        );
         let encoded_value = encode_tag_value(&encoded_value);
 
         let entry_size = if first_tag {
@@ -310,16 +340,44 @@ fn define_sampling_priority(
     traceparent_sampling_priority
 }
 
-fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
-    let captures = TRACEPARENT_REGEX
-        .captures(traceparent)
-        .ok_or_else(|| Error::extract("invalid traceparent", "traceparent"))?;
+fn take_char(s: &str, c: u8) -> Option<&str> {
+    if s.is_empty() || s.as_bytes()[0] != c {
+        return None;
+    }
+    Some(&s[1..])
+}
 
-    let version = &captures[1];
-    let trace_id = &captures[2];
-    let span_id = &captures[3];
-    let flags = &captures[4];
-    let tail = captures.get(5).map_or("", |m| m.as_str());
+fn take_n_hex_chars(s: &str, n: usize) -> Option<(&str, &str)> {
+    if s.len() < n {
+        return None;
+    }
+    for i in 0..n {
+        if !matches!(s.as_bytes()[i], b'0'..=b'9' | b'a'..=b'f') {
+            return None;
+        }
+    }
+    Some(s.split_at(n))
+}
+
+fn parse_traceparent_components(traceparent: &str) -> Option<(&str, &str, &str, &str, &str)> {
+    let (version, rest) = take_n_hex_chars(traceparent, 2)?;
+    let rest = take_char(rest, b'-')?;
+    let (trace_id, rest) = take_n_hex_chars(rest, 32)?;
+    let rest = take_char(rest, b'-')?;
+    let (span_id, rest) = take_n_hex_chars(rest, 16)?;
+    let rest = take_char(rest, b'-')?;
+    let (flags, rest) = take_n_hex_chars(rest, 2)?;
+    let tail = if rest.is_empty() {
+        ""
+    } else {
+        take_char(rest, b'-')?
+    };
+    Some((version, trace_id, span_id, flags, tail))
+}
+
+fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
+    let (version, trace_id, span_id, flags, tail) = parse_traceparent_components(traceparent)
+        .ok_or(Error::extract("invalid traceparent", "traceparent"))?;
 
     let trace_id = extract_trace_id(trace_id)?;
 
@@ -351,7 +409,7 @@ fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Err
             ))
         }
         "00" => {
-            if !tail.is_empty() && tail != "-" {
+            if !tail.is_empty() {
                 return Err(Error::extract(
                     "Traceparent with version `00` should contain only 4 values delimited by `-`",
                     "traceparent",
@@ -373,27 +431,27 @@ fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Err
 }
 
 fn extract_trace_id(trace_id: &str) -> Result<u128, Error> {
-    if INVALID_SEGMENT_REGEX.is_match(trace_id) {
+    let trace_id = u128::from_str_radix(trace_id, 16)
+        .map_err(|_| Error::extract("Failed to decode trace_id", "traceparent"))?;
+    if trace_id == 0 {
         return Err(Error::extract(
             "`0` value for trace_id is invalid",
             "traceparent",
         ));
     }
-
-    u128::from_str_radix(trace_id, 16)
-        .map_err(|_| Error::extract("Failed to decode trace_id", "traceparent"))
+    Ok(trace_id)
 }
 
 fn extract_span_id(span_id: &str) -> Result<u64, Error> {
-    if INVALID_SEGMENT_REGEX.is_match(span_id) {
+    let span_id = u64::from_str_radix(span_id, 16)
+        .map_err(|_| Error::extract("Failed to decode span_id", "traceparent"))?;
+    if span_id == 0 {
         return Err(Error::extract(
             "`0` value for span_id is invalid",
             "traceparent",
         ));
     }
-
-    u64::from_str_radix(span_id, 16)
-        .map_err(|_| Error::extract("Failed to decode span_id", "traceparent"))
+    Ok(span_id)
 }
 
 fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
@@ -727,5 +785,22 @@ mod test {
             .starts_with("dd=s:2;o:rum;p:5555eeee6666ffff;t.foo:abc,state0=value-0"));
 
         assert!(carrier[TRACESTATE_KEY].ends_with("state30=value-30"));
+    }
+
+    #[test]
+    fn test_replace_chars() {
+        let tests = vec![
+            ("ac", "ac"),
+            ("b", "_"),
+            ("abbc", "a__c"),
+            ("漢字", "__"),
+            ("漢字c", "__c"),
+            ("a漢b字c", "a___c"),
+            ("漢a字c", "_a_c"),
+            ("漢a字cb", "_a_c_"),
+        ];
+        for (input, expected) in tests {
+            assert_eq!(replace_chars(input, |c| c == b'b', '_'), expected);
+        }
     }
 }
