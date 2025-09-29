@@ -370,8 +370,7 @@ fn parse_traceparent_components(traceparent: &str) -> Option<(&str, &str, &str, 
     let tail = if rest.is_empty() {
         ""
     } else {
-        let rest = take_char(rest, b'-')?;
-        rest
+        take_char(rest, b'-')?
     };
     Some((version, trace_id, span_id, flags, tail))
 }
