@@ -781,7 +781,26 @@ mod tests {
 
     #[test]
     fn bench() {
-        let mut criterion = criterion::Criterion::default().with_output_color(true);
+        // Run with
+        // `cargo test --profile bench -- --nocapture bench -- <benchmark_filter>
+        // Collect cli arguments
+
+        // Interpret sequence of args `[ "...bench", "--", "[filter]" ]` as a trigger and extract `filter`
+        let filter = std::env::args()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .filter(|p| p.len() >= 2 && p[0].ends_with("bench") && p[1] == "--")
+            .map(|s| s.get(2).unwrap_or(&"".to_string()).clone())
+            .next();
+
+        let filter = match filter {
+            None => return,
+            Some(f) => f,
+        };
+
+        let mut criterion = criterion::Criterion::default()
+            .with_output_color(true)
+            .with_filter(&filter);
         bench_trace_registry(&mut criterion);
 
         criterion.final_summary();
