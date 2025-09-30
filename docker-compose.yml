@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  datadog-agent:
+    env_file:
+      - ~/sandbox.docker.env
+    image: datadog/agent:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+    ports:
+      - "8126:8126/tcp"  # APM traces
+      - "8125:8125/udp"  # DogStatsD metrics
+    environment:
+
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_LOG_LEVEL=TRACE
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+      - DD_AC_EXCLUDE=name:datadog-agent
+      - DD_LOGS_ENABLED=true
+      # Remote Configuration settings
+      - DD_REMOTE_CONFIGURATION_ENABLED=true
+      - DD_APM_RECEIVER_TIMEOUT=30s
+      # Additional APM settings for better debugging
+      - DD_APM_ANALYZED_SPANS=*:1.0
+      # Enable additional telemetry for debugging
+      - DD_APM_TELEMETRY_ENABLED=true
+      - DD_TRACE_DEBUG=true
+      - DD_SITE=datad0g.com
+    restart: unless-stopped
+    container_name: dd-agent
