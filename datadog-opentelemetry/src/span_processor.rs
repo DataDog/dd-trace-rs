@@ -1,8 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use hashbrown::{hash_map, HashMap as BHashMap};
 use std::{
-    collections::{hash_map, HashMap},
+    collections::HashMap,
+    fmt::Debug,
     str::FromStr,
     sync::{Arc, RwLock},
 };
@@ -56,7 +58,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
 
 #[derive(Debug)]
 struct InnerTraceRegistry {
-    registry: HashMap<[u8; 16], Trace>,
+    registry: BHashMap<[u8; 16], Trace>,
 }
 
 pub enum RegisterTracePropagationResult {
@@ -211,6 +213,12 @@ impl InnerTraceRegistry {
     }
 }
 
+const TRACE_REGISTRY_SHARDS: usize = 64;
+
+#[repr(align(128))]
+#[derive(Debug, Clone)]
+struct CachePadded<T>(T);
+
 #[derive(Clone, Debug)]
 /// A registry of traces that are currently running
 ///
@@ -220,21 +228,28 @@ impl InnerTraceRegistry {
 /// - The number of open spans in the trace
 /// - The sampling decision of the trace
 pub(crate) struct TraceRegistry {
-    // TODO: The lock should probably sharded based on the hash of the trace id
-    // so we reduce contention...
     // Example:
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
-    inner: Arc<RwLock<InnerTraceRegistry>>,
+    inner: Arc<[CachePadded<RwLock<InnerTraceRegistry>>; TRACE_REGISTRY_SHARDS]>,
 }
 
 impl TraceRegistry {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(InnerTraceRegistry {
-                registry: HashMap::new(),
+            inner: Arc::new(std::array::from_fn(|_| {
+                CachePadded(RwLock::new(InnerTraceRegistry {
+                    registry: BHashMap::new(),
+                }))
             })),
         }
+    }
+
+    fn get_shard(&self, trace_id: [u8; 16]) -> &RwLock<InnerTraceRegistry> {
+        use std::hash::BuildHasher;
+        let hash = foldhash::fast::RandomState::default().hash_one(u128::from_ne_bytes(trace_id));
+        let shard = hash as usize % TRACE_REGISTRY_SHARDS;
+        &self.inner[shard].0
     }
 
     /// Register the trace propagation data for a given trace ID
@@ -249,7 +264,7 @@ impl TraceRegistry {
         propagation_data: TracePropagationData,
     ) -> RegisterTracePropagationResult {
         let mut inner = self
-            .inner
+            .get_shard(trace_id)
             .write()
             .expect("Failed to acquire lock on trace registry");
         inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
@@ -260,7 +275,7 @@ impl TraceRegistry {
     /// If the trace is already registered, it will ignore the new root span ID and log a warning.
     pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
         let mut inner = self
-            .inner
+            .get_shard(trace_id)
             .write()
             .expect("Failed to acquire lock on trace registry");
         inner.register_local_root_span(trace_id, root_span_id);
@@ -274,7 +289,7 @@ impl TraceRegistry {
         propagation_data: TracePropagationData,
     ) {
         let mut inner = self
-            .inner
+            .get_shard(trace_id)
             .write()
             .expect("Failed to acquire lock on trace registry");
         inner.register_span(trace_id, span_id, propagation_data);
@@ -285,7 +300,7 @@ impl TraceRegistry {
     /// flush
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         let mut inner = self
-            .inner
+            .get_shard(trace_id)
             .write()
             .expect("Failed to acquire lock on trace registry");
         inner.finish_span(trace_id, span_data)
@@ -293,7 +308,7 @@ impl TraceRegistry {
 
     pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
         let inner = self
-            .inner
+            .get_shard(trace_id)
             .read()
             .expect("Failed to acquire lock on trace registry");
 
@@ -532,13 +547,22 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, RwLock};
+    use std::{
+        collections::HashMap,
+        hint::black_box,
+        sync::{Arc, RwLock},
+        thread,
+        time::Duration,
+    };
 
-    use dd_trace::Config;
+    use dd_trace::{
+        sampling::{mechanism, priority, SamplingDecision},
+        Config,
+    };
     use opentelemetry::{Key, KeyValue, Value};
     use opentelemetry_sdk::{trace::SpanProcessor, Resource};
 
-    use crate::span_processor::{DatadogSpanProcessor, TraceRegistry};
+    use crate::span_processor::{DatadogSpanProcessor, TracePropagationData, TraceRegistry};
 
     #[test]
     fn test_set_resource_from_empty_dd_config() {
@@ -682,5 +706,84 @@ mod tests {
             dd_resource.get(&Key::from_static_str("service.name")),
             Some(Value::String("otel-service".into()))
         );
+    }
+
+    fn bench_trace_registry(c: &mut criterion::Criterion) {
+        const ITERATIONS: u32 = 10000;
+        const NUM_TRACES: usize = ITERATIONS as usize / 20;
+        let mut group = c.benchmark_group("trace_registry_concurrent_access_threads");
+        group
+            .warm_up_time(Duration::from_millis(100))
+            .measurement_time(Duration::from_millis(1000));
+
+        for concurrency in [1, 2, 4, 8, 16, 32] {
+            group
+                .throughput(criterion::Throughput::Elements(
+                    ITERATIONS as u64 * concurrency,
+                ))
+                .bench_function(
+                    criterion::BenchmarkId::from_parameter(concurrency),
+                    move |g| {
+                        let trace_ids: Vec<_> = (0..concurrency)
+                            .map(|thread| {
+                                std::array::from_fn::<_, NUM_TRACES, _>(|i| {
+                                    ((thread << 16 | i as u64) as u128).to_be_bytes()
+                                })
+                            })
+                            .collect();
+                        g.iter_batched_ref(
+                            {
+                                let trace_ids = trace_ids.clone();
+                                move || {
+                                    let tr: TraceRegistry = TraceRegistry::new();
+                                    for trace_id in trace_ids.iter().flatten() {
+                                        tr.register_local_root_trace_propagation_data(
+                                            *trace_id,
+                                            TracePropagationData {
+                                                sampling_decision: SamplingDecision {
+                                                    priority: Some(priority::AUTO_KEEP),
+                                                    mechanism: Some(mechanism::DEFAULT),
+                                                },
+                                                origin: Some("rum".to_string()),
+                                                tags: Some(HashMap::from_iter([(
+                                                    "dd.p.tid".to_string(),
+                                                    "foobar".to_string(),
+                                                )])),
+                                            },
+                                        );
+                                    }
+                                    tr
+                                }
+                            },
+                            move |tr| {
+                                let tr = &*tr;
+                                let trace_ids = &trace_ids;
+                                thread::scope(move |s| {
+                                    for trace_id in trace_ids {
+                                        s.spawn(move || {
+                                            for _ in 0..(ITERATIONS as usize / NUM_TRACES) {
+                                                for trace_id in trace_id {
+                                                    black_box(tr.get_trace_propagation_data(
+                                                        black_box(*trace_id),
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                    }
+                                })
+                            },
+                            criterion::BatchSize::LargeInput,
+                        );
+                    },
+                );
+        }
+    }
+
+    #[test]
+    fn bench() {
+        let mut criterion = criterion::Criterion::default().with_output_color(true);
+        bench_trace_registry(&mut criterion);
+
+        criterion.final_summary();
     }
 }
