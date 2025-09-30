@@ -232,6 +232,7 @@ pub(crate) struct TraceRegistry {
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
     inner: Arc<[CachePadded<RwLock<InnerTraceRegistry>>; TRACE_REGISTRY_SHARDS]>,
+    hasher: foldhash::fast::RandomState,
 }
 
 impl TraceRegistry {
@@ -242,12 +243,13 @@ impl TraceRegistry {
                     registry: BHashMap::new(),
                 }))
             })),
+            hasher: foldhash::fast::RandomState::default(),
         }
     }
 
     fn get_shard(&self, trace_id: [u8; 16]) -> &RwLock<InnerTraceRegistry> {
         use std::hash::BuildHasher;
-        let hash = foldhash::fast::RandomState::default().hash_one(u128::from_ne_bytes(trace_id));
+        let hash = self.hasher.hash_one(u128::from_ne_bytes(trace_id));
         let shard = hash as usize % TRACE_REGISTRY_SHARDS;
         &self.inner[shard].0
     }
