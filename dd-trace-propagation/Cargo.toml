@@ -35,6 +35,10 @@ dd-trace-propagation = { path = ".", features = ["test-utils"] }
 name = "inject_benchmark"
 harness = false
 
+[[bench]]
+name = "extract_benchmark"
+harness = false
+
 [features]
 default = ["opentelemetry"]
 serde_config = ["serde", "serde_json"]
