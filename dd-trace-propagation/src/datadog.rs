@@ -123,35 +123,33 @@ fn get_propagation_tags(
     tags: &HashMap<String, String>,
     max_length: usize,
 ) -> Result<String, Error> {
-    // Use a single String buffer to avoid intermediate Vec allocation
-    let mut propagation_tags = String::new();
-    let mut first = true;
+    // Compute size before writing to prevent reallocations
+    let total_size: usize = tags
+        .iter()
+        .filter(|(k, _)| k.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
+        .enumerate()
+        .map(|(i, (k, v))| k.len() + v.len() + 1 + if i == 0 { 0 } else { 1 })
+        .sum();
+    if total_size > max_length {
+        return Err(Error::inject("inject_max_size", "datadog"));
+    }
+    let mut propagation_tags = String::with_capacity(total_size);
 
-    for (key, value) in tags.iter() {
-        if !key.starts_with(DATADOG_PROPAGATION_TAG_PREFIX) {
-            continue;
-        }
-
+    for (i, (key, value)) in tags
+        .iter()
+        .filter(|(k, _)| k.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
+        .enumerate()
+    {
         if !validate_tag_key(key) || !validate_tag_value(value) {
             return Err(Error::inject("encoding_error", "datadog"));
         }
 
-        // Estimate size to avoid multiple reallocations
-        let entry_len = key.len() + value.len() + 1; // +1 for '='
-        let separator_len = if first { 0 } else { 1 }; // ',' separator
-
-        // Check if adding this entry would exceed max_length
-        if propagation_tags.len() + entry_len + separator_len > max_length {
-            return Err(Error::inject("inject_max_size", "datadog"));
-        }
-
-        if !first {
+        if i != 0 {
             propagation_tags.push(',');
         }
         propagation_tags.push_str(key);
         propagation_tags.push('=');
         propagation_tags.push_str(value);
-        first = false;
     }
 
     Ok(propagation_tags)
