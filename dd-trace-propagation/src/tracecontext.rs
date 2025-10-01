@@ -821,6 +821,93 @@ mod test {
     }
 
     #[test]
+    fn test_tracestate_with_tags_longer_than_limit() {
+        let long_origin = "abcd".repeat(32);
+        let long_tag = "abcd".repeat(30);
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Sampling {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
+            },
+            origin: Some(long_origin.clone()),
+            tags: HashMap::from([("_dd.p.foo".to_string(), long_tag.clone())]),
+            links: vec![],
+            is_remote: false,
+            tracestate: None,
+        };
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
+        assert_eq!(
+            carrier[TRACESTATE_KEY],
+            format!("dd=s:2;o:{long_origin};p:5555eeee6666ffff")
+        );
+    }
+
+    #[test]
+    fn test_tracestate_with_tags_shorter_than_limit() {
+        let short_origin = "abcd".repeat(1);
+        let long_tag = "abcd".repeat(30);
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Sampling {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
+            },
+            origin: Some(short_origin.clone()),
+            tags: HashMap::from([("_dd.p.foo".to_string(), long_tag.clone())]),
+            links: vec![],
+            is_remote: false,
+            tracestate: None,
+        };
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
+        assert_eq!(
+            carrier[TRACESTATE_KEY],
+            format!("dd=s:2;o:{short_origin};p:5555eeee6666ffff;t.foo:{long_tag}")
+        );
+    }
+
+    #[test]
+    fn test_tracestate_with_long_dd_tags() {
+        let short_origin = "abcd".repeat(1);
+        let long_tag = "abcd".repeat(32);
+        let mut context = SpanContext {
+            trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
+            span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
+            sampling: Sampling {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
+            },
+            origin: Some(short_origin.clone()),
+            tags: HashMap::from([("_dd.p.foo".to_string(), long_tag.clone())]),
+            links: vec![],
+            is_remote: false,
+            tracestate: None,
+        };
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
+        assert_eq!(
+            carrier[TRACESTATE_KEY],
+            format!("dd=s:2;o:{short_origin};p:5555eeee6666ffff")
+        );
+    }
+
+    #[test]
     fn test_replace_chars() {
         let tests = vec![
             ("ac", "ac"),
