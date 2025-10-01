@@ -43,6 +43,11 @@ fn replace_chars<MatchFn: Fn(u8) -> bool>(
     f: MatchFn,
     replacement_char: char,
 ) -> Cow<'_, str> {
+    // Fast first pass
+    if s.as_bytes().iter().all(|c| c.is_ascii() && !f(*c)) {
+        return Cow::Borrowed(s);
+    }
+
     let mut replaced = String::new();
     let mut tail = s;
     loop {
@@ -68,11 +73,7 @@ fn replace_chars<MatchFn: Fn(u8) -> bool>(
         };
         tail = &tail[pos + offset..];
     }
-    if replaced.is_empty() {
-        Cow::Borrowed(s)
-    } else {
-        Cow::Owned(replaced)
-    }
+    Cow::Owned(replaced)
 }
 
 pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
@@ -88,8 +89,6 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
     // TODO: if higher trace_id 64bits are 0, we should verify _dd.p.tid is unset
     // if not 0, verify that `_dd.p.tid` is either unset or set to the encoded value of
     // the higher-order 64 bits
-    let trace_id = format!("{:032x}", context.trace_id);
-    let parent_id = format!("{:016x}", context.span_id);
 
     let flags = context
         .sampling
@@ -97,21 +96,59 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
         .map(|priority| if priority.is_keep() { "01" } else { "00" })
         .unwrap_or("00");
 
-    let traceparent = format!("00-{trace_id}-{parent_id}-{flags}");
+    let traceparent = format!(
+        "00-{:032x}-{:016x}-{flags}",
+        context.trace_id, context.span_id
+    );
 
     dd_debug!("Propagator (tracecontext): injecting traceparent: {traceparent}");
 
     carrier.set(TRACEPARENT_KEY, traceparent);
 }
 
+fn buff_appender(s: &mut String) -> BufAppender<'_> {
+    BufAppender {
+        start: s.len(),
+        buf: s,
+    }
+}
+
+struct BufAppender<'a> {
+    start: usize,
+    buf: &'a mut String,
+}
+
+impl BufAppender<'_> {
+    fn push_str(&mut self, s: &str) {
+        self.buf.push_str(s);
+    }
+
+    fn len(&self) -> usize {
+        self.buf.len() - self.start
+    }
+
+    fn appender(&mut self) -> BufAppender<'_> {
+        BufAppender {
+            start: self.buf.len(),
+            buf: self.buf,
+        }
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.buf.truncate(self.start + len);
+    }
+}
+
 fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
+    let mut tracestate = String::with_capacity(256);
+    tracestate.push_str("dd=");
+
     // Use a single String buffer to build the entire tracestate, avoiding intermediate allocations
-    let mut dd_parts = String::new();
+    let mut dd_parts = buff_appender(&mut tracestate);
 
     // Build sampling priority part
     let priority = context.sampling.priority.unwrap_or(priority::USER_KEEP);
-    dd_parts.push_str(TRACESTATE_SAMPLING_PRIORITY_KEY);
-    dd_parts.push(':');
+    dd_parts.push_str(crate::const_concat!(TRACESTATE_SAMPLING_PRIORITY_KEY, ":",));
     dd_parts.push_str(&priority.to_string());
 
     // Build origin part if present
@@ -130,9 +167,11 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
             + origin_encoded.len()
             < TRACESTATE_DD_KEY_MAX_LENGTH
         {
-            dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
-            dd_parts.push_str(TRACESTATE_ORIGIN_KEY);
-            dd_parts.push(':');
+            dd_parts.push_str(crate::const_concat!(
+                TRACESTATE_DD_PAIR_SEPARATOR,
+                TRACESTATE_ORIGIN_KEY,
+                ":",
+            ));
             dd_parts.push_str(&origin_encoded);
         }
     }
@@ -142,24 +181,27 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         dd_parts.len() + TRACESTATE_DD_PAIR_SEPARATOR.len() + TRACESTATE_LAST_PARENT_KEY.len() + 1;
     if last_parent_id_part_start + 16 < TRACESTATE_DD_KEY_MAX_LENGTH {
         // 16 chars for hex span_id
-        dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
-        dd_parts.push_str(TRACESTATE_LAST_PARENT_KEY);
-        dd_parts.push(':');
+
+        dd_parts.push_str(crate::const_concat!(
+            TRACESTATE_DD_PAIR_SEPARATOR,
+            TRACESTATE_LAST_PARENT_KEY,
+            ":",
+        ));
 
         if context.is_remote {
             if let Some(id) = context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
                 dd_parts.push_str(id);
             } else {
-                let _ = write!(&mut dd_parts, "{:016x}", context.span_id);
+                let _ = write!(&mut dd_parts.buf, "{:016x}", context.span_id);
             }
         } else {
-            let _ = write!(&mut dd_parts, "{:016x}", context.span_id);
+            let _ = write!(&mut dd_parts.buf, "{:016x}", context.span_id);
         }
     }
 
+    let index_before_tags = dd_parts.len();
     // Build propagation tags part
-    let mut tags_buffer = String::new();
-    let mut first_tag = true;
+    let mut tags_buffer = dd_parts.appender();
 
     for (key, value) in context.tags.iter() {
         let Some(key_suffix) = key.strip_prefix(DATADOG_PROPAGATION_TAG_PREFIX) else {
@@ -178,11 +220,8 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         );
         let encoded_value = encode_tag_value(&encoded_value);
 
-        let entry_size = if first_tag {
-            0
-        } else {
-            TRACESTATE_DD_PAIR_SEPARATOR.len()
-        } + TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX.len()
+        let entry_size = TRACESTATE_DD_PAIR_SEPARATOR.len()
+            + TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX.len()
             + t_key_suffix.len()
             + 1
             + encoded_value.len();
@@ -191,28 +230,19 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
             break;
         }
 
-        if !first_tag {
-            tags_buffer.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
-        }
-        tags_buffer.push_str(TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX);
+        tags_buffer.push_str(crate::const_concat!(
+            TRACESTATE_DD_PAIR_SEPARATOR,
+            TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX,
+        ));
         tags_buffer.push_str(&t_key_suffix);
-        tags_buffer.push(':');
+        tags_buffer.push_str(":");
         tags_buffer.push_str(&encoded_value);
-        first_tag = false;
     }
 
     // Add tags part to dd_parts if there's room
-    if !tags_buffer.is_empty()
-        && dd_parts.len() + TRACESTATE_DD_PAIR_SEPARATOR.len() + tags_buffer.len()
-            < TRACESTATE_DD_KEY_MAX_LENGTH
-    {
-        dd_parts.push_str(TRACESTATE_DD_PAIR_SEPARATOR);
-        dd_parts.push_str(&tags_buffer);
+    if tags_buffer.len() == 0 || dd_parts.len() >= TRACESTATE_DD_KEY_MAX_LENGTH {
+        dd_parts.truncate(index_before_tags);
     }
-
-    let mut tracestate = String::with_capacity(256);
-    tracestate.push_str("dd=");
-    tracestate.push_str(&dd_parts);
 
     // Add additional tracestate values if present
     if let Some(ref ts) = context.tracestate {
@@ -226,7 +256,10 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
         }
     }
 
-    dd_debug!("Propagator (tracecontext): injecting tracestate: {tracestate}");
+    dd_debug!(
+        "Propagator (tracecontext): injecting tracestate: {}",
+        tracestate
+    );
 
     carrier.set(TRACESTATE_KEY, tracestate);
 }

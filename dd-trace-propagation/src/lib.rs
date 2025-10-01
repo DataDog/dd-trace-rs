@@ -181,6 +181,35 @@ impl DatadogCompositePropagator {
     }
 }
 
+pub(crate) const fn const_append(source: &[u8], dest: &mut [u8], at: usize) {
+    let mut i = 0;
+    loop {
+        if i >= source.len() {
+            break;
+        }
+        dest[i + at] = source[i];
+        i += 1;
+    }
+}
+
+macro_rules! const_concat {
+    ($($s:expr,)+) => {{
+        const LEN: usize = 0 $( + $s.len())*;
+        const CONCATENATED: [u8; LEN] = {
+            let mut concatenated: [u8; LEN] = [0; LEN];
+            let mut at = 0;
+            $(
+                crate::const_append($s.as_bytes(), &mut concatenated, at);
+                at += $s.len();
+            )*
+            let _ = at;
+            concatenated
+        };
+        unsafe { std::str::from_utf8_unchecked(&CONCATENATED) }
+    }};
+}
+pub(crate) use const_concat;
+
 #[cfg(test)]
 pub mod tests {
     use std::{collections::HashMap, str::FromStr, sync::LazyLock, vec};
