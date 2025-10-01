@@ -6,7 +6,7 @@ use std::{borrow::Cow, collections::HashMap, fmt::Write, str::FromStr, sync::Laz
 use crate::{
     carrier::{Extractor, Injector},
     context::{
-        encode_tag_value, Sampling, SpanContext, Traceparent, Tracestate,
+        encode_tag_value, InjectSpanContext, Sampling, SpanContext, Traceparent, Tracestate,
         DATADOG_PROPAGATION_TAG_PREFIX,
     },
     datadog::DATADOG_LAST_PARENT_ID_KEY,
@@ -75,7 +75,7 @@ fn replace_chars<MatchFn: Fn(u8) -> bool>(
     }
 }
 
-pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
+pub fn inject(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     if context.trace_id != 0 && context.span_id != 0 {
         inject_traceparent(context, carrier);
         inject_tracestate(context, carrier);
@@ -84,7 +84,7 @@ pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector) {
     }
 }
 
-fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
+fn inject_traceparent(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     // TODO: if higher trace_id 64bits are 0, we should verify _dd.p.tid is unset
     // if not 0, verify that `_dd.p.tid` is either unset or set to the encoded value of
     // the higher-order 64 bits
@@ -104,7 +104,7 @@ fn inject_traceparent(context: &SpanContext, carrier: &mut dyn Injector) {
     carrier.set(TRACEPARENT_KEY, traceparent);
 }
 
-fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
+fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     // Use a single String buffer to build the entire tracestate, avoiding intermediate allocations
     let mut dd_parts = String::new();
 
@@ -117,7 +117,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     // Build origin part if present
     if let Some(origin) = context.origin.as_ref() {
         let origin_encoded = replace_chars(
-            origin.as_ref(),
+            origin,
             |c| !matches!(c, b' '..=b'+' | b'-'..=b':' | b'<'..=b'}'),
             INVALID_CHAR_REPLACEMENT,
         );
@@ -215,7 +215,7 @@ fn inject_tracestate(context: &SpanContext, carrier: &mut dyn Injector) {
     tracestate.push_str(&dd_parts);
 
     // Add additional tracestate values if present
-    if let Some(ref ts) = context.tracestate {
+    if let Some(ts) = context.tracestate {
         if let Some(ref additional) = ts.additional_values {
             for (key, value) in additional.iter().take(31) {
                 tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
@@ -679,21 +679,21 @@ mod test {
 
     #[test]
     fn test_inject_traceparent() {
-        let mut context = SpanContext {
+        let ts = Tracestate::from_str("other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4").unwrap();
+        let mut context = InjectSpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
             },
-            origin: Some("foo,bar=".to_string()),
-            tags: HashMap::from([(
+            origin: Some("foo,bar="),
+            tags: &mut HashMap::from([(
                 "_dd.p.foo bar,baz=".to_string(),
                 "abc~!@#$%^&*()_+`-=".to_string(),
             )]),
-            links: vec![],
             is_remote: false,
-            tracestate: Tracestate::from_str("other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4").ok(),
+            tracestate: Some(&ts),
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -716,16 +716,16 @@ mod test {
 
     #[test]
     fn test_inject_traceparent_with_256_max_length() {
-        let mut context = SpanContext {
+        let origin = "abc".repeat(200);
+        let mut context = InjectSpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
             },
-            origin: Some("abc".repeat(200)),
-            tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
-            links: vec![],
+            origin: Some(&origin),
+            tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
             tracestate: None,
         };
@@ -754,19 +754,19 @@ mod test {
         for index in 0..35 {
             tracestate.push(format!("state{index}=value-{index}"));
         }
+        let tracestate = Tracestate::from_str(&tracestate.join(",")).unwrap();
 
-        let mut context = SpanContext {
+        let mut context = InjectSpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
             sampling: Sampling {
                 priority: Some(priority::USER_KEEP),
                 mechanism: Some(mechanism::MANUAL),
             },
-            origin: Some("rum".to_string()),
-            tags: HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
-            links: vec![],
+            origin: Some("rum"),
+            tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
-            tracestate: Tracestate::from_str(&tracestate.join(",")).ok(),
+            tracestate: Some(&tracestate),
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();

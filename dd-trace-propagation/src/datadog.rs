@@ -6,7 +6,8 @@ use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 use crate::{
     carrier::{Extractor, Injector},
     context::{
-        combine_trace_id, split_trace_id, Sampling, SpanContext, DATADOG_PROPAGATION_TAG_PREFIX,
+        combine_trace_id, split_trace_id, InjectSpanContext, Sampling, SpanContext,
+        DATADOG_PROPAGATION_TAG_PREFIX,
     },
     error::Error,
 };
@@ -38,7 +39,7 @@ static DATADOG_HEADER_KEYS: LazyLock<[String; 5]> = LazyLock::new(|| {
     ]
 });
 
-pub fn inject(context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config) {
+pub fn inject(context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config) {
     let tags = &mut context.tags;
 
     inject_trace_id(context.trace_id, carrier, tags);
@@ -366,7 +367,10 @@ mod test {
         sampling::{mechanism, priority},
     };
 
-    use crate::{context::split_trace_id, Propagator};
+    use crate::{
+        context::{span_context_to_inject, split_trace_id},
+        Propagator,
+    };
 
     use super::*;
 
@@ -557,7 +561,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], "1234");
         assert_eq!(carrier[DATADOG_PARENT_ID_KEY], "5678");
@@ -596,7 +604,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], lower.to_string());
         assert_eq!(carrier[DATADOG_ORIGIN_KEY], "synthetics");
@@ -617,7 +629,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.dm=-4");
     }
@@ -632,7 +648,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -648,7 +668,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -663,7 +687,7 @@ mod test {
 
         let mut carrier = HashMap::new();
         propagator.inject(
-            &mut context,
+            &mut span_context_to_inject(&mut context),
             &mut carrier,
             &Config::builder().set_datadog_tags_max_length(0).build(),
         );
@@ -680,7 +704,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
     }
@@ -695,7 +723,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let mut carrier = HashMap::new();
-        propagator.inject(&mut context, &mut carrier, &Config::builder().build());
+        propagator.inject(
+            &mut span_context_to_inject(&mut context),
+            &mut carrier,
+            &Config::builder().build(),
+        );
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.other=test");
     }
