@@ -851,6 +851,7 @@ mod test {
 
     #[test]
     fn test_tracestate_with_tags_shorter_than_limit() {
+        #[allow(clippy::repeat_once)]
         let short_origin = "abcd".repeat(1);
         let long_tag = "abcd".repeat(30);
         let mut context = SpanContext {
@@ -880,6 +881,7 @@ mod test {
 
     #[test]
     fn test_tracestate_with_long_dd_tags() {
+        #[allow(clippy::repeat_once)]
         let short_origin = "abcd".repeat(1);
         let long_tag = "abcd".repeat(32);
         let mut context = SpanContext {
