@@ -787,7 +787,8 @@ mod tests {
         // `cargo test --profile bench -- --nocapture bench -- <benchmark_filter>
         // Collect cli arguments
 
-        // Interpret sequence of args `[ "...bench", "--", "[filter]" ]` as a trigger and extract `filter`
+        // Interpret sequence of args `[ "...bench", "--", "[filter]" ]` as a trigger and extract
+        // `filter`
         let filter = std::env::args()
             .collect::<Vec<_>>()
             .windows(3)
