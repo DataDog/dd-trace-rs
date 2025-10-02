@@ -249,14 +249,10 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     }
 
     // Add additional tracestate values if present
-    if let Some(ts) = context.tracestate {
-        if let Some(ref additional) = ts.additional_values {
-            for (key, value) in additional.iter().take(31) {
-                tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
-                tracestate.push_str(key);
-                tracestate.push('=');
-                tracestate.push_str(value);
-            }
+    if let Some(ts) = &context.tracestate {
+        for part in ts.additional_values().take(31) {
+            tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
+            tracestate.push_str(part)
         }
     }
 
@@ -509,7 +505,10 @@ pub fn keys() -> &'static [String] {
 mod test {
     use dd_trace::{configuration::TracePropagationStyle, sampling::priority, Config};
 
-    use crate::{context::span_context_to_inject, Propagator};
+    use crate::{
+        context::{span_context_to_inject, InjectTraceState},
+        Propagator,
+    };
 
     use super::*;
 
@@ -716,7 +715,6 @@ mod test {
 
     #[test]
     fn test_inject_traceparent() {
-        let ts = Tracestate::from_str("other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4").unwrap();
         let mut context = InjectSpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
             span_id: u64::from_str_radix("5555eeee6666ffff", 16).unwrap(),
@@ -730,7 +728,9 @@ mod test {
                 "abc~!@#$%^&*()_+`-=".to_string(),
             )]),
             is_remote: false,
-            tracestate: Some(&ts),
+            tracestate: Some(InjectTraceState::from_header(
+                "other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4".to_owned(),
+            )),
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -791,7 +791,7 @@ mod test {
         for index in 0..35 {
             tracestate.push(format!("state{index}=value-{index}"));
         }
-        let tracestate = Tracestate::from_str(&tracestate.join(",")).unwrap();
+        let tracestate = tracestate.join(",");
 
         let mut context = InjectSpanContext {
             trace_id: u128::from_str_radix("1111aaaa2222bbbb3333cccc4444dddd", 16).unwrap(),
@@ -803,7 +803,7 @@ mod test {
             origin: Some("rum"),
             tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
-            tracestate: Some(&tracestate),
+            tracestate: Some(InjectTraceState::from_header(tracestate)),
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
