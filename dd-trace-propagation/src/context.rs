@@ -66,6 +66,33 @@ impl SpanLink {
         }
     }
 }
+
+pub struct InjectSpanContext<'a> {
+    pub trace_id: u128,
+    pub span_id: u64,
+    pub sampling: Sampling,
+    pub origin: Option<&'a str>,
+    // tags needs to be mutable because we insert the error meta field
+    pub tags: &'a mut HashMap<String, String>,
+    pub is_remote: bool,
+    pub tracestate: Option<&'a Tracestate>,
+}
+
+#[cfg(test)]
+/// A helper function because creating synthetic borrowed data is a bit harder
+/// than owned data
+pub(crate) fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'_> {
+    InjectSpanContext {
+        trace_id: c.trace_id,
+        span_id: c.span_id,
+        sampling: c.sampling,
+        origin: c.origin.as_deref(),
+        tags: &mut c.tags,
+        is_remote: c.is_remote,
+        tracestate: c.tracestate.as_ref(),
+    }
+}
+
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct SpanContext {
     pub trace_id: u128,

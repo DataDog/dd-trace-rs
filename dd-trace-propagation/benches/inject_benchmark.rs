@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use dd_trace::{
     configuration::TracePropagationStyle,
     sampling::{mechanism, priority},
@@ -10,13 +10,25 @@ use dd_trace::{
 };
 use dd_trace_propagation::{
     carrier::Injector,
-    context::{Sampling, SpanContext},
+    context::{InjectSpanContext, Sampling, SpanContext},
     DatadogCompositePropagator,
 };
 use std::{collections::HashMap, sync::Arc};
 
 #[global_allocator]
 static GLOBAL: ReportingAllocator<std::alloc::System> = ReportingAllocator::new(std::alloc::System);
+
+fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'_> {
+    InjectSpanContext {
+        trace_id: c.trace_id,
+        span_id: c.span_id,
+        sampling: c.sampling,
+        origin: c.origin.as_deref(),
+        tags: &mut c.tags,
+        is_remote: c.is_remote,
+        tracestate: c.tracestate.as_ref(),
+    }
+}
 
 // Mock injector for benchmarking
 struct BenchInjector {
@@ -97,7 +109,7 @@ fn bench_datadog_only_inject<M: criterion::measurement::Measurement + Measuremen
         b.iter_batched(
             || (create_simple_span_context(), BenchInjector::new()),
             |(mut context, mut carrier)| {
-                propagator.inject(black_box(&mut context), black_box(&mut carrier))
+                propagator.inject(&mut span_context_to_inject(&mut context), &mut carrier)
             },
             BatchSize::LargeInput,
         )
@@ -107,7 +119,7 @@ fn bench_datadog_only_inject<M: criterion::measurement::Measurement + Measuremen
         b.iter_batched(
             || (create_complex_span_context(), BenchInjector::new()),
             |(mut context, mut carrier)| {
-                propagator.inject(black_box(&mut context), black_box(&mut carrier))
+                propagator.inject(&mut span_context_to_inject(&mut context), &mut carrier)
             },
             BatchSize::LargeInput,
         )
@@ -130,7 +142,7 @@ fn bench_tracecontext_only_inject<
             b.iter_batched(
                 || (create_simple_span_context(), BenchInjector::new()),
                 |(mut context, mut carrier)| {
-                    propagator.inject(black_box(&mut context), black_box(&mut carrier))
+                    propagator.inject(&mut span_context_to_inject(&mut context), &mut carrier)
                 },
                 BatchSize::LargeInput,
             )
@@ -143,7 +155,7 @@ fn bench_tracecontext_only_inject<
             b.iter_batched(
                 || (create_complex_span_context(), BenchInjector::new()),
                 |(mut context, mut carrier)| {
-                    propagator.inject(black_box(&mut context), black_box(&mut carrier))
+                    propagator.inject(&mut span_context_to_inject(&mut context), &mut carrier)
                 },
                 BatchSize::LargeInput,
             )

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::context::{SpanContext, SpanLink};
+use crate::context::{InjectSpanContext, SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
 use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
@@ -20,7 +20,7 @@ pub mod tracecontext;
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor, config: &Config) -> Option<SpanContext>;
-    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config);
+    fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config);
     fn keys(&self) -> &[String];
 }
 
@@ -81,7 +81,7 @@ impl DatadogCompositePropagator {
         Some(context)
     }
 
-    pub fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector) {
+    pub fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector) {
         self.injectors
             .iter()
             .for_each(|propagator| propagator.inject(context, carrier, &self.config));
@@ -1019,7 +1019,9 @@ pub mod tests {
             $(
                 #[test]
                 fn $name() {
-                    let (styles, context, expected) = $value;
+                    use crate::context::span_context_to_inject;
+
+                    let (styles, mut context, expected) = $value;
 
                     let builder = if let Some(styles) = styles {
                         let mut b = Config::builder();
@@ -1032,8 +1034,9 @@ pub mod tests {
                     let config = Arc::new(builder.build());
                     let propagator = DatadogCompositePropagator::new(config);
 
+                    let mut inject_context = span_context_to_inject(&mut context);
                     let mut carrier = HashMap::new();
-                    propagator.inject(context, &mut carrier);
+                    propagator.inject(&mut inject_context, &mut carrier);
 
                     assert_hashmap_keys(&expected, &carrier);
                     assert_hashmap_keys(&carrier, &expected);

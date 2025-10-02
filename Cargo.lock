@@ -823,6 +823,7 @@ name = "datadog-opentelemetry"
 version = "0.0.1"
 dependencies = [
  "assert_unordered",
+ "criterion",
  "data-pipeline",
  "datadog-opentelemetry",
  "datadog-opentelemetry-mappings",
@@ -830,7 +831,9 @@ dependencies = [
  "dd-trace",
  "dd-trace-propagation",
  "dd-trace-sampling",
+ "foldhash",
  "futures",
+ "hashbrown 0.15.5",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
