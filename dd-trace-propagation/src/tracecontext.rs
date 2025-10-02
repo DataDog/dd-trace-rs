@@ -139,6 +139,44 @@ impl BufAppender<'_> {
     }
 }
 
+fn append_dd_propagation_tags(context: &InjectSpanContext, tags_buffer: &mut BufAppender) {
+    for (key, value) in context.tags.iter() {
+        let Some(key_suffix) = key.strip_prefix(DATADOG_PROPAGATION_TAG_PREFIX) else {
+            continue;
+        };
+
+        let t_key_suffix = replace_chars(
+            key_suffix,
+            |c| !matches!(c, b'!'..=b'+' | b'-'..=b'<' | b'>'..=b'~'),
+            INVALID_CHAR_REPLACEMENT,
+        );
+        let encoded_value = replace_chars(
+            value,
+            |c| !matches!(c, b' '..=b'+' | b'-'..=b':' | b'<'..=b'}'),
+            INVALID_CHAR_REPLACEMENT,
+        );
+        let encoded_value = encode_tag_value(&encoded_value);
+
+        let entry_size = TRACESTATE_DD_PAIR_SEPARATOR.len()
+            + TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX.len()
+            + t_key_suffix.len()
+            + 1
+            + encoded_value.len();
+
+        if tags_buffer.len() + entry_size > TRACESTATE_DD_KEY_MAX_LENGTH / 2 {
+            break;
+        }
+
+        tags_buffer.push_str(crate::const_concat!(
+            TRACESTATE_DD_PAIR_SEPARATOR,
+            TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX,
+        ));
+        tags_buffer.push_str(&t_key_suffix);
+        tags_buffer.push_str(":");
+        tags_buffer.push_str(&encoded_value);
+    }
+}
+
 fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     let mut tracestate = String::with_capacity(256);
     tracestate.push_str("dd=");
@@ -203,41 +241,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     // Build propagation tags part
     let mut tags_buffer = dd_parts.appender();
 
-    for (key, value) in context.tags.iter() {
-        let Some(key_suffix) = key.strip_prefix(DATADOG_PROPAGATION_TAG_PREFIX) else {
-            continue;
-        };
-
-        let t_key_suffix = replace_chars(
-            key_suffix,
-            |c| !matches!(c, b'!'..=b'+' | b'-'..=b'<' | b'>'..=b'~'),
-            INVALID_CHAR_REPLACEMENT,
-        );
-        let encoded_value = replace_chars(
-            value,
-            |c| !matches!(c, b' '..=b'+' | b'-'..=b':' | b'<'..=b'}'),
-            INVALID_CHAR_REPLACEMENT,
-        );
-        let encoded_value = encode_tag_value(&encoded_value);
-
-        let entry_size = TRACESTATE_DD_PAIR_SEPARATOR.len()
-            + TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX.len()
-            + t_key_suffix.len()
-            + 1
-            + encoded_value.len();
-
-        if tags_buffer.len() + entry_size > TRACESTATE_DD_KEY_MAX_LENGTH / 2 {
-            break;
-        }
-
-        tags_buffer.push_str(crate::const_concat!(
-            TRACESTATE_DD_PAIR_SEPARATOR,
-            TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX,
-        ));
-        tags_buffer.push_str(&t_key_suffix);
-        tags_buffer.push_str(":");
-        tags_buffer.push_str(&encoded_value);
-    }
+    append_dd_propagation_tags(context, &mut tags_buffer);
 
     // Add tags part to dd_parts if there's room
     if tags_buffer.len() == 0 || dd_parts.len() >= TRACESTATE_DD_KEY_MAX_LENGTH {
