@@ -26,7 +26,7 @@ fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'_> {
         origin: c.origin.as_deref(),
         tags: &mut c.tags,
         is_remote: c.is_remote,
-        tracestate: c.tracestate.as_ref(),
+        tracestate: None,
     }
 }
 
