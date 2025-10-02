@@ -199,13 +199,14 @@ macro_rules! const_concat {
             let mut concatenated: [u8; LEN] = [0; LEN];
             let mut at = 0;
             $(
-                crate::const_append($s.as_bytes(), &mut concatenated, at);
+                let part: &str = $s;
+                crate::const_append(part.as_bytes(), &mut concatenated, at);
                 at += $s.len();
             )*
             let _ = at;
             concatenated
         };
-        unsafe { std::str::from_utf8_unchecked(&CONCATENATED) }
+        std::str::from_utf8(&CONCATENATED).expect("the concatenation of valid utf-8 strings is always a valid utf-8 string")
     }};
 }
 pub(crate) use const_concat;
