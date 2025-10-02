@@ -30,7 +30,6 @@ hashbrown = { workspace = true }
 # Libdatadog dependencies
 data-pipeline = { workspace = true }
 datadog-trace-utils = { workspace = true }
-tinybytes = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
