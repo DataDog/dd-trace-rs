@@ -1,9 +1,4 @@
 [overrides]
-
-# bollard-stubs is generated from the bollard repository
-# Missing repository information fixed with package override
-"bollard-stubs" = { origin = "https://github.com/fussybeaver/bollard" }
-
-# openssl-macros is part of the rust-openssl repository
-# Missing repository information fixed with package override  
-"openssl-macros" = { origin = "https://github.com/sfackler/rust-openssl" }
+# Tagged incorrectly by crates.io
+# https://github.com/pluots/stringmetrics/blob/v2.2.2/LICENSE
+"stringmetrics-2.2.2" = { license = "Apache-2.0" }
