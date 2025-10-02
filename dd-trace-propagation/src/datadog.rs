@@ -128,7 +128,12 @@ fn get_propagation_tags(
         .iter()
         .filter(|(k, _)| k.starts_with(DATADOG_PROPAGATION_TAG_PREFIX))
         .enumerate()
-        .map(|(i, (k, v))| k.len() + v.len() + 1 + if i == 0 { 0 } else { 1 })
+        .map(|(i, (k, v))| {
+            // Length of the tag is  len(key) + len(":") + len(value)
+            // and then we add a "," separator prefix but only if the tag is not
+            // the first one
+            k.len() + v.len() + 1 + if i == 0 { 0 } else { 1 }
+        })
         .sum();
     if total_size > max_length {
         return Err(Error::inject("inject_max_size", "datadog"));
