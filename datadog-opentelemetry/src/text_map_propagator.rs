@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
@@ -10,7 +10,7 @@ use opentelemetry::{
 };
 
 use dd_trace_propagation::{
-    context::{InjectSpanContext, Sampling, SpanContext, SpanLink, Tracestate},
+    context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
     DatadogCompositePropagator,
 };
 
@@ -113,7 +113,7 @@ impl DatadogPropagator {
         let tracestate = if *otel_tracestate == opentelemetry::trace::TraceState::NONE {
             None
         } else {
-            Tracestate::from_str(&otel_tracestate.header()).ok()
+            Some(InjectTraceState::from_header(otel_tracestate.header()))
         };
 
         let tags = if let Some(propagation_tags) = &mut propagation_data.tags {
@@ -129,7 +129,7 @@ impl DatadogPropagator {
             sampling,
             origin: propagation_data.origin.as_deref(),
             tags,
-            tracestate: tracestate.as_ref(),
+            tracestate,
         };
 
         self.inner.inject(dd_span_context, &mut injector)

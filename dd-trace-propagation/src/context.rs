@@ -75,7 +75,7 @@ pub struct InjectSpanContext<'a> {
     // tags needs to be mutable because we insert the error meta field
     pub tags: &'a mut HashMap<String, String>,
     pub is_remote: bool,
-    pub tracestate: Option<&'a Tracestate>,
+    pub tracestate: Option<InjectTraceState>,
 }
 
 #[cfg(test)]
@@ -89,7 +89,17 @@ pub(crate) fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'
         origin: c.origin.as_deref(),
         tags: &mut c.tags,
         is_remote: c.is_remote,
-        tracestate: c.tracestate.as_ref(),
+        tracestate: c.tracestate.as_ref().map(|ts| {
+            InjectTraceState::from_header(ts.additional_values.as_ref().map_or(
+                String::new(),
+                |v| {
+                    v.iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                },
+            ))
+        }),
     }
 }
 
@@ -103,6 +113,29 @@ pub struct SpanContext {
     pub links: Vec<SpanLink>,
     pub is_remote: bool,
     pub tracestate: Option<Tracestate>,
+}
+
+/// A tracestate we grab from the parent span
+///
+/// Only non-dd keys in the tracestate are injected
+pub struct InjectTraceState {
+    header: String,
+}
+
+impl InjectTraceState {
+    pub fn from_header(header: String) -> Self {
+        Self { header }
+    }
+
+    pub fn additional_values(&self) -> impl Iterator<Item = &str> {
+        self.header.split(',').filter(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            key != "dd"
+                && !value.is_empty()
+                && Tracestate::valid_key(key)
+                && Tracestate::valid_value(value)
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -171,9 +204,7 @@ impl FromStr for Tracestate {
         let mut additional_values = vec![];
 
         for v in ts_v {
-            let mut parts = v.splitn(2, '=');
-            let key = parts.next().unwrap_or_default();
-            let value = parts.next().unwrap_or_default();
+            let (key, value) = v.split_once('=').unwrap_or(("", ""));
 
             if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
                 dd_debug!("Tracestate: invalid key or header value: {v}");
