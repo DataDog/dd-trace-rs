@@ -18,7 +18,6 @@ serde = { workspace = true }
 
 # Libdatadog dependencies
 datadog-trace-utils = { workspace = true }
-tinybytes = { workspace = true }
 
 dd-trace = { path = "../dd-trace" }
 
