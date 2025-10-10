@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, str::FromStr, sync::Arc, vec};
+use std::{collections::HashMap, sync::Arc};
 
 use dd_trace::{catch_panic, sampling::priority, Config};
 use opentelemetry::{
@@ -10,7 +10,7 @@ use opentelemetry::{
 };
 
 use dd_trace_propagation::{
-    context::{Sampling, SpanContext, SpanLink, Tracestate},
+    context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
     DatadogCompositePropagator,
 };
 
@@ -87,7 +87,7 @@ impl DatadogPropagator {
         }
 
         let trace_id = otel_span_context.trace_id().to_bytes();
-        let propagation_data = self.registry.get_trace_propagation_data(trace_id);
+        let mut propagation_data = self.registry.get_trace_propagation_data(trace_id);
 
         // get Trace's sampling decision and if it is not present obtain it from otel's SpanContext
         // flags
@@ -113,25 +113,21 @@ impl DatadogPropagator {
         let tracestate = if *otel_tracestate == opentelemetry::trace::TraceState::NONE {
             None
         } else {
-            Tracestate::from_str(&otel_tracestate.header()).ok()
+            Some(InjectTraceState::from_header(otel_tracestate.header()))
         };
 
-        let mut tags = HashMap::new();
-        if let Some(propagation_tags) = propagation_data.tags {
-            propagation_tags.iter().for_each(|(key, value)| {
-                if key.starts_with("_dd.p.") {
-                    tags.insert(key.clone(), value.clone());
-                }
-            });
-        }
+        let tags = if let Some(propagation_tags) = &mut propagation_data.tags {
+            propagation_tags
+        } else {
+            &mut HashMap::new()
+        };
 
-        let dd_span_context = &mut SpanContext {
+        let dd_span_context = &mut InjectSpanContext {
             trace_id: u128::from_be_bytes(trace_id),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
             is_remote: otel_span_context.is_remote(),
-            links: vec![], // links don't affect injection
             sampling,
-            origin: propagation_data.origin,
+            origin: propagation_data.origin.as_deref(),
             tags,
             tracestate,
         };
