@@ -25,7 +25,12 @@ impl BenchExtractor {
 
 impl Extractor for BenchExtractor {
     fn get(&self, key: &str) -> Option<&str> {
-        self.headers.get(&key.to_lowercase()).map(String::as_str)
+        let k = if key.chars().any(char::is_uppercase) {
+            &key.to_lowercase()
+        } else {
+            key
+        };
+        self.headers.get(k).map(String::as_str)
     }
 
     fn keys(&self) -> Vec<&str> {
