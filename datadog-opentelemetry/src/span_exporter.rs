@@ -193,11 +193,11 @@ impl DatadogExporter {
                 builder.set_app_version(version);
             }
             if config.telemetry_enabled() {
-                builder.enable_telemetry(Some(TelemetryConfig {
+                builder.enable_telemetry(TelemetryConfig {
                     heartbeat: (config.telemetry_heartbeat_interval() * 1000.0) as u64,
                     runtime_id: Some(config.runtime_id().to_string()),
                     debug_enabled: false,
-                }));
+                });
             }
             TraceExporterWorker::spawn(
                 config,

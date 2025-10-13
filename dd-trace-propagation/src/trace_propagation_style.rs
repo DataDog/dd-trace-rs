@@ -7,7 +7,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::{
     carrier::{Extractor, Injector},
-    context::SpanContext,
+    context::{InjectSpanContext, SpanContext},
     datadog, tracecontext, Propagator,
 };
 
@@ -22,7 +22,7 @@ impl Propagator for TracePropagationStyle {
         }
     }
 
-    fn inject(&self, context: &mut SpanContext, carrier: &mut dyn Injector, config: &Config) {
+    fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config) {
         match self {
             Self::Datadog => datadog::inject(context, carrier, config),
             Self::TraceContext => tracecontext::inject(context, carrier),

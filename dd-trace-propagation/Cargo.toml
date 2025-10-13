@@ -13,10 +13,6 @@ crate-type = ["lib"]
 
 [dependencies]
 dd-trace = { path = "../dd-trace" }
-lazy_static = { version = "1.5", default-features = false }
-regex = { version = "1.10", default-features = false, features = [
-    "unicode-case",
-] }
 serde = { workspace = true, optional = true, features = [
     "derive",
 ] }
@@ -37,6 +33,10 @@ dd-trace-propagation = { path = ".", features = ["test-utils"] }
 
 [[bench]]
 name = "inject_benchmark"
+harness = false
+
+[[bench]]
+name = "extract_benchmark"
 harness = false
 
 [features]
