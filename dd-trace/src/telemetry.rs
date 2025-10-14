@@ -54,7 +54,7 @@ impl TelemetryHandle for TelemetryWorkerHandle {
                 .into_iter()
                 .for_each(|config_provider| {
                     self.try_send_msg(worker::TelemetryActions::AddConfig(
-                        config_provider.get_configuration(None),
+                        config_provider.get_configuration(),
                     ))
                     .ok();
                 });
@@ -173,16 +173,12 @@ fn add_log_error_inner<I: Into<String>>(
     handle.add_error_log(message.into(), stack).ok();
 }
 
-pub fn notify_configuration_update(
-    config_provider: &dyn ConfigurationProvider,
-    config_id: Option<String>,
-) {
-    notify_configuration_update_inner(config_provider, config_id, &TELEMETRY);
+pub fn notify_configuration_update(config_provider: &dyn ConfigurationProvider) {
+    notify_configuration_update_inner(config_provider, &TELEMETRY);
 }
 
 fn notify_configuration_update_inner(
     config_provider: &dyn ConfigurationProvider,
-    config_id: Option<String>,
     telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
 ) {
     let Some(telemetry) = telemetry_cell.get() else {
@@ -198,7 +194,7 @@ fn notify_configuration_update_inner(
         return;
     };
 
-    if let Err(err) = handle.add_configuration(config_provider.get_configuration(config_id)) {
+    if let Err(err) = handle.add_configuration(config_provider.get_configuration()) {
         dd_warn!("Telemetry: error sending configuration item {err}");
     } else {
         dd_debug!("Telemetry: configuration update sent sucessfully");
@@ -267,29 +263,31 @@ mod tests {
         }
     }
 
-    struct MockConfigurationProvider {
+    struct TestConfigurationProvider {
         name: String,
         value: String,
         origin: data::ConfigurationOrigin,
+        config_id: Option<String>,
     }
 
-    impl MockConfigurationProvider {
-        fn new(origin: data::ConfigurationOrigin) -> Self {
-            MockConfigurationProvider {
+    impl TestConfigurationProvider {
+        fn new(origin: data::ConfigurationOrigin, config_id: Option<String>) -> Self {
+            TestConfigurationProvider {
                 name: "DD_SERVICE".to_string(),
                 value: "test".to_string(),
                 origin,
+                config_id,
             }
         }
     }
 
-    impl ConfigurationProvider for MockConfigurationProvider {
-        fn get_configuration(&self, config_id: Option<String>) -> data::Configuration {
+    impl ConfigurationProvider for TestConfigurationProvider {
+        fn get_configuration(&self) -> data::Configuration {
             data::Configuration {
                 name: self.name.clone(),
                 value: self.value.clone(),
                 origin: self.origin.clone(),
-                config_id,
+                config_id: self.config_id.clone(),
             }
         }
     }
@@ -448,10 +446,11 @@ mod tests {
             &telemetry_cell,
         );
 
-        let mock_provider = MockConfigurationProvider::new(data::ConfigurationOrigin::EnvVar);
         let config_id = Some("config-42".to_string());
+        let test_provider =
+            TestConfigurationProvider::new(data::ConfigurationOrigin::EnvVar, config_id.clone());
 
-        notify_configuration_update_inner(&mock_provider, config_id.clone(), &telemetry_cell);
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
 
         let t = telemetry_cell.get().unwrap().lock().unwrap();
         let handle = t
@@ -481,9 +480,9 @@ mod tests {
             &telemetry_cell,
         );
 
-        let mock_provider = MockConfigurationProvider::new(data::ConfigurationOrigin::EnvVar);
+        let test_provider = TestConfigurationProvider::new(data::ConfigurationOrigin::EnvVar, None);
 
-        notify_configuration_update_inner(&mock_provider, None, &telemetry_cell);
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
 
         let t = telemetry_cell.get().unwrap().lock().unwrap();
         let handle = t
@@ -503,9 +502,10 @@ mod tests {
         let telemetry_cell = OnceLock::new();
         // Don't initialize telemetry - no handle should be present
 
-        let mock_provider = MockConfigurationProvider::new(data::ConfigurationOrigin::Default);
+        let test_provider =
+            TestConfigurationProvider::new(data::ConfigurationOrigin::Default, None);
 
         // Should not panic when no telemetry is initialized
-        notify_configuration_update_inner(&mock_provider, None, &telemetry_cell);
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
     }
 }

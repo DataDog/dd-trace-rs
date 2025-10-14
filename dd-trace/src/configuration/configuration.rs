@@ -200,13 +200,7 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
 pub trait ConfigurationProvider {
     /// Returns a telemetry configuration object representing the current state of this
     /// configuration item.
-    ///
-    /// # Parameters
-    ///
-    /// - `config_id`: Optional identifier for remote configuration scenarios. When provided, this
-    ///   ID is included in the returned `Configuration` to track which remote configuration is
-    ///   responsible for the current value.
-    fn get_configuration(&self, config_id: Option<String>) -> Configuration;
+    fn get_configuration(&self) -> Configuration;
 }
 
 /// A trait for converting configuration values to their string representation for telemetry.
@@ -257,6 +251,7 @@ struct ConfigItem<T: ConfigurationValueProvider> {
     default_value: T,
     env_value: Option<T>,
     code_value: Option<T>,
+    config_id: Option<String>,
 }
 
 impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
@@ -266,6 +261,7 @@ impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
             default_value: self.default_value.clone(),
             env_value: self.env_value.clone(),
             code_value: self.code_value.clone(),
+            config_id: self.config_id.clone(),
         }
     }
 }
@@ -278,6 +274,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             default_value: default,
             env_value: None,
             code_value: None,
+            config_id: None,
         }
     }
 
@@ -310,12 +307,12 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 
 impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
     /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self, config_id: Option<String>) -> Configuration {
+    fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.name.to_string(),
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
-            config_id,
+            config_id: self.config_id.clone(),
         }
     }
 }
@@ -343,6 +340,7 @@ struct ConfigItemWithOverride<T: ConfigurationValueProvider + Deref> {
     config_item: ConfigItem<T>,
     override_value: arc_swap::ArcSwapOption<T>,
     override_origin: ConfigSourceOrigin,
+    config_id: arc_swap::ArcSwapOption<String>,
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOverride<T> {
@@ -351,6 +349,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
             config_item: self.config_item.clone(),
             override_value: arc_swap::ArcSwapOption::new(self.override_value.load_full()),
             override_origin: self.override_origin,
+            config_id: arc_swap::ArcSwapOption::new(self.config_id.load_full()),
         }
     }
 }
@@ -361,6 +360,7 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::Code,
+            config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
@@ -369,6 +369,7 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::RemoteConfig,
+            config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
@@ -384,6 +385,13 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
     fn set_override_value(&self, value: T, source: ConfigSourceOrigin) {
         if source == self.override_origin {
             self.override_value.store(Some(Arc::new(value)));
+        }
+    }
+
+    fn set_config_id(&self, config_id: Option<String>) {
+        match config_id {
+            Some(id) => self.config_id.store(Some(Arc::new(id))),
+            None => self.config_id.store(None),
         }
     }
 
@@ -413,7 +421,8 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     for ConfigItemWithOverride<T>
 {
     /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self, config_id: Option<String>) -> Configuration {
+    fn get_configuration(&self) -> Configuration {
+        let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
         Configuration {
             name: self.config_item.name.to_string(),
             value: self.value().get_configuration_value(),
@@ -1159,13 +1168,14 @@ impl Config {
                 ParsedSamplingRules { rules },
                 ConfigSourceOrigin::RemoteConfig,
             );
+            self.trace_sampling_rules.set_config_id(config_id);
 
             // Notify callbacks about the sampling rules update
             self.remote_config_callbacks.lock().unwrap().notify_update(
                 &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
             );
 
-            telemetry::notify_configuration_update(&self.trace_sampling_rules, config_id);
+            telemetry::notify_configuration_update(&self.trace_sampling_rules);
         }
 
         Ok(())
@@ -1182,12 +1192,13 @@ impl Config {
 
     pub fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
         self.trace_sampling_rules.unset_override_value();
+        self.trace_sampling_rules.set_config_id(config_id);
 
         self.remote_config_callbacks.lock().unwrap().notify_update(
             &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
         );
 
-        telemetry::notify_configuration_update(&self.trace_sampling_rules, config_id);
+        telemetry::notify_configuration_update(&self.trace_sampling_rules);
     }
 
     /// Add a callback to be called when sampling rules are updated via remote configuration
@@ -2185,6 +2196,44 @@ mod tests {
     }
 
     #[test]
+    fn test_update_sampling_rules_from_remote_config_id() {
+        let config = Config::builder().build();
+
+        let new_rules = vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            service: Some("test-service".to_string()),
+            provenance: "remote".to_string(),
+            ..SamplingRuleConfig::default()
+        }];
+
+        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        config
+            .update_sampling_rules_from_remote(&rules_json, Some("config_id_1".to_string()))
+            .unwrap();
+
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            Some("config_id_1".to_string())
+        );
+
+        config
+            .update_sampling_rules_from_remote(&rules_json, Some("config_id_2".to_string()))
+            .unwrap();
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            Some("config_id_2".to_string())
+        );
+
+        config
+            .update_sampling_rules_from_remote(&"[]", None)
+            .unwrap();
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            None
+        );
+    }
+
+    #[test]
     fn test_telemetry_config_from_sources() {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
@@ -2426,7 +2475,7 @@ mod tests {
             r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#
         ).unwrap();
 
-        let configuration = &config.trace_sampling_rules.get_configuration(None);
+        let configuration = &config.trace_sampling_rules.get_configuration();
         assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
 
         // Converting configuration value to json helps with comparison as serialized properties may
@@ -2442,7 +2491,7 @@ mod tests {
             .trace_sampling_rules
             .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);
 
-        let configuration_after_rc = &config.trace_sampling_rules.get_configuration(None);
+        let configuration_after_rc = &config.trace_sampling_rules.get_configuration();
         assert_eq!(
             configuration_after_rc.origin,
             ConfigurationOrigin::RemoteConfig
@@ -2455,7 +2504,7 @@ mod tests {
         // Reset ConfigItemRc RC previous value
         config.trace_sampling_rules.unset_override_value();
 
-        let configuration = &config.trace_sampling_rules.get_configuration(None);
+        let configuration = &config.trace_sampling_rules.get_configuration();
         assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
             ParsedSamplingRules::from_str(&configuration.value).unwrap(),
