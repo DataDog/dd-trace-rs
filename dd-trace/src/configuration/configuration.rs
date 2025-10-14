@@ -2225,7 +2225,7 @@ mod tests {
         );
 
         config
-            .update_sampling_rules_from_remote(&"[]", None)
+            .update_sampling_rules_from_remote("[]", None)
             .unwrap();
         assert_eq!(
             config.trace_sampling_rules.get_configuration().config_id,
