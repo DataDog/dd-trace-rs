@@ -20,13 +20,13 @@ use dd_trace::{
 };
 
 // Datadog Keys
-const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
-const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
-const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
-const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
-const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
-const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
-const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
+pub const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
+pub const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
+pub const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
+pub const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
+pub const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
+pub const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
+pub const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
 pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
 
 static DATADOG_HEADER_KEYS: LazyLock<[String; 5]> = LazyLock::new(|| {
@@ -274,7 +274,7 @@ fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
     Some(origin.to_string())
 }
 
-fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, String> {
+pub fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, String> {
     let mut tags: HashMap<String, String> = HashMap::new();
 
     let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
