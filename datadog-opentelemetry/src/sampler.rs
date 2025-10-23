@@ -205,6 +205,7 @@ mod tests {
         );
 
         // Clean up environment
+        #[allow(clippy::disallowed_methods)]
         env::remove_var("DD_TRACE_SAMPLING_RULES");
     }
 

@@ -167,6 +167,7 @@ impl ConfigurationSource for EnvSource {
     }
 
     fn get(&self, key: &'static str) -> ConfigSourceResult<String> {
+        #[allow(clippy::disallowed_methods)]
         std::env::var(key).map_err(|_| ConfigSourceError::Missing)
     }
 }

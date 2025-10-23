@@ -1,0 +1,11 @@
+# Clippy configuration for dd-trace-rs
+
+# Disallow direct access to std::env to enforce using the configuration abstraction layer
+disallowed-methods = [
+    { path = "std::env::var", reason = "Use the configuration abstraction layer instead of direct env access" },
+    { path = "std::env::var_os", reason = "Use the configuration abstraction layer instead of direct env access" },
+    { path = "std::env::vars", reason = "Use the configuration abstraction layer instead of direct env access" },
+    { path = "std::env::vars_os", reason = "Use the configuration abstraction layer instead of direct env access" },
+    { path = "std::env::set_var", reason = "Use the configuration abstraction layer instead of direct env access" },
+    { path = "std::env::remove_var", reason = "Use the configuration abstraction layer instead of direct env access" },
+]
