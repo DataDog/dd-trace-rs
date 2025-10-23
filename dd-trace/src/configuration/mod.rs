@@ -5,6 +5,7 @@
 mod configuration;
 pub mod remote_config;
 mod sources;
+mod supported_configurations;
 
 pub use configuration::{
     Config, ConfigBuilder, RemoteConfigUpdate, SamplingRuleConfig, TracePropagationStyle,

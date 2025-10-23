@@ -5,6 +5,10 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 use ddtelemetry::data::ConfigurationOrigin;
 
+use crate::configuration::supported_configurations::{
+    SupportedConfigurations,
+};
+
 /// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSourceOrigin {
@@ -67,7 +71,7 @@ pub(crate) struct CompositeParseError {
 
 #[derive(Debug, PartialEq)]
 pub(crate) struct CompositeConfigSourceResult<T> {
-    pub name: &'static str,
+    pub name: SupportedConfigurations,
     pub value: Option<ConfigKey<T>>,
     #[allow(unused)]
     // TODO: log errors in debug mode, and send them through telemetry
@@ -75,7 +79,7 @@ pub(crate) struct CompositeConfigSourceResult<T> {
 }
 
 impl CompositeSource {
-    pub fn get(&self, key: &'static str) -> CompositeConfigSourceResult<String> {
+    pub fn get(&self, key: SupportedConfigurations) -> CompositeConfigSourceResult<String> {
         self.get_parse(key)
     }
 
@@ -88,11 +92,11 @@ impl CompositeSource {
     /// them with the source they came from.
     pub fn get_parse<T: FromStr<Err = impl Display>>(
         &self,
-        name: &'static str,
+        name: SupportedConfigurations,
     ) -> CompositeConfigSourceResult<T> {
         let mut errors = Vec::new();
         for s in &self.sources {
-            match s.get(name).and_then(|value| {
+            match s.get(name.as_str()).and_then(|value| {
                 value
                     .parse::<T>()
                     .map_err(|e| ConfigSourceError::FailedParsing {
@@ -206,7 +210,7 @@ impl ConfigurationSource for HashMapSource {
 mod tests {
 
     use crate::configuration::sources::ConfigKey;
-
+    use crate::configuration::supported_configurations::SupportedConfigurations;
     use super::{
         CompositeConfigSourceResult, CompositeParseError, CompositeSource, ConfigSourceOrigin,
         HashMapSource,
@@ -222,9 +226,9 @@ mod tests {
 
         for (key, expected) in [
             (
-                "DD_SERVICE",
+                SupportedConfigurations::DD_SERVICE,
                 CompositeConfigSourceResult {
-                    name: "DD_SERVICE",
+                    name: SupportedConfigurations::DD_SERVICE,
                     value: Some(super::ConfigKey {
                         value: "test-service".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
@@ -233,9 +237,9 @@ mod tests {
                 },
             ),
             (
-                "DD_ENV",
+                SupportedConfigurations::DD_ENV,
                 CompositeConfigSourceResult {
-                    name: "DD_ENV",
+                    name: SupportedConfigurations::DD_ENV,
                     value: Some(super::ConfigKey {
                         value: "test-env".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
@@ -244,16 +248,16 @@ mod tests {
                 },
             ),
             (
-                "DD_VERSION",
+                SupportedConfigurations::DD_VERSION,
                 CompositeConfigSourceResult {
-                    name: "DD_VERSION",
+                    name: SupportedConfigurations::DD_VERSION,
                     value: None,
                     errors: vec![],
                 },
             ),
         ] {
             let result = source.get(key);
-            assert_eq!(result, expected, "Failed for key: {key}");
+            assert_eq!(result, expected, "Failed for key: {:?}", key.as_str());
         }
     }
 
@@ -274,9 +278,9 @@ mod tests {
 
         for (key, expected) in [
             (
-                "DD_SERVICE",
+                SupportedConfigurations::DD_SERVICE,
                 CompositeConfigSourceResult {
-                    name: "DD_SERVICE",
+                    name: SupportedConfigurations::DD_SERVICE,
                     value: Some(super::ConfigKey {
                         value: "test-service-env_var".to_string(),
                         origin: ConfigSourceOrigin::EnvVar,
@@ -285,9 +289,9 @@ mod tests {
                 },
             ),
             (
-                "DD_ENV",
+                SupportedConfigurations::DD_ENV,
                 CompositeConfigSourceResult {
-                    name: "DD_ENV",
+                    name: SupportedConfigurations::DD_ENV,
                     value: Some(super::ConfigKey {
                         value: "test-env-default".to_string(),
                         origin: ConfigSourceOrigin::Default,
@@ -296,16 +300,16 @@ mod tests {
                 },
             ),
             (
-                "DD_VERSION",
+                SupportedConfigurations::DD_VERSION,
                 CompositeConfigSourceResult {
-                    name: "DD_VERSION",
+                    name: SupportedConfigurations::DD_VERSION,
                     value: None,
                     errors: vec![],
                 },
             ),
         ] {
             let result = source.get(key);
-            assert_eq!(result, expected, "Failed for key: {key}");
+            assert_eq!(result, expected, "Failed for key: {:?}", key.as_str());
         }
     }
 
@@ -325,11 +329,11 @@ mod tests {
             ConfigSourceOrigin::Default,
         ));
 
-        let result: CompositeConfigSourceResult<bool> = source.get_parse("DD_TRACE_ENABLED");
+        let result: CompositeConfigSourceResult<bool> = source.get_parse(SupportedConfigurations::DD_TRACE_ENABLED);
         assert_eq!(
             result,
             CompositeConfigSourceResult {
-                name: "DD_TRACE_ENABLED",
+                name: SupportedConfigurations::DD_TRACE_ENABLED,
                 value: Some(ConfigKey {
                     value: true,
                     origin: ConfigSourceOrigin::EnvVar,
@@ -373,11 +377,11 @@ mod tests {
             }
         }
 
-        let result = source.get_parse("DD_COMPLEX_STRUCT");
+        let result = source.get_parse(SupportedConfigurations::DD_COMPLEX_STRUCT);
         assert_eq!(
             result,
             CompositeConfigSourceResult {
-                name: "DD_COMPLEX_STRUCT",
+                name: SupportedConfigurations::DD_COMPLEX_STRUCT,
                 value: Some(ConfigKey {
                     value: ComplexConfig(vec![
                         ComplexStruct {

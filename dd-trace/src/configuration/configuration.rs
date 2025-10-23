@@ -13,6 +13,9 @@ use rustc_version_runtime::version;
 use crate::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
+use crate::configuration::supported_configurations::{
+    SupportedConfigurations,
+};
 use crate::log::LevelFilter;
 use crate::{dd_error, dd_warn};
 
@@ -254,9 +257,9 @@ impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
 
 impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     /// Creates a new ConfigItem with a default value
-    fn new(name: &'static str, default: T) -> Self {
+    fn new(name: SupportedConfigurations, default: T) -> Self {
         Self {
-            name,
+            name: name.as_str(),
             default_value: default,
             env_value: None,
             code_value: None,
@@ -336,7 +339,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
 }
 
 impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
-    fn new_code(name: &'static str, default: T) -> Self {
+    fn new_code(name: SupportedConfigurations, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
@@ -344,7 +347,7 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         }
     }
 
-    fn new_rc(name: &'static str, default: T) -> Self {
+    fn new_rc(name: SupportedConfigurations, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
@@ -419,7 +422,7 @@ struct ConfigItemSourceUpdater<'a> {
 impl ConfigItemSourceUpdater<'_> {
     fn apply_result<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
-        item_name: &'static str,
+        item_name: SupportedConfigurations,
         mut item: ConfigItemType,
         result: CompositeConfigSourceResult<RawConfig>,
         transform: F,
@@ -431,7 +434,8 @@ impl ConfigItemSourceUpdater<'_> {
     {
         if !result.errors.is_empty() {
             dd_error!(
-                "Configuration: Error parsing property {item_name} - {:?}",
+                "Configuration: Error parsing property {} - {:?}",
+                item_name.as_str(),
                 result.errors
             );
         }
@@ -445,7 +449,7 @@ impl ConfigItemSourceUpdater<'_> {
     /// Updates a ConfigItem from sources with parsed value (no transformation)
     fn update_parsed<ParsedConfig, ConfigItemType>(
         &self,
-        item_name: &'static str,
+        item_name: SupportedConfigurations,
         default: ConfigItemType,
     ) -> ConfigItemType
     where
@@ -460,7 +464,7 @@ impl ConfigItemSourceUpdater<'_> {
     /// Updates a ConfigItem from sources string with transformation
     pub fn update_string<ParsedConfig, ConfigItemType, F>(
         &self,
-        item_name: &'static str,
+        item_name: SupportedConfigurations,
         default: ConfigItemType,
         transform: F,
     ) -> ConfigItemType
@@ -476,7 +480,7 @@ impl ConfigItemSourceUpdater<'_> {
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
-        item_name: &'static str,
+        item_name: SupportedConfigurations,
         default: ConfigItemType,
         transform: F,
     ) -> ConfigItemType
@@ -848,7 +852,7 @@ impl Config {
         }
 
         let parsed_sampling_rules_config =
-            sources.get_parse::<ParsedSamplingRules>("DD_TRACE_SAMPLING_RULES");
+            sources.get_parse::<ParsedSamplingRules>(SupportedConfigurations::DD_TRACE_SAMPLING_RULES);
 
         let mut sampling_rules_item = ConfigItemWithOverride::new_rc(
             parsed_sampling_rules_config.name,
@@ -867,92 +871,92 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string("DD_SERVICE", default.service, ServiceName::Configured),
-            env: cisu.update_string("DD_ENV", default.env, Some),
-            version: cisu.update_string("DD_VERSION", default.version, Some),
+            service: cisu.update_string(SupportedConfigurations::DD_SERVICE, default.service, ServiceName::Configured),
+            env: cisu.update_string(SupportedConfigurations::DD_ENV, default.env, Some),
+            version: cisu.update_string(SupportedConfigurations::DD_VERSION, default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu.update_parsed_with_transform(
-                "DD_TAGS",
+                SupportedConfigurations::DD_TAGS,
                 default.global_tags,
                 |DdKeyValueTags(tags)| tags,
             ),
-            agent_host: cisu.update_string("DD_AGENT_HOST", default.agent_host, Cow::Owned),
-            trace_agent_port: cisu.update_parsed("DD_TRACE_AGENT_PORT", default.trace_agent_port),
+            agent_host: cisu.update_string(SupportedConfigurations::DD_AGENT_HOST, default.agent_host, Cow::Owned),
+            trace_agent_port: cisu.update_parsed(SupportedConfigurations::DD_TRACE_AGENT_PORT, default.trace_agent_port),
             trace_agent_url: cisu.update_string(
-                "DD_TRACE_AGENT_URL",
+                SupportedConfigurations::DD_TRACE_AGENT_URL,
                 default.trace_agent_url,
                 Cow::Owned,
             ),
             dogstatsd_agent_host: cisu.update_string(
-                "DD_DOGSTATSD_HOST",
+                SupportedConfigurations::DD_DOGSTATSD_HOST,
                 default.dogstatsd_agent_host,
                 Cow::Owned,
             ),
             dogstatsd_agent_port: cisu
-                .update_parsed("DD_DOGSTATSD_PORT", default.dogstatsd_agent_port),
+                .update_parsed(SupportedConfigurations::DD_DOGSTATSD_PORT, default.dogstatsd_agent_port),
             dogstatsd_agent_url: cisu.update_string(
-                "DD_DOGSTATSD_URL",
+                SupportedConfigurations::DD_DOGSTATSD_URL,
                 default.dogstatsd_agent_url,
                 Cow::Owned,
             ),
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_rate_limit: cisu.update_parsed("DD_TRACE_RATE_LIMIT", default.trace_rate_limit),
+            trace_rate_limit: cisu.update_parsed(SupportedConfigurations::DD_TRACE_RATE_LIMIT, default.trace_rate_limit),
 
-            enabled: cisu.update_parsed("DD_TRACE_ENABLED", default.enabled),
-            log_level_filter: cisu.update_parsed("DD_LOG_LEVEL", default.log_level_filter),
+            enabled: cisu.update_parsed(SupportedConfigurations::DD_TRACE_ENABLED, default.enabled),
+            log_level_filter: cisu.update_parsed(SupportedConfigurations::DD_LOG_LEVEL, default.log_level_filter),
             trace_stats_computation_enabled: cisu.update_parsed(
-                "DD_TRACE_STATS_COMPUTATION_ENABLED",
+                SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
                 default.trace_stats_computation_enabled,
             ),
             telemetry_enabled: cisu.update_parsed(
-                "DD_INSTRUMENTATION_TELEMETRY_ENABLED",
+                SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED,
                 default.telemetry_enabled,
             ),
             telemetry_log_collection_enabled: cisu.update_parsed(
-                "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
+                SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
                 default.telemetry_log_collection_enabled,
             ),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
-                "DD_TELEMETRY_HEARTBEAT_INTERVAL",
+                SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
             trace_propagation_style: cisu.update_parsed_with_transform(
-                "DD_TRACE_PROPAGATION_STYLE",
+                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
                 default.trace_propagation_style,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
-                "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
+                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_style_inject: cisu.update_parsed_with_transform(
-                "DD_TRACE_PROPAGATION_STYLE_INJECT",
+                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT,
                 default.trace_propagation_style_inject,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_extract_first: cisu.update_parsed(
-                "DD_TRACE_PROPAGATION_EXTRACT_FIRST",
+                SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
                 default.trace_propagation_extract_first,
             ),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
             remote_config_enabled: cisu.update_parsed(
-                "DD_REMOTE_CONFIGURATION_ENABLED",
+                SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
                 default.remote_config_enabled,
             ),
             remote_config_poll_interval: cisu.update_parsed_with_transform(
-                "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
+                SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
                 default.remote_config_poll_interval,
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
             datadog_tags_max_length: cisu.update_parsed_with_transform(
-                "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
+                SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
                 default.datadog_tags_max_length,
                 |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
             ),
@@ -1270,67 +1274,67 @@ impl std::fmt::Debug for Config {
 fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
-        env: ConfigItem::new("DD_ENV", None),
+        env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
         // TODO(paullgdc): Default service naming detection, probably from arg0
-        service: ConfigItemWithOverride::new_code("DD_SERVICE", ServiceName::Default),
-        version: ConfigItem::new("DD_VERSION", None),
-        global_tags: ConfigItem::new("DD_TAGS", Vec::new()),
+        service: ConfigItemWithOverride::new_code(SupportedConfigurations::DD_SERVICE, ServiceName::Default),
+        version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
+        global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
 
-        agent_host: ConfigItem::new("DD_AGENT_HOST", Cow::Borrowed("localhost")),
-        trace_agent_port: ConfigItem::new("DD_TRACE_AGENT_PORT", 8126),
-        trace_agent_url: ConfigItem::new("DD_TRACE_AGENT_URL", Cow::Borrowed("")),
-        dogstatsd_agent_host: ConfigItem::new("DD_DOGSTATSD_HOST", Cow::Borrowed("localhost")),
-        dogstatsd_agent_port: ConfigItem::new("DD_DOGSTATSD_PORT", 8125),
-        dogstatsd_agent_url: ConfigItem::new("DD_DOGSTATSD_URL", Cow::Borrowed("")),
+        agent_host: ConfigItem::new(SupportedConfigurations::DD_AGENT_HOST, Cow::Borrowed("localhost")),
+        trace_agent_port: ConfigItem::new(SupportedConfigurations::DD_TRACE_AGENT_PORT, 8126),
+        trace_agent_url: ConfigItem::new(SupportedConfigurations::DD_TRACE_AGENT_URL, Cow::Borrowed("")),
+        dogstatsd_agent_host: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_HOST, Cow::Borrowed("localhost")),
+        dogstatsd_agent_port: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_PORT, 8125),
+        dogstatsd_agent_url: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_URL, Cow::Borrowed("")),
         trace_sampling_rules: ConfigItemWithOverride::new_rc(
-            "DD_TRACE_SAMPLING_RULES",
+            SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
         ),
-        trace_rate_limit: ConfigItem::new("DD_TRACE_RATE_LIMIT", 100),
-        enabled: ConfigItem::new("DD_TRACE_ENABLED", true),
-        log_level_filter: ConfigItem::new("DD_LOG_LEVEL", LevelFilter::default()),
+        trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
+        enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
+        log_level_filter: ConfigItem::new(SupportedConfigurations::DD_LOG_LEVEL, LevelFilter::default()),
         tracer_version: TRACER_VERSION,
         language: "rust",
         language_version: version().to_string(),
         trace_stats_computation_enabled: ConfigItem::new(
-            "DD_TRACE_STATS_COMPUTATION_ENABLED",
+            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
         ),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
-        telemetry_enabled: ConfigItem::new("DD_INSTRUMENTATION_TELEMETRY_ENABLED", true),
+        telemetry_enabled: ConfigItem::new(SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED, true),
         telemetry_log_collection_enabled: ConfigItem::new(
-            "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
+            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
             true,
         ),
-        telemetry_heartbeat_interval: ConfigItem::new("DD_TELEMETRY_HEARTBEAT_INTERVAL", 60.0),
+        telemetry_heartbeat_interval: ConfigItem::new(SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL, 60.0),
 
         trace_propagation_style: ConfigItem::new(
-            "DD_TRACE_PROPAGATION_STYLE",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
             ]),
         ),
         trace_propagation_style_extract: ConfigItem::new(
-            "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
             None,
         ),
-        trace_propagation_style_inject: ConfigItem::new("DD_TRACE_PROPAGATION_STYLE_INJECT", None),
+        trace_propagation_style_inject: ConfigItem::new(SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT, None),
         trace_propagation_extract_first: ConfigItem::new(
-            "DD_TRACE_PROPAGATION_EXTRACT_FIRST",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
             false,
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
-        remote_config_enabled: ConfigItem::new("DD_REMOTE_CONFIG_ENABLED", true),
+        remote_config_enabled: ConfigItem::new(SupportedConfigurations::DD_REMOTE_CONFIG_ENABLED, true),
         remote_config_poll_interval: ConfigItem::new(
-            "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
+            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
             RC_DEFAULT_POLL_INTERVAL,
         ),
         remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         datadog_tags_max_length: ConfigItem::new(
-            "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
+            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
             DATADOG_TAGS_MAX_LENGTH,
         ),
     }
@@ -2003,7 +2007,7 @@ mod tests {
     fn test_config_item_priority() {
         // Test that ConfigItem respects priority: remote_config > code > env_var > default
         let mut config_item = ConfigItemWithOverride::new_rc(
-            "DD_TRACE_SAMPLING_RULES",
+            SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(),
         );
 
@@ -2340,12 +2344,12 @@ mod tests {
         assert!(default.enabled());
         assert_eq!(default.global_tags().collect::<Vec<_>>(), vec![]);
 
-        let env = cisu.update_string("DD_ENV", default.env, Some);
+        let env = cisu.update_string(SupportedConfigurations::DD_ENV, default.env, Some);
         assert_eq!(env.default_value, None);
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled = cisu.update_parsed("DD_ENABLED", default.enabled);
+        let enabled = cisu.update_parsed(SupportedConfigurations::DD_TRACE_ENABLED, default.enabled);
         assert!(enabled.default_value);
         assert_eq!(enabled.env_value, None);
         assert_eq!(enabled.code_value, None);
@@ -2366,7 +2370,7 @@ mod tests {
         }
 
         let tags =
-            cisu.update_parsed_with_transform("DD_TAGS", default.global_tags, |Tags(tags)| tags);
+            cisu.update_parsed_with_transform(SupportedConfigurations::DD_TAGS, default.global_tags, |Tags(tags)| tags);
         assert_eq!(tags.default_value, vec![]);
         assert_eq!(tags.env_value, None);
         assert_eq!(

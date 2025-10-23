@@ -3,6 +3,12 @@ import json
 supported_configurations_file = open("supported-configurations.json", "r")
 supported_configurations = json.load(supported_configurations_file)
 
+# PLEASE DO NOT ADD ANYTHING TO THIS LIST.
+# Only reason this exists is to test the code with fake env vars.
+undocumented_configurations = [
+    "DD_COMPLEX_STRUCT",
+]
+
 enum_block = ""
 as_str_block = ""
 for i, key in enumerate(supported_configurations["supportedConfigurations"].keys()):
@@ -13,6 +19,14 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
         enum_block += f",\n    {key}"
         as_str_block += f",\n            SupportedConfigurations::{key} => \"{key}\""
 
+if len(undocumented_configurations) > 0:
+    enum_block += ",\n\n    /// Used for testing purposes only"
+for i, key in enumerate(undocumented_configurations):
+    if i != 0:
+        enum_block += ","
+    enum_block += f"\n    #[allow(unused)]\n    {key}"
+    as_str_block += f",\n            SupportedConfigurations::{key} => \"{key}\""
+
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
@@ -22,13 +36,14 @@ result = f"""\
 /// To add a new configuration, add it to the supported-configurations.json file, then run the script.
 
 #[allow(nonstandard_style)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 #[non_exhaustive]
 pub enum SupportedConfigurations {{
 {enum_block}
 }}
 
 impl SupportedConfigurations {{
-    fn as_str(&self) -> &'static str {{
+    pub fn as_str(&self) -> &'static str {{
         match self {{
 {as_str_block}
         }}

@@ -6,6 +6,7 @@
 /// To add a new configuration, add it to the supported-configurations.json file, then run the script.
 
 #[allow(nonstandard_style)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 #[non_exhaustive]
 pub enum SupportedConfigurations {
     DD_AGENT_HOST,
@@ -33,11 +34,15 @@ pub enum SupportedConfigurations {
     DD_TRACE_SAMPLING_RULES,
     DD_TRACE_STATS_COMPUTATION_ENABLED,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
-    DD_VERSION
+    DD_VERSION,
+
+    /// Used for testing purposes only
+    #[allow(unused)]
+    DD_COMPLEX_STRUCT
 }
 
 impl SupportedConfigurations {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => "DD_AGENT_HOST",
             SupportedConfigurations::DD_DOGSTATSD_HOST => "DD_DOGSTATSD_HOST",
@@ -64,7 +69,8 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES => "DD_TRACE_SAMPLING_RULES",
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => "DD_TRACE_STATS_COMPUTATION_ENABLED",
             SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
-            SupportedConfigurations::DD_VERSION => "DD_VERSION"
+            SupportedConfigurations::DD_VERSION => "DD_VERSION",
+            SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT"
         }
     }
 }
