@@ -5,9 +5,7 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 use ddtelemetry::data::ConfigurationOrigin;
 
-use crate::configuration::supported_configurations::{
-    SupportedConfigurations,
-};
+use crate::configuration::supported_configurations::SupportedConfigurations;
 
 /// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,12 +208,12 @@ impl ConfigurationSource for HashMapSource {
 #[cfg(test)]
 mod tests {
 
-    use crate::configuration::sources::ConfigKey;
-    use crate::configuration::supported_configurations::SupportedConfigurations;
     use super::{
         CompositeConfigSourceResult, CompositeParseError, CompositeSource, ConfigSourceOrigin,
         HashMapSource,
     };
+    use crate::configuration::sources::ConfigKey;
+    use crate::configuration::supported_configurations::SupportedConfigurations;
 
     #[test]
     fn test_composite_source_single_origin() {
@@ -330,7 +328,8 @@ mod tests {
             ConfigSourceOrigin::Default,
         ));
 
-        let result: CompositeConfigSourceResult<bool> = source.get_parse(SupportedConfigurations::DD_TRACE_ENABLED);
+        let result: CompositeConfigSourceResult<bool> =
+            source.get_parse(SupportedConfigurations::DD_TRACE_ENABLED);
         assert_eq!(
             result,
             CompositeConfigSourceResult {
