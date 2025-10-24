@@ -61,13 +61,15 @@ impl DatadogExtractData {
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator,
     registry: TraceRegistry,
+    cfg: Arc<Config>,
 }
 
 impl DatadogPropagator {
     pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
         DatadogPropagator {
-            inner: DatadogCompositePropagator::new(config),
+            inner: DatadogCompositePropagator::new(config.clone()),
             registry,
+            cfg: config,
         }
     }
 
@@ -173,6 +175,9 @@ impl TextMapPropagator for DatadogPropagator {
         cx: &opentelemetry::Context,
         injector: &mut dyn opentelemetry::propagation::Injector,
     ) {
+        if !self.cfg.enabled() {
+            return;
+        }
         catch_panic!(DatadogPropagator::inject_context(self, cx, injector));
     }
 
@@ -181,6 +186,10 @@ impl TextMapPropagator for DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
+        if !self.cfg.enabled() {
+            return cx.clone();
+        }
+
         catch_panic!(
             DatadogPropagator::extract_with_context(self, cx, extractor),
             cx.clone()
@@ -188,7 +197,12 @@ impl TextMapPropagator for DatadogPropagator {
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
-        FieldIter::new(self.inner.keys())
+        let fields = if self.cfg.enabled() {
+            self.inner.keys()
+        } else {
+            &[]
+        };
+        FieldIter::new(fields)
     }
 }
 

@@ -475,6 +475,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             return;
         };
 
+        if !self.config.enabled() {
+            return;
+        }
+
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {

@@ -3,7 +3,7 @@
 
 use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision, Config};
 use dd_trace_sampling::{DatadogSampler, SamplingRulesCallback};
-use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
 
@@ -17,11 +17,12 @@ use crate::{
 pub struct Sampler {
     sampler: DatadogSampler,
     trace_registry: TraceRegistry,
+    cfg: Arc<Config>,
 }
 
 impl Sampler {
     pub fn new(
-        cfg: &Config,
+        cfg: Arc<Config>,
         resource: Arc<RwLock<Resource>>,
         trace_registry: TraceRegistry,
     ) -> Self {
@@ -30,6 +31,7 @@ impl Sampler {
         let sampler =
             dd_trace_sampling::DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
         Self {
+            cfg,
             sampler,
             trace_registry,
         }
@@ -55,6 +57,14 @@ impl ShouldSample for Sampler {
         attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
+        if !self.cfg.enabled() {
+            return opentelemetry::trace::SamplingResult {
+                decision: opentelemetry::trace::SamplingDecision::Drop,
+                attributes: vec![],
+                trace_state: TraceState::NONE,
+            };
+        }
+
         // If we have a deferred sampling decision on the parent span, we ignored the parent
         // sampling decision and let the sampler decide.
         let is_parent_deferred = parent_context
@@ -177,19 +187,21 @@ mod tests {
     #[test]
     fn test_create_sampler_with_sampling_rules() {
         // Build a fresh config to pick up the env var
-        let config = Config::builder()
-            .set_trace_sampling_rules(vec![SamplingRuleConfig {
-                sample_rate: 0.5,
-                service: Some("test-service".to_string()),
-                name: None,
-                resource: None,
-                tags: HashMap::new(),
-                provenance: "customer".to_string(),
-            }])
-            .build();
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                    sample_rate: 0.5,
+                    service: Some("test-service".to_string()),
+                    name: None,
+                    resource: None,
+                    tags: HashMap::new(),
+                    provenance: "customer".to_string(),
+                }])
+                .build(),
+        );
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
-        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
 
         let trace_id_bytes = [1; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -211,10 +223,10 @@ mod tests {
     #[test]
     fn test_create_default_sampler() {
         // Create a default config (no rules, no specific rate limit)
-        let config = Config::builder().build();
+        let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
 
         let trace_id_bytes = [2; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -230,10 +242,10 @@ mod tests {
 
     #[test]
     fn test_trace_state_propagation() {
-        let config = Config::builder().build();
+        let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(&config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
 
         let trace_id = TraceId::from_bytes([2; 16]);
         let span_id = SpanId::from_bytes([3; 8]);

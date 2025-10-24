@@ -7,7 +7,8 @@ use datadog_opentelemetry::make_test_tracer;
 use dd_trace::configuration::{SamplingRuleConfig, TracePropagationStyle};
 use opentelemetry::global::ObjectSafeSpan;
 use opentelemetry::trace::{
-    SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, TracerProvider,
+    SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, Tracer,
+    TracerProvider,
 };
 use opentelemetry::Context;
 
@@ -274,4 +275,33 @@ async fn test_decision_less_extraction() {
         );
     })
     .await;
+}
+
+#[tokio::test]
+async fn test_tracing_disabled() {
+    const SESSION_NAME: &str = "opentelemetry_api/test_tracing_disabled";
+    let mut cfg = dd_trace::Config::builder();
+    cfg.set_enabled(false)
+        .set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        {
+            let span = tracer_provider
+                .tracer("test_tracing_disabled")
+                .build(SpanBuilder {
+                    name: "span_disabled".into(),
+                    ..SpanBuilder::default()
+                });
+            let _cx = Context::new().with_span(span).attach();
+            let mut injected = HashMap::new();
+            propagator.inject(&mut injected);
+
+            assert!(injected.is_empty());
+        }
+
+        let extractor = make_extractor([("x-datadog-trace-id", "321")]);
+
+        let cx = propagator.extract(&extractor);
+        assert!(!cx.has_active_span());
+    })
+    .await
 }
