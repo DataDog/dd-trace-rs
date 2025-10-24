@@ -72,6 +72,16 @@
         ]
       }
     ],
+    "DD_REMOTE_CONFIGURATION_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default_value": "true",
+        "propertyKeys": [
+          "remote_config_enabled"
+        ]
+      }
+    ],
     "DD_REMOTE_CONFIG_ENABLED": [
       {
         "version": "A",
@@ -89,16 +99,6 @@
         "default_value": "5.0",
         "propertyKeys": [
           "remote_config_poll_interval"
-        ]
-      }
-    ],
-    "DD_REMOTE_CONFIGURATION_ENABLED": [
-      {
-        "version": "A",
-        "type": "boolean",
-        "default_value": "true",
-        "propertyKeys": [
-          "remote_config_enabled"
         ]
       }
     ],

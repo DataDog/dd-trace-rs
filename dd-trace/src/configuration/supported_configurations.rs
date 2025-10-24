@@ -15,9 +15,9 @@ pub(crate) enum SupportedConfigurations {
     DD_ENV,
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
     DD_LOG_LEVEL,
+    DD_REMOTE_CONFIGURATION_ENABLED,
     DD_REMOTE_CONFIG_ENABLED,
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
-    DD_REMOTE_CONFIGURATION_ENABLED,
     DD_SERVICE,
     DD_TAGS,
     DD_TELEMETRY_HEARTBEAT_INTERVAL,
@@ -52,12 +52,12 @@ impl SupportedConfigurations {
                 "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
             }
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
+                "DD_REMOTE_CONFIGURATION_ENABLED"
+            }
             SupportedConfigurations::DD_REMOTE_CONFIG_ENABLED => "DD_REMOTE_CONFIG_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => {
                 "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS"
-            }
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
-                "DD_REMOTE_CONFIGURATION_ENABLED"
             }
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
