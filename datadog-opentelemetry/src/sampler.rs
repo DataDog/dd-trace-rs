@@ -172,7 +172,7 @@ mod tests {
         Context, SpanId, TraceFlags,
     };
     use opentelemetry_sdk::trace::ShouldSample;
-    use std::{collections::HashMap, env};
+    use std::collections::HashMap;
 
     #[test]
     fn test_create_sampler_with_sampling_rules() {
@@ -203,10 +203,6 @@ mod tests {
                 .is_empty(),
             "Sampler should add attributes even if decision is complex"
         );
-
-        // Clean up environment
-        #[allow(clippy::disallowed_methods)]
-        env::remove_var("DD_TRACE_SAMPLING_RULES");
     }
 
     #[test]
