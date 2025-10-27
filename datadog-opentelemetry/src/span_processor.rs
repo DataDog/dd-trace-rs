@@ -340,7 +340,7 @@ impl DatadogSpanProcessor {
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
-        let rc_client_handle = if config.remote_config_enabled() {
+        let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
             RemoteConfigClientWorker::start(config.clone())
                 .inspect_err(|e| {
                     dd_trace::dd_error!(
@@ -355,13 +355,9 @@ impl DatadogSpanProcessor {
         // Create remote config client with shared config
 
         // Extract config clone before moving the Arc
-        let config_clone = config.clone();
         Self {
             registry,
-            span_exporter: DatadogExporter::new(
-                config_clone.as_ref().clone(),
-                agent_response_handler,
-            ),
+            span_exporter: DatadogExporter::new(config.clone(), agent_response_handler),
             resource,
             config,
             rc_client_handle,

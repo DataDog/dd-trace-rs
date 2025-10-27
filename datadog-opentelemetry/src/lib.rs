@@ -289,35 +289,29 @@ fn make_tracer(
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
-    // Get sampler callback before moving sampler into tracer provider
-    let sampler_callback = if config.remote_config_enabled() {
-        Some(sampler.on_rules_update())
-    } else {
-        None
+    if config.remote_config_enabled() {
+        let sampler_callback = sampler.on_rules_update();
+
+        config.set_sampling_rules_callback(move |update| match update {
+            RemoteConfigUpdate::SamplingRules(rules) => {
+                sampler_callback(rules);
+            }
+        });
     };
 
-    let span_processor = DatadogSpanProcessor::new(
-        config.clone(),
-        registry.clone(),
-        resource_slot.clone(),
-        Some(agent_response_handler),
-    );
-    let tracer_provider = tracer_provider_builder
-        .with_span_processor(span_processor)
+    let mut tracer_provider_builder = tracer_provider_builder
         .with_sampler(sampler) // Use the sampler created above
-        .with_id_generator(trace_id::TraceidGenerator)
-        .build();
-
-    if config.remote_config_enabled() {
-        // Add sampler callback to the shared config before creating the remote config client
-        if let Some(sampler_callback) = sampler_callback {
-            config.set_sampling_rules_callback(move |update| match update {
-                RemoteConfigUpdate::SamplingRules(rules) => {
-                    sampler_callback(rules);
-                }
-            });
-        }
+        .with_id_generator(trace_id::TraceidGenerator);
+    if config.enabled() {
+        let span_processor = DatadogSpanProcessor::new(
+            config.clone(),
+            registry.clone(),
+            resource_slot.clone(),
+            Some(agent_response_handler),
+        );
+        tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
     }
+    let tracer_provider = tracer_provider_builder.build();
 
     (tracer_provider, propagator)
 }
