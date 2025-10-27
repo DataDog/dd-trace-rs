@@ -57,6 +57,9 @@ impl ShouldSample for Sampler {
         attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
     ) -> opentelemetry::trace::SamplingResult {
+        // If the library has been disabled, we make every span take a Drop decision
+        // This way they will not store any data (attributes, name, errors, ...) and will not be
+        // passed to span processors
         if !self.cfg.enabled() {
             return opentelemetry::trace::SamplingResult {
                 decision: opentelemetry::trace::SamplingDecision::Drop,
