@@ -3,21 +3,87 @@
 
 use std::{
     any::Any,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
     time::Duration,
 };
 
 use anyhow::Error;
 use ddtelemetry::{
     data,
+    metrics::ContextKey,
     worker::{self, TelemetryWorkerHandle},
 };
 
-use crate::{dd_error, dd_info, Config};
+use crate::{dd_debug, dd_error, Config};
 
-static TELEMETRY: OnceLock<Arc<Mutex<Telemetry>>> = OnceLock::new();
+static TELEMETRY: OnceLock<Mutex<Telemetry>> = OnceLock::new();
+
+type TelemetryCell = OnceLock<Mutex<Telemetry>>;
+
+fn with_telemetry_handle<F: FnOnce(&mut dyn TelemetryHandle) -> R, R>(
+    cell: &TelemetryCell,
+    f: F,
+) -> Option<R> {
+    let mut telemetry = cell.get()?.lock().ok()?;
+    if !telemetry.enabled || !telemetry.log_collection_enabled {
+        return None;
+    }
+    let handle = telemetry.handle.as_mut()?;
+
+    Some(f(handle.as_mut()))
+}
+
+macro_rules! telemetry_metrics {
+    ($($variant:ident => ($name:expr, $ns:expr, $ty:expr),)*) => {
+        #[derive(PartialEq)]
+        pub enum TelemetryMetric {
+            $(
+                $variant ,
+            )*
+        }
+
+        const TELEMETRY_METRICS_COUNT: usize = [$(TelemetryMetric :: $variant ,)*].len();
+
+        impl TelemetryMetric {
+            fn ddtelemetry_metric_info(
+                &self,
+            ) -> (
+                &'static str,
+                data::metrics::MetricNamespace,
+                data::metrics::MetricType,
+            ) {
+                use data::metrics::MetricNamespace::*;
+                use data::metrics::MetricType::*;
+                use TelemetryMetric::*;
+                match self {
+                    $(
+                        $variant => ($name, $ns, $ty),
+                    )*
+                }
+            }
+
+            fn idx(&self) -> usize {
+                [$(TelemetryMetric :: $variant ,)*]
+                    .into_iter().enumerate()
+                    .find(|(_, v)| v == self)
+                    .unwrap()
+                    .0
+            }
+        }
+    };
+}
+
+telemetry_metrics!(
+    SpansCreated => ("spans_created", Tracers, Count),
+    SpansFinished => ("spans_dropped", Tracers, Count),
+    SpansEnqueuedForSerialization => ("spans_enqueued_for_serialization", Tracers, Count),
+    TraceSegmentsCreated => ("trace_chunks_created", Tracers, Count),
+    TraceSegmentsClosed => ("trace_chunks_closed", Tracers, Count),
+);
 
 trait TelemetryHandle: Sync + Send + 'static + Any {
+    fn add_point(&self, value: f64, metric: TelemetryMetric) -> Result<(), anyhow::Error>;
+
     fn add_error_log(
         &mut self,
         message: String,
@@ -32,13 +98,30 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
     fn as_any(&self) -> &dyn Any;
 }
 
-impl TelemetryHandle for TelemetryWorkerHandle {
+struct TelemetryHandleWrapper {
+    handle: TelemetryWorkerHandle,
+    metrics_context: [OnceLock<ContextKey>; TELEMETRY_METRICS_COUNT],
+}
+
+impl TelemetryHandle for TelemetryHandleWrapper {
+    fn add_point(&self, value: f64, metric: TelemetryMetric) -> Result<(), anyhow::Error> {
+        let idx = metric.idx();
+
+        let context_key = self.metrics_context[idx].get_or_init(|| {
+            let (n, ns, ty) = metric.ddtelemetry_metric_info();
+            self.handle
+                .register_metric_context(n.to_string(), vec![], ty, true, ns)
+        });
+        self.handle.add_point(value, context_key, vec![])
+    }
+
     fn add_error_log(
         &mut self,
         message: String,
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error> {
-        self.add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
+        self.handle
+            .add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
     }
 
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
@@ -47,16 +130,17 @@ impl TelemetryHandle for TelemetryWorkerHandle {
                 .get_telemetry_configuration()
                 .into_iter()
                 .for_each(|config_item| {
-                    self.try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+                    self.handle
+                        .try_send_msg(worker::TelemetryActions::AddConfig(config_item))
                         .ok();
                 });
         }
 
-        self.send_start()
+        self.handle.send_start()
     }
 
     fn send_stop(&self) -> Result<(), anyhow::Error> {
-        self.send_stop()
+        self.handle.send_stop()
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -78,20 +162,20 @@ pub fn init_telemetry(config: &Config) {
 fn init_telemetry_inner(
     config: &Config,
     custom_handle: Option<Box<dyn TelemetryHandle>>,
-    telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
+    telemetry_cell: &TelemetryCell,
 ) {
     telemetry_cell.get_or_init(|| match make_telemetry_worker(config, custom_handle) {
         Ok(handle) => {
             handle.send_start(Some(config)).ok();
-            Arc::new(Mutex::new(Telemetry {
+            Mutex::new(Telemetry {
                 handle: Some(handle),
                 enabled: config.telemetry_enabled(),
                 log_collection_enabled: config.telemetry_log_collection_enabled(),
-            }))
+            })
         }
         Err(err) => {
             dd_error!("Telemetry: Error initializing worker: {err:?}");
-            Arc::new(Mutex::new(Telemetry::default()))
+            Mutex::new(Telemetry::default())
         }
     });
 }
@@ -114,9 +198,12 @@ fn make_telemetry_worker(
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
         // builder.config.debug_enabled = true;
 
-        builder
-            .run()
-            .map(|handle| Box::new(handle) as Box<dyn TelemetryHandle>)
+        builder.run().map(|handle| {
+            Box::new(TelemetryHandleWrapper {
+                handle,
+                metrics_context: [const { OnceLock::new() }; TELEMETRY_METRICS_COUNT],
+            }) as Box<dyn TelemetryHandle>
+        })
     } else {
         custom_handle.ok_or_else(|| Error::msg("Custom telemetry handle not provided"))
     }
@@ -126,18 +213,21 @@ pub fn stop_telemetry() {
     stop_telemetry_inner(&TELEMETRY);
 }
 
-fn stop_telemetry_inner(telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>) {
-    let Some(telemetry) = telemetry_cell.get() else {
-        return;
-    };
-    let Ok(telemetry) = telemetry.lock() else {
-        return;
-    };
-    let Some(handle) = &telemetry.handle else {
-        return;
-    };
-    dd_info!("Stopping telemetry");
-    handle.send_stop().ok();
+fn stop_telemetry_inner(telemetry_cell: &TelemetryCell) {
+    with_telemetry_handle(telemetry_cell, |handle| {
+        dd_debug!("Stopping telemetry");
+        handle.send_stop().ok();
+    });
+}
+
+pub fn add_point(value: f64, metric: TelemetryMetric) {
+    add_point_inner(value, metric, &TELEMETRY)
+}
+
+fn add_point_inner(value: f64, metric: TelemetryMetric, telemetry_cell: &TelemetryCell) {
+    with_telemetry_handle(telemetry_cell, |handle| {
+        handle.add_point(value, metric).ok();
+    });
 }
 
 pub fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
@@ -148,30 +238,23 @@ pub fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
 fn add_log_error_inner<I: Into<String>>(
     message: I,
     stack: Option<String>,
-    telemetry_cell: &OnceLock<Arc<Mutex<Telemetry>>>,
+    telemetry_cell: &TelemetryCell,
 ) {
-    let Some(telemetry) = telemetry_cell.get() else {
-        return;
-    };
-    let Ok(mut telemetry) = telemetry.lock() else {
-        return;
-    };
-    if !telemetry.enabled || !telemetry.log_collection_enabled {
-        return;
-    }
-    let Some(handle) = telemetry.handle.as_mut() else {
-        return;
-    };
-    handle.add_error_log(message.into(), stack).ok();
+    with_telemetry_handle(telemetry_cell, |handle| {
+        handle.add_error_log(message.into(), stack).ok();
+    });
 }
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Ok;
     use ddtelemetry::data;
 
     use crate::{
         dd_debug, dd_error, dd_warn,
-        telemetry::{add_log_error_inner, init_telemetry_inner, TelemetryHandle, TELEMETRY},
+        telemetry::{
+            add_log_error_inner, init_telemetry_inner, TelemetryHandle, TelemetryMetric, TELEMETRY,
+        },
         Config,
     };
 
@@ -189,6 +272,9 @@ mod tests {
     }
 
     impl TelemetryHandle for TestTelemetryHandle {
+        fn add_point(&self, _value: f64, _metric: TelemetryMetric) -> Result<(), anyhow::Error> {
+            Ok(())
+        }
         fn add_error_log(
             &mut self,
             message: String,

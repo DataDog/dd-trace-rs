@@ -32,6 +32,7 @@ arc-swap = "1.7.1"
 
 # Libdatadog dependencies
 ddtelemetry = { workspace = true }
+
 tokio-util = "0.7"
 
 # Test utils
@@ -39,7 +40,6 @@ criterion = { version = "0.5.1", optional = true }
 
 [dev-dependencies]
 dd-trace = { path = "./", features = ["test-utils"] }
-
 [features]
 test-utils = ["criterion"]
 
