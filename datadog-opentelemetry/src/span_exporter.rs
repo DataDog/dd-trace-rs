@@ -163,14 +163,10 @@ pub struct DatadogExporter {
 impl DatadogExporter {
     #[allow(clippy::type_complexity)]
     pub fn new(
-        config: dd_trace::Config,
+        config: Arc<dd_trace::Config>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
-        let (tx, rx) = channel(
-            SPAN_FLUSH_THRESHOLD,
-            MAX_BUFFERED_SPANS,
-            Arc::new(config.clone()),
-        );
+        let (tx, rx) = channel(SPAN_FLUSH_THRESHOLD, MAX_BUFFERED_SPANS, config.clone());
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
@@ -553,7 +549,7 @@ impl TraceExporterWorker {
     /// * The thread panics
     #[allow(clippy::type_complexity)]
     fn spawn(
-        cfg: dd_trace::Config,
+        cfg: Arc<dd_trace::Config>,
         builder: TraceExporterBuilder,
         rx: Receiver,
         otel_resource: opentelemetry_sdk::Resource,

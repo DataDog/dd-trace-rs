@@ -80,10 +80,6 @@ use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
 
-// Type alias to simplify complex callback type for remote config
-// Arc wrapper around SamplingRulesCallback for shared ownership in remote config
-type SamplerCallback = Arc<dd_trace_sampling::SamplingRulesCallback>;
-
 pub struct DatadogTracingBuilder {
     config: Option<dd_trace::Config>,
     resource: Option<opentelemetry_sdk::Resource>,
@@ -277,16 +273,15 @@ pub fn init_datadog(
 
 /// Create an instance of the tracer provider
 fn make_tracer(
-    shared_config: Arc<dd_trace::Config>,
+    config: Arc<dd_trace::Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let config = shared_config.clone();
     let registry = TraceRegistry::new();
     let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
     // Sampler only needs config for initialization (reads initial sampling rules)
     // Runtime updates come via config callback, so no need for shared config
-    let sampler = Sampler::new(&config, resource_slot.clone(), registry.clone());
+    let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
 
     let agent_response_handler = sampler.on_agent_response();
 
@@ -294,37 +289,29 @@ fn make_tracer(
     tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
     let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
-    // Get sampler callback before moving sampler into tracer provider
-    let sampler_callback = if config.remote_config_enabled() {
-        Some(sampler.on_rules_update())
-    } else {
-        None
+    if config.remote_config_enabled() {
+        let sampler_callback = sampler.on_rules_update();
+
+        config.set_sampling_rules_callback(move |update| match update {
+            RemoteConfigUpdate::SamplingRules(rules) => {
+                sampler_callback(rules);
+            }
+        });
     };
 
-    let span_processor = DatadogSpanProcessor::new(
-        shared_config.clone(),
-        registry.clone(),
-        resource_slot.clone(),
-        Some(agent_response_handler),
-    );
-    let tracer_provider = tracer_provider_builder
-        .with_span_processor(span_processor)
+    let mut tracer_provider_builder = tracer_provider_builder
         .with_sampler(sampler) // Use the sampler created above
-        .with_id_generator(trace_id::TraceidGenerator)
-        .build();
-
-    if config.remote_config_enabled() {
-        // Add sampler callback to the shared config before creating the remote config client
-        if let Some(sampler_callback) = sampler_callback {
-            let sampler_callback = Arc::new(sampler_callback);
-            let sampler_callback_clone: SamplerCallback = sampler_callback.clone();
-            shared_config.set_sampling_rules_callback(move |update| match update {
-                RemoteConfigUpdate::SamplingRules(rules) => {
-                    sampler_callback_clone(rules);
-                }
-            });
-        }
+        .with_id_generator(trace_id::TraceidGenerator);
+    if config.enabled() {
+        let span_processor = DatadogSpanProcessor::new(
+            config.clone(),
+            registry.clone(),
+            resource_slot.clone(),
+            Some(agent_response_handler),
+        );
+        tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
     }
+    let tracer_provider = tracer_provider_builder.build();
 
     (tracer_provider, propagator)
 }
