@@ -16,6 +16,7 @@ use dd_trace::{
     constants::SAMPLING_DECISION_MAKER_TAG_KEY,
     sampling::SamplingDecision,
     telemetry::init_telemetry,
+    utils::WorkerError,
 };
 use opentelemetry::{
     global::ObjectSafeSpan,
@@ -27,7 +28,10 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 use crate::{
-    create_dd_resource, span_exporter::DatadogExporter, text_map_propagator::DatadogExtractData,
+    create_dd_resource,
+    span_exporter::DatadogExporter,
+    spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
+    text_map_propagator::DatadogExtractData,
 };
 
 #[derive(Debug)]
@@ -59,6 +63,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
 #[derive(Debug)]
 struct InnerTraceRegistry {
     registry: BHashMap<[u8; 16], Trace>,
+    stats: TraceRegistryStats,
 }
 
 pub enum RegisterTracePropagationResult {
@@ -105,6 +110,8 @@ impl InnerTraceRegistry {
                     open_span_count: 1,
                     propagation_data,
                 });
+                self.stats.trace_segments_created += 1;
+                self.stats.spans_created += 1;
                 RegisterTracePropagationResult::New
             }
         }
@@ -143,13 +150,17 @@ impl InnerTraceRegistry {
     ) {
         self.registry
             .entry(trace_id)
-            .or_insert_with(|| Trace {
-                local_root_span_id: span_id,
-                finished_spans: Vec::new(),
-                open_span_count: 0,
-                propagation_data,
+            .or_insert_with(|| {
+                self.stats.trace_segments_created += 1;
+                Trace {
+                    local_root_span_id: span_id,
+                    finished_spans: Vec::new(),
+                    open_span_count: 0,
+                    propagation_data,
+                }
             })
             .open_span_count += 1;
+        self.stats.spans_created += 1;
     }
 
     /// Finish a span with the given trace ID and span data.
@@ -167,6 +178,7 @@ impl InnerTraceRegistry {
     /// TODO: We should implement partial flushing, as this will allow use to flush traces that are
     /// too big, and avoid unbounded memory usage.
     fn finish_span(&mut self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
+        self.stats.spans_finished += 1;
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
             let span = if !trace.finished_spans.is_empty()
@@ -183,12 +195,18 @@ impl InnerTraceRegistry {
 
             trace.open_span_count = trace.open_span_count.saturating_sub(1);
             if trace.open_span_count == 0 {
-                Some(slot.remove())
+                let trace = slot.remove();
+                self.stats.spans_flushed += trace.finished_spans.len();
+                self.stats.trace_segments_closed += 1;
+                Some(trace)
             } else {
                 None
             }
         } else {
             // if we somehow don't have the trace registered, we just flush the span...
+            self.stats.trace_segments_created += 1;
+            self.stats.trace_segments_closed += 1;
+            self.stats.spans_flushed += 1;
 
             dd_trace::dd_debug!(
                 "TraceRegistry.finish_span: trace with trace_id={:?} has a finished span span_id={:?}, but hasn't been registered first. This is probably a bug.",
@@ -210,6 +228,10 @@ impl InnerTraceRegistry {
             Some(trace) => &trace.propagation_data,
             None => &EMPTY_PROPAGATION_DATA,
         }
+    }
+
+    fn get_stats(&mut self) -> TraceRegistryStats {
+        std::mem::take(&mut self.stats)
     }
 }
 
@@ -241,6 +263,7 @@ impl TraceRegistry {
             inner: Arc::new(std::array::from_fn(|_| {
                 CachePadded(RwLock::new(InnerTraceRegistry {
                     registry: BHashMap::new(),
+                    stats: TraceRegistryStats::default(),
                 }))
             })),
             hasher: foldhash::fast::RandomState::default(),
@@ -316,6 +339,29 @@ impl TraceRegistry {
 
         inner.get_trace_propagation_data(trace_id).clone()
     }
+
+    pub fn get_stats(&self) -> TraceRegistryStats {
+        let mut stats = TraceRegistryStats::default();
+        for shard_idx in 0..TRACE_REGISTRY_SHARDS {
+            let mut shard = self.inner[shard_idx].0.write().unwrap();
+            let shard_stats = shard.get_stats();
+            stats.spans_created += shard_stats.spans_created;
+            stats.spans_finished += shard_stats.spans_finished;
+            stats.spans_flushed += shard_stats.spans_flushed;
+            stats.trace_segments_created += shard_stats.trace_segments_created;
+            stats.trace_segments_closed += shard_stats.trace_segments_closed;
+        }
+        stats
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct TraceRegistryStats {
+    pub spans_created: usize,
+    pub spans_finished: usize,
+    pub spans_flushed: usize,
+    pub trace_segments_created: usize,
+    pub trace_segments_closed: usize,
 }
 
 pub(crate) struct DatadogSpanProcessor {
@@ -324,6 +370,7 @@ pub(crate) struct DatadogSpanProcessor {
     resource: Arc<RwLock<Resource>>,
     config: Arc<dd_trace::Config>,
     rc_client_handle: Option<RemoteConfigClientHandle>,
+    telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -352,7 +399,9 @@ impl DatadogSpanProcessor {
         } else {
             None
         };
-        // Create remote config client with shared config
+        let telemetry_metrics_handle = config
+            .telemetry_enabled()
+            .then(|| TelemetryMetricsCollector::start(registry.clone()));
 
         // Extract config clone before moving the Arc
         Self {
@@ -361,6 +410,7 @@ impl DatadogSpanProcessor {
             resource,
             config,
             rc_client_handle,
+            telemetry_metrics_handle,
         }
     }
 
@@ -493,10 +543,18 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         timeout: std::time::Duration,
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let deadline = std::time::Instant::now() + timeout;
+
+        // Trigger all tasks shutdown
         self.span_exporter.trigger_shutdown();
         if let Some(rc_client_handle) = &self.rc_client_handle {
             rc_client_handle.trigger_shutdown();
         };
+        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
+            telemetry_metrics_handle.trigger_shutdown();
+        }
+
+        // Wait fot all tasks to finish, keeping in mind how much time is left
+        // since the beginning of the call
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         self.span_exporter
             .wait_for_shutdown(left)
@@ -506,6 +564,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                 }
                 _ => e,
             })?;
+
         if let Some(rc_client_handle) = &self.rc_client_handle {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             rc_client_handle
@@ -521,6 +580,23 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                     }
                     RemoteConfigClientError::ShutdownTimedOut => {
                         opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+                    }
+                })?;
+        }
+
+        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            telemetry_metrics_handle
+                .wait_for_shutdown(left)
+                .map_err(|e| match e {
+                    WorkerError::ShutdownTimedOut => {
+                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+                    }
+                    WorkerError::HandleMutexPoisoned | WorkerError::WorkerPanicked(_) => {
+                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
+                            "TelemetryMetricsCollector.shutdown_with_timeout: {}",
+                            e
+                        ))
                     }
                 })?;
         }
@@ -550,6 +626,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 #[cfg(test)]
 mod tests {
     use std::{
+        borrow::Cow,
         collections::HashMap,
         hint::black_box,
         sync::{Arc, RwLock},
@@ -561,10 +638,18 @@ mod tests {
         sampling::{mechanism, priority, SamplingDecision},
         Config,
     };
-    use opentelemetry::{Key, KeyValue, Value};
-    use opentelemetry_sdk::{trace::SpanProcessor, Resource};
+    use opentelemetry::{
+        trace::{SpanContext, TraceFlags},
+        SpanId, TraceId, {Key, KeyValue, Value},
+    };
+    use opentelemetry_sdk::{
+        trace::{SpanData, SpanEvents, SpanLinks, SpanProcessor},
+        Resource,
+    };
 
-    use crate::span_processor::{DatadogSpanProcessor, TracePropagationData, TraceRegistry};
+    use crate::span_processor::{
+        DatadogSpanProcessor, TracePropagationData, TraceRegistry, EMPTY_PROPAGATION_DATA,
+    };
 
     #[test]
     fn test_set_resource_from_empty_dd_config() {
@@ -807,5 +892,399 @@ mod tests {
         bench_trace_registry(&mut criterion);
 
         criterion.final_summary();
+    }
+
+    fn create_test_span_data(trace_id: [u8; 16], span_id: [u8; 8]) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from_bytes(trace_id),
+                SpanId::from_bytes(span_id),
+                TraceFlags::default(),
+                false,
+                Default::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            span_kind: opentelemetry::trace::SpanKind::Internal,
+            name: Cow::Borrowed("test_span"),
+            start_time: std::time::SystemTime::now(),
+            end_time: std::time::SystemTime::now(),
+            attributes: Vec::new(),
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: opentelemetry::trace::Status::Unset,
+            instrumentation_scope: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_stats_single_span_trace() {
+        let registry = TraceRegistry::new();
+        let trace_id = [1u8; 16];
+        let span_id = [1u8; 8];
+
+        // Register and finish a single span
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+            },
+        );
+        registry.register_local_root_span(trace_id, span_id);
+
+        let span_data = create_test_span_data(trace_id, span_id);
+        registry.finish_span(trace_id, span_data);
+
+        let stats = registry.get_stats();
+        assert_eq!(stats.spans_created, 1, "Expected 1 span created");
+        assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
+        assert_eq!(stats.spans_flushed, 1, "Expected 1 span flushed");
+        assert_eq!(
+            stats.trace_segments_created, 1,
+            "Expected 1 trace segment created"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 1,
+            "Expected 1 trace segment closed"
+        );
+    }
+
+    #[test]
+    fn test_stats_multiple_spans_single_trace() {
+        let registry = TraceRegistry::new();
+        let trace_id = [2u8; 16];
+        let root_span_id = [1u8; 8];
+        let child1_span_id = [2u8; 8];
+        let child2_span_id = [3u8; 8];
+
+        // Register root span
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+            },
+        );
+        registry.register_local_root_span(trace_id, root_span_id);
+
+        // Register child spans
+        registry.register_span(trace_id, child1_span_id, EMPTY_PROPAGATION_DATA);
+        registry.register_span(trace_id, child2_span_id, EMPTY_PROPAGATION_DATA);
+
+        // Finish all spans
+        let root_span = create_test_span_data(trace_id, root_span_id);
+        let child1_span = create_test_span_data(trace_id, child1_span_id);
+        let child2_span = create_test_span_data(trace_id, child2_span_id);
+
+        assert!(
+            registry.finish_span(trace_id, child1_span).is_none(),
+            "Should not flush incomplete trace"
+        );
+        assert!(
+            registry.finish_span(trace_id, child2_span).is_none(),
+            "Should not flush incomplete trace"
+        );
+        assert!(
+            registry.finish_span(trace_id, root_span).is_some(),
+            "Should flush complete trace"
+        );
+
+        let stats = registry.get_stats();
+        assert_eq!(stats.spans_created, 3, "Expected 3 spans created");
+        assert_eq!(stats.spans_finished, 3, "Expected 3 spans finished");
+        assert_eq!(stats.spans_flushed, 3, "Expected 3 spans flushed");
+        assert_eq!(
+            stats.trace_segments_created, 1,
+            "Expected 1 trace segment created"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 1,
+            "Expected 1 trace segment closed"
+        );
+    }
+
+    #[test]
+    fn test_stats_multiple_independent_traces() {
+        let registry = TraceRegistry::new();
+
+        // Create 3 independent traces
+        for i in 1..=3 {
+            let trace_id = [i; 16];
+            let span_id = [i; 8];
+
+            registry.register_local_root_trace_propagation_data(
+                trace_id,
+                TracePropagationData {
+                    sampling_decision: SamplingDecision {
+                        priority: None,
+                        mechanism: None,
+                    },
+                    origin: None,
+                    tags: None,
+                },
+            );
+            registry.register_local_root_span(trace_id, span_id);
+
+            let span_data = create_test_span_data(trace_id, span_id);
+            registry.finish_span(trace_id, span_data);
+        }
+
+        let stats = registry.get_stats();
+        assert_eq!(stats.spans_created, 3, "Expected 3 spans created");
+        assert_eq!(stats.spans_finished, 3, "Expected 3 spans finished");
+        assert_eq!(stats.spans_flushed, 3, "Expected 3 spans flushed");
+        assert_eq!(
+            stats.trace_segments_created, 3,
+            "Expected 3 trace segments created"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 3,
+            "Expected 3 trace segments closed"
+        );
+    }
+
+    #[test]
+    fn test_stats_unfinished_trace() {
+        let registry = TraceRegistry::new();
+        let trace_id = [4u8; 16];
+        let root_span_id = [1u8; 8];
+        let child_span_id = [2u8; 8];
+
+        // Register root and child spans
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+            },
+        );
+        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+
+        // Only finish the root span
+        let root_span = create_test_span_data(trace_id, root_span_id);
+        assert!(
+            registry.finish_span(trace_id, root_span).is_none(),
+            "Should not flush incomplete trace"
+        );
+
+        let stats = registry.get_stats();
+        assert_eq!(stats.spans_created, 2, "Expected 2 spans created");
+        assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
+        assert_eq!(
+            stats.spans_flushed, 0,
+            "Expected 0 spans flushed (trace incomplete)"
+        );
+        assert_eq!(
+            stats.trace_segments_created, 1,
+            "Expected 1 trace segment created"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 0,
+            "Expected 0 trace segments closed (trace incomplete)"
+        );
+    }
+
+    #[test]
+    fn test_stats_orphaned_span() {
+        let registry = TraceRegistry::new();
+        let trace_id = [5u8; 16];
+        let span_id = [1u8; 8];
+
+        // Finish a span without registering it first
+        let span_data = create_test_span_data(trace_id, span_id);
+        assert!(
+            registry.finish_span(trace_id, span_data).is_some(),
+            "Should flush orphaned span immediately"
+        );
+
+        let stats = registry.get_stats();
+        assert_eq!(
+            stats.spans_created, 0,
+            "Expected 0 spans created (orphaned span)"
+        );
+        assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
+        assert_eq!(stats.spans_flushed, 1, "Expected 1 span flushed");
+        assert_eq!(
+            stats.trace_segments_created, 1,
+            "Expected 1 trace segment created for orphaned span"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 1,
+            "Expected 1 trace segment closed for orphaned span"
+        );
+    }
+
+    #[test]
+    fn test_stats_reset_after_get() {
+        let registry = TraceRegistry::new();
+        let trace_id = [6u8; 16];
+        let span_id = [1u8; 8];
+
+        // Create and finish a trace
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+            },
+        );
+        registry.register_local_root_span(trace_id, span_id);
+        let span_data = create_test_span_data(trace_id, span_id);
+        registry.finish_span(trace_id, span_data);
+
+        // Get stats (should reset them)
+        let stats1 = registry.get_stats();
+        assert_eq!(stats1.spans_created, 1);
+
+        // Get stats again (should be zero)
+        let stats2 = registry.get_stats();
+        assert_eq!(
+            stats2.spans_created, 0,
+            "Expected stats to reset after get_stats()"
+        );
+        assert_eq!(
+            stats2.spans_finished, 0,
+            "Expected stats to reset after get_stats()"
+        );
+        assert_eq!(
+            stats2.spans_flushed, 0,
+            "Expected stats to reset after get_stats()"
+        );
+        assert_eq!(
+            stats2.trace_segments_created, 0,
+            "Expected stats to reset after get_stats()"
+        );
+        assert_eq!(
+            stats2.trace_segments_closed, 0,
+            "Expected stats to reset after get_stats()"
+        );
+    }
+
+    #[test]
+    fn test_stats_across_multiple_shards() {
+        let registry = TraceRegistry::new();
+
+        // Create traces that will likely hit different shards
+        let num_traces = 100;
+        for i in 0..num_traces {
+            let trace_id = (i as u128).to_be_bytes();
+            let span_id = [i as u8; 8];
+
+            registry.register_local_root_trace_propagation_data(
+                trace_id,
+                TracePropagationData {
+                    sampling_decision: SamplingDecision {
+                        priority: None,
+                        mechanism: None,
+                    },
+                    origin: None,
+                    tags: None,
+                },
+            );
+            registry.register_local_root_span(trace_id, span_id);
+
+            let span_data = create_test_span_data(trace_id, span_id);
+            registry.finish_span(trace_id, span_data);
+        }
+
+        let stats = registry.get_stats();
+        assert_eq!(
+            stats.spans_created, num_traces,
+            "Expected {} spans created",
+            num_traces
+        );
+        assert_eq!(
+            stats.spans_finished, num_traces,
+            "Expected {} spans finished",
+            num_traces
+        );
+        assert_eq!(
+            stats.spans_flushed, num_traces,
+            "Expected {} spans flushed",
+            num_traces
+        );
+        assert_eq!(
+            stats.trace_segments_created, num_traces,
+            "Expected {} trace segments created",
+            num_traces
+        );
+        assert_eq!(
+            stats.trace_segments_closed, num_traces,
+            "Expected {} trace segments closed",
+            num_traces
+        );
+    }
+
+    #[test]
+    fn test_stats_complex_trace_hierarchy() {
+        let registry = TraceRegistry::new();
+        let trace_id = [7u8; 16];
+        let root_span_id = [1u8; 8];
+
+        // Register root
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+            },
+        );
+        registry.register_local_root_span(trace_id, root_span_id);
+
+        // Register 5 child spans
+        for i in 2..=6 {
+            let child_span_id = [i; 8];
+            registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+        }
+
+        // Finish all spans
+        for i in 1..=6 {
+            let span_id = [i; 8];
+            let span_data = create_test_span_data(trace_id, span_id);
+            let result = registry.finish_span(trace_id, span_data);
+            if i == 6 {
+                assert!(result.is_some(), "Should flush after last span");
+            } else {
+                assert!(
+                    result.is_none(),
+                    "Should not flush before all spans complete"
+                );
+            }
+        }
+
+        let stats = registry.get_stats();
+        assert_eq!(stats.spans_created, 6, "Expected 6 spans created");
+        assert_eq!(stats.spans_finished, 6, "Expected 6 spans finished");
+        assert_eq!(stats.spans_flushed, 6, "Expected 6 spans flushed");
+        assert_eq!(
+            stats.trace_segments_created, 1,
+            "Expected 1 trace segment created"
+        );
+        assert_eq!(
+            stats.trace_segments_closed, 1,
+            "Expected 1 trace segment closed"
+        );
     }
 }

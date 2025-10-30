@@ -11,6 +11,7 @@ pub use error::{Error, Result};
 
 pub mod log;
 pub mod telemetry;
+pub mod utils;
 
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
