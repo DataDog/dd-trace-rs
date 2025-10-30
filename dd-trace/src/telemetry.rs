@@ -3,6 +3,7 @@
 
 use std::{
     any::Any,
+    ops::DerefMut,
     sync::{Mutex, OnceLock},
     time::Duration,
 };
@@ -16,21 +17,30 @@ use ddtelemetry::{
 
 use crate::{dd_debug, dd_error, Config};
 
-static TELEMETRY: OnceLock<Mutex<Telemetry>> = OnceLock::new();
+static TELEMETRY: TelemetryCell = OnceLock::new();
 
 type TelemetryCell = OnceLock<Mutex<Telemetry>>;
 
-fn with_telemetry_handle<F: FnOnce(&mut dyn TelemetryHandle) -> R, R>(
+struct TelemetryProjection<'a> {
+    handle: &'a mut dyn TelemetryHandle,
+    log_collection_enabled: bool,
+}
+
+fn with_telemetry_handle<F: FnOnce(TelemetryProjection) -> R, R>(
     cell: &TelemetryCell,
     f: F,
 ) -> Option<R> {
     let mut telemetry = cell.get()?.lock().ok()?;
-    if !telemetry.enabled || !telemetry.log_collection_enabled {
+    if !telemetry.enabled {
         return None;
     }
+    let telemetry = telemetry.deref_mut();
     let handle = telemetry.handle.as_mut()?;
 
-    Some(f(handle.as_mut()))
+    Some(f(TelemetryProjection {
+        handle: handle.as_mut(),
+        log_collection_enabled: telemetry.log_collection_enabled,
+    }))
 }
 
 macro_rules! telemetry_metrics {
@@ -214,9 +224,9 @@ pub fn stop_telemetry() {
 }
 
 fn stop_telemetry_inner(telemetry_cell: &TelemetryCell) {
-    with_telemetry_handle(telemetry_cell, |handle| {
+    with_telemetry_handle(telemetry_cell, |t| {
         dd_debug!("Stopping telemetry");
-        handle.send_stop().ok();
+        t.handle.send_stop().ok();
     });
 }
 
@@ -225,8 +235,8 @@ pub fn add_point(value: f64, metric: TelemetryMetric) {
 }
 
 fn add_point_inner(value: f64, metric: TelemetryMetric, telemetry_cell: &TelemetryCell) {
-    with_telemetry_handle(telemetry_cell, |handle| {
-        handle.add_point(value, metric).ok();
+    with_telemetry_handle(telemetry_cell, |t| {
+        t.handle.add_point(value, metric).ok();
     });
 }
 
@@ -240,8 +250,10 @@ fn add_log_error_inner<I: Into<String>>(
     stack: Option<String>,
     telemetry_cell: &TelemetryCell,
 ) {
-    with_telemetry_handle(telemetry_cell, |handle| {
-        handle.add_error_log(message.into(), stack).ok();
+    with_telemetry_handle(telemetry_cell, |t| {
+        if t.log_collection_enabled {
+            t.handle.add_error_log(message.into(), stack).ok();
+        }
     });
 }
 
