@@ -8,5 +8,6 @@ mod sources;
 mod supported_configurations;
 
 pub use configuration::{
-    Config, ConfigBuilder, RemoteConfigUpdate, SamplingRuleConfig, TracePropagationStyle,
+    Config, ConfigBuilder, ConfigurationProvider, RemoteConfigUpdate, SamplingRuleConfig,
+    TracePropagationStyle,
 };
