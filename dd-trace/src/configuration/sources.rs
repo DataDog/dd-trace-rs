@@ -113,7 +113,39 @@ impl CompositeSource {
                         errors,
                     };
                 }
-                Err(ConfigSourceError::Missing) => continue,
+                Err(ConfigSourceError::Missing) => match s.get_alias_value(name).and_then(|value| {
+                    value
+                        .parse::<T>()
+                        .map_err(|e| ConfigSourceError::FailedParsing {
+                            desired_type: std::any::type_name::<T>(),
+                            error: Cow::Owned(e.to_string()),
+                            value,
+                        })
+                }) {
+                    Ok(v) => {
+                        return CompositeConfigSourceResult {
+                            name,
+                            value: Some(ConfigKey {
+                                value: v,
+                                origin: s.origin(),
+                            }),
+                            errors,
+                        };
+                    }
+                    Err(ConfigSourceError::Missing) => continue,
+                    Err(ConfigSourceError::FailedParsing {
+                        error,
+                        value,
+                        desired_type,
+                    }) => {
+                        errors.push(CompositeParseError {
+                            desired_type,
+                            error,
+                            value,
+                            origin: s.origin(),
+                        });
+                    }
+                },
                 Err(ConfigSourceError::FailedParsing {
                     error,
                     value,
@@ -155,6 +187,17 @@ pub(crate) trait ConfigurationSource {
     fn origin(&self) -> ConfigSourceOrigin;
 
     fn get(&self, key: &'static str) -> ConfigSourceResult<String>;
+
+    fn get_alias_value(&self, key: SupportedConfigurations) -> ConfigSourceResult<String> {
+        for alias in key.aliases() {
+            match self.get(alias) {
+                Ok(value) => return Ok(value),
+                Err(ConfigSourceError::Missing) => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(ConfigSourceError::Missing)
+    }
 }
 
 pub(crate) struct EnvSource;
@@ -258,6 +301,27 @@ mod tests {
             let result = source.get(key);
             assert_eq!(result, expected, "Failed for key: {:?}", key.as_str());
         }
+    }
+
+    #[test]
+    fn test_composite_source_aliases() {
+        let mut source = CompositeSource::new();
+        source.add_source(HashMapSource::from_iter(
+            [("DD_NONEXISTANT_CONFIGURATION_ALIAS", "test-value")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+
+        let key = SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION;
+        let expected = CompositeConfigSourceResult {
+            name: SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION,
+            value: Some(super::ConfigKey {
+                value: "test-value".to_string(),
+                origin: ConfigSourceOrigin::EnvVar,
+            }),
+            errors: vec![],
+        };
+        let result = source.get(key);
+        assert_eq!(result, expected, "Failed for key: {:?}", key.as_str());
     }
 
     #[test]

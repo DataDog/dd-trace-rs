@@ -79,16 +79,9 @@
         "default_value": "true",
         "propertyKeys": [
           "remote_config_enabled"
-        ]
-      }
-    ],
-    "DD_REMOTE_CONFIG_ENABLED": [
-      {
-        "version": "A",
-        "type": "boolean",
-        "default_value": "true",
-        "propertyKeys": [
-          "remote_config_enabled"
+        ],
+        "aliases": [
+          "DD_REMOTE_CONFIG_ENABLED"
         ]
       }
     ],
