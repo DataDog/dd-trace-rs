@@ -1372,7 +1372,7 @@ fn default_config() -> Config {
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_REMOTE_CONFIG_ENABLED,
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
             true,
         ),
         remote_config_poll_interval: ConfigItem::new(
