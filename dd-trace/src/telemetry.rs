@@ -236,6 +236,21 @@ fn stop_telemetry_inner(telemetry_cell: &TelemetryCell) {
     });
 }
 
+pub fn add_points<Points: IntoIterator<Item = (f64, TelemetryMetric)>>(points: Points) {
+    add_points_inner(&mut points.into_iter(), &TELEMETRY)
+}
+
+fn add_points_inner(
+    points: &mut dyn Iterator<Item = (f64, TelemetryMetric)>,
+    telemetry_cell: &TelemetryCell,
+) {
+    with_telemetry_handle(telemetry_cell, |t| {
+        for (value, metric) in points {
+            t.handle.add_point(value, metric).ok();
+        }
+    });
+}
+
 pub fn add_point(value: f64, metric: TelemetryMetric) {
     add_point_inner(value, metric, &TELEMETRY)
 }

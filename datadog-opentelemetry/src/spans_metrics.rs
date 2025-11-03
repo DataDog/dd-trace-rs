@@ -68,25 +68,27 @@ impl TelemetryMetricsCollector {
     fn emit_metrics(&mut self) {
         use dd_trace::telemetry::TelemetryMetric::*;
         let registry_metrics = self.registry.get_metrics();
-        dd_trace::telemetry::add_point(registry_metrics.spans_created as f64, SpansCreated);
-        dd_trace::telemetry::add_point(registry_metrics.spans_finished as f64, SpansFinished);
-        dd_trace::telemetry::add_point(
-            registry_metrics.trace_segments_created as f64,
-            TraceSegmentsCreated,
-        );
-        dd_trace::telemetry::add_point(
-            registry_metrics.trace_segments_closed as f64,
-            TraceSegmentsClosed,
-        );
-
         let exporter_queue_metrics = self.exporter_queue_metrics.get_metrics();
-        dd_trace::telemetry::add_point(
-            exporter_queue_metrics.spans_queued as f64,
-            SpansEnqueuedForSerialization,
-        );
-        dd_trace::telemetry::add_point(
-            exporter_queue_metrics.spans_dropped_full_buffer as f64,
-            SpansDroppedBufferFull,
-        );
+
+        dd_trace::telemetry::add_points([
+            (registry_metrics.spans_created as f64, SpansCreated),
+            (registry_metrics.spans_finished as f64, SpansFinished),
+            (
+                registry_metrics.trace_segments_created as f64,
+                TraceSegmentsCreated,
+            ),
+            (
+                registry_metrics.trace_segments_closed as f64,
+                TraceSegmentsClosed,
+            ),
+            (
+                exporter_queue_metrics.spans_queued as f64,
+                SpansEnqueuedForSerialization,
+            ),
+            (
+                exporter_queue_metrics.spans_dropped_full_buffer as f64,
+                SpansDroppedBufferFull,
+            ),
+        ]);
     }
 }
