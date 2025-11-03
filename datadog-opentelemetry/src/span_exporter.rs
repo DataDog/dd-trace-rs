@@ -180,6 +180,9 @@ impl DatadogExporter {
                 .enable_health_metrics()
                 .enable_agent_rates_payload_version();
 
+            if config.trace_partial_flush_enabled() {
+                builder.set_client_computed_top_level();
+            }
             if config.trace_stats_computation_enabled() {
                 builder.enable_stats(Duration::from_secs(10));
             }
