@@ -44,7 +44,7 @@ fn with_telemetry_handle<F: FnOnce(TelemetryProjection) -> R, R>(
 }
 
 macro_rules! telemetry_metrics {
-    ($($variant:ident => ($name:expr, $ns:expr, $ty:expr),)*) => {
+    ($($variant:ident => ($name:expr, $ns:expr, $ty:expr, [ $($key:expr => $val:expr),* $(,)?] ),)*) => {
         #[derive(PartialEq)]
         pub enum TelemetryMetric {
             $(
@@ -61,13 +61,18 @@ macro_rules! telemetry_metrics {
                 &'static str,
                 data::metrics::MetricNamespace,
                 data::metrics::MetricType,
+                Vec<ddcommon::tag::Tag>
             ) {
                 use data::metrics::MetricNamespace::*;
                 use data::metrics::MetricType::*;
                 use TelemetryMetric::*;
                 match self {
                     $(
-                        $variant => ($name, $ns, $ty),
+                        $variant => ($name, $ns, $ty, vec![
+                            $(
+                                ddcommon::tag!($key, $val)
+                            )*
+                        ]),
                     )*
                 }
             }
@@ -84,11 +89,12 @@ macro_rules! telemetry_metrics {
 }
 
 telemetry_metrics!(
-    SpansCreated => ("spans_created", Tracers, Count),
-    SpansFinished => ("spans_dropped", Tracers, Count),
-    SpansEnqueuedForSerialization => ("spans_enqueued_for_serialization", Tracers, Count),
-    TraceSegmentsCreated => ("trace_chunks_created", Tracers, Count),
-    TraceSegmentsClosed => ("trace_chunks_closed", Tracers, Count),
+    SpansCreated => ("spans_created", Tracers, Count, []),
+    SpansFinished => ("spans_finished", Tracers, Count, []),
+    SpansEnqueuedForSerialization => ("spans_enqueued_for_serialization", Tracers, Count, []),
+    SpansDroppedBufferFull => ("spans_dropped", Tracers, Count, ["reason" => "overfull_buffer"]),
+    TraceSegmentsCreated => ("trace_chunks_created", Tracers, Count, []),
+    TraceSegmentsClosed => ("trace_chunks_closed", Tracers, Count, []),
 );
 
 trait TelemetryHandle: Sync + Send + 'static + Any {
@@ -118,9 +124,9 @@ impl TelemetryHandle for TelemetryHandleWrapper {
         let idx = metric.idx();
 
         let context_key = self.metrics_context[idx].get_or_init(|| {
-            let (n, ns, ty) = metric.ddtelemetry_metric_info();
+            let (n, ns, ty, tags) = metric.ddtelemetry_metric_info();
             self.handle
-                .register_metric_context(n.to_string(), vec![], ty, true, ns)
+                .register_metric_context(n.to_string(), tags, ty, true, ns)
         });
         self.handle.add_point(value, context_key, vec![])
     }

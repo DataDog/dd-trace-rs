@@ -63,7 +63,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
 #[derive(Debug)]
 struct InnerTraceRegistry {
     registry: BHashMap<[u8; 16], Trace>,
-    stats: TraceRegistryStats,
+    metrics: TraceRegistryMetrics,
 }
 
 pub enum RegisterTracePropagationResult {
@@ -110,8 +110,8 @@ impl InnerTraceRegistry {
                     open_span_count: 1,
                     propagation_data,
                 });
-                self.stats.trace_segments_created += 1;
-                self.stats.spans_created += 1;
+                self.metrics.trace_segments_created += 1;
+                self.metrics.spans_created += 1;
                 RegisterTracePropagationResult::New
             }
         }
@@ -151,7 +151,7 @@ impl InnerTraceRegistry {
         self.registry
             .entry(trace_id)
             .or_insert_with(|| {
-                self.stats.trace_segments_created += 1;
+                self.metrics.trace_segments_created += 1;
                 Trace {
                     local_root_span_id: span_id,
                     finished_spans: Vec::new(),
@@ -160,7 +160,7 @@ impl InnerTraceRegistry {
                 }
             })
             .open_span_count += 1;
-        self.stats.spans_created += 1;
+        self.metrics.spans_created += 1;
     }
 
     /// Finish a span with the given trace ID and span data.
@@ -178,7 +178,7 @@ impl InnerTraceRegistry {
     /// TODO: We should implement partial flushing, as this will allow use to flush traces that are
     /// too big, and avoid unbounded memory usage.
     fn finish_span(&mut self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
-        self.stats.spans_finished += 1;
+        self.metrics.spans_finished += 1;
         if let hash_map::Entry::Occupied(mut slot) = self.registry.entry(trace_id) {
             let trace = slot.get_mut();
             let span = if !trace.finished_spans.is_empty()
@@ -196,17 +196,15 @@ impl InnerTraceRegistry {
             trace.open_span_count = trace.open_span_count.saturating_sub(1);
             if trace.open_span_count == 0 {
                 let trace = slot.remove();
-                self.stats.spans_flushed += trace.finished_spans.len();
-                self.stats.trace_segments_closed += 1;
+                self.metrics.trace_segments_closed += 1;
                 Some(trace)
             } else {
                 None
             }
         } else {
             // if we somehow don't have the trace registered, we just flush the span...
-            self.stats.trace_segments_created += 1;
-            self.stats.trace_segments_closed += 1;
-            self.stats.spans_flushed += 1;
+            self.metrics.trace_segments_created += 1;
+            self.metrics.trace_segments_closed += 1;
 
             dd_trace::dd_debug!(
                 "TraceRegistry.finish_span: trace with trace_id={:?} has a finished span span_id={:?}, but hasn't been registered first. This is probably a bug.",
@@ -230,8 +228,8 @@ impl InnerTraceRegistry {
         }
     }
 
-    fn get_stats(&mut self) -> TraceRegistryStats {
-        std::mem::take(&mut self.stats)
+    fn get_metrics(&mut self) -> TraceRegistryMetrics {
+        std::mem::take(&mut self.metrics)
     }
 }
 
@@ -263,7 +261,7 @@ impl TraceRegistry {
             inner: Arc::new(std::array::from_fn(|_| {
                 CachePadded(RwLock::new(InnerTraceRegistry {
                     registry: BHashMap::new(),
-                    stats: TraceRegistryStats::default(),
+                    metrics: TraceRegistryMetrics::default(),
                 }))
             })),
             hasher: foldhash::fast::RandomState::default(),
@@ -340,14 +338,13 @@ impl TraceRegistry {
         inner.get_trace_propagation_data(trace_id).clone()
     }
 
-    pub fn get_stats(&self) -> TraceRegistryStats {
-        let mut stats = TraceRegistryStats::default();
+    pub fn get_metrics(&self) -> TraceRegistryMetrics {
+        let mut stats = TraceRegistryMetrics::default();
         for shard_idx in 0..TRACE_REGISTRY_SHARDS {
             let mut shard = self.inner[shard_idx].0.write().unwrap();
-            let shard_stats = shard.get_stats();
+            let shard_stats = shard.get_metrics();
             stats.spans_created += shard_stats.spans_created;
             stats.spans_finished += shard_stats.spans_finished;
-            stats.spans_flushed += shard_stats.spans_flushed;
             stats.trace_segments_created += shard_stats.trace_segments_created;
             stats.trace_segments_closed += shard_stats.trace_segments_closed;
         }
@@ -356,10 +353,9 @@ impl TraceRegistry {
 }
 
 #[derive(Default, Debug)]
-pub struct TraceRegistryStats {
+pub struct TraceRegistryMetrics {
     pub spans_created: usize,
     pub spans_finished: usize,
-    pub spans_flushed: usize,
     pub trace_segments_created: usize,
     pub trace_segments_closed: usize,
 }
@@ -399,14 +395,14 @@ impl DatadogSpanProcessor {
         } else {
             None
         };
-        let telemetry_metrics_handle = config
-            .telemetry_enabled()
-            .then(|| TelemetryMetricsCollector::start(registry.clone()));
+        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler);
+        let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
+            TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
+        });
 
-        // Extract config clone before moving the Arc
         Self {
             registry,
-            span_exporter: DatadogExporter::new(config.clone(), agent_response_handler),
+            span_exporter,
             resource,
             config,
             rc_client_handle,
@@ -940,10 +936,9 @@ mod tests {
         let span_data = create_test_span_data(trace_id, span_id);
         registry.finish_span(trace_id, span_data);
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 1, "Expected 1 span created");
         assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
-        assert_eq!(stats.spans_flushed, 1, "Expected 1 span flushed");
         assert_eq!(
             stats.trace_segments_created, 1,
             "Expected 1 trace segment created"
@@ -998,10 +993,9 @@ mod tests {
             "Should flush complete trace"
         );
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 3, "Expected 3 spans created");
         assert_eq!(stats.spans_finished, 3, "Expected 3 spans finished");
-        assert_eq!(stats.spans_flushed, 3, "Expected 3 spans flushed");
         assert_eq!(
             stats.trace_segments_created, 1,
             "Expected 1 trace segment created"
@@ -1038,10 +1032,9 @@ mod tests {
             registry.finish_span(trace_id, span_data);
         }
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 3, "Expected 3 spans created");
         assert_eq!(stats.spans_finished, 3, "Expected 3 spans finished");
-        assert_eq!(stats.spans_flushed, 3, "Expected 3 spans flushed");
         assert_eq!(
             stats.trace_segments_created, 3,
             "Expected 3 trace segments created"
@@ -1081,13 +1074,9 @@ mod tests {
             "Should not flush incomplete trace"
         );
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 2, "Expected 2 spans created");
         assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
-        assert_eq!(
-            stats.spans_flushed, 0,
-            "Expected 0 spans flushed (trace incomplete)"
-        );
         assert_eq!(
             stats.trace_segments_created, 1,
             "Expected 1 trace segment created"
@@ -1111,13 +1100,12 @@ mod tests {
             "Should flush orphaned span immediately"
         );
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(
             stats.spans_created, 0,
             "Expected 0 spans created (orphaned span)"
         );
         assert_eq!(stats.spans_finished, 1, "Expected 1 span finished");
-        assert_eq!(stats.spans_flushed, 1, "Expected 1 span flushed");
         assert_eq!(
             stats.trace_segments_created, 1,
             "Expected 1 trace segment created for orphaned span"
@@ -1151,21 +1139,17 @@ mod tests {
         registry.finish_span(trace_id, span_data);
 
         // Get stats (should reset them)
-        let stats1 = registry.get_stats();
+        let stats1 = registry.get_metrics();
         assert_eq!(stats1.spans_created, 1);
 
         // Get stats again (should be zero)
-        let stats2 = registry.get_stats();
+        let stats2 = registry.get_metrics();
         assert_eq!(
             stats2.spans_created, 0,
             "Expected stats to reset after get_stats()"
         );
         assert_eq!(
             stats2.spans_finished, 0,
-            "Expected stats to reset after get_stats()"
-        );
-        assert_eq!(
-            stats2.spans_flushed, 0,
             "Expected stats to reset after get_stats()"
         );
         assert_eq!(
@@ -1205,7 +1189,7 @@ mod tests {
             registry.finish_span(trace_id, span_data);
         }
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(
             stats.spans_created, num_traces,
             "Expected {} spans created",
@@ -1214,11 +1198,6 @@ mod tests {
         assert_eq!(
             stats.spans_finished, num_traces,
             "Expected {} spans finished",
-            num_traces
-        );
-        assert_eq!(
-            stats.spans_flushed, num_traces,
-            "Expected {} spans flushed",
             num_traces
         );
         assert_eq!(
@@ -1274,10 +1253,9 @@ mod tests {
             }
         }
 
-        let stats = registry.get_stats();
+        let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 6, "Expected 6 spans created");
         assert_eq!(stats.spans_finished, 6, "Expected 6 spans finished");
-        assert_eq!(stats.spans_flushed, 6, "Expected 6 spans flushed");
         assert_eq!(
             stats.trace_segments_created, 1,
             "Expected 1 trace segment created"
