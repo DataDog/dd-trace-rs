@@ -82,6 +82,10 @@ impl TelemetryMetricsCollector {
                 TraceSegmentsClosed,
             ),
             (
+                registry_metrics.trace_partial_flush_count as f64,
+                TracePartialFlushCount,
+            ),
+            (
                 exporter_queue_metrics.spans_queued as f64,
                 SpansEnqueuedForSerialization,
             ),

@@ -200,6 +200,7 @@ impl InnerTraceRegistry {
             let partial_flush = self.config.trace_partial_flush_enabled()
                 && trace.finished_spans.len() >= self.config.trace_partial_flush_min_spans();
             if partial_flush {
+                self.metrics.trace_partial_flush_count += 1;
                 let trace = Trace {
                     local_root_span_id: trace.local_root_span_id,
                     finished_spans: std::mem::take(&mut trace.finished_spans),
@@ -361,6 +362,7 @@ impl TraceRegistry {
             stats.spans_finished += shard_stats.spans_finished;
             stats.trace_segments_created += shard_stats.trace_segments_created;
             stats.trace_segments_closed += shard_stats.trace_segments_closed;
+            stats.trace_partial_flush_count += shard_stats.trace_partial_flush_count;
         }
         stats
     }
@@ -372,6 +374,7 @@ pub struct TraceRegistryMetrics {
     pub spans_finished: usize,
     pub trace_segments_created: usize,
     pub trace_segments_closed: usize,
+    pub trace_partial_flush_count: usize,
 }
 
 pub(crate) struct DatadogSpanProcessor {
@@ -1197,14 +1200,17 @@ mod tests {
         assert!(result.is_some(), "Should flush after all spans are done");
         let trace = result.unwrap();
         assert_eq!(trace.finished_spans.len(), 400);
+        let metrics = registry.get_metrics();
+        assert_eq!(metrics.trace_partial_flush_count, 0);
+        assert_eq!(metrics.trace_segments_closed, 1);
     }
 
     #[test]
     fn test_partial_flush_enabled_min_spans() {
-        let mut builder = Config::builder();
-        builder.set_trace_partial_flush_enabled(true);
-        builder.set_trace_partial_flush_min_spans(10);
-        let config = builder.build();
+        let config = Config::builder()
+            .set_trace_partial_flush_enabled(true)
+            .set_trace_partial_flush_min_spans(10)
+            .build();
         let registry = TraceRegistry::new(Arc::new(config));
         let trace_id = [9u8; 16];
         let root_span_id = [1u8; 8];
@@ -1237,6 +1243,10 @@ mod tests {
             "Should flush when min_spans threshold is reached"
         );
         let trace = result.unwrap();
+        let metrics = registry.get_metrics();
+        assert_eq!(metrics.trace_partial_flush_count, 1);
+        assert_eq!(metrics.trace_segments_closed, 0);
+
         assert_eq!(trace.finished_spans.len(), 10);
         assert_eq!(
             trace.open_span_count, 6,
@@ -1277,8 +1287,11 @@ mod tests {
         }
 
         // Should have multiple partial flushes
-        assert!(flush_count >= 2, "Should have at least 2 partial flushes");
+        assert_eq!(flush_count, 4, "Should have 4 partial flushes");
         assert_eq!(total_flushed, 20, "Should have flushed all 20 child spans");
+        let metrics = registry.get_metrics();
+        assert_eq!(metrics.trace_partial_flush_count, 4);
+        assert_eq!(metrics.trace_segments_closed, 0);
 
         // Finish root span - final flush
         let root_span = create_test_span_data(trace_id, root_span_id);
@@ -1287,5 +1300,11 @@ mod tests {
         let trace = result.unwrap();
         assert_eq!(trace.finished_spans.len(), 1);
         assert_eq!(trace.open_span_count, 0);
+        let metrics = registry.get_metrics();
+        assert_eq!(
+            metrics.trace_partial_flush_count, 0,
+            "Last flush is a complete one"
+        );
+        assert_eq!(metrics.trace_segments_closed, 1);
     }
 }
