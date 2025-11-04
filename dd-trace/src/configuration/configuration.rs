@@ -15,7 +15,7 @@ use crate::configuration::sources::{
 };
 use crate::configuration::supported_configurations::SupportedConfigurations;
 use crate::log::LevelFilter;
-use crate::{dd_error, dd_warn};
+use crate::{dd_error, dd_warn, telemetry};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -192,6 +192,18 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
     }
 }
 
+/// A trait for providing configuration data for telemetry reporting.
+///
+/// This trait standardizes how configuration items expose their current state
+/// as `ddtelemetry::data::Configuration` payloads for telemetry collection.
+/// It enables the configuration system to report configuration values, their
+/// origins, and associated metadata to Datadog.
+pub trait ConfigurationProvider {
+    /// Returns a telemetry configuration object representing the current state of this
+    /// configuration item.
+    fn get_configuration(&self) -> Configuration;
+}
+
 /// A trait for converting configuration values to their string representation for telemetry.
 ///
 /// This trait is used to serialize configuration values into strings that can be sent
@@ -240,6 +252,7 @@ struct ConfigItem<T: ConfigurationValueProvider> {
     default_value: T,
     env_value: Option<T>,
     code_value: Option<T>,
+    config_id: Option<String>,
 }
 
 impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
@@ -249,6 +262,7 @@ impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
             default_value: self.default_value.clone(),
             env_value: self.env_value.clone(),
             code_value: self.code_value.clone(),
+            config_id: self.config_id.clone(),
         }
     }
 }
@@ -261,6 +275,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             default_value: default,
             env_value: None,
             code_value: None,
+            config_id: None,
         }
     }
 
@@ -289,14 +304,16 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             ConfigSourceOrigin::Default
         }
     }
+}
 
+impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
     /// Gets a Configuration object used as telemetry payload
     fn get_configuration(&self) -> Configuration {
         Configuration {
             name: self.name.to_string(),
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
-            config_id: None,
+            config_id: self.config_id.clone(),
         }
     }
 }
@@ -324,6 +341,7 @@ struct ConfigItemWithOverride<T: ConfigurationValueProvider + Deref> {
     config_item: ConfigItem<T>,
     override_value: arc_swap::ArcSwapOption<T>,
     override_origin: ConfigSourceOrigin,
+    config_id: arc_swap::ArcSwapOption<String>,
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOverride<T> {
@@ -332,6 +350,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
             config_item: self.config_item.clone(),
             override_value: arc_swap::ArcSwapOption::new(self.override_value.load_full()),
             override_origin: self.override_origin,
+            config_id: arc_swap::ArcSwapOption::new(self.config_id.load_full()),
         }
     }
 }
@@ -342,6 +361,7 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::Code,
+            config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
@@ -350,6 +370,7 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::RemoteConfig,
+            config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
@@ -365,6 +386,13 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
     fn set_override_value(&self, value: T, source: ConfigSourceOrigin) {
         if source == self.override_origin {
             self.override_value.store(Some(Arc::new(value)));
+        }
+    }
+
+    fn set_config_id(&self, config_id: Option<String>) {
+        match config_id {
+            Some(id) => self.config_id.store(Some(Arc::new(id))),
+            None => self.config_id.store(None),
         }
     }
 
@@ -388,14 +416,19 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             ConfigItemRef::Ref(self.config_item.value())
         }
     }
+}
 
+impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
+    for ConfigItemWithOverride<T>
+{
     /// Gets a Configuration object used as telemetry payload
     fn get_configuration(&self) -> Configuration {
+        let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
         Configuration {
             name: self.config_item.name.to_string(),
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
-            config_id: None,
+            config_id,
         }
     }
 }
@@ -991,33 +1024,33 @@ impl Config {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
 
-    pub fn get_telemetry_configuration(&self) -> Vec<Configuration> {
+    pub fn get_telemetry_configuration(&self) -> Vec<&dyn ConfigurationProvider> {
         vec![
-            self.service.get_configuration(),
-            self.env.get_configuration(),
-            self.version.get_configuration(),
-            self.global_tags.get_configuration(),
-            self.agent_host.get_configuration(),
-            self.trace_agent_port.get_configuration(),
-            self.trace_agent_url.get_configuration(),
-            self.dogstatsd_agent_host.get_configuration(),
-            self.dogstatsd_agent_port.get_configuration(),
-            self.dogstatsd_agent_url.get_configuration(),
-            self.trace_sampling_rules.get_configuration(),
-            self.trace_rate_limit.get_configuration(),
-            self.enabled.get_configuration(),
-            self.log_level_filter.get_configuration(),
-            self.trace_stats_computation_enabled.get_configuration(),
-            self.telemetry_enabled.get_configuration(),
-            self.telemetry_log_collection_enabled.get_configuration(),
-            self.telemetry_heartbeat_interval.get_configuration(),
-            self.trace_propagation_style.get_configuration(),
-            self.trace_propagation_style_extract.get_configuration(),
-            self.trace_propagation_style_inject.get_configuration(),
-            self.trace_propagation_extract_first.get_configuration(),
-            self.remote_config_enabled.get_configuration(),
-            self.remote_config_poll_interval.get_configuration(),
-            self.datadog_tags_max_length.get_configuration(),
+            &self.service,
+            &self.env,
+            &self.version,
+            &self.global_tags,
+            &self.agent_host,
+            &self.trace_agent_port,
+            &self.trace_agent_url,
+            &self.dogstatsd_agent_host,
+            &self.dogstatsd_agent_port,
+            &self.dogstatsd_agent_url,
+            &self.trace_sampling_rules,
+            &self.trace_rate_limit,
+            &self.enabled,
+            &self.log_level_filter,
+            &self.trace_stats_computation_enabled,
+            &self.telemetry_enabled,
+            &self.telemetry_log_collection_enabled,
+            &self.telemetry_heartbeat_interval,
+            &self.trace_propagation_style,
+            &self.trace_propagation_style_extract,
+            &self.trace_propagation_style_inject,
+            &self.trace_propagation_extract_first,
+            &self.remote_config_enabled,
+            &self.remote_config_poll_interval,
+            &self.datadog_tags_max_length,
         ]
     }
 
@@ -1139,24 +1172,31 @@ impl Config {
         *self.trace_propagation_extract_first.value()
     }
 
-    pub fn update_sampling_rules_from_remote(&self, rules_json: &str) -> Result<(), String> {
+    pub fn update_sampling_rules_from_remote(
+        &self,
+        rules_json: &str,
+        config_id: Option<String>,
+    ) -> Result<(), String> {
         // Parse the JSON into SamplingRuleConfig objects
         let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
             .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
 
         // If remote config sends empty rules, clear remote config to fall back to local rules
         if rules.is_empty() {
-            self.clear_remote_sampling_rules();
+            self.clear_remote_sampling_rules(config_id);
         } else {
             self.trace_sampling_rules.set_override_value(
                 ParsedSamplingRules { rules },
                 ConfigSourceOrigin::RemoteConfig,
             );
+            self.trace_sampling_rules.set_config_id(config_id);
 
             // Notify callbacks about the sampling rules update
             self.remote_config_callbacks.lock().unwrap().notify_update(
                 &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
             );
+
+            telemetry::notify_configuration_update(&self.trace_sampling_rules);
         }
 
         Ok(())
@@ -1171,12 +1211,15 @@ impl Config {
         }
     }
 
-    pub fn clear_remote_sampling_rules(&self) {
+    pub fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
         self.trace_sampling_rules.unset_override_value();
+        self.trace_sampling_rules.set_config_id(config_id);
 
         self.remote_config_callbacks.lock().unwrap().notify_update(
             &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
         );
+
+        telemetry::notify_configuration_update(&self.trace_sampling_rules);
     }
 
     /// Add a callback to be called when sampling rules are updated via remote configuration
@@ -2031,7 +2074,7 @@ mod tests {
 
         let rules_json = serde_json::to_string(&new_rules).unwrap();
         config
-            .update_sampling_rules_from_remote(&rules_json)
+            .update_sampling_rules_from_remote(&rules_json, None)
             .unwrap();
 
         // Callback should be called with the new rules
@@ -2042,7 +2085,7 @@ mod tests {
         *callback_called.lock().unwrap() = false;
         callback_rules.lock().unwrap().clear();
 
-        config.clear_remote_sampling_rules();
+        config.clear_remote_sampling_rules(None);
 
         // Callback should be called with fallback rules (empty in this case since no env/code rules
         // set)
@@ -2165,7 +2208,7 @@ mod tests {
         let remote_rules_json =
             r#"[{"sample_rate": 0.8, "service": "remote-service", "provenance": "remote"}]"#;
         config
-            .update_sampling_rules_from_remote(remote_rules_json)
+            .update_sampling_rules_from_remote(remote_rules_json, None)
             .unwrap();
 
         // Verify remote rules override local rules
@@ -2179,7 +2222,7 @@ mod tests {
         // 3. Remote config sends empty array []
         let empty_remote_rules_json = "[]";
         config
-            .update_sampling_rules_from_remote(empty_remote_rules_json)
+            .update_sampling_rules_from_remote(empty_remote_rules_json, None)
             .unwrap();
 
         // Empty remote rules automatically fall back to local rules
@@ -2192,7 +2235,7 @@ mod tests {
 
         // 4. Verify explicit clearing still works (for completeness)
         // Since we're already on local rules, clear should keep us on local rules
-        config.clear_remote_sampling_rules();
+        config.clear_remote_sampling_rules(None);
 
         // Should remain on local rules
         assert_eq!(config.trace_sampling_rules().len(), 1);
@@ -2200,6 +2243,44 @@ mod tests {
         assert_eq!(
             config.trace_sampling_rules.source(),
             ConfigSourceOrigin::EnvVar
+        );
+    }
+
+    #[test]
+    fn test_update_sampling_rules_from_remote_config_id() {
+        let config = Config::builder().build();
+
+        let new_rules = vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            service: Some("test-service".to_string()),
+            provenance: "remote".to_string(),
+            ..SamplingRuleConfig::default()
+        }];
+
+        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        config
+            .update_sampling_rules_from_remote(&rules_json, Some("config_id_1".to_string()))
+            .unwrap();
+
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            Some("config_id_1".to_string())
+        );
+
+        config
+            .update_sampling_rules_from_remote(&rules_json, Some("config_id_2".to_string()))
+            .unwrap();
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            Some("config_id_2".to_string())
+        );
+
+        config
+            .update_sampling_rules_from_remote("[]", None)
+            .unwrap();
+        assert_eq!(
+            config.trace_sampling_rules.get_configuration().config_id,
+            None
         );
     }
 
