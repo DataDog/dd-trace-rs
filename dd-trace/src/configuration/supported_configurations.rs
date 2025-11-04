@@ -138,7 +138,6 @@ impl SupportedConfigurations {
         }
     }
 
-    #[allow(dead_code)]
     pub fn is_deprecated(&self) -> bool {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => false,
@@ -170,4 +169,11 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => false,
         }
     }
+}
+
+pub(crate) fn is_alias_deprecated(name: &str) -> bool {
+    matches!(
+        name,
+        "DD_REMOTE_CONFIG_ENABLED" | "DD_NONEXISTANT_CONFIGURATION_ALIAS"
+    )
 }

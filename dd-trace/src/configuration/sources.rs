@@ -5,7 +5,10 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 
 use ddtelemetry::data::ConfigurationOrigin;
 
-use crate::configuration::supported_configurations::SupportedConfigurations;
+use crate::{
+    configuration::supported_configurations::{is_alias_deprecated, SupportedConfigurations},
+    dd_warn,
+};
 
 /// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,6 +107,9 @@ impl CompositeSource {
                     })
             }) {
                 Ok(v) => {
+                    if name.is_deprecated() {
+                        dd_warn!("Configuration {} is deprecated and will be removed in the next major release.", name.as_str());
+                    }
                     return CompositeConfigSourceResult {
                         name,
                         value: Some(ConfigKey {
@@ -191,7 +197,12 @@ pub(crate) trait ConfigurationSource {
     fn get_alias_value(&self, key: SupportedConfigurations) -> ConfigSourceResult<String> {
         for alias in key.aliases() {
             match self.get(alias) {
-                Ok(value) => return Ok(value),
+                Ok(value) => {
+                    if is_alias_deprecated(alias) {
+                        dd_warn!("Alias {} is deprecated, please use {} instead. This will be enforced in the next major release.", alias, key.as_str());
+                    }
+                    return Ok(value);
+                }
                 Err(ConfigSourceError::Missing) => continue,
                 Err(e) => return Err(e),
             }

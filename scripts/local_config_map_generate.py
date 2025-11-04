@@ -21,6 +21,7 @@ enum_block = ""
 as_str_block = ""
 aliases_block = ""
 deprecated_block = ""
+is_alias_deprecated = []
 for i, key in enumerate(supported_configurations["supportedConfigurations"].keys()):
     if i != 0:
         enum_block += "\n"
@@ -35,6 +36,8 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
         if "aliases" in version:
             for alias in version["aliases"]:
                 aliases_accumulator.append(alias)
+                if alias not in supported_configurations["supportedConfigurations"].keys():
+                    is_alias_deprecated.append(alias)
         if "deprecated" in version and version["deprecated"]:
             deprecated = True
     
@@ -50,6 +53,9 @@ for i, key in enumerate(undocumented_configurations):
     as_str_block += f"\n            SupportedConfigurations::{key} => \"{key}\","
     aliases_block += f"\n            SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in undocumented_configurations[key]["aliases"])}],"
     deprecated_block += f"\n            SupportedConfigurations::{key} => {str(undocumented_configurations[key]["deprecated"]).lower()},"
+    for alias in undocumented_configurations[key]["aliases"]:
+        if alias not in undocumented_configurations.keys():
+            is_alias_deprecated.append(alias)
 
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
@@ -78,12 +84,15 @@ impl SupportedConfigurations {{
         }}
     }}
 
-    #[allow(dead_code)]
     pub fn is_deprecated(&self) -> bool {{
         match self {{
 {deprecated_block}
         }}
     }}
+}}
+
+pub(crate) fn is_alias_deprecated(name: &str) -> bool {{
+    matches!(name, {" | ".join(f"\"{alias}\"" for alias in is_alias_deprecated)})
 }}
 """
 
