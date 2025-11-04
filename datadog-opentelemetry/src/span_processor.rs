@@ -1180,7 +1180,7 @@ mod tests {
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
         registry.register_local_root_span(trace_id, root_span_id);
 
-        // Register and finish 15 child spans (more than default min_spans)
+        // Register and finish more than default min_spans
         for i in 2..=400 {
             let child_span_id = [0, 0, 0, 0, 0, 0, (i / 256) as u8, i as u8];
             registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
