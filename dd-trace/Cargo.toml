@@ -32,6 +32,7 @@ arc-swap = "1.7.1"
 
 # Libdatadog dependencies
 ddtelemetry = { workspace = true }
+ddcommon = { workspace = true }
 
 tokio-util = "0.7"
 

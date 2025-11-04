@@ -332,12 +332,37 @@ impl DatadogExporter {
                 }
             })
     }
+
+    pub fn queue_metrics(&self) -> QueueMetricsFetcher {
+        QueueMetricsFetcher {
+            waiter: self.tx.waiter.clone(),
+        }
+    }
 }
 
 impl fmt::Debug for DatadogExporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DatadogExporter").finish()
     }
+}
+
+pub struct QueueMetricsFetcher {
+    waiter: Arc<Waiter>,
+}
+
+impl QueueMetricsFetcher {
+    pub fn get_metrics(&self) -> QueueMetrics {
+        let Some(mut state) = self.waiter.state.lock().ok() else {
+            return QueueMetrics::default();
+        };
+        std::mem::take(&mut state.metrics)
+    }
+}
+
+#[derive(Default)]
+pub struct QueueMetrics {
+    pub spans_dropped_full_buffer: usize,
+    pub spans_queued: usize,
 }
 
 fn channel(
@@ -352,6 +377,7 @@ fn channel(
             has_shutdown: false,
             batch: Batch::new(max_number_of_spans, config),
             set_resource: None,
+            metrics: QueueMetrics::default(),
         }),
         notifier: Condvar::new(),
     });
@@ -393,10 +419,13 @@ impl Sender {
 
     fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<(), SenderError> {
         let mut state = self.get_running_state()?;
-        state
-            .batch
-            .add_trace_chunk(chunk)
-            .map_err(SenderError::BatchFull)?;
+        let chunk_len = chunk.len();
+        if let Err(e @ BatchFullError { spans_dropped }) = state.batch.add_trace_chunk(chunk) {
+            state.metrics.spans_dropped_full_buffer += spans_dropped;
+            return Err(SenderError::BatchFull(e));
+        }
+        state.metrics.spans_queued += chunk_len;
+
         if state.batch.span_count() > self.flush_trigger_number_of_spans {
             state.flush_needed = true;
             self.waiter.notify_all(state);
@@ -516,6 +545,7 @@ struct SharedState {
     has_shutdown: bool,
     batch: Batch,
     set_resource: Option<Resource>,
+    metrics: QueueMetrics,
 }
 
 struct Waiter {

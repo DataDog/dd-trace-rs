@@ -5,10 +5,11 @@ use std::{sync::Arc, time::Duration};
 
 use dd_trace::utils::{ShutdownSignaler, WorkerError, WorkerHandle};
 
-use crate::TraceRegistry;
+use crate::{span_exporter::QueueMetricsFetcher, TraceRegistry};
 
 pub struct TelemetryMetricsCollector {
     registry: TraceRegistry,
+    exporter_queue_metrics: QueueMetricsFetcher,
     shutdown_rx: std::sync::mpsc::Receiver<()>,
     shutdown_finished: Arc<dd_trace::utils::ShutdownSignaler>,
 }
@@ -35,13 +36,17 @@ impl Drop for TelemetryMetricsCollector {
 }
 
 impl TelemetryMetricsCollector {
-    pub fn start(registry: TraceRegistry) -> TelemetryMetricsCollectorHandle {
+    pub fn start(
+        registry: TraceRegistry,
+        exporter_queue_metrics: QueueMetricsFetcher,
+    ) -> TelemetryMetricsCollectorHandle {
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::sync_channel(1);
         let shutdown_finished = ShutdownSignaler::new();
         let worker = Self {
             registry,
             shutdown_rx,
             shutdown_finished: shutdown_finished.clone(),
+            exporter_queue_metrics,
         };
         let handle = std::thread::spawn(|| worker.run());
         TelemetryMetricsCollectorHandle {
@@ -62,11 +67,28 @@ impl TelemetryMetricsCollector {
 
     fn emit_metrics(&mut self) {
         use dd_trace::telemetry::TelemetryMetric::*;
-        let stats = self.registry.get_stats();
-        dd_trace::telemetry::add_point(stats.spans_created as f64, SpansCreated);
-        dd_trace::telemetry::add_point(stats.spans_finished as f64, SpansFinished);
-        dd_trace::telemetry::add_point(stats.spans_flushed as f64, SpansEnqueuedForSerialization);
-        dd_trace::telemetry::add_point(stats.trace_segments_created as f64, TraceSegmentsCreated);
-        dd_trace::telemetry::add_point(stats.trace_segments_closed as f64, TraceSegmentsClosed);
+        let registry_metrics = self.registry.get_metrics();
+        let exporter_queue_metrics = self.exporter_queue_metrics.get_metrics();
+
+        dd_trace::telemetry::add_points([
+            (registry_metrics.spans_created as f64, SpansCreated),
+            (registry_metrics.spans_finished as f64, SpansFinished),
+            (
+                registry_metrics.trace_segments_created as f64,
+                TraceSegmentsCreated,
+            ),
+            (
+                registry_metrics.trace_segments_closed as f64,
+                TraceSegmentsClosed,
+            ),
+            (
+                exporter_queue_metrics.spans_queued as f64,
+                SpansEnqueuedForSerialization,
+            ),
+            (
+                exporter_queue_metrics.spans_dropped_full_buffer as f64,
+                SpansDroppedBufferFull,
+            ),
+        ]);
     }
 }
