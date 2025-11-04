@@ -93,8 +93,8 @@ telemetry_metrics!(
     SpansFinished => ("spans_finished", Tracers, Count, []),
     SpansEnqueuedForSerialization => ("spans_enqueued_for_serialization", Tracers, Count, []),
     SpansDroppedBufferFull => ("spans_dropped", Tracers, Count, ["reason" => "overfull_buffer"]),
-    TraceSegmentsCreated => ("trace_chunks_created", Tracers, Count, []),
-    TraceSegmentsClosed => ("trace_chunks_closed", Tracers, Count, []),
+    TraceSegmentsCreated => ("trace_segments_created", Tracers, Count, []),
+    TraceSegmentsClosed => ("trace_segments_closed", Tracers, Count, []),
 );
 
 trait TelemetryHandle: Sync + Send + 'static + Any {
