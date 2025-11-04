@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::configuration::Config;
+use crate::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
 use core::fmt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread::{self};
 use std::time::{Duration, Instant};
 
@@ -248,36 +249,6 @@ struct SignedTargets {
     version: Option<u64>,
 }
 
-#[derive(Default)]
-struct ShutdownSignaler {
-    shutdown_finished: Mutex<bool>,
-    shutdown_condvar: Condvar,
-}
-
-impl ShutdownSignaler {
-    fn signal_shutdown(&self) {
-        let mut finished = self.shutdown_finished.lock().unwrap();
-        *finished = true;
-        self.shutdown_condvar.notify_all();
-    }
-
-    fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
-        let Ok(finished) = self.shutdown_finished.lock() else {
-            return Ok(());
-        };
-        let Ok((_finished, timeout)) =
-            self.shutdown_condvar
-                .wait_timeout_while(finished, timeout, |f| !*f)
-        else {
-            return Ok(());
-        };
-        if timeout.timed_out() {
-            return Err(RemoteConfigClientError::ShutdownTimedOut);
-        }
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum RemoteConfigClientError {
     InvalidAgentUri,
@@ -298,9 +269,8 @@ impl fmt::Display for RemoteConfigClientError {
 }
 
 pub struct RemoteConfigClientHandle {
-    join_handle: Mutex<Option<thread::JoinHandle<()>>>,
     cancel_token: tokio_util::sync::CancellationToken,
-    shutdown_finished: Arc<ShutdownSignaler>,
+    worker_handle: WorkerHandle,
 }
 
 impl Drop for RemoteConfigClientHandle {
@@ -315,33 +285,16 @@ impl RemoteConfigClientHandle {
     }
 
     pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
-        let Some(handle) = self
-            .join_handle
-            .lock()
-            .map_err(|_| {
-                crate::dd_error!("RemoteConfigClient.wait_for_shutdown: handle mutex poisoned");
-                RemoteConfigClientError::HandleMutexPoisoned
-            })?
-            .take()
-        else {
-            return Ok(());
-        };
-        self.shutdown_finished.wait_for_shutdown(timeout)?;
-        handle.join().map_err(|e| {
-            let err = if let Some(e) = e.downcast_ref::<&'static str>() {
-                e
-            } else if let Some(e) = e.downcast_ref::<String>() {
-                e
-            } else {
-                "unknown panic type"
-            };
-            crate::dd_error!(
-                "RemoteConfigClient.wait_for_shutdown: Worker panicked: {}",
-                err
-            );
-            RemoteConfigClientError::WorkerPanicked(err.to_string())
-        })?;
-        Ok(())
+        use crate::utils::WorkerError::*;
+        if let Err(e) = self.worker_handle.wait_for_shutdown(timeout) {
+            Err(match e {
+                ShutdownTimedOut => RemoteConfigClientError::ShutdownTimedOut,
+                HandleMutexPoisoned => RemoteConfigClientError::HandleMutexPoisoned,
+                WorkerPanicked(p) => RemoteConfigClientError::WorkerPanicked(p),
+            })
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -368,7 +321,7 @@ pub struct RemoteConfigClientWorker {
 impl RemoteConfigClientWorker {
     pub fn start(config: Arc<Config>) -> Result<RemoteConfigClientHandle, RemoteConfigClientError> {
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let shutdown_finished = Arc::new(ShutdownSignaler::default());
+        let shutdown_finished = ShutdownSignaler::new();
         let shutdown_receiver = RemoteConfigClientShutdownReceiver {
             cancel_token: cancel_token.clone(),
             shutdown_finished: shutdown_finished.clone(),
@@ -379,9 +332,8 @@ impl RemoteConfigClientWorker {
         };
         let join_handle = thread::spawn(move || worker.run());
         Ok(RemoteConfigClientHandle {
-            join_handle: Mutex::new(Some(join_handle)),
             cancel_token,
-            shutdown_finished,
+            worker_handle: WorkerHandle::new(shutdown_finished, join_handle),
         })
     }
 

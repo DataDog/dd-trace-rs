@@ -52,13 +52,13 @@ struct BatchFullError {
 /// Error that can occur when the mutex was poisoned.
 ///
 /// The only way to handle it is to log and try to exit cleanly
-struct MutexPoisonnedError;
+struct MutexPoisonedError;
 
 #[derive(Debug, PartialEq, Eq)]
 enum SenderError {
     AlreadyShutdown,
     TimedOut,
-    MutexPoisonned,
+    MutexPoisoned,
     BatchFull(BatchFullError),
 }
 
@@ -163,14 +163,10 @@ pub struct DatadogExporter {
 impl DatadogExporter {
     #[allow(clippy::type_complexity)]
     pub fn new(
-        config: dd_trace::Config,
+        config: Arc<dd_trace::Config>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
-        let (tx, rx) = channel(
-            SPAN_FLUSH_THRESHOLD,
-            MAX_BUFFERED_SPANS,
-            Arc::new(config.clone()),
-        );
+        let (tx, rx) = channel(SPAN_FLUSH_THRESHOLD, MAX_BUFFERED_SPANS, config.clone());
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
@@ -181,6 +177,7 @@ impl DatadogExporter {
                 .set_language_version(config.language_version())
                 .set_service(&config.service())
                 .set_output_format(TraceExporterOutputFormat::V04)
+                .enable_health_metrics()
                 .enable_agent_rates_payload_version();
 
             if config.trace_stats_computation_enabled() {
@@ -264,7 +261,7 @@ impl DatadogExporter {
     pub fn trigger_shutdown(&self) {
         use SenderError::*;
         match self.tx.trigger_shutdown() {
-            Err(AlreadyShutdown | MutexPoisonned) => {}
+            Err(AlreadyShutdown | MutexPoisoned) => {}
             Err(e @ (TimedOut | BatchFull(_))) => {
                 // This should logically never happen, so log an error and continue
                 dd_trace::dd_error!(
@@ -291,7 +288,7 @@ impl DatadogExporter {
                 "DatadogExporter.wait_for_shutdown: unexpected error waiting for shutdown"
                     .to_string(),
             )),
-            Ok(()) | Err(MutexPoisonned) => self.join(),
+            Ok(()) | Err(MutexPoisoned) => self.join(),
         }
     }
 
@@ -335,12 +332,37 @@ impl DatadogExporter {
                 }
             })
     }
+
+    pub fn queue_metrics(&self) -> QueueMetricsFetcher {
+        QueueMetricsFetcher {
+            waiter: self.tx.waiter.clone(),
+        }
+    }
 }
 
 impl fmt::Debug for DatadogExporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DatadogExporter").finish()
     }
+}
+
+pub struct QueueMetricsFetcher {
+    waiter: Arc<Waiter>,
+}
+
+impl QueueMetricsFetcher {
+    pub fn get_metrics(&self) -> QueueMetrics {
+        let Some(mut state) = self.waiter.state.lock().ok() else {
+            return QueueMetrics::default();
+        };
+        std::mem::take(&mut state.metrics)
+    }
+}
+
+#[derive(Default)]
+pub struct QueueMetrics {
+    pub spans_dropped_full_buffer: usize,
+    pub spans_queued: usize,
 }
 
 fn channel(
@@ -355,6 +377,7 @@ fn channel(
             has_shutdown: false,
             batch: Batch::new(max_number_of_spans, config),
             set_resource: None,
+            metrics: QueueMetrics::default(),
         }),
         notifier: Condvar::new(),
     });
@@ -383,7 +406,7 @@ impl Sender {
         self.waiter
             .state
             .lock()
-            .map_err(|_| SenderError::MutexPoisonned)
+            .map_err(|_| SenderError::MutexPoisoned)
     }
 
     fn get_running_state(&self) -> Result<MutexGuard<'_, SharedState>, SenderError> {
@@ -396,13 +419,16 @@ impl Sender {
 
     fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<(), SenderError> {
         let mut state = self.get_running_state()?;
-        state
-            .batch
-            .add_trace_chunk(chunk)
-            .map_err(SenderError::BatchFull)?;
+        let chunk_len = chunk.len();
+        if let Err(e @ BatchFullError { spans_dropped }) = state.batch.add_trace_chunk(chunk) {
+            state.metrics.spans_dropped_full_buffer += spans_dropped;
+            return Err(SenderError::BatchFull(e));
+        }
+        state.metrics.spans_queued += chunk_len;
+
         if state.batch.span_count() > self.flush_trigger_number_of_spans {
             state.flush_needed = true;
-            self.waiter.notifier.notify_all();
+            self.waiter.notify_all(state);
         }
         Ok(())
     }
@@ -411,21 +437,21 @@ impl Sender {
     fn set_resource(&self, resource: Resource) -> Result<(), SenderError> {
         let mut state = self.get_running_state()?;
         state.set_resource = Some(resource);
-        self.waiter.notifier.notify_all();
+        self.waiter.notify_all(state);
         Ok(())
     }
 
     fn trigger_flush(&self) -> Result<(), SenderError> {
         let mut state = self.get_running_state()?;
         state.flush_needed = true;
-        self.waiter.notifier.notify_all();
+        self.waiter.notify_all(state);
         Ok(())
     }
 
     fn trigger_shutdown(&self) -> Result<(), SenderError> {
         let mut state = self.get_running_state()?;
         state.shutdown_needed = true;
-        self.waiter.notifier.notify_all();
+        self.waiter.notify_all(state);
         Ok(())
     }
 
@@ -444,7 +470,7 @@ impl Sender {
                 .wait_timeout(state, leftover)
                 .map_err(|_| SenderError::TimedOut)?;
             if res.timed_out() {
-                return Err(SenderError::MutexPoisonned);
+                return Err(SenderError::MutexPoisoned);
             }
             leftover = deadline
                 .checked_duration_since(Instant::now())
@@ -465,19 +491,19 @@ impl Drop for Receiver {
 }
 
 impl Receiver {
-    fn shutdown_done(&self) -> Result<(), MutexPoisonnedError> {
-        let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonnedError)?;
+    fn shutdown_done(&self) -> Result<(), MutexPoisonedError> {
+        let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonedError)?;
         state.has_shutdown = true;
-        self.waiter.notifier.notify_all();
+        self.waiter.notify_all(state);
         Ok(())
     }
 
     fn receive(
         &self,
         timeout: Duration,
-    ) -> Result<(TraceExporterMessage, Vec<TraceChunk>), MutexPoisonnedError> {
-        let deadline = Instant::now() + timeout;
-        let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonnedError)?;
+    ) -> Result<(TraceExporterMessage, Vec<TraceChunk>), MutexPoisonedError> {
+        let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonedError)?;
+        let deadline = state.batch.last_flush + timeout;
         loop {
             if let Some(res) = state.set_resource.take() {
                 return Ok((TraceExporterMessage::SetResource { resource: res }, vec![]));
@@ -492,9 +518,17 @@ impl Receiver {
                 return Ok((TraceExporterMessage::FlushTraceChunks, state.batch.export()));
             }
             let leftover = deadline.saturating_duration_since(Instant::now());
-            let timeout_result;
-            (state, timeout_result) = self.waiter.notifier.wait_timeout(state, leftover).unwrap();
-            if timeout_result.timed_out() {
+            let timed_out;
+            (state, timed_out) = if leftover == Duration::ZERO {
+                (state, true)
+            } else {
+                self.waiter
+                    .notifier
+                    .wait_timeout(state, leftover)
+                    .map(|(s, t)| (s, t.timed_out()))
+                    .unwrap()
+            };
+            if timed_out {
                 // If we hit timeout, flush whatever is in the batch
                 return Ok((
                     TraceExporterMessage::FlushTraceChunksWithTimeout,
@@ -511,11 +545,20 @@ struct SharedState {
     has_shutdown: bool,
     batch: Batch,
     set_resource: Option<Resource>,
+    metrics: QueueMetrics,
 }
 
 struct Waiter {
     state: Mutex<SharedState>,
     notifier: Condvar,
+}
+
+impl Waiter {
+    #[inline(always)]
+    fn notify_all(&self, state: MutexGuard<'_, SharedState>) {
+        drop(state);
+        self.notifier.notify_all();
+    }
 }
 
 struct TraceExporterWorker {
@@ -536,7 +579,7 @@ impl TraceExporterWorker {
     /// * The thread panics
     #[allow(clippy::type_complexity)]
     fn spawn(
-        cfg: dd_trace::Config,
+        cfg: Arc<dd_trace::Config>,
         builder: TraceExporterBuilder,
         rx: Receiver,
         otel_resource: opentelemetry_sdk::Resource,
