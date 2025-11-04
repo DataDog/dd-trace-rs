@@ -204,7 +204,7 @@ mod tests {
         );
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
-        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
 
         let trace_id_bytes = [1; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -226,7 +226,7 @@ mod tests {
         let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
 
         let trace_id_bytes = [2; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -245,7 +245,7 @@ mod tests {
         let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(config, test_resource, TraceRegistry::new());
+        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
 
         let trace_id = TraceId::from_bytes([2; 16]);
         let span_id = SpanId::from_bytes([3; 8]);

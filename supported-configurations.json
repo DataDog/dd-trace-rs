@@ -7,9 +7,7 @@
         "version": "A",
         "type": "string",
         "default_value": "localhost",
-        "propertyKeys": [
-          "agent_host"
-        ]
+        "propertyKeys": ["agent_host"]
       }
     ],
     "DD_DOGSTATSD_HOST": [
@@ -17,9 +15,7 @@
         "version": "A",
         "type": "string",
         "default_value": "localhost",
-        "propertyKeys": [
-          "dogstatsd_agent_host"
-        ]
+        "propertyKeys": ["dogstatsd_agent_host"]
       }
     ],
     "DD_DOGSTATSD_PORT": [
@@ -27,9 +23,7 @@
         "version": "A",
         "type": "integer",
         "default_value": "8125",
-        "propertyKeys": [
-          "dogstatsd_agent_port"
-        ]
+        "propertyKeys": ["dogstatsd_agent_port"]
       }
     ],
     "DD_DOGSTATSD_URL": [
@@ -37,9 +31,7 @@
         "version": "A",
         "type": "string",
         "default_value": "",
-        "propertyKeys": [
-          "dogstatsd_agent_url"
-        ]
+        "propertyKeys": ["dogstatsd_agent_url"]
       }
     ],
     "DD_ENV": [
@@ -47,9 +39,7 @@
         "version": "A",
         "type": "string",
         "default_value": "",
-        "propertyKeys": [
-          "env"
-        ]
+        "propertyKeys": ["env"]
       }
     ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
@@ -57,9 +47,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "telemetry_enabled"
-        ]
+        "propertyKeys": ["telemetry_enabled"]
       }
     ],
     "DD_LOG_LEVEL": [
@@ -67,9 +55,7 @@
         "version": "A",
         "type": "string",
         "default_value": "ERROR",
-        "propertyKeys": [
-          "log_level_filter"
-        ]
+        "propertyKeys": ["log_level_filter"]
       }
     ],
     "DD_REMOTE_CONFIGURATION_ENABLED": [
@@ -77,9 +63,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "remote_config_enabled"
-        ]
+        "propertyKeys": ["remote_config_enabled"]
       }
     ],
     "DD_REMOTE_CONFIG_ENABLED": [
@@ -87,9 +71,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "remote_config_enabled"
-        ]
+        "propertyKeys": ["remote_config_enabled"]
       }
     ],
     "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS": [
@@ -97,9 +79,7 @@
         "version": "A",
         "type": "decimal",
         "default_value": "5.0",
-        "propertyKeys": [
-          "remote_config_poll_interval"
-        ]
+        "propertyKeys": ["remote_config_poll_interval"]
       }
     ],
     "DD_SERVICE": [
@@ -107,9 +87,7 @@
         "version": "A",
         "type": "string",
         "default_value": "unnamed-rust-service",
-        "propertyKeys": [
-          "service"
-        ]
+        "propertyKeys": ["service"]
       }
     ],
     "DD_TAGS": [
@@ -117,9 +95,7 @@
         "version": "A",
         "type": "map",
         "default_value": "",
-        "propertyKeys": [
-          "global_tags"
-        ]
+        "propertyKeys": ["global_tags"]
       }
     ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
@@ -127,9 +103,7 @@
         "version": "A",
         "type": "decimal",
         "default_value": "60.0",
-        "propertyKeys": [
-          "telemetry_heartbeat_interval"
-        ]
+        "propertyKeys": ["telemetry_heartbeat_interval"]
       }
     ],
     "DD_TELEMETRY_LOG_COLLECTION_ENABLED": [
@@ -137,9 +111,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "telemetry_log_collection_enabled"
-        ]
+        "propertyKeys": ["telemetry_log_collection_enabled"]
       }
     ],
     "DD_TRACE_AGENT_PORT": [
@@ -147,9 +119,7 @@
         "version": "A",
         "type": "integer",
         "default_value": "8126",
-        "propertyKeys": [
-          "trace_agent_port"
-        ]
+        "propertyKeys": ["trace_agent_port"]
       }
     ],
     "DD_TRACE_AGENT_URL": [
@@ -157,9 +127,7 @@
         "version": "A",
         "type": "string",
         "default_value": "",
-        "propertyKeys": [
-          "trace_agent_url"
-        ]
+        "propertyKeys": ["trace_agent_url"]
       }
     ],
     "DD_TRACE_ENABLED": [
@@ -167,9 +135,23 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "enabled"
-        ]
+        "propertyKeys": ["enabled"]
+      }
+    ],
+    "DD_TRACE_PARTIAL_FLUSH_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default_value": "false",
+        "propertyKeys": ["trace_partial_flushed_enabled"]
+      }
+    ],
+    "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS": [
+      {
+        "version": "A",
+        "type": "integer",
+        "default_value": "300",
+        "propertyKeys": ["trace_partial_flushed_min_spans"]
       }
     ],
     "DD_TRACE_PROPAGATION_EXTRACT_FIRST": [
@@ -177,9 +159,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "false",
-        "propertyKeys": [
-          "trace_propagation_extract_first"
-        ]
+        "propertyKeys": ["trace_propagation_extract_first"]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE": [
@@ -187,9 +167,7 @@
         "version": "A",
         "type": "array",
         "default_value": "datadog,tracecontext",
-        "propertyKeys": [
-          "trace_propagation_style"
-        ]
+        "propertyKeys": ["trace_propagation_style"]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_EXTRACT": [
@@ -197,9 +175,7 @@
         "version": "A",
         "type": "array",
         "default_value": "",
-        "propertyKeys": [
-          "trace_propagation_style_extract"
-        ]
+        "propertyKeys": ["trace_propagation_style_extract"]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_INJECT": [
@@ -207,9 +183,7 @@
         "version": "A",
         "type": "array",
         "default_value": "",
-        "propertyKeys": [
-          "trace_propagation_style_inject"
-        ]
+        "propertyKeys": ["trace_propagation_style_inject"]
       }
     ],
     "DD_TRACE_RATE_LIMIT": [
@@ -217,9 +191,7 @@
         "version": "A",
         "type": "integer",
         "default_value": "100",
-        "propertyKeys": [
-          "trace_rate_limit"
-        ]
+        "propertyKeys": ["trace_rate_limit"]
       }
     ],
     "DD_TRACE_SAMPLING_RULES": [
@@ -227,9 +199,7 @@
         "version": "A",
         "type": "array",
         "default_value": "",
-        "propertyKeys": [
-          "trace_sampling_rules"
-        ]
+        "propertyKeys": ["trace_sampling_rules"]
       }
     ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
@@ -237,9 +207,7 @@
         "version": "A",
         "type": "boolean",
         "default_value": "true",
-        "propertyKeys": [
-          "trace_stats_computation_enabled"
-        ]
+        "propertyKeys": ["trace_stats_computation_enabled"]
       }
     ],
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [
@@ -247,9 +215,7 @@
         "version": "A",
         "type": "integer",
         "default_value": "512",
-        "propertyKeys": [
-          "datadog_tags_max_length"
-        ]
+        "propertyKeys": ["datadog_tags_max_length"]
       }
     ],
     "DD_VERSION": [
@@ -257,9 +223,7 @@
         "version": "A",
         "type": "string",
         "default_value": "",
-        "propertyKeys": [
-          "version"
-        ]
+        "propertyKeys": ["version"]
       }
     ]
   }

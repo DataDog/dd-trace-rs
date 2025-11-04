@@ -95,6 +95,7 @@ telemetry_metrics!(
     SpansDroppedBufferFull => ("spans_dropped", Tracers, Count, ["reason" => "overfull_buffer"]),
     TraceSegmentsCreated => ("trace_segments_created", Tracers, Count, []),
     TraceSegmentsClosed => ("trace_segments_closed", Tracers, Count, []),
+    TracePartialFlushCount => ("trace_partial_flush.count", Tracers, Count, []),
 );
 
 trait TelemetryHandle: Sync + Send + 'static + Any {

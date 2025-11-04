@@ -273,8 +273,9 @@ pub mod tests {
                 ])
                 .build()
         };
+        let config = Arc::new(config);
 
-        DatadogPropagator::new(Arc::new(config), TraceRegistry::new())
+        DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
     }
 
     #[derive(Debug)]
@@ -570,8 +571,9 @@ pub mod tests {
     fn extract_inject_w3c() {
         for (trace_parent, trace_state, expected_trace_state) in extract_inject_data() {
             let builder = Config::builder();
-            let registry = TraceRegistry::new();
-            let propagator = DatadogPropagator::new(Arc::new(builder.build()), registry.clone());
+            let config = Arc::new(builder.build());
+            let registry = TraceRegistry::new(config.clone());
+            let propagator = DatadogPropagator::new(config, registry.clone());
 
             let mut extractor = HashMap::new();
             extractor.insert(TRACEPARENT_KEY.to_string(), trace_parent.to_string());

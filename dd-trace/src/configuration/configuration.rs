@@ -820,6 +820,10 @@ pub struct Config {
     /// Interval by which telemetry events are flushed (seconds)
     telemetry_heartbeat_interval: ConfigItem<f64>,
 
+    /// Partial flush
+    trace_partial_flush_enabled: ConfigItem<bool>,
+    trace_partial_flush_min_spans: ConfigItem<usize>,
+
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -944,6 +948,15 @@ impl Config {
                 Cow::Owned,
             ),
 
+            trace_partial_flush_enabled: cisu.update_parsed(
+                SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
+                default.trace_partial_flush_enabled,
+            ),
+            trace_partial_flush_min_spans: cisu.update_parsed(
+                SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
+                default.trace_partial_flush_min_spans,
+            ),
+
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
             trace_rate_limit: cisu.update_parsed(
@@ -1044,6 +1057,8 @@ impl Config {
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_heartbeat_interval,
+            &self.trace_partial_flush_enabled,
+            &self.trace_partial_flush_min_spans,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
@@ -1154,6 +1169,14 @@ impl Config {
 
     pub fn telemetry_heartbeat_interval(&self) -> f64 {
         *self.telemetry_heartbeat_interval.value()
+    }
+
+    pub fn trace_partial_flush_enabled(&self) -> bool {
+        *self.trace_partial_flush_enabled.value()
+    }
+
+    pub fn trace_partial_flush_min_spans(&self) -> usize {
+        *self.trace_partial_flush_min_spans.value()
     }
 
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
@@ -1393,7 +1416,14 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
         ),
-
+        trace_partial_flush_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
+            false,
+        ),
+        trace_partial_flush_min_spans: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
+            300,
+        ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
             Some(vec![
@@ -1537,6 +1567,18 @@ impl ConfigBuilder {
 
     pub fn set_dogstatsd_agent_port(&mut self, port: u32) -> &mut Self {
         self.config.dogstatsd_agent_port.set_code(port);
+        self
+    }
+
+    pub fn set_trace_partial_flush_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.trace_partial_flush_enabled.set_code(enabled);
+        self
+    }
+
+    pub fn set_trace_partial_flush_min_spans(&mut self, min_spans: usize) -> &mut Self {
+        self.config
+            .trace_partial_flush_min_spans
+            .set_code(min_spans);
         self
     }
 
