@@ -10,12 +10,12 @@ use std::{
 
 use anyhow::Error;
 use ddtelemetry::{
-    data,
+    data::{self, Configuration},
     metrics::ContextKey,
     worker::{self, TelemetryWorkerHandle},
 };
 
-use crate::{dd_debug, dd_error, Config};
+use crate::{configuration::ConfigurationProvider, dd_debug, dd_error, dd_warn, Config};
 
 static TELEMETRY: TelemetryCell = OnceLock::new();
 
@@ -107,6 +107,8 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error>;
 
+    fn add_configuration(&mut self, configuration: Configuration) -> Result<(), anyhow::Error>;
+
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
@@ -141,14 +143,21 @@ impl TelemetryHandle for TelemetryHandleWrapper {
             .add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
     }
 
+    fn add_configuration(&mut self, config_item: Configuration) -> Result<(), anyhow::Error> {
+        self.handle
+            .try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+    }
+
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
         if let Some(config) = config {
             config
                 .get_telemetry_configuration()
                 .into_iter()
-                .for_each(|config_item| {
+                .for_each(|config_provider| {
                     self.handle
-                        .try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+                        .try_send_msg(worker::TelemetryActions::AddConfig(
+                            config_provider.get_configuration(),
+                        ))
                         .ok();
                 });
         }
@@ -279,29 +288,54 @@ fn add_log_error_inner<I: Into<String>>(
     });
 }
 
+pub fn notify_configuration_update(config_provider: &dyn ConfigurationProvider) {
+    notify_configuration_update_inner(config_provider, &TELEMETRY);
+}
+
+fn notify_configuration_update_inner(
+    config_provider: &dyn ConfigurationProvider,
+    telemetry_cell: &TelemetryCell,
+) {
+    with_telemetry_handle(telemetry_cell, |t| {
+        if let Err(err) = t
+            .handle
+            .add_configuration(config_provider.get_configuration())
+        {
+            dd_warn!("Telemetry: error sending configuration item {err}");
+        } else {
+            dd_debug!("Telemetry: configuration update sent sucessfully");
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Ok;
     use ddtelemetry::data;
 
     use crate::{
+        configuration::ConfigurationProvider,
         dd_debug, dd_error, dd_warn,
         telemetry::{
-            add_log_error_inner, init_telemetry_inner, TelemetryHandle, TelemetryMetric, TELEMETRY,
+            add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
+            TelemetryHandle, TelemetryMetric, TELEMETRY,
         },
         Config,
     };
 
     use std::{any::Any, sync::OnceLock};
 
-    #[derive(Clone)]
     struct TestTelemetryHandle {
         pub logs: Vec<(String, data::LogLevel, Option<String>)>,
+        pub configurations: Vec<data::Configuration>,
     }
 
     impl TestTelemetryHandle {
         fn new() -> Self {
-            TestTelemetryHandle { logs: vec![] }
+            TestTelemetryHandle {
+                logs: vec![],
+                configurations: vec![],
+            }
         }
     }
 
@@ -319,6 +353,14 @@ mod tests {
             Ok(())
         }
 
+        fn add_configuration(
+            &mut self,
+            configuration: data::Configuration,
+        ) -> Result<(), anyhow::Error> {
+            self.configurations.push(configuration);
+            Ok(())
+        }
+
         fn send_start(&self, _config: Option<&Config>) -> Result<(), anyhow::Error> {
             Ok(())
         }
@@ -329,6 +371,35 @@ mod tests {
 
         fn as_any(&self) -> &dyn Any {
             self
+        }
+    }
+
+    struct TestConfigurationProvider {
+        name: String,
+        value: String,
+        origin: data::ConfigurationOrigin,
+        config_id: Option<String>,
+    }
+
+    impl TestConfigurationProvider {
+        fn new(origin: data::ConfigurationOrigin, config_id: Option<String>) -> Self {
+            TestConfigurationProvider {
+                name: "DD_SERVICE".to_string(),
+                value: "test".to_string(),
+                origin,
+                config_id,
+            }
+        }
+    }
+
+    impl ConfigurationProvider for TestConfigurationProvider {
+        fn get_configuration(&self) -> data::Configuration {
+            data::Configuration {
+                name: self.name.clone(),
+                value: self.value.clone(),
+                origin: self.origin.clone(),
+                config_id: self.config_id.clone(),
+            }
         }
     }
 
@@ -474,5 +545,78 @@ mod tests {
         // Other levels not
         assert!(!logs.iter().any(|(msg, _, _)| msg == "This is an debug"));
         assert!(!logs.iter().any(|(msg, _, _)| msg == "This is an warn"));
+    }
+
+    #[test]
+    fn test_notify_configuration_update() {
+        let config = Config::builder().build();
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
+
+        let config_id = Some("config-42".to_string());
+        let test_provider =
+            TestConfigurationProvider::new(data::ConfigurationOrigin::EnvVar, config_id.clone());
+
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
+
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        assert_eq!(handle.configurations.len(), 1);
+
+        let sent_config = &handle.configurations[0];
+        assert_eq!(sent_config.name, "DD_SERVICE");
+        assert_eq!(sent_config.value, "test");
+        assert_eq!(sent_config.origin, data::ConfigurationOrigin::EnvVar);
+        assert_eq!(sent_config.config_id, config_id);
+    }
+
+    #[test]
+    fn test_notify_configuration_update_telemetry_disabled() {
+        let config = Config::builder().set_telemetry_enabled(false).build();
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
+
+        let test_provider = TestConfigurationProvider::new(data::ConfigurationOrigin::EnvVar, None);
+
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
+
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        // Should not send configuration when telemetry is disabled
+        assert_eq!(handle.configurations.len(), 0);
+    }
+
+    #[test]
+    fn test_notify_configuration_update_no_handle() {
+        let telemetry_cell = OnceLock::new();
+        // Don't initialize telemetry - no handle should be present
+
+        let test_provider =
+            TestConfigurationProvider::new(data::ConfigurationOrigin::Default, None);
+
+        // Should not panic when no telemetry is initialized
+        notify_configuration_update_inner(&test_provider, &telemetry_cell);
     }
 }

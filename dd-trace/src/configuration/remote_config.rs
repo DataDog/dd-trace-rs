@@ -188,6 +188,7 @@ where
 /// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
 #[derive(Debug, Clone, Deserialize)]
 struct ApmTracingConfig {
+    id: String,
     lib_config: LibConfig, // lib_config is a required property
 }
 
@@ -794,7 +795,8 @@ impl ProductHandler for ApmTracingHandler {
                 let rules_json = serde_json::to_string(&rules_value)
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                match config.update_sampling_rules_from_remote(&rules_json) {
+                match config.update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
+                {
                     Ok(()) => {
                         crate::dd_debug!(
                             "RemoteConfigClient: Applied sampling rules from remote config"
@@ -811,7 +813,7 @@ impl ProductHandler for ApmTracingHandler {
                 crate::dd_debug!(
                     "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
                 );
-                config.clear_remote_sampling_rules();
+                config.clear_remote_sampling_rules(Some(tracing_config.id));
             }
         } else {
             crate::dd_debug!(
@@ -1037,6 +1039,7 @@ mod tests {
     #[test]
     fn test_apm_tracing_config_parsing() {
         let json = r#"{
+            "id": "42",
             "lib_config": {
                 "tracing_sampling_rules": [
                     {
@@ -1064,6 +1067,7 @@ mod tests {
     fn test_apm_tracing_config_full_schema() {
         // Test parsing a more complete configuration
         let json = r#"{
+            "id": "42",
             "lib_config": {
                 "tracing_sampling_rules": [
                     {
@@ -1252,7 +1256,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/apm-tracing-sampling/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(), // base64 encoded APM config
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(), // base64 encoded APM config
                 },
             ]),
             client_configs: Some(vec![
@@ -1292,7 +1296,7 @@ mod tests {
             cached_files[0].path,
             "datadog/2/APM_TRACING/apm-tracing-sampling/config"
         );
-        assert_eq!(cached_files[0].length, 124);
+        assert_eq!(cached_files[0].length, 140);
         assert_eq!(cached_files[0].hashes.len(), 1);
         assert_eq!(cached_files[0].hashes[0].algorithm, "sha256");
 
@@ -1368,7 +1372,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/test-config/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(),
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(),
                 },
             ]),
             client_configs: Some(vec![
@@ -1597,7 +1601,7 @@ mod tests {
 
         // Test processing config - this should not panic for valid JSON
         let config = Arc::new(Config::builder().build());
-        let config_json = r#"{"lib_config": {"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}}"#;
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}}"#;
 
         // This should succeed
         let result = handler.process_config(config_json, &config);
@@ -1622,7 +1626,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/config1/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0xIn1dfX0=".to_string(),
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0xIn1dfX0=".to_string(),
                 },
             ]),
             client_configs: Some(vec![
@@ -1649,11 +1653,11 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/config2/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMiJ9XX19".to_string(),
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJpZCI6IjQyIiwgInRyYWNpbmdfc2FtcGxpbmdfcnVsZXMiOiBbeyJzYW1wbGVfcmF0ZSI6IDAuNzUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0yIn1dfX0=".to_string(),
                 },
                 TargetFile {
                     path: "datadog/2/APM_TRACING/config3/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjI1LCAic2VydmljZSI6ICJ0ZXN0LXNlcnZpY2UtMiJ9XX19".to_string(),
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJpZCI6IjQyIiwgInRyYWNpbmdfc2FtcGxpbmdfcnVsZXMiOiBbeyJzYW1wbGVfcmF0ZSI6IDAuMjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZS0yIn1dfX0=".to_string(),
                 },
             ]),
             client_configs: Some(vec![
@@ -1725,7 +1729,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/good_config/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(),
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjUsICJzZXJ2aWNlIjogInRlc3Qtc2VydmljZSJ9XX19".to_string(),
                 },
             ]),
             client_configs: Some(vec![
@@ -1827,7 +1831,7 @@ mod tests {
             target_files: Some(vec![
                 TargetFile {
                     path: "datadog/2/APM_TRACING/test-sampling/config".to_string(),
-                    raw: "eyJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LWFwcC1zZXJ2aWNlIn1dfX0=".to_string(), // base64 encoded sampling rules
+                    raw: "eyJpZCI6ICI0MiIsICJsaWJfY29uZmlnIjogeyJ0cmFjaW5nX3NhbXBsaW5nX3J1bGVzIjogW3sic2FtcGxlX3JhdGUiOiAwLjc1LCAic2VydmljZSI6ICJ0ZXN0LWFwcC1zZXJ2aWNlIn1dfX0=".to_string(), // base64 encoded sampling rules
                 },
             ]),
             client_configs: Some(vec![
@@ -1867,7 +1871,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_tracing_sampling_rules_null() {
-        let config_json = r#"{"lib_config": {"tracing_sampling_rules": null}}"#;
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rules": null}}"#;
         let tracing_config: ApmTracingConfig =
             serde_json::from_str(config_json).expect("Json should be parsed");
 
@@ -1881,7 +1885,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_tracing_sampling_rules_missing() {
-        let config_json = r#"{"lib_config": {}}"#;
+        let config_json = r#"{"id": "42", "lib_config": {}}"#;
         let tracing_config: ApmTracingConfig =
             serde_json::from_str(config_json).expect("Json should be parsed");
 
