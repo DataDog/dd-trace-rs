@@ -104,70 +104,22 @@ impl SupportedConfigurations {
 
     pub fn aliases(&self) -> &[&'static str] {
         match self {
-            SupportedConfigurations::DD_AGENT_HOST => &[],
-            SupportedConfigurations::DD_DOGSTATSD_HOST => &[],
-            SupportedConfigurations::DD_DOGSTATSD_PORT => &[],
-            SupportedConfigurations::DD_DOGSTATSD_URL => &[],
-            SupportedConfigurations::DD_ENV => &[],
-            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => &[],
-            SupportedConfigurations::DD_LOG_LEVEL => &[],
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 &["DD_REMOTE_CONFIG_ENABLED"]
             }
-            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => &[],
-            SupportedConfigurations::DD_SERVICE => &[],
-            SupportedConfigurations::DD_TAGS => &[],
-            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => &[],
-            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => &[],
-            SupportedConfigurations::DD_TRACE_AGENT_PORT => &[],
-            SupportedConfigurations::DD_TRACE_AGENT_URL => &[],
-            SupportedConfigurations::DD_TRACE_ENABLED => &[],
-            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => &[],
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE => &[],
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => &[],
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => &[],
-            SupportedConfigurations::DD_TRACE_RATE_LIMIT => &[],
-            SupportedConfigurations::DD_TRACE_SAMPLING_RULES => &[],
-            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => &[],
-            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => &[],
-            SupportedConfigurations::DD_VERSION => &[],
-            SupportedConfigurations::DD_COMPLEX_STRUCT => &[],
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => {
-                &["DD_NONEXISTANT_CONFIGURATION_ALIAS"]
-            }
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS",
+            ],
+            _ => &[],
         }
     }
 
     pub fn is_deprecated(&self) -> bool {
-        match self {
-            SupportedConfigurations::DD_AGENT_HOST => false,
-            SupportedConfigurations::DD_DOGSTATSD_HOST => false,
-            SupportedConfigurations::DD_DOGSTATSD_PORT => false,
-            SupportedConfigurations::DD_DOGSTATSD_URL => false,
-            SupportedConfigurations::DD_ENV => false,
-            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => false,
-            SupportedConfigurations::DD_LOG_LEVEL => false,
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => false,
-            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => false,
-            SupportedConfigurations::DD_SERVICE => false,
-            SupportedConfigurations::DD_TAGS => false,
-            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => false,
-            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => false,
-            SupportedConfigurations::DD_TRACE_AGENT_PORT => false,
-            SupportedConfigurations::DD_TRACE_AGENT_URL => false,
-            SupportedConfigurations::DD_TRACE_ENABLED => false,
-            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => false,
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE => false,
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => false,
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => false,
-            SupportedConfigurations::DD_TRACE_RATE_LIMIT => false,
-            SupportedConfigurations::DD_TRACE_SAMPLING_RULES => false,
-            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => false,
-            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => false,
-            SupportedConfigurations::DD_VERSION => false,
-            SupportedConfigurations::DD_COMPLEX_STRUCT => false,
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => false,
-        }
+        matches!(
+            self,
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED
+        )
     }
 }
 
