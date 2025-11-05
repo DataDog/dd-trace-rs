@@ -64,9 +64,7 @@
         "type": "boolean",
         "default_value": "true",
         "propertyKeys": ["remote_config_enabled"],
-        "aliases": [
-          "DD_REMOTE_CONFIG_ENABLED"
-        ]
+        "aliases": ["DD_REMOTE_CONFIG_ENABLED"]
       }
     ],
     "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS": [
