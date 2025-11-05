@@ -12,9 +12,17 @@ undocumented_configurations = {
         "deprecated": False,
     },
     "DD_NONEXISTANT_CONFIGURATION": {
-        "aliases": ["DD_NONEXISTANT_CONFIGURATION_ALIAS"],
+        "aliases": ["DD_NONEXISTANT_CONFIGURATION_ALIAS", "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"],
         "deprecated": False,
-    }
+    },
+    "DD_NONEXISTANT_CONFIGURATION_ALIAS": {
+        "aliases": [],
+        "deprecated": False,
+    },
+    "DD_NONEXISTANT_CONFIGURATION_DEPRECATED": {
+        "aliases": [],
+        "deprecated": True,
+    },
 }
 
 enum_block = ""

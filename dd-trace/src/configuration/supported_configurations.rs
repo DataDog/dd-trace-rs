@@ -41,6 +41,10 @@ pub(crate) enum SupportedConfigurations {
     DD_COMPLEX_STRUCT,
     #[allow(unused)]
     DD_NONEXISTANT_CONFIGURATION,
+    #[allow(unused)]
+    DD_NONEXISTANT_CONFIGURATION_ALIAS,
+    #[allow(unused)]
+    DD_NONEXISTANT_CONFIGURATION_DEPRECATED,
 }
 
 impl SupportedConfigurations {
@@ -99,6 +103,12 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => "DD_NONEXISTANT_CONFIGURATION",
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => {
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS"
+            }
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
+            }
         }
     }
 
@@ -108,8 +118,8 @@ impl SupportedConfigurations {
                 &["DD_REMOTE_CONFIG_ENABLED"]
             }
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
-                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
                 "DD_NONEXISTANT_CONFIGURATION_ALIAS",
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
             ],
             _ => &[],
         }
@@ -126,6 +136,6 @@ impl SupportedConfigurations {
 pub(crate) fn is_alias_deprecated(name: &str) -> bool {
     matches!(
         name,
-        "DD_REMOTE_CONFIG_ENABLED" | "DD_NONEXISTANT_CONFIGURATION_ALIAS"
+        "DD_REMOTE_CONFIG_ENABLED" | "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"
     )
 }
