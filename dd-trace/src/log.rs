@@ -66,7 +66,7 @@ impl Display for LevelFilter {
 }
 
 #[repr(usize)]
-#[derive(Copy, Debug, Hash)]
+#[derive(Copy, Debug, Hash, PartialEq)]
 pub enum Level {
     Error = 1, // this value must match with LogLevelFilter::Error
     Warn,
@@ -125,6 +125,98 @@ impl PartialOrd<LevelFilter> for Level {
     #[inline]
     fn ge(&self, other: &LevelFilter) -> bool {
         *self as usize >= *other as usize
+    }
+}
+
+#[cfg(feature = "test-utils")]
+pub mod test_logger {
+    //! Implements a thread local, overridable logger 
+    //! 
+    //! Tests can locally intercept logs by calling to `activate_test_logger`
+    //! 
+    //! ```no_run
+    //! let _log_guard = dd_trace::log::test_logger::activate_test_logger;();
+    //! // whatever is logged by the dd_(level)! macros will be stored
+    //! dd_trace::dd_debug!("my log");
+    //! let logs = dd_trace::log::test_logger::take_test_logs().unwrap();
+    //! // logs should contain (Debug, "my log")
+    //! 
+    //! // to see logs in threads spawned from the test, the function passed to spawn 
+    //! // should be wrapped by `with_local_logger`
+    //! std::thread::spawn(dd_trace::log::with_local_logger(|| {
+    //!   dd_trace::dd_debug!("my log");
+    //! })).join();
+    //! ```
+    use std::{cell::RefCell, sync::Arc};
+
+    #[derive(Default)]
+    struct TestLogger(std::sync::Mutex<Vec<(crate::log::Level, String)>>);
+
+    pub fn print_log(
+        lvl: crate::log::Level,
+        log: std::fmt::Arguments,
+        _file: &str,
+        _line: u32,
+        _template: Option<&str>,
+    ) {
+        let _ = LOCAL_LOGGER.try_with(|l| {
+            if let Some(l) = &*l.borrow() {
+                l.0.lock().unwrap().push((lvl, log.to_string()))
+            }
+        });
+    }
+
+    thread_local! {
+        static LOCAL_LOGGER: RefCell<Option<Arc<TestLogger>>> = RefCell::new(None);
+    }
+
+    pub fn with_local_logger<F: FnOnce() -> R, R>(f: F) -> impl FnOnce() -> R {
+        let logger = LOCAL_LOGGER.try_with(|l| l.borrow().clone()).ok().flatten();
+        move || {
+            let _guard = LoggerGuard {
+                prev: LOCAL_LOGGER.replace(logger),
+            };
+            f()
+        }
+    }
+
+    pub struct LoggerGuard {
+        prev: Option<Arc<TestLogger>>,
+    }
+
+    impl Drop for LoggerGuard {
+        fn drop(&mut self) {
+            LOCAL_LOGGER.set(self.prev.take());
+        }
+    }
+
+    pub fn activate_test_logger() -> LoggerGuard {
+        let prev = LOCAL_LOGGER.replace(Some(Arc::new(TestLogger::default())));
+        LoggerGuard { prev }
+    }
+
+    pub fn take_test_logs() -> Option<Vec<(crate::log::Level, String)>> {
+        use std::ops::DerefMut;
+
+        LOCAL_LOGGER
+            .try_with(|l| {
+                l.borrow()
+                    .as_deref()
+                    .map(|l| std::mem::take(l.0.lock().unwrap().deref_mut()))
+            })
+            .ok()
+            .flatten()
+    }
+}
+
+pub fn with_local_logger<F: FnOnce() -> R, R>(f: F) -> impl FnOnce() -> R {
+    #[cfg(feature = "test-utils")]
+    {
+        test_logger::with_local_logger(f)
+    }
+    #[cfg(not(feature = "test-utils"))]
+    {
+        f
     }
 }
 
@@ -190,23 +282,21 @@ macro_rules! dd_log {
         let loc = std::panic::Location::caller();
         $crate::log::print_log(lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first));
       }
+      #[cfg(feature = "test-utils")]
+      {
+        let loc = std::panic::Location::caller();
+        $crate::log::test_logger::print_log(lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first))
+      }
     }};
 
     ($lvl:expr, $first:expr) => {
-      let lvl = $lvl;
-      if lvl <= $crate::log::max_level() {
-        let loc = std::panic::Location::caller();
-        $crate::log::print_log(lvl, format_args!($first), loc.file(), loc.line(), Some($first));
-      }
+      $crate::dd_log!($lvl, $first,)
     };
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        log::LevelFilter,
-        log::{max_level, set_max_level, Level},
-    };
+    use crate::log::{max_level, set_max_level, test_logger, Level, LevelFilter};
 
     #[test]
     fn test_default_max_level() {
@@ -244,5 +334,24 @@ mod tests {
                 assert!(*lvl < FILTERS[filter_index + 1]);
             }
         }
+    }
+
+    #[test]
+    fn test_test_logger() {
+        let _g = test_logger::activate_test_logger();
+        dd_debug!("debug log {}", "foo");
+        std::thread::spawn(test_logger::with_local_logger(|| {
+            dd_warn!("debug log {}", "bar");
+        }))
+        .join()
+        .unwrap();
+        let test_logs = test_logger::take_test_logs().unwrap();
+        assert_eq!(
+            &test_logs,
+            &[
+                (Level::Debug, "debug log foo".into()),
+                (Level::Warn, "debug log bar".into())
+            ]
+        );
     }
 }

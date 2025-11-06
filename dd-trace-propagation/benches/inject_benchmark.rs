@@ -101,7 +101,7 @@ fn bench_datadog_only_inject<M: criterion::measurement::Measurement + Measuremen
 ) {
     let config = Config::builder()
         .set_trace_propagation_style_inject(vec![TracePropagationStyle::Datadog])
-        .set_datadog_tags_max_length_with_no_limit(20000)
+        .__internal_set_datadog_tags_max_length_with_no_limit(20000)
         .build();
     let propagator = DatadogCompositePropagator::new(Arc::new(config));
 

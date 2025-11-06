@@ -5,8 +5,10 @@ use hashbrown::{hash_map, HashMap as BHashMap};
 use std::{
     collections::HashMap,
     fmt::Debug,
+    ops::DerefMut,
     str::FromStr,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use dd_trace::{
@@ -29,6 +31,7 @@ use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 use crate::{
+    abandoned_traces::{self, AbandonedTracesRegistry},
     create_dd_resource,
     span_exporter::DatadogExporter,
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
@@ -41,7 +44,6 @@ struct Trace {
     /// Root span will always be the first span in this vector if it is present
     finished_spans: Vec<SpanData>,
     open_span_count: usize,
-
     propagation_data: TracePropagationData,
 }
 
@@ -247,6 +249,47 @@ impl InnerTraceRegistry {
     }
 }
 
+#[derive(Debug)]
+pub struct ShardedTraces<T> {
+    shards: Arc<[CachePadded<RwLock<T>>; TRACE_REGISTRY_SHARDS]>,
+    hasher: foldhash::fast::RandomState,
+}
+
+impl<T> ShardedTraces<T> {
+    pub fn new<F: FnMut(usize) -> T>(mut f: F) -> Self {
+        Self {
+            shards: Arc::new(std::array::from_fn(|i| CachePadded(RwLock::new(f(i))))),
+            hasher: foldhash::fast::RandomState::default(),
+        }
+    }
+
+    pub fn write_shard(&self, trace_id: [u8; 16]) -> impl DerefMut<Target = T> + use<'_, T> {
+        self.get_shard(trace_id)
+            .write()
+            .expect("Failed to acquire lock on trace registry")
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RwLock<T>> {
+        self.shards.iter().map(|i| &i.0)
+    }
+
+    fn get_shard(&self, trace_id: [u8; 16]) -> &RwLock<T> {
+        use std::hash::BuildHasher;
+        let hash = self.hasher.hash_one(u128::from_ne_bytes(trace_id));
+        let shard: usize = hash as usize % TRACE_REGISTRY_SHARDS;
+        &self.shards[shard].0
+    }
+}
+
+impl<T> Clone for ShardedTraces<T> {
+    fn clone(&self) -> Self {
+        Self {
+            shards: self.shards.clone(),
+            hasher: self.hasher.clone(),
+        }
+    }
+}
+
 const TRACE_REGISTRY_SHARDS: usize = 64;
 
 #[repr(align(128))]
@@ -262,32 +305,22 @@ struct CachePadded<T>(T);
 /// - The number of open spans in the trace
 /// - The sampling decision of the trace
 pub(crate) struct TraceRegistry {
-    // Example:
-    // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
-    // to access a trace we do inner[hash(trace_id) % N].read()
-    inner: Arc<[CachePadded<RwLock<InnerTraceRegistry>>; TRACE_REGISTRY_SHARDS]>,
-    hasher: foldhash::fast::RandomState,
+    shards: ShardedTraces<InnerTraceRegistry>,
+    abandoned_spans: Option<AbandonedTracesRegistry>,
 }
 
 impl TraceRegistry {
     pub fn new(config: Arc<Config>) -> Self {
         Self {
-            inner: Arc::new(std::array::from_fn(|_| {
-                CachePadded(RwLock::new(InnerTraceRegistry {
-                    registry: BHashMap::new(),
-                    metrics: TraceRegistryMetrics::default(),
-                    config: config.clone(),
-                }))
-            })),
-            hasher: foldhash::fast::RandomState::default(),
+            shards: ShardedTraces::new(|_| InnerTraceRegistry {
+                registry: BHashMap::new(),
+                metrics: TraceRegistryMetrics::default(),
+                config: config.clone(),
+            }),
+            abandoned_spans: config
+                .trace_debug_open_spans()
+                .then(AbandonedTracesRegistry::new),
         }
-    }
-
-    fn get_shard(&self, trace_id: [u8; 16]) -> &RwLock<InnerTraceRegistry> {
-        use std::hash::BuildHasher;
-        let hash = self.hasher.hash_one(u128::from_ne_bytes(trace_id));
-        let shard = hash as usize % TRACE_REGISTRY_SHARDS;
-        &self.inner[shard].0
     }
 
     /// Register the trace propagation data for a given trace ID
@@ -300,11 +333,13 @@ impl TraceRegistry {
         &self,
         trace_id: [u8; 16],
         propagation_data: TracePropagationData,
+        span_name: Option<String>,
     ) -> RegisterTracePropagationResult {
-        let mut inner = self
-            .get_shard(trace_id)
-            .write()
-            .expect("Failed to acquire lock on trace registry");
+        self.abandoned_spans
+            .as_ref()
+            .and_then(|a| Some(a.register_root_span_sampling(trace_id, span_name?)));
+
+        let mut inner = self.shards.write_shard(trace_id);
         inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
     }
 
@@ -312,10 +347,11 @@ impl TraceRegistry {
     /// This will also increment the open span count for the trace.
     /// If the trace is already registered, it will ignore the new root span ID and log a warning.
     pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
-        let mut inner = self
-            .get_shard(trace_id)
-            .write()
-            .expect("Failed to acquire lock on trace registry");
+        self.abandoned_spans
+            .as_ref()
+            .map(|a| a.register_local_root_span(trace_id));
+
+        let mut inner = self.shards.write_shard(trace_id);
         inner.register_local_root_span(trace_id, root_span_id);
     }
 
@@ -326,10 +362,11 @@ impl TraceRegistry {
         span_id: [u8; 8],
         propagation_data: TracePropagationData,
     ) {
-        let mut inner = self
-            .get_shard(trace_id)
-            .write()
-            .expect("Failed to acquire lock on trace registry");
+        self.abandoned_spans
+            .as_ref()
+            .map(|a| a.register_span(trace_id));
+
+        let mut inner = self.shards.write_shard(trace_id);
         inner.register_span(trace_id, span_id, propagation_data);
     }
 
@@ -337,26 +374,23 @@ impl TraceRegistry {
     /// If the trace is finished (i.e., all spans are finished), return the full trace chunk to
     /// flush
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
-        let mut inner = self
-            .get_shard(trace_id)
-            .write()
-            .expect("Failed to acquire lock on trace registry");
+        self.abandoned_spans
+            .as_ref()
+            .map(|a| a.finish_span(trace_id));
+
+        let mut inner = self.shards.write_shard(trace_id);
         inner.finish_span(trace_id, span_data)
     }
 
     pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
-        let inner = self
-            .get_shard(trace_id)
-            .read()
-            .expect("Failed to acquire lock on trace registry");
-
+        let inner = self.shards.write_shard(trace_id);
         inner.get_trace_propagation_data(trace_id).clone()
     }
 
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
         let mut stats = TraceRegistryMetrics::default();
-        for shard_idx in 0..TRACE_REGISTRY_SHARDS {
-            let mut shard = self.inner[shard_idx].0.write().unwrap();
+        for shard in self.shards.iter() {
+            let mut shard = shard.write().unwrap();
             let shard_stats = shard.get_metrics();
             stats.spans_created += shard_stats.spans_created;
             stats.spans_finished += shard_stats.spans_finished;
@@ -365,6 +399,21 @@ impl TraceRegistry {
             stats.trace_partial_flush_count += shard_stats.trace_partial_flush_count;
         }
         stats
+    }
+
+    pub fn iter_old_traces(
+        &self,
+        min_age: Duration,
+    ) -> impl Iterator<Item = abandoned_traces::OldTrace> + use<'_> {
+        self.abandoned_spans
+            .iter()
+            .flat_map(move |a| a.iter_old_traces(min_age))
+    }
+
+    pub fn iter_lost_traces(&self) -> impl Iterator<Item = abandoned_traces::OldTrace> + use<'_> {
+        self.abandoned_spans
+            .iter()
+            .flat_map(move |a| a.iter_open_traces())
     }
 }
 
@@ -412,9 +461,15 @@ impl DatadogSpanProcessor {
         } else {
             None
         };
+
         let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler);
+
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
-            TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
+            TelemetryMetricsCollector::start(
+                config.clone(),
+                registry.clone(),
+                span_exporter.queue_metrics(),
+            )
         });
 
         Self {
@@ -868,6 +923,7 @@ mod tests {
                                                     "foobar".to_string(),
                                                 )])),
                                             },
+                                            None,
                                         );
                                     }
                                     tr
@@ -955,7 +1011,7 @@ mod tests {
         let span_id = [1u8; 8];
 
         // Register and finish a single span
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, span_id);
 
         let span_data = create_test_span_data(trace_id, span_id);
@@ -977,7 +1033,7 @@ mod tests {
         let child2_span_id = [3u8; 8];
 
         // Register root span
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
 
         // Register child spans
@@ -1018,7 +1074,11 @@ mod tests {
             let trace_id = [i; 16];
             let span_id = [i; 8];
 
-            registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+            registry.register_local_root_trace_propagation_data(
+                trace_id,
+                EMPTY_PROPAGATION_DATA,
+                None,
+            );
             registry.register_local_root_span(trace_id, span_id);
 
             let span_data = create_test_span_data(trace_id, span_id);
@@ -1046,7 +1106,7 @@ mod tests {
         let child_span_id = [2u8; 8];
 
         // Register root and child spans
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
         registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
 
@@ -1091,7 +1151,7 @@ mod tests {
         let span_id = [1u8; 8];
 
         // Create and finish a trace
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, span_id);
         let span_data = create_test_span_data(trace_id, span_id);
         registry.finish_span(trace_id, span_data);
@@ -1118,7 +1178,11 @@ mod tests {
             let trace_id = (i as u128).to_be_bytes();
             let span_id = [i as u8; 8];
 
-            registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+            registry.register_local_root_trace_propagation_data(
+                trace_id,
+                EMPTY_PROPAGATION_DATA,
+                None,
+            );
             registry.register_local_root_span(trace_id, span_id);
 
             let span_data = create_test_span_data(trace_id, span_id);
@@ -1139,7 +1203,7 @@ mod tests {
         let root_span_id = [1u8; 8];
 
         // Register root
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
 
         // Register 5 child spans
@@ -1177,7 +1241,7 @@ mod tests {
         let root_span_id = [1u8; 8];
 
         // Register root span
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
 
         // Register and finish more than default min_spans
@@ -1216,7 +1280,7 @@ mod tests {
         let root_span_id = [1u8; 8];
 
         // Register root span
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
 
         // Register 15 child spans
@@ -1265,7 +1329,7 @@ mod tests {
         let root_span_id = [1u8; 8];
 
         // Register root span
-        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
         registry.register_local_root_span(trace_id, root_span_id);
 
         // Register 20 child spans

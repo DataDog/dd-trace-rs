@@ -144,6 +144,7 @@ impl ShouldSample for Sampler {
                 .register_local_root_trace_propagation_data(
                     trace_id.to_bytes(),
                     trace_propagation_data,
+                    self.cfg.trace_debug_open_spans().then(|| name.to_string())
                 ) {
                 RegisterTracePropagationResult::Existing(sampling_decision) => {
                     return opentelemetry::trace::SamplingResult {

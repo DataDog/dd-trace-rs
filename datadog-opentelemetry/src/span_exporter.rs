@@ -589,25 +589,23 @@ impl TraceExporterWorker {
 
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> TraceExporterHandle {
-        let handle = thread::spawn({
-            move || {
-                let trace_exporter = match builder.build() {
-                    Ok(exporter) => exporter,
-                    Err(e) => {
-                        return Err(e);
-                    }
-                };
-                let cached_config = CachedConfig::new(&cfg);
-                let task = Self {
-                    trace_exporter,
-                    cached_config,
-                    rx,
-                    otel_resource,
-                    agent_response_handler,
-                };
-                task.run()
-            }
-        });
+        let handle = thread::spawn(dd_trace::log::with_local_logger(move || {
+            let trace_exporter = match builder.build() {
+                Ok(exporter) => exporter,
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+            let cached_config = CachedConfig::new(&cfg);
+            let task = Self {
+                trace_exporter,
+                cached_config,
+                rx,
+                otel_resource,
+                agent_response_handler,
+            };
+            task.run()
+        }));
         TraceExporterHandle {
             handle: Mutex::new(Some(handle)),
         }

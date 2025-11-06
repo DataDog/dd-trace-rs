@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::HashMap;
+use std::{collections::HashMap, thread, time::Duration};
 
 use opentelemetry::{
     trace::{TraceContextExt, TracerProvider},
@@ -84,4 +84,50 @@ async fn test_remote_span_extraction_propagation() {
         );
     })
     .await;
+}
+
+#[tokio::test]
+async fn test_debug_open_spans() {
+    const SESSION_NAME: &str = "tracing_api/test_debug_open_spans";
+    let mut cfg = dd_trace::Config::builder();
+    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Off)
+        .set_trace_debug_open_spans(true)
+        .set_trace_open_span_timeout(Duration::from_millis(1))
+        .__internal_set_span_metrics_interval(Duration::from_millis(100));
+    let _logger_guard = dd_trace::log::test_logger::activate_test_logger();
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
+        let _guard = subscriber.set_default();
+
+        // leak a span
+        let _root_span = tracing::trace_span!("root_span").entered();
+        std::mem::forget(tracing::trace_span!("child_span"));
+        thread::sleep(Duration::from_millis(200));
+
+
+        let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
+        let abandoned_logs = test_logs
+            .iter()
+            .filter(|(lvl, msg)| {
+                *lvl == dd_trace::log::Level::Warn
+                    && msg.contains("possibly abandoned trace")
+                    && msg.contains("root_name=root_span")
+            })
+            .collect::<Vec<_>>();
+        assert!(abandoned_logs.len() >= 1)
+    })
+    .await;
+
+    let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
+    let abandoned_logs = test_logs
+        .iter()
+        .filter(|(lvl, msg)| {
+            *lvl == dd_trace::log::Level::Warn
+                && msg.contains("lost trace not finished during shutdown")
+                && msg.contains("root_name=root_span")
+        })
+        .collect::<Vec<_>>();
+    assert!(abandoned_logs.len() >= 1)
 }

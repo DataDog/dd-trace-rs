@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::configuration::Config;
+use crate::log;
 use crate::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
@@ -330,7 +331,7 @@ impl RemoteConfigClientWorker {
             client: RemoteConfigClient::new(config)?,
             shutdown_receiver,
         };
-        let join_handle = thread::spawn(move || worker.run());
+        let join_handle = thread::spawn(log::with_local_logger(move || worker.run()));
         Ok(RemoteConfigClientHandle {
             cancel_token,
             worker_handle: WorkerHandle::new(shutdown_finished, join_handle),

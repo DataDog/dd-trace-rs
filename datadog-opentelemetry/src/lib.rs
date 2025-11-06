@@ -70,6 +70,7 @@ mod span_processor;
 mod spans_metrics;
 mod text_map_propagator;
 mod trace_id;
+mod abandoned_traces;
 
 use std::sync::{Arc, RwLock};
 
