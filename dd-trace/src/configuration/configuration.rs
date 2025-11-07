@@ -834,7 +834,7 @@ pub struct Config {
 
     /// Debug potentially abandoned spans
     trace_debug_open_spans: ConfigItem<bool>,
-    trace_open_span_timeout: ConfigItem<Duration>,
+    trace_debug_open_spans_timeout: ConfigItem<Duration>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -1002,9 +1002,9 @@ impl Config {
                 SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS,
                 default.trace_debug_open_spans,
             ),
-            trace_open_span_timeout: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TRACE_OPEN_SPAN_TIMEOUT,
-                default.trace_open_span_timeout,
+            trace_debug_open_spans_timeout: cisu.update_parsed_with_transform(
+                SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT,
+                default.trace_debug_open_spans_timeout,
                 |val: u64| Duration::from_secs(val.max(1)),
             ),
             trace_propagation_style: cisu.update_parsed_with_transform(
@@ -1155,8 +1155,8 @@ impl Config {
         *self.trace_debug_open_spans.value()
     }
 
-    pub fn trace_open_span_timeout(&self) -> Duration {
-        *self.trace_open_span_timeout.value()
+    pub fn trace_debug_open_spans_timeout(&self) -> Duration {
+        *self.trace_debug_open_spans_timeout.value()
     }
 
     pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
@@ -1366,8 +1366,8 @@ impl std::fmt::Debug for Config {
             .field("log_level_filter", &self.log_level_filter)
             .field("trace_debug_open_spans", &self.trace_debug_open_spans)
             .field(
-                "trace_open_span_timeout_secs",
-                &self.trace_open_span_timeout,
+                "trace_debug_open_spans_timeout_secs",
+                &self.trace_debug_open_spans_timeout,
             )
             .field(
                 "trace_stats_computation_enabled",
@@ -1431,8 +1431,8 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS,
             false,
         ),
-        trace_open_span_timeout: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_OPEN_SPAN_TIMEOUT,
+        trace_debug_open_spans_timeout: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT,
             Duration::from_secs(60),
         ),
         trace_sampling_rules: ConfigItemWithOverride::new_rc(
@@ -1628,9 +1628,9 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_open_span_timeout(&mut self, timeout: Duration) -> &mut Self {
+    pub fn set_trace_debug_open_spans_timeout(&mut self, timeout: Duration) -> &mut Self {
         self.config
-            .trace_open_span_timeout
+            .trace_debug_open_spans_timeout
             .set_code(timeout.max(Duration::from_millis(1)));
         self
     }

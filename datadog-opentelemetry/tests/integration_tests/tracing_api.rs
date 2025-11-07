@@ -92,7 +92,7 @@ async fn test_debug_open_spans() {
     let mut cfg = dd_trace::Config::builder();
     cfg.set_log_level_filter(dd_trace::log::LevelFilter::Off)
         .set_trace_debug_open_spans(true)
-        .set_trace_open_span_timeout(Duration::from_millis(1))
+        .set_trace_debug_open_spans_timeout(Duration::from_millis(1))
         .__internal_set_span_metrics_interval(Duration::from_millis(100));
     let _logger_guard = dd_trace::log::test_logger::activate_test_logger();
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {

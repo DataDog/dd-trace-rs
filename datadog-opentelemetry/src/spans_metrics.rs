@@ -100,7 +100,7 @@ impl TelemetryMetricsCollector {
     }
 
     fn warn_maybe_abandoned_traces(&self) {
-        let min_age = self.config.trace_open_span_timeout();
+        let min_age = self.config.trace_debug_open_spans_timeout();
         // Log at most 100 traces
         for t in self.registry.iter_old_traces(min_age).take(100) {
             dd_trace::dd_warn!(

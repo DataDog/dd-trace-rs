@@ -138,12 +138,12 @@
         "propertyKeys": ["trace_debug_open_spans"]
       }
     ],
-    "DD_TRACE_OPEN_SPAN_TIMEOUT": [
+    "DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT": [
       {
         "version": "A",
         "type": "seconds",
         "default_value": "60",
-        "propertyKeys": ["trace_open_span_timeout"]
+        "propertyKeys": ["trace_debug_open_spans_timeout"]
       }
     ],
     "DD_TRACE_ENABLED": [

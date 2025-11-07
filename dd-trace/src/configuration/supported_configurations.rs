@@ -25,7 +25,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_AGENT_PORT,
     DD_TRACE_AGENT_URL,
     DD_TRACE_DEBUG_OPEN_SPANS,
-    DD_TRACE_OPEN_SPAN_TIMEOUT,
+    DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT,
     DD_TRACE_ENABLED,
     DD_TRACE_PARTIAL_FLUSH_ENABLED,
     DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
@@ -74,7 +74,9 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_TRACE_AGENT_PORT => "DD_TRACE_AGENT_PORT",
             SupportedConfigurations::DD_TRACE_AGENT_URL => "DD_TRACE_AGENT_URL",
             SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS => "DD_TRACE_DEBUG_OPEN_SPANS",
-            SupportedConfigurations::DD_TRACE_OPEN_SPAN_TIMEOUT => "DD_TRACE_OPEN_SPAN_TIMEOUT",
+            SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT => {
+                "DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT"
+            }
             SupportedConfigurations::DD_TRACE_ENABLED => "DD_TRACE_ENABLED",
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED => {
                 "DD_TRACE_PARTIAL_FLUSH_ENABLED"
