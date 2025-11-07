@@ -55,57 +55,51 @@ impl AbandonedTracesRegistry {
 
     pub fn iter_open_traces(&self) -> impl Iterator<Item = OldTrace> + use<'_> {
         let now = Instant::now();
-        self.shards
-            .iter()
-            .map(move |shard| {
-                let shard = shard
-                    .read()
-                    .expect("failed to lock the abandoned spans registry");
-                let now = now.clone();
-                shard
-                    .traces
-                    .iter()
-                    .filter_map(|(tid, trace)| {
-                        let age: Duration = now.checked_duration_since(trace.start_ts)?;
-                        Some(OldTrace {
-                            tid: u128::from_be_bytes(*tid),
-                            root_span_name: trace.name.clone(),
-                            age,
-                            open_spans: trace.open_spans,
-                        })
+        self.shards.iter().flat_map(move |shard| {
+            let shard = shard
+                .read()
+                .expect("failed to lock the abandoned spans registry");
+            let now = now;
+            shard
+                .traces
+                .iter()
+                .filter_map(|(tid, trace)| {
+                    let age: Duration = now.checked_duration_since(trace.start_ts)?;
+                    Some(OldTrace {
+                        tid: u128::from_be_bytes(*tid),
+                        root_span_name: trace.name.clone(),
+                        age,
+                        open_spans: trace.open_spans,
                     })
-                    .collect::<Vec<_>>()
-            })
-            .flatten()
+                })
+                .collect::<Vec<_>>()
+        })
     }
 
     pub fn iter_old_traces(&self, min_age: Duration) -> impl Iterator<Item = OldTrace> + use<'_> {
         let now = Instant::now();
-        self.shards
-            .iter()
-            .map(move |shard| {
-                let shard = shard
-                    .read()
-                    .expect("failed to lock the abandoned spans registry");
-                let now = now.clone();
-                shard
-                    .traces
-                    .iter()
-                    .filter_map(|(tid, trace)| {
-                        let age = now.checked_duration_since(trace.start_ts)?;
-                        if age < min_age {
-                            return None;
-                        }
-                        Some(OldTrace {
-                            tid: u128::from_be_bytes(*tid),
-                            root_span_name: trace.name.clone(),
-                            age,
-                            open_spans: trace.open_spans,
-                        })
+        self.shards.iter().flat_map(move |shard| {
+            let shard = shard
+                .read()
+                .expect("failed to lock the abandoned spans registry");
+            let now = now;
+            shard
+                .traces
+                .iter()
+                .filter_map(|(tid, trace)| {
+                    let age = now.checked_duration_since(trace.start_ts)?;
+                    if age < min_age {
+                        return None;
+                    }
+                    Some(OldTrace {
+                        tid: u128::from_be_bytes(*tid),
+                        root_span_name: trace.name.clone(),
+                        age,
+                        open_spans: trace.open_spans,
                     })
-                    .collect::<Vec<_>>()
-            })
-            .flatten()
+                })
+                .collect::<Vec<_>>()
+        })
     }
 }
 
@@ -202,7 +196,7 @@ mod tests {
         }
         thread::sleep(Duration::from_millis(50));
 
-        let trace_id = (3 as u128).to_be_bytes();
+        let trace_id = 3_u128.to_be_bytes();
         registry.register_root_span_sampling(trace_id, format!("root_span_{}", 3));
         registry.register_local_root_span(trace_id);
 

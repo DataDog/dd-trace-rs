@@ -285,7 +285,7 @@ impl<T> Clone for ShardedTraces<T> {
     fn clone(&self) -> Self {
         Self {
             shards: self.shards.clone(),
-            hasher: self.hasher.clone(),
+            hasher: self.hasher,
         }
     }
 }
@@ -335,9 +335,10 @@ impl TraceRegistry {
         propagation_data: TracePropagationData,
         span_name: Option<String>,
     ) -> RegisterTracePropagationResult {
-        self.abandoned_spans
-            .as_ref()
-            .and_then(|a| Some(a.register_root_span_sampling(trace_id, span_name?)));
+        self.abandoned_spans.as_ref().and_then(|a| {
+            let _: () = a.register_root_span_sampling(trace_id, span_name?);
+            Some(())
+        });
 
         let mut inner = self.shards.write_shard(trace_id);
         inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
@@ -347,9 +348,9 @@ impl TraceRegistry {
     /// This will also increment the open span count for the trace.
     /// If the trace is already registered, it will ignore the new root span ID and log a warning.
     pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
-        self.abandoned_spans
-            .as_ref()
-            .map(|a| a.register_local_root_span(trace_id));
+        if let Some(a) = self.abandoned_spans.as_ref() {
+            a.register_local_root_span(trace_id)
+        }
 
         let mut inner = self.shards.write_shard(trace_id);
         inner.register_local_root_span(trace_id, root_span_id);
@@ -362,9 +363,9 @@ impl TraceRegistry {
         span_id: [u8; 8],
         propagation_data: TracePropagationData,
     ) {
-        self.abandoned_spans
-            .as_ref()
-            .map(|a| a.register_span(trace_id));
+        if let Some(a) = self.abandoned_spans.as_ref() {
+            a.register_span(trace_id)
+        }
 
         let mut inner = self.shards.write_shard(trace_id);
         inner.register_span(trace_id, span_id, propagation_data);
@@ -374,9 +375,9 @@ impl TraceRegistry {
     /// If the trace is finished (i.e., all spans are finished), return the full trace chunk to
     /// flush
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
-        self.abandoned_spans
-            .as_ref()
-            .map(|a| a.finish_span(trace_id));
+        if let Some(a) = self.abandoned_spans.as_ref() {
+            a.finish_span(trace_id)
+        }
 
         let mut inner = self.shards.write_shard(trace_id);
         inner.finish_span(trace_id, span_data)

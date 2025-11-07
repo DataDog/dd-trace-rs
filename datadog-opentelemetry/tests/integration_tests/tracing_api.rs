@@ -106,7 +106,6 @@ async fn test_debug_open_spans() {
         std::mem::forget(tracing::trace_span!("child_span"));
         thread::sleep(Duration::from_millis(200));
 
-
         let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
         let abandoned_logs = test_logs
             .iter()
@@ -116,7 +115,7 @@ async fn test_debug_open_spans() {
                     && msg.contains("root_name=root_span")
             })
             .collect::<Vec<_>>();
-        assert!(abandoned_logs.len() >= 1)
+        assert!(!abandoned_logs.is_empty())
     })
     .await;
 
@@ -129,5 +128,5 @@ async fn test_debug_open_spans() {
                 && msg.contains("root_name=root_span")
         })
         .collect::<Vec<_>>();
-    assert!(abandoned_logs.len() >= 1)
+    assert!(!abandoned_logs.is_empty())
 }

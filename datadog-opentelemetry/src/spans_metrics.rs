@@ -71,6 +71,7 @@ impl TelemetryMetricsCollector {
         {
             interval = Duration::from_secs(10);
         }
+        #[allow(clippy::while_let_loop)]
         loop {
             match self.shutdown_rx.recv_timeout(interval) {
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}

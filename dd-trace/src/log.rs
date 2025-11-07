@@ -130,22 +130,24 @@ impl PartialOrd<LevelFilter> for Level {
 
 #[cfg(feature = "test-utils")]
 pub mod test_logger {
-    //! Implements a thread local, overridable logger 
-    //! 
+    //! Implements a thread local, overridable logger
+    //!
     //! Tests can locally intercept logs by calling to `activate_test_logger`
-    //! 
+    //!
     //! ```no_run
-    //! let _log_guard = dd_trace::log::test_logger::activate_test_logger;();
+    //! let _log_guard = dd_trace::log::test_logger::activate_test_logger;
+    //! ();
     //! // whatever is logged by the dd_(level)! macros will be stored
     //! dd_trace::dd_debug!("my log");
     //! let logs = dd_trace::log::test_logger::take_test_logs().unwrap();
     //! // logs should contain (Debug, "my log")
-    //! 
-    //! // to see logs in threads spawned from the test, the function passed to spawn 
+    //!
+    //! // to see logs in threads spawned from the test, the function passed to spawn
     //! // should be wrapped by `with_local_logger`
     //! std::thread::spawn(dd_trace::log::with_local_logger(|| {
-    //!   dd_trace::dd_debug!("my log");
-    //! })).join();
+    //!     dd_trace::dd_debug!("my log");
+    //! }))
+    //! .join();
     //! ```
     use std::{cell::RefCell, sync::Arc};
 
@@ -167,7 +169,7 @@ pub mod test_logger {
     }
 
     thread_local! {
-        static LOCAL_LOGGER: RefCell<Option<Arc<TestLogger>>> = RefCell::new(None);
+        static LOCAL_LOGGER: RefCell<Option<Arc<TestLogger>>> = const { RefCell::new(None) };
     }
 
     pub fn with_local_logger<F: FnOnce() -> R, R>(f: F) -> impl FnOnce() -> R {
