@@ -37,12 +37,16 @@ pub(crate) enum SupportedConfigurations {
     DD_VERSION,
 
     /// Used for testing purposes only
+    #[cfg(test)]
     #[allow(unused)]
     DD_COMPLEX_STRUCT,
+    #[cfg(test)]
     #[allow(unused)]
     DD_NONEXISTANT_CONFIGURATION,
+    #[cfg(test)]
     #[allow(unused)]
     DD_NONEXISTANT_CONFIGURATION_ALIAS,
+    #[cfg(test)]
     #[allow(unused)]
     DD_NONEXISTANT_CONFIGURATION_DEPRECATED,
 }
@@ -101,11 +105,15 @@ impl SupportedConfigurations {
                 "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
             }
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
+            #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
+            #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => "DD_NONEXISTANT_CONFIGURATION",
+            #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => {
                 "DD_NONEXISTANT_CONFIGURATION_ALIAS"
             }
+            #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
                 "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
             }
@@ -117,6 +125,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 &["DD_REMOTE_CONFIG_ENABLED"]
             }
+            #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
                 "DD_NONEXISTANT_CONFIGURATION_ALIAS",
                 "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
@@ -126,16 +135,19 @@ impl SupportedConfigurations {
     }
 
     pub fn is_deprecated(&self) -> bool {
-        matches!(
-            self,
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED
-        )
+        match self {
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => true,
+            _ => false,
+        }
     }
 }
 
 pub(crate) fn is_alias_deprecated(name: &str) -> bool {
-    matches!(
-        name,
-        "DD_REMOTE_CONFIG_ENABLED" | "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"
-    )
+    match name {
+        "DD_REMOTE_CONFIG_ENABLED" => true,
+        #[cfg(test)]
+        "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS" => true,
+        _ => false,
+    }
 }

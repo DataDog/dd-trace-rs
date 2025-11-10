@@ -28,8 +28,8 @@ undocumented_configurations = {
 enum_block = ""
 as_str_block = ""
 aliases_block = []
-is_alias_deprecated = []
-is_deprecated = []
+alias_deprecated_block = []
+deprecated_block = []
 for i, key in enumerate(supported_configurations["supportedConfigurations"].keys()):
     if i != 0:
         enum_block += "\n"
@@ -43,9 +43,9 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
             for alias in version["aliases"]:
                 aliases_accumulator.append(alias)
                 if alias not in supported_configurations["supportedConfigurations"].keys():
-                    is_alias_deprecated.append(alias)
+                    alias_deprecated_block.append(f"\"{alias}\" => true,")
         if "deprecated" in version and version["deprecated"]:
-            is_deprecated.append(key)
+            deprecated_block.append(f"SupportedConfigurations::{key} => true,")
     if len(aliases_accumulator) > 0:
         aliases_block.append(f"SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in aliases_accumulator)}],")
         
@@ -53,15 +53,15 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
 if len(undocumented_configurations) > 0:
     enum_block += "\n\n    /// Used for testing purposes only"
 for i, key in enumerate(undocumented_configurations):
-    enum_block += f"\n    #[allow(unused)]\n    {key},"
-    as_str_block += f"\n            SupportedConfigurations::{key} => \"{key}\","
+    enum_block += f"\n    #[cfg(test)]\n    #[allow(unused)]\n    {key},"
+    as_str_block += f"\n            #[cfg(test)]\n            SupportedConfigurations::{key} => \"{key}\","
     if len(undocumented_configurations[key]["aliases"]) > 0:
-        aliases_block.append(f"SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in undocumented_configurations[key]["aliases"])}],")
+        aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in undocumented_configurations[key]["aliases"])}],")
     if undocumented_configurations[key]["deprecated"]:
-        is_deprecated.append(key)
+        deprecated_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => true,")
     for alias in undocumented_configurations[key]["aliases"]:
         if alias not in undocumented_configurations.keys():
-            is_alias_deprecated.append(alias)
+            alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
 
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
@@ -92,12 +92,18 @@ impl SupportedConfigurations {{
     }}
 
     pub fn is_deprecated(&self) -> bool {{
-        matches!(self, {" | ".join(f"SupportedConfigurations::{key}" for key in is_deprecated)})
+        match self {{
+            {"\n            ".join(deprecated_block)}
+            _ => false,
+        }}
     }}
 }}
 
 pub(crate) fn is_alias_deprecated(name: &str) -> bool {{
-    matches!(name, {" | ".join(f"\"{alias}\"" for alias in is_alias_deprecated)})
+    match name {{
+        {"\n            ".join(alias_deprecated_block)}
+        _ => false,
+    }}
 }}
 """
 
