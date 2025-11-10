@@ -606,6 +606,7 @@ pub mod tests {
                     },
                     tags: Some(tags),
                 },
+                "test_span".to_string(),
             );
 
             let mut injector = HashMap::new();

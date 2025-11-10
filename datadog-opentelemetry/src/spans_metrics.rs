@@ -90,12 +90,29 @@ impl TelemetryMetricsCollector {
     fn warn_shutdown_abandoned_traces(&self) {
         for t in self.registry.iter_lost_traces().take(100) {
             // Log at most 100 traces
+            let open_spans_details = t
+                .open_span_details
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{{span_id:{:x} name:{} age:{}ms}}",
+                        s.span_id,
+                        s.name,
+                        std::time::Instant::now()
+                            .duration_since(s.start_ts)
+                            .as_millis()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
             dd_trace::dd_warn!(
-                    "lost trace not finished during shutdown trace_id={} root_name={} age={}ms open_spans={}",
+                    "lost trace not finished during shutdown trace_id={} root_name={} age={}ms open_spans={} open_span_details=[{}]",
                     t.tid,
                     t.root_span_name.as_str(),
                     t.age.as_millis(),
-                    t.open_spans
+                    t.open_spans,
+                    open_spans_details
                 )
         }
     }
@@ -104,12 +121,29 @@ impl TelemetryMetricsCollector {
         let min_age = self.config.trace_debug_open_spans_timeout();
         // Log at most 100 traces
         for t in self.registry.iter_old_traces(min_age).take(100) {
+            let open_spans_details = t
+                .open_span_details
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{{span_id:{:x} name:{} age:{}ms}}",
+                        s.span_id,
+                        s.name,
+                        std::time::Instant::now()
+                            .duration_since(s.start_ts)
+                            .as_millis()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
             dd_trace::dd_warn!(
-                "possibly abandoned trace trace_id={} root_name={} age={}ms open_spans={}",
+                "possibly abandoned trace trace_id={} root_name={} age={}ms open_spans={} open_span_details=[{}]",
                 t.tid,
                 t.root_span_name.as_str(),
                 t.age.as_millis(),
-                t.open_spans
+                t.open_spans,
+                open_spans_details
             )
         }
     }

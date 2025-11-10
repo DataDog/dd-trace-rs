@@ -333,12 +333,10 @@ impl TraceRegistry {
         &self,
         trace_id: [u8; 16],
         propagation_data: TracePropagationData,
-        span_name: Option<String>,
+        _span_name: Option<String>,
     ) -> RegisterTracePropagationResult {
-        self.abandoned_spans.as_ref().and_then(|a| {
-            let _: () = a.register_root_span_sampling(trace_id, span_name?);
-            Some(())
-        });
+        // Note: we don't register with abandoned_spans here because span_id isn't available yet
+        // It will be registered later in register_local_root_span when span_id is known
 
         let mut inner = self.shards.write_shard(trace_id);
         inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
@@ -347,9 +345,14 @@ impl TraceRegistry {
     /// Set the root span ID for a given trace ID.
     /// This will also increment the open span count for the trace.
     /// If the trace is already registered, it will ignore the new root span ID and log a warning.
-    pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
+    pub fn register_local_root_span(
+        &self,
+        trace_id: [u8; 16],
+        root_span_id: [u8; 8],
+        span_name: String,
+    ) {
         if let Some(a) = self.abandoned_spans.as_ref() {
-            a.register_local_root_span(trace_id)
+            a.register_local_root_span(trace_id, root_span_id, span_name)
         }
 
         let mut inner = self.shards.write_shard(trace_id);
@@ -362,9 +365,10 @@ impl TraceRegistry {
         trace_id: [u8; 16],
         span_id: [u8; 8],
         propagation_data: TracePropagationData,
+        span_name: String,
     ) {
         if let Some(a) = self.abandoned_spans.as_ref() {
-            a.register_span(trace_id)
+            a.register_span(trace_id, span_id, span_name)
         }
 
         let mut inner = self.shards.write_shard(trace_id);
@@ -376,7 +380,8 @@ impl TraceRegistry {
     /// flush
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         if let Some(a) = self.abandoned_spans.as_ref() {
-            a.finish_span(trace_id)
+            let span_id = span_data.span_context.span_id().to_bytes();
+            a.finish_span(trace_id, span_id)
         }
 
         let mut inner = self.shards.write_shard(trace_id);
@@ -571,15 +576,22 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
+        // Get the span name via exported_data(), with fallback to span_id if unavailable
+        let span_name = span
+            .exported_data()
+            .map(|data| data.name.to_string())
+            .unwrap_or_else(|| format!("span_{:x}", u64::from_be_bytes(span_id)));
 
         if parent_ctx.span().span_context().is_remote() {
             self.add_remote_links(span, parent_ctx);
-            self.registry.register_local_root_span(trace_id, span_id);
+            self.registry
+                .register_local_root_span(trace_id, span_id, span_name);
         } else if !parent_ctx.has_active_span() {
-            self.registry.register_local_root_span(trace_id, span_id);
+            self.registry
+                .register_local_root_span(trace_id, span_id, span_name);
         } else {
             self.registry
-                .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
+                .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA, span_name);
         }
     }
 
@@ -1013,7 +1025,7 @@ mod tests {
 
         // Register and finish a single span
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, span_id);
+        registry.register_local_root_span(trace_id, span_id, "test_span".to_string());
 
         let span_data = create_test_span_data(trace_id, span_id);
         registry.finish_span(trace_id, span_data);
@@ -1035,11 +1047,21 @@ mod tests {
 
         // Register root span
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
 
         // Register child spans
-        registry.register_span(trace_id, child1_span_id, EMPTY_PROPAGATION_DATA);
-        registry.register_span(trace_id, child2_span_id, EMPTY_PROPAGATION_DATA);
+        registry.register_span(
+            trace_id,
+            child1_span_id,
+            EMPTY_PROPAGATION_DATA,
+            "child1".to_string(),
+        );
+        registry.register_span(
+            trace_id,
+            child2_span_id,
+            EMPTY_PROPAGATION_DATA,
+            "child2".to_string(),
+        );
 
         // Finish all spans
         let root_span = create_test_span_data(trace_id, root_span_id);
@@ -1080,7 +1102,7 @@ mod tests {
                 EMPTY_PROPAGATION_DATA,
                 None,
             );
-            registry.register_local_root_span(trace_id, span_id);
+            registry.register_local_root_span(trace_id, span_id, format!("trace_{}", i));
 
             let span_data = create_test_span_data(trace_id, span_id);
             registry.finish_span(trace_id, span_data);
@@ -1108,8 +1130,13 @@ mod tests {
 
         // Register root and child spans
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
-        registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
+        registry.register_span(
+            trace_id,
+            child_span_id,
+            EMPTY_PROPAGATION_DATA,
+            "child_span".to_string(),
+        );
 
         // Only finish the root span
         let root_span = create_test_span_data(trace_id, root_span_id);
@@ -1153,7 +1180,7 @@ mod tests {
 
         // Create and finish a trace
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, span_id);
+        registry.register_local_root_span(trace_id, span_id, "test_span".to_string());
         let span_data = create_test_span_data(trace_id, span_id);
         registry.finish_span(trace_id, span_data);
 
@@ -1184,7 +1211,7 @@ mod tests {
                 EMPTY_PROPAGATION_DATA,
                 None,
             );
-            registry.register_local_root_span(trace_id, span_id);
+            registry.register_local_root_span(trace_id, span_id, format!("trace_{}", i));
 
             let span_data = create_test_span_data(trace_id, span_id);
             registry.finish_span(trace_id, span_data);
@@ -1205,12 +1232,17 @@ mod tests {
 
         // Register root
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
 
         // Register 5 child spans
         for i in 2..=6 {
             let child_span_id = [i; 8];
-            registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+            registry.register_span(
+                trace_id,
+                child_span_id,
+                EMPTY_PROPAGATION_DATA,
+                format!("child_span_{}", i),
+            );
         }
 
         // Finish all spans
@@ -1243,12 +1275,17 @@ mod tests {
 
         // Register root span
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
 
         // Register and finish more than default min_spans
         for i in 2..=400 {
             let child_span_id = [0, 0, 0, 0, 0, 0, (i / 256) as u8, i as u8];
-            registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+            registry.register_span(
+                trace_id,
+                child_span_id,
+                EMPTY_PROPAGATION_DATA,
+                format!("span_{}", i),
+            );
             let span_data = create_test_span_data(trace_id, child_span_id);
 
             // With partial flushing disabled, no trace should be flushed until all spans are done
@@ -1282,12 +1319,17 @@ mod tests {
 
         // Register root span
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
 
         // Register 15 child spans
         for i in 2..=16 {
             let child_span_id = [i; 8];
-            registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+            registry.register_span(
+                trace_id,
+                child_span_id,
+                EMPTY_PROPAGATION_DATA,
+                format!("child_{}", i),
+            );
         }
 
         // Finish 9 spans (below threshold)
@@ -1331,12 +1373,17 @@ mod tests {
 
         // Register root span
         registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA, None);
-        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_local_root_span(trace_id, root_span_id, "root_span".to_string());
 
         // Register 20 child spans
         for i in 2..=21 {
             let child_span_id = [i; 8];
-            registry.register_span(trace_id, child_span_id, EMPTY_PROPAGATION_DATA);
+            registry.register_span(
+                trace_id,
+                child_span_id,
+                EMPTY_PROPAGATION_DATA,
+                format!("child_{}", i),
+            );
         }
 
         let mut total_flushed = 0;
