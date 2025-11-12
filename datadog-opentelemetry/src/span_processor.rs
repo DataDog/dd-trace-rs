@@ -356,6 +356,12 @@ impl TraceRegistry {
         inner.register_local_root_span(trace_id, root_span_id);
     }
 
+    pub fn register_span_sampling(&self, trace_id: [u8; 16], span_name: Option<String>) {
+        self.abandoned_spans
+            .as_ref()
+            .and_then(|a| Some(a.register_span_sampling(trace_id, span_name?)));
+    }
+
     /// Register a new span with the given trace ID and span ID.
     pub fn register_span(
         &self,
@@ -376,7 +382,7 @@ impl TraceRegistry {
     /// flush
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         if let Some(a) = self.abandoned_spans.as_ref() {
-            a.finish_span(trace_id)
+            a.finish_span(trace_id, &span_data.name)
         }
 
         let mut inner = self.shards.write_shard(trace_id);

@@ -25,7 +25,7 @@ async fn test_smoke() {
         let span = tracing::trace_span!("test_span", _sampling_priority_v1 = 2);
         span.in_scope(|| {
             {
-                tracing::trace_span!("child_span_1")
+                tracing::trace_span!("child_span_1");
             };
             {
                 tracing::trace_span!("child_span_2")
@@ -90,7 +90,7 @@ async fn test_remote_span_extraction_propagation() {
 async fn test_debug_open_spans() {
     const SESSION_NAME: &str = "tracing_api/test_debug_open_spans";
     let mut cfg = dd_trace::Config::builder();
-    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Off)
+    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Debug)
         .set_trace_debug_open_spans(true)
         .set_trace_debug_open_spans_timeout(Duration::from_millis(1))
         .__internal_set_span_metrics_interval(Duration::from_millis(100));
@@ -98,13 +98,22 @@ async fn test_debug_open_spans() {
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer())
-            .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
+            .with(
+                tracing_opentelemetry::layer()
+                    .with_context_activation(true)
+                    .with_tracer(tracer_provider.tracer("test")),
+            );
         let _guard = subscriber.set_default();
+        let _child_span_1;
+        let child_span_2;
 
         // leak a span
-        let _root_span = tracing::trace_span!("root_span").entered();
-        std::mem::forget(tracing::trace_span!("child_span"));
-        thread::sleep(Duration::from_millis(200));
+        {
+            let _root_span = tracing::trace_span!("root_span").entered();
+            _child_span_1 = tracing::trace_span!("child_span").entered().exit();
+            child_span_2 = tracing::trace_span!("child_span").entered().exit();
+        }
+        thread::sleep(Duration::from_millis(300));
 
         let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
         let abandoned_logs = test_logs
@@ -112,10 +121,13 @@ async fn test_debug_open_spans() {
             .filter(|(lvl, msg)| {
                 *lvl == dd_trace::log::Level::Warn
                     && msg.contains("possibly abandoned trace")
-                    && msg.contains("root_name=root_span")
+                    && msg.contains("open_span_names=")
+                    && msg.contains("(root_span,1)")
+                    && msg.contains("(child_span,2)")
             })
             .collect::<Vec<_>>();
-        assert!(!abandoned_logs.is_empty())
+        assert!(!abandoned_logs.is_empty());
+        std::mem::forget(child_span_2);
     })
     .await;
 
@@ -125,7 +137,8 @@ async fn test_debug_open_spans() {
         .filter(|(lvl, msg)| {
             *lvl == dd_trace::log::Level::Warn
                 && msg.contains("lost trace not finished during shutdown")
-                && msg.contains("root_name=root_span")
+                && msg.contains("(root_span,1)")
+                && msg.contains("(child_span,1)")
         })
         .collect::<Vec<_>>();
     assert!(!abandoned_logs.is_empty())

@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use dd_trace::{
     utils::{ShutdownSignaler, WorkerError, WorkerHandle},
@@ -91,11 +91,11 @@ impl TelemetryMetricsCollector {
         for t in self.registry.iter_lost_traces().take(100) {
             // Log at most 100 traces
             dd_trace::dd_warn!(
-                    "lost trace not finished during shutdown trace_id={} root_name={} age={}ms open_spans={}",
+                    "lost trace not finished during shutdown trace_id={} age={}ms open_spans={} open_span_names={} ",
                     t.tid,
-                    t.root_span_name.as_str(),
                     t.age.as_millis(),
-                    t.open_spans
+                    t.open_spans,
+                    SpanNamesDisplay(&t.open_span_names),
                 )
         }
     }
@@ -105,11 +105,11 @@ impl TelemetryMetricsCollector {
         // Log at most 100 traces
         for t in self.registry.iter_old_traces(min_age).take(100) {
             dd_trace::dd_warn!(
-                "possibly abandoned trace trace_id={} root_name={} age={}ms open_spans={}",
+                "possibly abandoned trace trace_id={} age={}ms open_spans={} open_span_names={} ",
                 t.tid,
-                t.root_span_name.as_str(),
                 t.age.as_millis(),
-                t.open_spans
+                t.open_spans,
+                SpanNamesDisplay(&t.open_span_names),
             )
         }
     }
@@ -143,5 +143,17 @@ impl TelemetryMetricsCollector {
                 SpansDroppedBufferFull,
             ),
         ]);
+    }
+}
+
+struct SpanNamesDisplay<'a>(&'a hashbrown::HashMap<String, u32>);
+
+impl fmt::Display for SpanNamesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        for (k, v) in self.0.iter() {
+            write!(f, "({},{}),", k, v)?;
+        }
+        write!(f, "]")
     }
 }

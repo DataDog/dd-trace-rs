@@ -7,14 +7,14 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct TraceInfo {
-    name: String,
+    open_span_names: HashMap<String, u32>,
     start_ts: Instant,
     open_spans: usize,
 }
 
 pub struct OldTrace {
     pub tid: u128,
-    pub root_span_name: String,
+    pub open_span_names: HashMap<String, u32>,
     pub age: Duration,
     pub open_spans: usize,
 }
@@ -45,12 +45,20 @@ impl AbandonedTracesRegistry {
             .register_root_span(trace_id);
     }
 
+    pub fn register_span_sampling(&self, trace_id: [u8; 16], name: String) {
+        self.shards
+            .write_shard(trace_id)
+            .register_span_sampling(trace_id, name);
+    }
+
     pub fn register_span(&self, trace_id: [u8; 16]) {
         self.shards.write_shard(trace_id).register_span(trace_id);
     }
 
-    pub fn finish_span(&self, trace_id: [u8; 16]) {
-        self.shards.write_shard(trace_id).finish_span(trace_id);
+    pub fn finish_span(&self, trace_id: [u8; 16], name: &str) {
+        self.shards
+            .write_shard(trace_id)
+            .finish_span(trace_id, name);
     }
 
     pub fn iter_open_traces(&self) -> impl Iterator<Item = OldTrace> + use<'_> {
@@ -67,7 +75,7 @@ impl AbandonedTracesRegistry {
                     let age: Duration = now.checked_duration_since(trace.start_ts)?;
                     Some(OldTrace {
                         tid: u128::from_be_bytes(*tid),
-                        root_span_name: trace.name.clone(),
+                        open_span_names: trace.open_span_names.clone(),
                         age,
                         open_spans: trace.open_spans,
                     })
@@ -93,7 +101,7 @@ impl AbandonedTracesRegistry {
                     }
                     Some(OldTrace {
                         tid: u128::from_be_bytes(*tid),
-                        root_span_name: trace.name.clone(),
+                        open_span_names: trace.open_span_names.clone(),
                         age,
                         open_spans: trace.open_spans,
                     })
@@ -110,14 +118,11 @@ struct InnerAbandonedTracesRegistry {
 
 impl InnerAbandonedTracesRegistry {
     fn register_root_span_sampling(&mut self, trace_id: [u8; 16], name: String) {
-        self.traces
-            .entry(trace_id)
-            .or_insert(TraceInfo {
-                open_spans: 0,
-                name,
-                start_ts: Instant::now(),
-            })
-            .open_spans += 1;
+        self.traces.entry(trace_id).or_insert_with(|| TraceInfo {
+            open_spans: 1,
+            open_span_names: HashMap::from_iter([(name, 1)]),
+            start_ts: Instant::now(),
+        });
     }
 
     fn register_root_span(&mut self, trace_id: [u8; 16]) {
@@ -126,9 +131,24 @@ impl InnerAbandonedTracesRegistry {
         };
         e.insert(TraceInfo {
             open_spans: 1,
-            name: "unknown_name".to_string(),
+            open_span_names: HashMap::new(),
             start_ts: Instant::now(),
         });
+    }
+
+    fn register_span_sampling(&mut self, trace_id: [u8; 16], name: String) {
+        let c = self
+            .traces
+            .entry(trace_id)
+            .or_insert(TraceInfo {
+                open_spans: 0,
+                start_ts: Instant::now(),
+                open_span_names: HashMap::new(),
+            })
+            .open_span_names
+            .entry(name)
+            .or_default();
+        *c += 1;
     }
 
     fn register_span(&mut self, trace_id: [u8; 16]) {
@@ -136,17 +156,28 @@ impl InnerAbandonedTracesRegistry {
             .entry(trace_id)
             .or_insert(TraceInfo {
                 open_spans: 0,
-                name: "".to_string(),
+                open_span_names: HashMap::new(),
                 start_ts: Instant::now(),
             })
             .open_spans += 1;
     }
 
-    fn finish_span(&mut self, trace_id: [u8; 16]) {
+    fn finish_span(&mut self, trace_id: [u8; 16], name: &str) {
+        dbg!("finish span");
         let Entry::Occupied(mut e) = self.traces.entry(trace_id) else {
             return;
         };
         let trace = e.get_mut();
+        if *trace
+            .open_span_names
+            .entry_ref(name)
+            .and_modify(|c| *c = c.saturating_sub(1))
+            .or_default()
+            == 0
+        {
+            trace.open_span_names.remove(name);
+        };
+        dbg!(name, &trace.open_span_names);
         trace.open_spans -= 1;
         if trace.open_spans == 0 {
             e.remove();
@@ -175,13 +206,13 @@ mod tests {
         let trace_id = [1; 16];
         registry.register_root_span_sampling(trace_id, "root_span".to_owned());
         registry.register_local_root_span(trace_id);
-        for _ in 0..16 {
+        for i in 0..16 {
             registry.register_span(trace_id);
-            registry.finish_span(trace_id);
+            registry.finish_span(trace_id, &i.to_string());
         }
         assert_eq!(active_traces(&registry), 1);
 
-        registry.finish_span(trace_id);
+        registry.finish_span(trace_id, "root_span");
 
         assert_eq!(active_traces(&registry), 0);
     }
@@ -200,32 +231,42 @@ mod tests {
         registry.register_root_span_sampling(trace_id, format!("root_span_{}", 3));
         registry.register_local_root_span(trace_id);
 
-        let old_traces = registry
-            .iter_old_traces(Duration::from_millis(10))
-            .map(|t| (t.tid, t.root_span_name, t.open_spans))
-            .collect::<HashSet<_>>();
+        let collect_old_traces = || {
+            registry
+                .iter_old_traces(Duration::from_millis(10))
+                .map(|t| {
+                    (
+                        t.tid,
+                        t.open_span_names
+                            .iter()
+                            .map(|(k, v)| (k.to_owned(), *v))
+                            .collect::<Vec<_>>(),
+                        t.open_spans,
+                    )
+                })
+                .collect::<HashSet<_>>()
+        };
+
+        let old_traces = collect_old_traces();
         assert_eq!(active_traces(&registry), 3);
         assert_eq!(
             old_traces,
             HashSet::from_iter([
-                (1, "root_span_1".to_string(), 1),
-                (2, "root_span_2".to_string(), 1),
+                (1, vec![("root_span_1".to_owned(), 1)], 1),
+                (2, vec![("root_span_2".to_owned(), 1)], 1),
             ])
         );
 
         for i in 1..=2 {
             let trace_id = (i as u128).to_be_bytes();
-            registry.finish_span(trace_id);
+            registry.finish_span(trace_id, &format!("root_span_{}", 3));
         }
         thread::sleep(Duration::from_millis(50));
-        let old_traces = registry
-            .iter_old_traces(Duration::from_millis(10))
-            .map(|t| (t.tid, t.root_span_name, t.open_spans))
-            .collect::<HashSet<_>>();
+        let old_traces = collect_old_traces();
         assert_eq!(active_traces(&registry), 1);
         assert_eq!(
             old_traces,
-            HashSet::from_iter([(3, "root_span_3".to_string(), 1),])
+            HashSet::from_iter([(3, vec![("root_span_3".to_owned(), 1)], 1),])
         );
     }
 }

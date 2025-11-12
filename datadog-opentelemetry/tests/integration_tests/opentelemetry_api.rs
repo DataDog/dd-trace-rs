@@ -1,14 +1,16 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::thread;
+use std::time::Duration;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use datadog_opentelemetry::make_test_tracer;
 use dd_trace::configuration::{SamplingRuleConfig, TracePropagationStyle};
 use opentelemetry::global::ObjectSafeSpan;
 use opentelemetry::trace::{
-    SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, Tracer,
-    TracerProvider,
+    mark_span_as_active, SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt,
+    TraceState, Tracer, TracerProvider,
 };
 use opentelemetry::Context;
 
@@ -305,4 +307,53 @@ async fn test_tracing_disabled() {
         assert!(!cx.has_active_span());
     })
     .await
+}
+
+#[tokio::test]
+async fn test_debug_open_spans() {
+    const SESSION_NAME: &str = "opentelemetry_api/test_debug_open_spans";
+    let mut cfg = dd_trace::Config::builder();
+    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Debug)
+        .set_trace_debug_open_spans(true)
+        .set_trace_debug_open_spans_timeout(Duration::from_millis(1))
+        .__internal_set_span_metrics_interval(Duration::from_millis(100));
+    let _logger_guard = dd_trace::log::test_logger::activate_test_logger();
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+        let tracer = tracer_provider.tracer("test_debug_open_spans");
+        let _child_span_1;
+        let child_span_2;
+
+        // leak a span
+        {
+            let _root = mark_span_as_active(tracer.start("root_span"));
+            _child_span_1 = tracer.start("child_span");
+            child_span_2 = tracer.start("child_span");
+        }
+        thread::sleep(Duration::from_millis(300));
+
+        let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
+        let abandoned_logs = test_logs
+            .iter()
+            .filter(|(lvl, msg)| {
+                *lvl == dd_trace::log::Level::Warn
+                    && msg.contains("possibly abandoned trace")
+                    && msg.contains("open_span_names=")
+                    && msg.contains("[(child_span,2),]")
+            })
+            .collect::<Vec<_>>();
+        assert!(!abandoned_logs.is_empty());
+        std::mem::forget(child_span_2);
+    })
+    .await;
+
+    let test_logs = dd_trace::log::test_logger::take_test_logs().unwrap();
+    let abandoned_logs = test_logs
+        .iter()
+        .filter(|(lvl, msg)| {
+            *lvl == dd_trace::log::Level::Warn
+                && msg.contains("lost trace not finished during shutdown")
+                && msg.contains("[(child_span,1),]")
+        })
+        .collect::<Vec<_>>();
+    assert!(!abandoned_logs.is_empty())
 }

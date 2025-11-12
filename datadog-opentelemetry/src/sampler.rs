@@ -165,6 +165,11 @@ impl ShouldSample for Sampler {
                 }
                 RegisterTracePropagationResult::New => {}
             }
+        } else {
+            self.trace_registry.register_span_sampling(
+                trace_id.to_bytes(),
+                self.cfg.trace_debug_open_spans().then(|| name.to_string()),
+            )
         }
 
         opentelemetry::trace::SamplingResult {
