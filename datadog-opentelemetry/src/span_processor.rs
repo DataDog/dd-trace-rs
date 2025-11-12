@@ -945,6 +945,7 @@ mod tests {
             links: SpanLinks::default(),
             status: opentelemetry::trace::Status::Unset,
             instrumentation_scope: Default::default(),
+            parent_span_is_remote: false,
         }
     }
 

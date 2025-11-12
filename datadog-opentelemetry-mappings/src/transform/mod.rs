@@ -163,7 +163,7 @@ fn otel_span_to_dd_span_minimal<'a>(
         duration,
         meta: HashMap::with_capacity(span.attr_len() + span.res_len()),
         // We will likely put _sampling_priority, maybe _dd.measured, top level
-        // And by default tracing tags by code.lineno, thread.id and busy_ns/idle_ns
+        // And by default tracing tags by code.line.number, thread.id and busy_ns/idle_ns
         //
         // Why 6? This seems like a good number to prevent small reallocations while not
         // using too much memory

@@ -15,7 +15,7 @@
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.30.0"
+      "telemetry.sdk.version": "0.31.0"
     },
     "metrics": {
       "_dd.rule_psr": 1.0,
@@ -41,7 +41,7 @@
          "span.kind": "client",
          "telemetry.sdk.language": "rust",
          "telemetry.sdk.name": "opentelemetry",
-         "telemetry.sdk.version": "0.30.0"
+         "telemetry.sdk.version": "0.31.0"
        },
        "metrics": {
          "_dd.measured": 1.0,
