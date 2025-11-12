@@ -10,27 +10,28 @@
     "meta": {
       "_dd.origin": "my_origin",
       "_dd.p.foo": "bar",
-      "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
-      "code.namespace": "tests::integration_tests::tracing_api",
+      "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+      "code.module.name": "tests::integration_tests::tracing_api",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "000000000000000000000000000004d2",
       "span.kind": "internal",
+      "target": "tests::integration_tests::tracing_api",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.30.0",
+      "telemetry.sdk.version": "0.31.0",
       "thread.name": "integration_tests::tracing_api::test_remote_span_extraction_propagation"
     },
     "metrics": {
       "_sampling_priority_v1": 2.0,
       "_top_level": 1.0,
-      "busy_ns": 1860000.0,
-      "code.lineno": 58.0,
-      "idle_ns": 222000.0,
-      "thread.id": 2.0
+      "busy_ns": 53916.0,
+      "code.line.number": 58.0,
+      "idle_ns": 80959.0,
+      "thread.id": 9.0
     },
-    "duration": 2077000,
-    "start": 1757431543016916000
+    "duration": 128000,
+    "start": 1762801576872182000
   },
      {
        "name": "internal",
@@ -42,24 +43,25 @@
        "type": "custom",
        "meta": {
          "_dd.origin": "my_origin",
-         "code.filepath": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
-         "code.namespace": "tests::integration_tests::tracing_api",
+         "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+         "code.module.name": "tests::integration_tests::tracing_api",
          "otel.scope.name": "test",
          "otel.status_code": "Unset",
          "otel.trace_id": "000000000000000000000000000004d2",
          "span.kind": "internal",
+         "target": "tests::integration_tests::tracing_api",
          "telemetry.sdk.language": "rust",
          "telemetry.sdk.name": "opentelemetry",
-         "telemetry.sdk.version": "0.30.0",
+         "telemetry.sdk.version": "0.31.0",
          "thread.name": "integration_tests::tracing_api::test_remote_span_extraction_propagation"
        },
        "metrics": {
          "_sampling_priority_v1": 2.0,
          "busy_ns": 0.0,
-         "code.lineno": 62.0,
+         "code.line.number": 62.0,
          "idle_ns": 0.0,
-         "thread.id": 2.0
+         "thread.id": 9.0
        },
-       "duration": 1834000,
-       "start": 1757431543017149000
+       "duration": 35000,
+       "start": 1762801576872265000
      }]]
