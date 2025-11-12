@@ -1,40 +1,67 @@
 import json
+import subprocess
 
 supported_configurations_file = open("supported-configurations.json", "r")
 supported_configurations = json.load(supported_configurations_file)
 
 # PLEASE DO NOT ADD ANYTHING TO THIS LIST.
 # Only reason this exists is to test the code with fake env vars.
-undocumented_configurations = [
-    "DD_COMPLEX_STRUCT",
-]
+undocumented_configurations = {
+    "DD_COMPLEX_STRUCT": {
+        "aliases": [],
+        "deprecated": False,
+    },
+    "DD_NONEXISTANT_CONFIGURATION": {
+        "aliases": ["DD_NONEXISTANT_CONFIGURATION_ALIAS", "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"],
+        "deprecated": False,
+    },
+    "DD_NONEXISTANT_CONFIGURATION_ALIAS": {
+        "aliases": [],
+        "deprecated": False,
+    },
+    "DD_NONEXISTANT_CONFIGURATION_DEPRECATED": {
+        "aliases": [],
+        "deprecated": True,
+    },
+}
 
 enum_block = ""
 as_str_block = ""
+aliases_block = []
+alias_deprecated_block = []
+deprecated_block = []
 for i, key in enumerate(supported_configurations["supportedConfigurations"].keys()):
     if i != 0:
         enum_block += "\n"
         as_str_block += "\n"
     enum_block += f"    {key},"
-    if len(key) > 28:
-        as_str_block += f"""\
-            SupportedConfigurations::{key} => {{
-                \"{key}\"
-            }}"""
-    else:
-        as_str_block += f"            SupportedConfigurations::{key} => \"{key}\","
+    as_str_block += f"            SupportedConfigurations::{key} => \"{key}\","
+    aliases_accumulator = []
+    deprecated = False
+    for version in supported_configurations["supportedConfigurations"][key]:
+        if "aliases" in version:
+            for alias in version["aliases"]:
+                aliases_accumulator.append(alias)
+                if alias not in supported_configurations["supportedConfigurations"].keys():
+                    alias_deprecated_block.append(f"\"{alias}\" => true,")
+        if "deprecated" in version and version["deprecated"]:
+            deprecated_block.append(f"SupportedConfigurations::{key} => true,")
+    if len(aliases_accumulator) > 0:
+        aliases_block.append(f"SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in aliases_accumulator)}],")
+        
 
 if len(undocumented_configurations) > 0:
     enum_block += "\n\n    /// Used for testing purposes only"
 for i, key in enumerate(undocumented_configurations):
-    enum_block += f"\n    #[allow(unused)]\n    {key},"
-    if len(key) > 28:
-        as_str_block += f"""
-            SupportedConfigurations::{key} => {{
-                \"{key}\"
-            }}"""
-    else:
-        as_str_block += f"\n            SupportedConfigurations::{key} => \"{key}\","
+    enum_block += f"\n    #[cfg(test)]\n    #[allow(unused)]\n    {key},"
+    as_str_block += f"\n            #[cfg(test)]\n            SupportedConfigurations::{key} => \"{key}\","
+    if len(undocumented_configurations[key]["aliases"]) > 0:
+        aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in undocumented_configurations[key]["aliases"])}],")
+    if undocumented_configurations[key]["deprecated"]:
+        deprecated_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => true,")
+    for alias in undocumented_configurations[key]["aliases"]:
+        if alias not in undocumented_configurations.keys():
+            alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
 
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
@@ -56,8 +83,32 @@ impl SupportedConfigurations {{
 {as_str_block}
         }}
     }}
+
+    pub fn aliases(&self) -> &[&'static str] {{
+        match self {{
+            {"\n            ".join(aliases_block)}
+            _ => &[],
+        }}
+    }}
+
+    pub fn is_deprecated(&self) -> bool {{
+        match self {{
+            {"\n            ".join(deprecated_block)}
+            _ => false,
+        }}
+    }}
+}}
+
+pub(crate) fn is_alias_deprecated(name: &str) -> bool {{
+    match name {{
+        {"\n            ".join(alias_deprecated_block)}
+        _ => false,
+    }}
 }}
 """
 
 with open("dd-trace/src/configuration/supported_configurations.rs", "w") as f:
     f.write(result)
+
+# run cargo fmt
+subprocess.run(["rustfmt", "dd-trace/src/configuration/supported_configurations.rs"])

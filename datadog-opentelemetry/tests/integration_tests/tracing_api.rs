@@ -57,7 +57,7 @@ async fn test_remote_span_extraction_propagation() {
 
         let span = tracing::trace_span!("test_span");
         let ctx = propagator.extract_with_context(&Context::default(), &extractor);
-        span.set_parent(ctx);
+        let _ = span.set_parent(ctx);
         span.in_scope(|| {
             let child_span = tracing::trace_span!("child_span");
             propagator.inject_context(&child_span.context(), &mut injected);

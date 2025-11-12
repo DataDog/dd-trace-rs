@@ -43,7 +43,7 @@ datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
 # Testing the tracing API
 tracing = { version = "0.1.4" }
-tracing-opentelemetry = { version = "0.31" }
+tracing-opentelemetry = { version = "0.32" }
 tracing-subscriber = { version = "0.3" }
 
 # Benchmarking

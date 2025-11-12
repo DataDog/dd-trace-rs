@@ -35,7 +35,7 @@ fn main() {
 
 ### Tracing
 
-To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.30.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 
 ### Configuration
 
@@ -78,7 +78,7 @@ To trace functions, you can either use the `opentelemetry` crate's [API](https:/
 ## Support
 
 * MSRV: 1.84
-* Opentelemetry version: 0.30
+* Opentelemetry version: 0.31
 
 ## Overview
 

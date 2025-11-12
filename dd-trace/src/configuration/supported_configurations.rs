@@ -16,7 +16,6 @@ pub(crate) enum SupportedConfigurations {
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
     DD_LOG_LEVEL,
     DD_REMOTE_CONFIGURATION_ENABLED,
-    DD_REMOTE_CONFIG_ENABLED,
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
     DD_SERVICE,
     DD_TAGS,
@@ -40,8 +39,18 @@ pub(crate) enum SupportedConfigurations {
     DD_VERSION,
 
     /// Used for testing purposes only
+    #[cfg(test)]
     #[allow(unused)]
     DD_COMPLEX_STRUCT,
+    #[cfg(test)]
+    #[allow(unused)]
+    DD_NONEXISTANT_CONFIGURATION,
+    #[cfg(test)]
+    #[allow(unused)]
+    DD_NONEXISTANT_CONFIGURATION_ALIAS,
+    #[cfg(test)]
+    #[allow(unused)]
+    DD_NONEXISTANT_CONFIGURATION_DEPRECATED,
 }
 
 impl SupportedConfigurations {
@@ -59,7 +68,6 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 "DD_REMOTE_CONFIGURATION_ENABLED"
             }
-            SupportedConfigurations::DD_REMOTE_CONFIG_ENABLED => "DD_REMOTE_CONFIG_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => {
                 "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS"
             }
@@ -103,7 +111,49 @@ impl SupportedConfigurations {
                 "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
             }
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
+            #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => "DD_NONEXISTANT_CONFIGURATION",
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => {
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS"
+            }
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
+            }
         }
+    }
+
+    pub fn aliases(&self) -> &[&'static str] {
+        match self {
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
+                &["DD_REMOTE_CONFIG_ENABLED"]
+            }
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS",
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
+            ],
+            _ => &[],
+        }
+    }
+
+    pub fn is_deprecated(&self) -> bool {
+        match self {
+            #[cfg(test)]
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => true,
+            _ => false,
+        }
+    }
+}
+
+pub(crate) fn is_alias_deprecated(name: &str) -> bool {
+    match name {
+        "DD_REMOTE_CONFIG_ENABLED" => true,
+        #[cfg(test)]
+        "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS" => true,
+        _ => false,
     }
 }
