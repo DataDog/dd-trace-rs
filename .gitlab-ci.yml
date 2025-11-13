@@ -1,0 +1,34 @@
+stages:
+  - config-validation
+
+include:
+  - local: ".gitlab/configuration-central-validation.yml"
+
+variables:
+  REPO_LANG: rust
+  REPO_NOTIFICATION_CHANNEL: "#dd-trace-rs-alerts"
+
+default:
+  tags: ["runner:main", "size:large"]
+
+# Config inversion CI steps
+validate_supported_configurations_local_file:
+  stage: config-validation
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:76364641
+  tags: ["runner:apm-k8s-tweaked-metal"]
+  rules:
+    - when: on_success
+  extends: .validate_supported_configurations_local_file
+  variables:
+    LOCAL_JSON_PATH: "supported-configurations.json"
+
+# Executed on release (branch with tag vx.y.z)
+update_central_configurations_version_range:
+  stage: config-validation
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:76364641
+  tags: ["runner:apm-k8s-tweaked-metal"]
+  extends: .update_central_configurations_version_range
+  variables:
+    LOCAL_REPO_NAME: "dd-trace-rs"
+    LOCAL_JSON_PATH: "supported-configurations.json"
+    LANGUAGE_NAME: "rust"
