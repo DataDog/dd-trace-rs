@@ -1,13 +1,17 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{sync::Arc, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
-use dd_trace::utils::{ShutdownSignaler, WorkerError, WorkerHandle};
+use dd_trace::{
+    utils::{ShutdownSignaler, WorkerError, WorkerHandle},
+    Config,
+};
 
 use crate::{span_exporter::QueueMetricsFetcher, TraceRegistry};
 
 pub struct TelemetryMetricsCollector {
+    config: Arc<Config>,
     registry: TraceRegistry,
     exporter_queue_metrics: QueueMetricsFetcher,
     shutdown_rx: std::sync::mpsc::Receiver<()>,
@@ -37,18 +41,20 @@ impl Drop for TelemetryMetricsCollector {
 
 impl TelemetryMetricsCollector {
     pub fn start(
+        config: Arc<Config>,
         registry: TraceRegistry,
         exporter_queue_metrics: QueueMetricsFetcher,
     ) -> TelemetryMetricsCollectorHandle {
         let (shutdown_tx, shutdown_rx) = std::sync::mpsc::sync_channel(1);
         let shutdown_finished = ShutdownSignaler::new();
         let worker = Self {
+            config,
             registry,
             shutdown_rx,
             shutdown_finished: shutdown_finished.clone(),
             exporter_queue_metrics,
         };
-        let handle = std::thread::spawn(|| worker.run());
+        let handle = std::thread::spawn(dd_trace::log::with_local_logger(|| worker.run()));
         TelemetryMetricsCollectorHandle {
             shutdown_tx,
             worker_handle: WorkerHandle::new(shutdown_finished, handle),
@@ -56,12 +62,55 @@ impl TelemetryMetricsCollector {
     }
 
     fn run(mut self) {
+        let interval;
+        #[cfg(feature = "test-utils")]
+        {
+            interval = self.config.__internal_span_metrics_interval();
+        }
+        #[cfg(not(feature = "test-utils"))]
+        {
+            interval = Duration::from_secs(10);
+        }
+        #[allow(clippy::while_let_loop)]
         loop {
-            match self.shutdown_rx.recv_timeout(Duration::from_secs(10)) {
+            match self.shutdown_rx.recv_timeout(interval) {
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) | Ok(()) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) | Ok(()) => break,
             };
             self.emit_metrics();
+            if self.config.trace_debug_open_spans() {
+                self.warn_maybe_abandoned_traces();
+            }
+        }
+        if self.config.trace_debug_open_spans() {
+            self.warn_shutdown_abandoned_traces();
+        }
+    }
+
+    fn warn_shutdown_abandoned_traces(&self) {
+        for t in self.registry.iter_lost_traces().take(100) {
+            // Log at most 100 traces
+            dd_trace::dd_warn!(
+                    "lost trace not finished during shutdown trace_id={} age={}ms open_spans={} open_span_names={} ",
+                    t.tid,
+                    t.age.as_millis(),
+                    t.open_spans,
+                    SpanNamesDisplay(&t.open_span_names),
+                )
+        }
+    }
+
+    fn warn_maybe_abandoned_traces(&self) {
+        let min_age = self.config.trace_debug_open_spans_timeout();
+        // Log at most 100 traces
+        for t in self.registry.iter_old_traces(min_age).take(100) {
+            dd_trace::dd_warn!(
+                "possibly abandoned trace trace_id={} age={}ms open_spans={} open_span_names={} ",
+                t.tid,
+                t.age.as_millis(),
+                t.open_spans,
+                SpanNamesDisplay(&t.open_span_names),
+            )
         }
     }
 
@@ -94,5 +143,17 @@ impl TelemetryMetricsCollector {
                 SpansDroppedBufferFull,
             ),
         ]);
+    }
+}
+
+struct SpanNamesDisplay<'a>(&'a hashbrown::HashMap<String, u32>);
+
+impl fmt::Display for SpanNamesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        for (k, v) in self.0.iter() {
+            write!(f, "({},{}),", k, v)?;
+        }
+        write!(f, "]")
     }
 }

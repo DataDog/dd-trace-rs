@@ -63,6 +63,7 @@
 //!     .init();
 //! ```
 
+mod abandoned_traces;
 mod ddtrace_transform;
 mod sampler;
 mod span_exporter;

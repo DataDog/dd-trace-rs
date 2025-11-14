@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 use rustc_version_runtime::version;
@@ -742,8 +743,14 @@ impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, u64, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
 impl_config_value_provider!(option: String);
+
+impl ConfigurationValueProvider for Duration {
+    fn get_configuration_value(&self) -> String {
+        self.as_secs_f64().to_string()
+    }
+}
 
 #[derive(Clone)]
 #[non_exhaustive]
@@ -811,6 +818,7 @@ pub struct Config {
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
+    span_metrics_interval: Duration,
 
     // # Telemetry configuration
     /// Disables telemetry if false
@@ -823,6 +831,10 @@ pub struct Config {
     /// Partial flush
     trace_partial_flush_enabled: ConfigItem<bool>,
     trace_partial_flush_min_spans: ConfigItem<usize>,
+
+    /// Debug potentially abandoned spans
+    trace_debug_open_spans: ConfigItem<bool>,
+    trace_debug_open_spans_timeout: ConfigItem<Duration>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -986,6 +998,15 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
+            trace_debug_open_spans: cisu.update_parsed(
+                SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS,
+                default.trace_debug_open_spans,
+            ),
+            trace_debug_open_spans_timeout: cisu.update_parsed_with_transform(
+                SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT,
+                default.trace_debug_open_spans_timeout,
+                |val: u64| Duration::from_secs(val.max(1)),
+            ),
             trace_propagation_style: cisu.update_parsed_with_transform(
                 SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
                 default.trace_propagation_style,
@@ -1005,8 +1026,6 @@ impl Config {
                 SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
                 default.trace_propagation_extract_first,
             ),
-            #[cfg(feature = "test-utils")]
-            wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
             remote_config_enabled: cisu.update_parsed(
                 SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
@@ -1023,6 +1042,11 @@ impl Config {
                 default.datadog_tags_max_length,
                 |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
             ),
+
+            // Test only configs
+            #[cfg(feature = "test-utils")]
+            wait_agent_info_ready: default.wait_agent_info_ready,
+            span_metrics_interval: default.span_metrics_interval,
         }
     }
 
@@ -1127,6 +1151,14 @@ impl Config {
         self.dogstatsd_agent_url.value()
     }
 
+    pub fn trace_debug_open_spans(&self) -> bool {
+        *self.trace_debug_open_spans.value()
+    }
+
+    pub fn trace_debug_open_spans_timeout(&self) -> Duration {
+        *self.trace_debug_open_spans_timeout.value()
+    }
+
     pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
         self.trace_sampling_rules.value()
     }
@@ -1145,11 +1177,6 @@ impl Config {
 
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub fn __internal_wait_agent_info_ready(&self) -> bool {
-        self.wait_agent_info_ready
     }
 
     /// Static runtime id if the process
@@ -1308,6 +1335,17 @@ impl Config {
     pub fn datadog_tags_max_length(&self) -> usize {
         *self.datadog_tags_max_length.value()
     }
+
+    // Test only configs
+    #[cfg(feature = "test-utils")]
+    pub fn __internal_wait_agent_info_ready(&self) -> bool {
+        self.wait_agent_info_ready
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn __internal_span_metrics_interval(&self) -> Duration {
+        self.span_metrics_interval
+    }
 }
 
 impl std::fmt::Debug for Config {
@@ -1326,6 +1364,11 @@ impl std::fmt::Debug for Config {
             .field("trace_rate_limit", &self.trace_rate_limit)
             .field("enabled", &self.enabled)
             .field("log_level_filter", &self.log_level_filter)
+            .field("trace_debug_open_spans", &self.trace_debug_open_spans)
+            .field(
+                "trace_debug_open_spans_timeout_secs",
+                &self.trace_debug_open_spans_timeout,
+            )
             .field(
                 "trace_stats_computation_enabled",
                 &self.trace_stats_computation_enabled,
@@ -1384,6 +1427,14 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_DOGSTATSD_URL,
             Cow::Borrowed(""),
         ),
+        trace_debug_open_spans: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS,
+            false,
+        ),
+        trace_debug_open_spans_timeout: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_DEBUG_OPEN_SPANS_TIMEOUT,
+            Duration::from_secs(60),
+        ),
         trace_sampling_rules: ConfigItemWithOverride::new_rc(
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
@@ -1401,9 +1452,6 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
         ),
-        #[cfg(feature = "test-utils")]
-        wait_agent_info_ready: false,
-
         telemetry_enabled: ConfigItem::new(
             SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED,
             true,
@@ -1457,6 +1505,11 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
             DATADOG_TAGS_MAX_LENGTH,
         ),
+
+        // Test only configs
+        #[cfg(feature = "test-utils")]
+        wait_agent_info_ready: false,
+        span_metrics_interval: Duration::from_secs(10),
     }
 }
 
@@ -1570,6 +1623,18 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn set_trace_debug_open_spans(&mut self, enabled: bool) -> &mut Self {
+        self.config.trace_debug_open_spans.set_code(enabled);
+        self
+    }
+
+    pub fn set_trace_debug_open_spans_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.config
+            .trace_debug_open_spans_timeout
+            .set_code(timeout.max(Duration::from_millis(1)));
+        self
+    }
+
     pub fn set_trace_partial_flush_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.trace_partial_flush_enabled.set_code(enabled);
         self
@@ -1664,7 +1729,10 @@ impl ConfigBuilder {
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
+    pub fn __internal_set_datadog_tags_max_length_with_no_limit(
+        &mut self,
+        length: usize,
+    ) -> &mut Self {
         self.config.datadog_tags_max_length.set_code(length);
         self
     }
@@ -1675,6 +1743,12 @@ impl ConfigBuilder {
         wait_agent_info_ready: bool,
     ) -> &mut Self {
         self.config.wait_agent_info_ready = wait_agent_info_ready;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    pub fn __internal_set_span_metrics_interval(&mut self, interval: Duration) -> &mut Self {
+        self.config.span_metrics_interval = interval;
         self
     }
 }
