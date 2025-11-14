@@ -163,7 +163,6 @@ impl InnerAbandonedTracesRegistry {
     }
 
     fn finish_span(&mut self, trace_id: [u8; 16], name: &str) {
-        dbg!("finish span");
         let Entry::Occupied(mut e) = self.traces.entry(trace_id) else {
             return;
         };
@@ -177,7 +176,6 @@ impl InnerAbandonedTracesRegistry {
         {
             trace.open_span_names.remove(name);
         };
-        dbg!(name, &trace.open_span_names);
         trace.open_spans -= 1;
         if trace.open_spans == 0 {
             e.remove();
