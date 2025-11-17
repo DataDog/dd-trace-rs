@@ -3,8 +3,10 @@
 
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
+use datadog_opentelemetry::core::configuration::{SamplingRuleConfig, TracePropagationStyle};
+use datadog_opentelemetry::core::log::LevelFilter;
+use datadog_opentelemetry::core::Config;
 use datadog_opentelemetry::make_test_tracer;
-use dd_trace::configuration::{SamplingRuleConfig, TracePropagationStyle};
 use opentelemetry::global::ObjectSafeSpan;
 use opentelemetry::trace::{
     SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, Tracer,
@@ -21,7 +23,7 @@ async fn test_received_traces() {
     const SESSION_NAME: &str = "opentelemetry_api/test_received_traces";
     with_test_agent_session(
         SESSION_NAME,
-        dd_trace::Config::builder(),
+        Config::builder(),
         |_, tracer_provider, _, _| {
             let tracer = tracer_provider.tracer("test");
             for decision in [
@@ -49,8 +51,8 @@ async fn test_received_traces() {
 #[tokio::test]
 async fn test_injection_extraction() {
     const SESSION_NAME: &str = "opentelemetry_api/test_injection_extraction";
-    let mut cfg = dd_trace::Config::builder();
-    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+    let mut cfg = Config::builder();
+    cfg.set_log_level_filter(LevelFilter::Debug);
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             (
@@ -122,7 +124,7 @@ async fn test_injection_extraction() {
 async fn test_sampling_extraction() {
     const SESSION_NAME: &str = "opentelemetry_api/test_sampling_extraction";
 
-    let mut config_builder = dd_trace::Config::builder();
+    let mut config_builder = Config::builder();
     config_builder.set_service("my_service_name".to_string());
     config_builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
         service: Some("my_service_name".to_string()),
@@ -208,14 +210,14 @@ async fn test_remote_config_sampling_rates() {
         )
         .await;
 
-    let config = dd_trace::Config::builder()
+    let config = Config::builder()
         .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into())
-        .set_trace_sampling_rules(vec![dd_trace::SamplingRuleConfig {
+        .set_trace_sampling_rules(vec![SamplingRuleConfig {
             resource: Some("test-span".into()),
             sample_rate: 0.0,
             ..Default::default()
         }])
-        .set_log_level_filter(dd_trace::log::LevelFilter::Debug)
+        .set_log_level_filter(LevelFilter::Debug)
         .build();
     let config = Arc::new(config);
 
@@ -228,7 +230,7 @@ async fn test_remote_config_sampling_rates() {
 
     assert_eq!(
         config.trace_sampling_rules().deref(),
-        vec![dd_trace::SamplingRuleConfig {
+        vec![SamplingRuleConfig {
             resource: Some("test-span".into()),
             sample_rate: 1.0,
             provenance: "customer".into(),
@@ -246,12 +248,12 @@ async fn test_remote_config_sampling_rates() {
 /// if we extract a span without a sampling decision, we should sample it
 async fn test_decision_less_extraction() {
     const SESSION_NAME: &str = "opentelemetry_api/test_decision_less_extraction";
-    let mut cfg = dd_trace::Config::builder();
-    cfg.set_trace_sampling_rules(vec![dd_trace::SamplingRuleConfig {
+    let mut cfg = Config::builder();
+    cfg.set_trace_sampling_rules(vec![SamplingRuleConfig {
         sample_rate: 0.0,
         ..Default::default()
     }])
-    .set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+    .set_log_level_filter(LevelFilter::Debug);
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
         let extractor = make_extractor([
             ("x-datadog-trace-id", "321"),
@@ -281,9 +283,9 @@ async fn test_decision_less_extraction() {
 #[tokio::test]
 async fn test_tracing_disabled() {
     const SESSION_NAME: &str = "opentelemetry_api/test_tracing_disabled";
-    let mut cfg = dd_trace::Config::builder();
+    let mut cfg = Config::builder();
     cfg.set_enabled(false)
-        .set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+        .set_log_level_filter(LevelFilter::Debug);
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
         {
             let span = tracer_provider

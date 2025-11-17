@@ -25,7 +25,7 @@
 //! // Custom datadog configuration
 //! datadog_opentelemetry::tracing()
 //!     .with_config(
-//!         dd_trace::Config::builder()
+//!         datadog_opentelemetry::core::Config::builder()
 //!             .set_service("my_service".to_string())
 //!             .set_env("my_env".to_string())
 //!             .set_version("1.0.0".to_string())
@@ -63,6 +63,11 @@
 //!     .init();
 //! ```
 
+pub mod core;
+pub mod mappings;
+pub mod propagation;
+mod sampling;
+
 mod ddtrace_transform;
 mod sampler;
 mod span_exporter;
@@ -73,7 +78,7 @@ mod trace_id;
 
 use std::sync::{Arc, RwLock};
 
-use dd_trace::configuration::RemoteConfigUpdate;
+use core::configuration::RemoteConfigUpdate;
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
@@ -81,8 +86,10 @@ use sampler::Sampler;
 use span_processor::{DatadogSpanProcessor, TraceRegistry};
 use text_map_propagator::DatadogPropagator;
 
+use crate::core::Config;
+
 pub struct DatadogTracingBuilder {
-    config: Option<dd_trace::Config>,
+    config: Option<Config>,
     resource: Option<opentelemetry_sdk::Resource>,
     tracer_provider: opentelemetry_sdk::trace::TracerProviderBuilder,
 }
@@ -90,8 +97,8 @@ pub struct DatadogTracingBuilder {
 impl DatadogTracingBuilder {
     /// Sets the datadog specific configuration
     ///
-    /// Default: dd_trace::Config::builder().build()
-    pub fn with_config(mut self, config: dd_trace::Config) -> Self {
+    /// Default: Config::builder().build()
+    pub fn with_config(mut self, config: Config) -> Self {
         self.config = Some(config);
         self
     }
@@ -129,9 +136,7 @@ impl DatadogTracingBuilder {
     /// opentelemetry::global::set_tracer_provider(tracer_provider.clone());
     /// ```
     pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator) {
-        let config = self
-            .config
-            .unwrap_or_else(|| dd_trace::Config::builder().build());
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
         make_tracer(Arc::new(config), self.tracer_provider, self.resource)
     }
 }
@@ -212,7 +217,7 @@ impl DatadogTracingBuilder {
 /// // Custom datadog configuration
 /// datadog_opentelemetry::tracing()
 ///     .with_config(
-///         dd_trace::Config::builder()
+///         datadog_opentelemetry::core::Config::builder()
 ///             .set_service("my_service".to_string())
 ///             .set_env("my_env".to_string())
 ///             .set_version("1.0.0".to_string())
@@ -260,7 +265,7 @@ pub fn tracing() -> DatadogTracingBuilder {
 #[deprecated(note = "Use `datadog_opentelemetry::tracing()` instead")]
 // TODO: update system tests to use the new API and remove this function
 pub fn init_datadog(
-    config: dd_trace::Config,
+    config: Config,
     tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> SdkTracerProvider {
@@ -274,7 +279,7 @@ pub fn init_datadog(
 
 /// Create an instance of the tracer provider
 fn make_tracer(
-    config: Arc<dd_trace::Config>,
+    config: Arc<Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
@@ -340,7 +345,7 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
     builder.build()
 }
 
-fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
+fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
     let otel_service_name: Option<Value> = resource.get(&Key::from_static_str(SERVICE_NAME));
 
     // Collect attributes to add
@@ -383,9 +388,7 @@ fn create_dd_resource(resource: Resource, cfg: &dd_trace::Config) -> Resource {
 }
 
 #[cfg(feature = "test-utils")]
-pub fn make_test_tracer(
-    shared_config: Arc<dd_trace::Config>,
-) -> (SdkTracerProvider, DatadogPropagator) {
+pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, DatadogPropagator) {
     make_tracer(
         shared_config,
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),

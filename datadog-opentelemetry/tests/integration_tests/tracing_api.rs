@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use datadog_opentelemetry::core::{log::LevelFilter, Config};
 use opentelemetry::{
     trace::{TraceContextExt, TracerProvider},
     Context,
@@ -15,8 +16,8 @@ use crate::integration_tests::{assert_subset, make_extractor, with_test_agent_se
 #[tokio::test]
 async fn test_smoke() {
     const SESSION_NAME: &str = "tracing_api/test_smoke";
-    let mut cfg = dd_trace::Config::builder();
-    cfg.set_log_level_filter(dd_trace::log::LevelFilter::Debug);
+    let mut cfg = Config::builder();
+    cfg.set_log_level_filter(LevelFilter::Debug);
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
@@ -38,7 +39,7 @@ async fn test_smoke() {
 #[tokio::test]
 async fn test_remote_span_extraction_propagation() {
     const SESSION_NAME: &str = "tracing_api/test_remote_span_extraction_propagation";
-    let cfg = dd_trace::Config::builder();
+    let cfg = Config::builder();
     with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer())

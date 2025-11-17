@@ -3,20 +3,25 @@
 
 use std::{sync::Arc, time::Duration};
 
-use dd_trace::utils::{ShutdownSignaler, WorkerError, WorkerHandle};
-
-use crate::{span_exporter::QueueMetricsFetcher, TraceRegistry};
+use crate::{
+    core::{
+        telemetry,
+        utils::{ShutdownSignaler, WorkerError, WorkerHandle},
+    },
+    span_exporter::QueueMetricsFetcher,
+    TraceRegistry,
+};
 
 pub struct TelemetryMetricsCollector {
     registry: TraceRegistry,
     exporter_queue_metrics: QueueMetricsFetcher,
     shutdown_rx: std::sync::mpsc::Receiver<()>,
-    shutdown_finished: Arc<dd_trace::utils::ShutdownSignaler>,
+    shutdown_finished: Arc<ShutdownSignaler>,
 }
 
 pub struct TelemetryMetricsCollectorHandle {
     shutdown_tx: std::sync::mpsc::SyncSender<()>,
-    worker_handle: dd_trace::utils::WorkerHandle,
+    worker_handle: WorkerHandle,
 }
 
 impl TelemetryMetricsCollectorHandle {
@@ -66,11 +71,11 @@ impl TelemetryMetricsCollector {
     }
 
     fn emit_metrics(&mut self) {
-        use dd_trace::telemetry::TelemetryMetric::*;
+        use telemetry::TelemetryMetric::*;
         let registry_metrics = self.registry.get_metrics();
         let exporter_queue_metrics = self.exporter_queue_metrics.get_metrics();
 
-        dd_trace::telemetry::add_points([
+        telemetry::add_points([
             (registry_metrics.spans_created as f64, SpansCreated),
             (registry_metrics.spans_finished as f64, SpansFinished),
             (

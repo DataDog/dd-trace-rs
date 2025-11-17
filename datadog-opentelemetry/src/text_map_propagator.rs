@@ -3,15 +3,17 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use dd_trace::{catch_panic, sampling::priority, Config};
+use crate::{
+    catch_panic,
+    core::{sampling::priority, Config},
+    propagation::{
+        context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
+        DatadogCompositePropagator,
+    },
+};
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
-};
-
-use dd_trace_propagation::{
-    context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-    DatadogCompositePropagator,
 };
 
 use crate::TraceRegistry;
@@ -237,15 +239,15 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
+    use crate::core::{configuration::TracePropagationStyle, sampling::SamplingDecision, Config};
     use assert_unordered::assert_eq_unordered;
-    use dd_trace::{configuration::TracePropagationStyle, sampling::SamplingDecision, Config};
     use opentelemetry::{
         propagation::{Extractor, TextMapPropagator},
         trace::{Span, SpanContext as OtelSpanContext, Status, TraceContextExt, TraceState},
         Context, KeyValue, SpanId, TraceFlags, TraceId,
     };
 
-    use dd_trace_propagation::{
+    use crate::propagation::{
         context::Tracestate,
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };

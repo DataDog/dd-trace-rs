@@ -9,15 +9,21 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use dd_trace::{
-    configuration::remote_config::{
-        RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
+use crate::{
+    core::{
+        configuration::remote_config::{
+            RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
+        },
+        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+        sampling::SamplingDecision,
+        telemetry::init_telemetry,
+        utils::WorkerError,
+        Config,
     },
-    constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-    sampling::SamplingDecision,
-    telemetry::init_telemetry,
-    utils::WorkerError,
-    Config,
+    create_dd_resource, dd_debug, dd_error,
+    span_exporter::DatadogExporter,
+    spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
+    text_map_propagator::DatadogExtractData,
 };
 use opentelemetry::{
     global::ObjectSafeSpan,
@@ -27,13 +33,6 @@ use opentelemetry::{
 use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-
-use crate::{
-    create_dd_resource,
-    span_exporter::DatadogExporter,
-    spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
-    text_map_propagator::DatadogExtractData,
-};
 
 #[derive(Debug)]
 struct Trace {
@@ -132,7 +131,7 @@ impl InnerTraceRegistry {
         if trace.local_root_span_id == [0; 8] {
             trace.local_root_span_id = root_span_id;
         } else {
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "TraceRegistry.register_local_root_span: trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Ignoring the new root_span_id={:?}",
                 trace_id,
                 trace.local_root_span_id,
@@ -220,7 +219,7 @@ impl InnerTraceRegistry {
             self.metrics.trace_segments_created += 1;
             self.metrics.trace_segments_closed += 1;
 
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "TraceRegistry.finish_span: trace with trace_id={:?} has a finished span span_id={:?}, but hasn't been registered first. This is probably a bug.",
                 u128::from_be_bytes(trace_id),
                 u64::from_be_bytes(span_data.span_context.span_id().to_bytes())
@@ -381,7 +380,7 @@ pub(crate) struct DatadogSpanProcessor {
     registry: TraceRegistry,
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
-    config: Arc<dd_trace::Config>,
+    config: Arc<Config>,
     rc_client_handle: Option<RemoteConfigClientHandle>,
     telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
 }
@@ -395,7 +394,7 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 impl DatadogSpanProcessor {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
-        config: Arc<dd_trace::Config>,
+        config: Arc<Config>,
         registry: TraceRegistry,
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
@@ -403,7 +402,7 @@ impl DatadogSpanProcessor {
         let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
             RemoteConfigClientWorker::start(config.clone())
                 .inspect_err(|e| {
-                    dd_trace::dd_error!(
+                    dd_error!(
                         "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
                         e
                     );
@@ -558,7 +557,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
-            dd_trace::dd_error!(
+            dd_error!(
                 "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
             );
         }
@@ -636,7 +635,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         let dd_resource = create_dd_resource(resource.clone(), &self.config);
         if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
-            dd_trace::dd_error!(
+            dd_error!(
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
             );
         }
@@ -664,7 +663,7 @@ mod tests {
         time::Duration,
     };
 
-    use dd_trace::{
+    use crate::core::{
         sampling::{mechanism, priority, SamplingDecision},
         Config,
     };

@@ -12,7 +12,6 @@ doc = false
 bench = false
 
 [dependencies]
-dd-trace = { path = "../../../dd-trace" }
 datadog-opentelemetry = { path = "../../../datadog-opentelemetry" }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
