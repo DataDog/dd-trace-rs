@@ -15,7 +15,6 @@ default:
 validate_supported_configurations_local_file:
   stage: config-validation
   image: registry.ddbuild.io/ci/libdatadog-build/packaging:76364641
-  tags: ["runner:apm-k8s-tweaked-metal"]
   rules:
     - when: on_success
   extends: .validate_supported_configurations_local_file
@@ -26,7 +25,6 @@ validate_supported_configurations_local_file:
 update_central_configurations_version_range:
   stage: config-validation
   image: registry.ddbuild.io/ci/libdatadog-build/packaging:76364641
-  tags: ["runner:apm-k8s-tweaked-metal"]
   extends: .update_central_configurations_version_range
   variables:
     LOCAL_REPO_NAME: "dd-trace-rs"
