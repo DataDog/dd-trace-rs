@@ -4,7 +4,7 @@
 pub mod benchmarks {
     //! Scaffolding for memory usage benchmarks
     //!
-    //! See dd-trace/benches/smoke.rs for usage
+    //! See datadog_opentelemetry/benches/smoke.rs for usage
 
     use std::{
         alloc::{GlobalAlloc, System},

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! This module contains trace mapping from otel to datadog
-//! specific to dd-trace
+//! specific to datadog-opentelemetry
 
 use std::collections::hash_map;
 

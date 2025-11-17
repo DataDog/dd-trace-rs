@@ -39,6 +39,6 @@ jobs:
           python-version: "3.12"
       - name: Check supported_configurations.rs
         run: |
-          mv dd-trace/src/configuration/supported_configurations.rs dd-trace/src/configuration/supported_configurations_check.rs
+          mv core/src/configuration/supported_configurations.rs core/src/configuration/supported_configurations_check.rs
           python scripts/local_config_map_generate.py
-          diff dd-trace/src/configuration/supported_configurations.rs dd-trace/src/configuration/supported_configurations_check.rs
+          diff core/src/configuration/supported_configurations.rs core/src/configuration/supported_configurations_check.rs
