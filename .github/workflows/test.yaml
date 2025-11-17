@@ -133,3 +133,4 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
+      ref: igor/rust/bump-version

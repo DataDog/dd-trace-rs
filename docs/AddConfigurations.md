@@ -2,7 +2,7 @@
 
 ## Overview
 
-Configuration options are defined in `supported-configurations.json` at the project root. A Python script (`scripts/local_config_map_generate.py`) reads this JSON file and generates `dd-trace/src/configuration/supported_configurations.rs`. A CI check will ensure that the files are sorted and synchronized, so don't forget to sort `supported-configurations.json` and run the `scripts/local_config_map_generate.py` script!
+Configuration options are defined in `supported-configurations.json` at the project root. A Python script (`scripts/local_config_map_generate.py`) reads this JSON file and generates `datadog-opentelemetry/src/core/configuration/supported_configurations.rs`. A CI check will ensure that the files are sorted and synchronized, so don't forget to sort `supported-configurations.json` and run the `scripts/local_config_map_generate.py` script!
 
 ## Configuration Schema
 
@@ -63,12 +63,12 @@ python3 scripts/local_config_map_generate.py
 
 This will:
 - Read `supported-configurations.json`
-- Generate `dd-trace/src/configuration/supported_configurations.rs`
+- Generate `datadog-opentelemetry/src/core/configuration/supported_configurations.rs`
 - Automatically format the generated Rust code using `rustfmt`
 
 3. **Implement the configuration usage**
 
-After generation, you need to implement the actual configuration logic in your code, typically in `dd-trace/src/configuration/configuration.rs`
+After generation, you need to implement the actual configuration logic in your code, typically in `datadog-opentelemetry/src/core/configuration/configuration.rs`
 
 ## Working with Aliases and Deprecation
 
