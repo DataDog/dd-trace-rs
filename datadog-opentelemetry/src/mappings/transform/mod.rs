@@ -156,7 +156,7 @@ fn otel_span_to_dd_span_minimal<'a>(
         name: SpanStr::from_cow(span.get_attr_str(DATADOG_NAME)),
         resource: SpanStr::from_cow(span.get_attr_str(DATADOG_RESOURCE)),
         r#type: SpanStr::from_cow(span.get_attr_str(DATADOG_TYPE)),
-        trace_id: trace_id_lower_half,
+        trace_id: trace_id_lower_half.into(),
         span_id,
         parent_id,
         start,
