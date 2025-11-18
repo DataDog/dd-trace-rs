@@ -84,9 +84,9 @@ To trace functions, you can either use the `opentelemetry` crate's [API](https:/
 
 This repository contains a collection of crates that work together to provide Datadog tracing capabilities for Rust applications, with full OpenTelemetry compatibility. The library allows you to instrument your Rust applications and send traces to Datadog while leveraging the OpenTelemetry ecosystem.
 
-## Crates
+## Modules
 
-### `dd-trace`
+### `core`
 The core configuration and foundational types for Datadog tracing. This crate provides:
 - **Configuration management**: Reads from environment variables and allows programmatic configuration
 - **Core types**: Sampling decisions, priorities, and mechanisms
@@ -94,21 +94,21 @@ The core configuration and foundational types for Datadog tracing. This crate pr
 - **Error handling**: Common error types used across the library
 - **Logging**: Internal logging infrastructure
 
-### `dd-trace-propagation`
+### `propagation`
 Handles trace context propagation between services. This crate implements:
 - **Datadog propagation format**: Extract and inject trace context using Datadog headers (`x-datadog-*`)
 - **W3C Trace Context**: Support for W3C `traceparent` and `tracestate` headers
 - **Composite propagator**: Automatically handles multiple propagation formats
 - **Span context management**: Maintains trace IDs, span IDs, sampling decisions, and tags across service boundaries
 
-### `dd-trace-sampling`
+### `sampling`
 Implements Datadog's trace sampling logic. Features include:
 - **Rule-based sampling**: Apply sampling rules based on service, operation name, resource, and tags
 - **Rate limiting**: Control the maximum number of traces per second
 - **Service-based sampling**: Apply different sampling rates per service/environment combination
 - **Glob pattern matching**: Flexible matching rules for sampling decisions
 
-### `datadog-opentelemetry-mappings`
+### `mappings`
 Converts between OpenTelemetry and Datadog data models. This crate:
 - **Span conversion**: Transforms OpenTelemetry spans to Datadog's span format
 - **Semantic convention mapping**: Maps OpenTelemetry semantic conventions to Datadog equivalents
@@ -127,13 +127,13 @@ The main integration point that brings everything together. This crate provides:
 
 The crates are orchestrated in `datadog-opentelemetry/src/lib.rs` through the `init_datadog` function:
 
-1. **Configuration** (`dd-trace`): The system starts by loading configuration from environment variables and any programmatic overrides.
+1. **Configuration** (`core`): The system starts by loading configuration from environment variables and any programmatic overrides.
 
 2. **Trace Registry** (`datadog-opentelemetry`): A shared registry is created to track all active traces in the application.
 
-3. **Sampler** (`dd-trace-sampling`): A Datadog-compatible sampler is initialized with the configured sampling rules and rate limits.
+3. **Sampler** (`sampling`): A Datadog-compatible sampler is initialized with the configured sampling rules and rate limits.
 
-4. **Propagator** (`dd-trace-propagation`): A composite propagator is created that can handle both Datadog and W3C trace context formats.
+4. **Propagator** (`propagation`): A composite propagator is created that can handle both Datadog and W3C trace context formats.
 
 5. **Span Processor** (`datadog-opentelemetry`): The processor collects spans, uses the mappings to convert them to Datadog format, and manages trace assembly.
 

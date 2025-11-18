@@ -2,13 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! This module contains trace mapping from otel to datadog
-//! specific to dd-trace
+//! specific to datadog-opentelemetry
 
 use std::collections::hash_map;
 
-use datadog_opentelemetry_mappings::{CachedConfig, DdSpan, SdkSpan, SpanStr, VERSION_KEY};
+use crate::{
+    core::sampling,
+    mappings::{
+        otel_span_to_dd_span, CachedConfig, DdSpan, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME,
+        VERSION_KEY,
+    },
+};
 use datadog_trace_utils::span::SpanText;
-use dd_trace::sampling;
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -48,8 +53,7 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a>(
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
             let sdk_span = SdkSpan::from_sdk_span_data(s);
-            let mut dd_span =
-                datadog_opentelemetry_mappings::otel_span_to_dd_span(&sdk_span, otel_resource);
+            let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource);
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);
@@ -64,7 +68,7 @@ fn add_config_metadata<'a>(
     cached_config: &'a CachedConfig,
     otel_resource: &'a Resource,
 ) {
-    if dd_span.service.as_str() == datadog_opentelemetry_mappings::DEFAULT_OTLP_SERVICE_NAME {
+    if dd_span.service.as_str() == DEFAULT_OTLP_SERVICE_NAME {
         dd_span.service = SpanStr::from_str(cached_config.service());
     }
 

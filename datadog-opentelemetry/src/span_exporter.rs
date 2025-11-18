@@ -8,19 +8,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::{core::Config, dd_debug, dd_error, ddtrace_transform, mappings::CachedConfig};
 use data_pipeline::trace_exporter::{
     agent_response::AgentResponse,
     error::{self as trace_exporter_error, TraceExporterError},
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
-use datadog_opentelemetry_mappings::CachedConfig;
 use opentelemetry_sdk::{
     error::{OTelSdkError, OTelSdkResult},
     trace::SpanData,
     Resource,
 };
-
-use crate::ddtrace_transform::{self};
 
 /// A reasonable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
@@ -68,7 +66,7 @@ struct Batch {
     span_count: usize,
     max_buffered_spans: usize,
     /// Configuration for service discovery via remote config
-    config: Arc<dd_trace::Config>,
+    config: Arc<Config>,
 }
 
 // Pre-allocate the batch buffer to avoid reallocations on small sizes.
@@ -76,7 +74,7 @@ struct Batch {
 const PRE_ALLOCATE_CHUNKS: usize = 400;
 
 impl Batch {
-    fn new(max_buffered_spans: usize, config: Arc<dd_trace::Config>) -> Self {
+    fn new(max_buffered_spans: usize, config: Arc<Config>) -> Self {
         Self {
             chunks: Vec::with_capacity(PRE_ALLOCATE_CHUNKS),
             last_flush: std::time::Instant::now(),
@@ -163,7 +161,7 @@ pub struct DatadogExporter {
 impl DatadogExporter {
     #[allow(clippy::type_complexity)]
     pub fn new(
-        config: Arc<dd_trace::Config>,
+        config: Arc<Config>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
         let (tx, rx) = channel(SPAN_FLUSH_THRESHOLD, MAX_BUFFERED_SPANS, config.clone());
@@ -267,7 +265,7 @@ impl DatadogExporter {
             Err(AlreadyShutdown | MutexPoisoned) => {}
             Err(e @ (TimedOut | BatchFull(_))) => {
                 // This should logically never happen, so log an error and continue
-                dd_trace::dd_error!(
+                dd_error!(
                     "DatadogExporter.trigger_shutdown: unexpected error failed to trigger shutdown: {:?}",
                     e,
                 );
@@ -371,7 +369,7 @@ pub struct QueueMetrics {
 fn channel(
     flush_trigger_number_of_spans: usize,
     max_number_of_spans: usize,
-    config: Arc<dd_trace::Config>,
+    config: Arc<Config>,
 ) -> (Sender, Receiver) {
     let waiter = Arc::new(Waiter {
         state: Mutex::new(SharedState {
@@ -582,7 +580,7 @@ impl TraceExporterWorker {
     /// * The thread panics
     #[allow(clippy::type_complexity)]
     fn spawn(
-        cfg: Arc<dd_trace::Config>,
+        cfg: Arc<Config>,
         builder: TraceExporterBuilder,
         rx: Receiver,
         otel_resource: opentelemetry_sdk::Resource,
@@ -679,12 +677,12 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
     match e {
         // Exceptional errors
         TraceExporterError::Builder(e) => {
-            dd_trace::dd_error!("DatadogExporter: Export error: Builder error: {}", e);
+            dd_error!("DatadogExporter: Export error: Builder error: {}", e);
         }
         TraceExporterError::Internal(
             trace_exporter_error::InternalErrorKind::InvalidWorkerState(state),
         ) => {
-            dd_trace::dd_error!(
+            dd_error!(
                 "DatadogExporter: Export error: Internal error: Invalid worker state: {}",
                 state
             );
@@ -692,39 +690,39 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
 
         // Runtime errors
         TraceExporterError::Deserialization(e) => {
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "DatadogExporter: Export error: Deserialization error: {}",
                 e
             );
         }
         TraceExporterError::Io(error) => {
-            dd_trace::dd_debug!("DatadogExporter: Export error: IO error: {}", error);
+            dd_debug!("DatadogExporter: Export error: IO error: {}", error);
         }
         TraceExporterError::Network(e) => {
-            dd_trace::dd_debug!("DatadogExporter: Export error: Network error: {}", e);
+            dd_debug!("DatadogExporter: Export error: Network error: {}", e);
         }
         TraceExporterError::Request(e) => {
-            dd_trace::dd_debug!("DatadogExporter: Export error: Request error: {}", e);
+            dd_debug!("DatadogExporter: Export error: Request error: {}", e);
         }
         TraceExporterError::Serialization(error) => {
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "DatadogExporter: Export error: Serialization error: {}",
                 error
             );
         }
         TraceExporterError::Agent(trace_exporter_error::AgentErrorKind::EmptyResponse) => {
-            dd_trace::dd_debug!("DatadogExporter: Export error: Agent error: empty response");
+            dd_debug!("DatadogExporter: Export error: Agent error: empty response");
         }
         TraceExporterError::Shutdown(
             data_pipeline::trace_exporter::error::ShutdownError::TimedOut(duration),
         ) => {
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "DatadogExporter: Export error: Shutdown error: timed out after {}ms",
                 duration.as_millis()
             );
         }
         TraceExporterError::Telemetry(e) => {
-            dd_trace::dd_debug!(
+            dd_debug!(
                 "DatadogExporter: Export error: Instrumentation telemetry error: {}",
                 e
             );
@@ -754,7 +752,10 @@ mod tests {
     use opentelemetry::SpanId;
     use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
 
-    use crate::span_exporter::{BatchFullError, SenderError};
+    use crate::{
+        core::Config,
+        span_exporter::{BatchFullError, SenderError},
+    };
 
     use super::channel;
 
@@ -778,7 +779,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_flush() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data(), empty_span_data()]));
@@ -794,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_batch_drop() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         for i in 1..=3 {
             tx.add_trace_chunk(vec![empty_span_data(); i]).unwrap();
         }
@@ -816,7 +817,7 @@ mod tests {
 
     #[test]
     fn test_receiver_sender_timeout() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
             s.spawn(|| {
@@ -835,7 +836,7 @@ mod tests {
 
     #[test]
     fn test_trigger_shutdown() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         std::thread::scope(|s| {
             s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]).unwrap());
             s.spawn(|| {
@@ -859,7 +860,7 @@ mod tests {
 
     #[test]
     fn test_wait_for_shutdown() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
 
         std::thread::scope(|s| {
             s.spawn(|| {
@@ -881,7 +882,7 @@ mod tests {
 
     #[test]
     fn test_already_shutdown() {
-        let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         drop(rx);
         assert_eq!(tx.trigger_shutdown(), Err(SenderError::AlreadyShutdown));
     }
@@ -891,7 +892,7 @@ mod tests {
         use opentelemetry::{Key, KeyValue, Value};
 
         let config = Arc::new(
-            dd_trace::Config::builder()
+            Config::builder()
                 .set_service("main-service".to_string())
                 .build(),
         );

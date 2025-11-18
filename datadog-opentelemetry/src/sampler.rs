@@ -1,13 +1,13 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use dd_trace::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision, Config};
-use dd_trace_sampling::{DatadogSampler, SamplingRulesCallback};
 use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
 
 use crate::{
+    core::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision, Config},
+    sampling::{DatadogSampler, SamplingRule, SamplingRulesCallback},
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},
     TraceRegistry,
@@ -26,10 +26,8 @@ impl Sampler {
         resource: Arc<RwLock<Resource>>,
         trace_registry: TraceRegistry,
     ) -> Self {
-        let rules =
-            dd_trace_sampling::SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
-        let sampler =
-            dd_trace_sampling::DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
+        let rules = SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
+        let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
         Self {
             cfg,
             sampler,
@@ -179,7 +177,7 @@ impl ShouldSample for Sampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dd_trace::configuration::SamplingRuleConfig;
+    use crate::core::configuration::SamplingRuleConfig;
     use opentelemetry::{
         trace::{SamplingDecision, SpanContext, SpanKind, TraceId, TraceState},
         Context, SpanId, TraceFlags,

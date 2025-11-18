@@ -9,31 +9,56 @@ readme.workspace = true
 description.workspace = true
 
 [dependencies]
-# Workspace dependencies
-dd-trace = { path = "../dd-trace" }
-dd-trace-sampling = { path = "../dd-trace-sampling" }
-dd-trace-propagation = { path = "../dd-trace-propagation", features = [
-    "opentelemetry",
-] }
-datadog-opentelemetry-mappings = { path = "../datadog-opentelemetry-mappings" }
 
 # External dependencies
+foldhash = { workspace = true }
 futures = { workspace = true }
+hashbrown = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
-foldhash = { workspace = true }
-hashbrown = { workspace = true }
+
+# sampling
+lru = "0.12"
+regex = "1.10.3"
+serde = { workspace = true, features = ["derive"] }
+
+# propagation
+thiserror = { version = "1.0", default-features = false }
+
+# core
+anyhow = "1.0.97"
+rustc_version_runtime = "0.3.0"
+hyper = { version = "1.6", features = ["client", "http1"] }
+hyper-util = { version = "0.1.16", features = [
+    "client",
+    "client-legacy",
+    "http1",
+    "tokio",
+] }
+http-body-util = "0.1"
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+tokio-util = "0.7"
+base64 = "0.21"
+sha2 = "0.10"
+uuid = { version = "1.11.0", features = ["v4"] }
+arc-swap = "1.7.1"
+
+# core Test utils
+criterion = { version = "0.5.1", optional = true }
 
 # Libdatadog dependencies
 data-pipeline = { workspace = true }
 datadog-trace-utils = { workspace = true }
+ddtelemetry = { workspace = true }
+ddcommon = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 assert_unordered = "0.3"
+pretty_assertions = "1.4.1"
+tokio = { workspace = true }
 
 # Libdatadog dependencies - change to a stable version once we release
 datadog-trace-utils = { workspace = true, features = ["test-utils"] }
@@ -50,4 +75,24 @@ tracing-subscriber = { version = "0.3" }
 criterion = "0.5.1"
 
 [features]
-test-utils = ["dd-trace/test-utils", "data-pipeline/test-utils"]
+test-utils = ["data-pipeline/test-utils", "criterion"]
+
+[[bench]]
+name = "smoke"
+harness = false
+path = "benches/smoke.rs"
+
+[[bench]]
+name = "mappings_benchmark"
+harness = false
+path = "benches/mappings_benchmark.rs"
+
+[[bench]]
+name = "inject_benchmark"
+harness = false
+path = "benches/inject_benchmark.rs"
+
+[[bench]]
+name = "extract_benchmark"
+harness = false
+path = "benches/extract_benchmark.rs"

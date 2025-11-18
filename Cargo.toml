@@ -6,10 +6,6 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
-    "datadog-opentelemetry-mappings",
-    "dd-trace",
-    "dd-trace-propagation",
-    "dd-trace-sampling",
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2

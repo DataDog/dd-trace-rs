@@ -503,41 +503,40 @@ dependencies = [
 name = "datadog-opentelemetry"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
+ "arc-swap",
  "assert_unordered",
+ "base64 0.21.7",
  "criterion",
  "data-pipeline",
  "datadog-opentelemetry",
- "datadog-opentelemetry-mappings",
  "datadog-trace-utils",
- "dd-trace",
- "dd-trace-propagation",
- "dd-trace-sampling",
+ "ddcommon",
+ "ddtelemetry",
  "foldhash",
  "futures",
  "hashbrown",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "lru",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "pretty_assertions",
  "rand 0.8.5",
+ "regex",
+ "rustc_version_runtime",
+ "serde",
  "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "datadog-opentelemetry-mappings"
-version = "0.0.1"
-dependencies = [
- "criterion",
- "datadog-opentelemetry-mappings",
- "datadog-trace-utils",
- "dd-trace",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "serde",
+ "uuid",
 ]
 
 [[package]]
@@ -597,59 +596,6 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
-]
-
-[[package]]
-name = "dd-trace"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "arc-swap",
- "base64 0.21.7",
- "criterion",
- "dd-trace",
- "ddcommon",
- "ddtelemetry",
- "http-body-util",
- "hyper",
- "hyper-util",
- "rustc_version_runtime",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-util",
- "uuid",
-]
-
-[[package]]
-name = "dd-trace-propagation"
-version = "0.0.1"
-dependencies = [
- "assert_unordered",
- "criterion",
- "dd-trace",
- "dd-trace-propagation",
- "opentelemetry",
- "pretty_assertions",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "dd-trace-sampling"
-version = "0.0.1"
-dependencies = [
- "datadog-opentelemetry-mappings",
- "dd-trace",
- "lru",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "opentelemetry_sdk",
- "regex",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1679,7 +1625,6 @@ name = "propagator"
 version = "0.1.0"
 dependencies = [
  "datadog-opentelemetry",
- "dd-trace",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2067,7 +2012,6 @@ name = "simple_tracing"
 version = "0.1.0"
 dependencies = [
  "datadog-opentelemetry",
- "dd-trace",
  "opentelemetry",
  "opentelemetry_sdk",
 ]

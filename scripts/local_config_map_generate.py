@@ -107,8 +107,8 @@ pub(crate) fn is_alias_deprecated(name: &str) -> bool {{
 }}
 """
 
-with open("dd-trace/src/configuration/supported_configurations.rs", "w") as f:
+with open("datadog-opentelemetry/src/core/configuration/supported_configurations.rs", "w") as f:
     f.write(result)
 
 # run cargo fmt
-subprocess.run(["rustfmt", "dd-trace/src/configuration/supported_configurations.rs"])
+subprocess.run(["rustfmt", "datadog-opentelemetry/src/core/configuration/supported_configurations.rs"])
