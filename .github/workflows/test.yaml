@@ -12,7 +12,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     strategy:
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-13]
+        platform: [windows-latest, ubuntu-latest, macos-14]
         rust_version: [""]
         include:
           - platform: "ubuntu-latest"
@@ -133,4 +133,3 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: igor/rust/bump-version
