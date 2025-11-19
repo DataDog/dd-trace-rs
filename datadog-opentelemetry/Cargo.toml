@@ -1,12 +1,13 @@
 [package]
 name = "datadog-opentelemetry"
+repository = "https://github.com/DataDog/dd-trace-rs/tree/main/datadog-opentelemetry"
+description = "A Datadog layer of compatibility for the opentelemetry SDK"
 # rust-version.workspace = true
 edition.workspace = true
 version.workspace = true
 license.workspace = true
-repository.workspace = true
 readme.workspace = true
-description.workspace = true
+authors.workspace = true
 
 [dependencies]
 

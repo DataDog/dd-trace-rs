@@ -19,6 +19,7 @@ license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
 description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
+authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
