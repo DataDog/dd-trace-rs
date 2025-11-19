@@ -7,7 +7,8 @@
         "version": "A",
         "type": "string",
         "default": "localhost",
-        "propertyKeys": ["agent_host"]
+        "propertyKeys": ["agent_host"],
+        "aliases": []
       }
     ],
     "DD_DOGSTATSD_HOST": [
