@@ -12,7 +12,7 @@ use datadog_opentelemetry::{
     core::{Config, ConfigBuilder},
     make_test_tracer,
 };
-use datadog_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
+use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::propagation::{Extractor, TextMapPropagator};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 

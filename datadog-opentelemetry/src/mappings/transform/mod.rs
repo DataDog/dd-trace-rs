@@ -47,7 +47,7 @@ use std::{
     collections::{hash_map, HashMap},
 };
 
-use datadog_trace_utils::span::SpanText;
+use libdd_trace_utils::span::SpanText;
 use opentelemetry::{
     trace::{Link, SpanKind},
     Key, KeyValue, Value,
@@ -60,13 +60,13 @@ use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use super::sdk_span::SdkSpan;
 
 pub type SpanStr<'a> = CowStr<'a>;
-pub type DdSpan<'a> = datadog_trace_utils::span::Span<CowStr<'a>>;
-type DdSpanEvent<'a> = datadog_trace_utils::span::SpanEvent<CowStr<'a>>;
-type DdSpanLink<'a> = datadog_trace_utils::span::SpanLink<CowStr<'a>>;
-type DdAnyValue<'a> = datadog_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
-type DdAttributeAnyValue<'a> = datadog_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
-type DdAttributeArrayValue<'a> = datadog_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
-type DdScalarValue<'a> = datadog_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
+pub type DdSpan<'a> = libdd_trace_utils::span::Span<CowStr<'a>>;
+type DdSpanEvent<'a> = libdd_trace_utils::span::SpanEvent<CowStr<'a>>;
+type DdSpanLink<'a> = libdd_trace_utils::span::SpanLink<CowStr<'a>>;
+type DdAnyValue<'a> = libdd_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
+type DdAttributeAnyValue<'a> = libdd_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
+type DdAttributeArrayValue<'a> = libdd_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
+type DdScalarValue<'a> = libdd_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
 
 fn set_meta_otlp<'a>(k: SpanStr<'a>, v: SpanStr<'a>, dd_span: &mut DdSpan<'a>) {
     match k.borrow() {
@@ -156,7 +156,7 @@ fn otel_span_to_dd_span_minimal<'a>(
         name: SpanStr::from_cow(span.get_attr_str(DATADOG_NAME)),
         resource: SpanStr::from_cow(span.get_attr_str(DATADOG_RESOURCE)),
         r#type: SpanStr::from_cow(span.get_attr_str(DATADOG_TYPE)),
-        trace_id: trace_id_lower_half,
+        trace_id: trace_id_lower_half.into(),
         span_id,
         parent_id,
         start,

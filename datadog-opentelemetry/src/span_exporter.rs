@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{core::Config, dd_debug, dd_error, ddtrace_transform, mappings::CachedConfig};
-use data_pipeline::trace_exporter::{
+use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse,
     error::{self as trace_exporter_error, TraceExporterError},
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
@@ -714,7 +714,7 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             dd_debug!("DatadogExporter: Export error: Agent error: empty response");
         }
         TraceExporterError::Shutdown(
-            data_pipeline::trace_exporter::error::ShutdownError::TimedOut(duration),
+            libdd_data_pipeline::trace_exporter::error::ShutdownError::TimedOut(duration),
         ) => {
             dd_debug!(
                 "DatadogExporter: Export error: Shutdown error: timed out after {}ms",
