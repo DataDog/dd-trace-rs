@@ -7,7 +7,6 @@ on:
 env:
   RUST_VERSION: 1.84.1
   CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-  TEST_TAG: "datadog-opentelemetry-v0.0.1"
 
 jobs:
   publish:
