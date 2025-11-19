@@ -17,7 +17,7 @@ jobs:
         run: rustup install ${RUST_VERSION} && rustup default ${RUST_VERSION}
 
       - name: "Install nextest"
-        uses: taiki-e/install-action@2c41309d51ede152b6f2ee6bf3b71e6dc9a8b7df # 2.49.27
+        uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # 2.49.15
         with:
           tool: nextest@0.9.96
 
