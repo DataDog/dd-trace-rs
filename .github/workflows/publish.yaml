@@ -2,6 +2,9 @@ name: Publish
 
 on:
   push:
+    branches: 
+      - 'julio/versioning/*'
+      - 'igor/versioning/*'
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 env:
@@ -12,6 +15,7 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: publish
     steps:
       - name: "Install Rust ${RUST_VERSION}"
         run: rustup install ${RUST_VERSION} && rustup default ${RUST_VERSION}
