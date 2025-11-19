@@ -9,7 +9,7 @@ use std::{
 };
 
 use anyhow::Error;
-use ddtelemetry::{
+use libdd_telemetry::{
     data::{self, Configuration},
     metrics::ContextKey,
     worker::{self, TelemetryWorkerHandle},
@@ -62,7 +62,7 @@ macro_rules! telemetry_metrics {
                 &'static str,
                 data::metrics::MetricNamespace,
                 data::metrics::MetricType,
-                Vec<ddcommon::tag::Tag>
+                Vec<libdd_common::tag::Tag>
             ) {
                 use data::metrics::MetricNamespace::*;
                 use data::metrics::MetricType::*;
@@ -71,7 +71,7 @@ macro_rules! telemetry_metrics {
                     $(
                         $variant => ($name, $ns, $ty, vec![
                             $(
-                                ddcommon::tag!($key, $val)
+                                libdd_common::tag!($key, $val)
                             )*
                         ]),
                     )*
@@ -220,7 +220,7 @@ fn make_telemetry_worker(
             config.tracer_version().to_string(),
         );
         builder.runtime_id = Some(config.runtime_id().to_string());
-        builder.config = ddtelemetry::config::Config::from_env();
+        builder.config = libdd_telemetry::config::Config::from_env();
         builder.config.telemetry_heartbeat_interval =
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
         // builder.config.debug_enabled = true;
@@ -312,7 +312,7 @@ fn notify_configuration_update_inner(
 #[cfg(test)]
 mod tests {
     use anyhow::Ok;
-    use ddtelemetry::data;
+    use libdd_telemetry::data;
 
     use crate::{
         core::{

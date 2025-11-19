@@ -50,10 +50,10 @@ arc-swap = "1.7.1"
 criterion = { version = "0.5.1", optional = true }
 
 # Libdatadog dependencies
-data-pipeline = { workspace = true }
-datadog-trace-utils = { workspace = true }
-ddtelemetry = { workspace = true }
-ddcommon = { workspace = true }
+libdd-data-pipeline = { workspace = true }
+libdd-trace-utils = { workspace = true }
+libdd-telemetry = { workspace = true }
+libdd-common = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
@@ -61,7 +61,7 @@ pretty_assertions = "1.4.1"
 tokio = { workspace = true }
 
 # Libdatadog dependencies - change to a stable version once we release
-datadog-trace-utils = { workspace = true, features = ["test-utils"] }
+libdd-trace-utils = { workspace = true, features = ["test-utils"] }
 
 # Depend on ourselves to have APIs exposed only during tests
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }
@@ -75,7 +75,7 @@ tracing-subscriber = { version = "0.3" }
 criterion = "0.5.1"
 
 [features]
-test-utils = ["data-pipeline/test-utils", "criterion"]
+test-utils = ["libdd-data-pipeline/test-utils", "criterion"]
 
 [[bench]]
 name = "smoke"

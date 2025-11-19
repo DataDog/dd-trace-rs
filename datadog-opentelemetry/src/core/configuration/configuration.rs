@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use ddtelemetry::data::Configuration;
+use libdd_telemetry::data::Configuration;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
@@ -1682,7 +1682,7 @@ impl ConfigBuilder {
 
 #[cfg(test)]
 mod tests {
-    use ddtelemetry::data::ConfigurationOrigin;
+    use libdd_telemetry::data::ConfigurationOrigin;
 
     use super::Config;
     use super::*;
