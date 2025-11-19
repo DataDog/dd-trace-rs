@@ -14,7 +14,7 @@ NC='\033[0m'
 
 # Allowed crate names for publication (in dependency order)
 ALLOWED_CRATES=(
-    "dd-trace-rs"
+    "datadog-opentelemetry"
 )
 
 LIBDATADOG_OWNERS="github:datadog:libdatadog-owners"
@@ -256,7 +256,7 @@ publish_crate() {
     
     # Test with no default features
     echo "Testing with --no-default-features..." >&2
-    if cargo nextest run --package "$crate_name" --no-default-features -E '!test(tracing_integration_tests::)'; then
+    if cargo nextest run --locked --package "$crate_name" --no-default-features; then
         echo -e "${GREEN}✓ Tests passed with --no-default-features${NC}" >&2
     else
         echo -e "${YELLOW}⚠️  Warning: Tests with --no-default-features failed${NC}" >&2
@@ -266,7 +266,7 @@ publish_crate() {
     
     # Test with all features
     echo "Testing with --all-features..." >&2
-    if cargo nextest run --package "$crate_name" --all-features -E '!test(tracing_integration_tests::)'; then
+    if cargo nextest run --locked --package "$crate_name" --all-features; then
         echo -e "${GREEN}✓ Tests passed with --all-features${NC}" >&2
     else
         echo -e "${RED}❌ ERROR: Tests failed with --all-features${NC}" >&2
