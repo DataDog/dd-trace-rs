@@ -3,7 +3,7 @@
 
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 
-use ddtelemetry::data::ConfigurationOrigin;
+use libdd_telemetry::data::ConfigurationOrigin;
 
 use crate::dd_warn;
 

@@ -8,9 +8,7 @@ use std::{
     vec,
 };
 
-use datadog_trace_utils::span::{
-    AttributeAnyValue as Any, AttributeArrayValue as Scalar, SpanText,
-};
+use libdd_trace_utils::span::{AttributeAnyValue as Any, AttributeArrayValue as Scalar, SpanText};
 
 use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{

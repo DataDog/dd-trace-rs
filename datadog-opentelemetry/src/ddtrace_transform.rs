@@ -13,7 +13,7 @@ use crate::{
         VERSION_KEY,
     },
 };
-use datadog_trace_utils::span::SpanText;
+use libdd_trace_utils::span::SpanText;
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
