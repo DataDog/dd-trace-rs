@@ -13,7 +13,7 @@ Each configuration entry in `supported-configurations.json` follows this structu
   {
     "version": "A",
     "type": "string|integer|decimal|boolean|array|map",
-    "default_value": "default value as string",
+    "default": "default value as string",
     "propertyKeys": [
       "internal_property_name"
     ],
@@ -29,7 +29,7 @@ Each configuration entry in `supported-configurations.json` follows this structu
 
 - **version**: The implementation version of the configuration (available on the FPD). If there is a difference with an existing one, it is a different version and you must create a new one on the FPD.
 - **type**: Data type - one of: `string`, `integer`, `decimal`, `boolean`, `array`, or `map`. For now, it is only informative.
-- **default_value**: Default value as a string (even for non-string types). Also currently only informative.
+- **default**: Default value as a string (even for non-string types). Also currently only informative.
 - **propertyKeys**: Array containing the internal property name(s) used in the configuration struct. Also currently only informative.
 - **aliases** (optional): Array of alternative environment variable names
 - **deprecated** (optional): Boolean indicating if this configuration is deprecated
@@ -46,7 +46,7 @@ Example:
   {
     "version": "A",
     "type": "string",
-    "default_value": "my-default",
+    "default": "my-default",
     "propertyKeys": [
       "my_new_config"
     ]
@@ -91,7 +91,7 @@ Example:
   {
     "version": "A",
     "type": "string",
-    "default_value": "value",
+    "default": "value",
     "propertyKeys": [
       "config_property"
     ],
@@ -114,7 +114,7 @@ To deprecate a configuration without providing a replacement:
   {
     "version": "A",
     "type": "string",
-    "default_value": "",
+    "default": "",
     "propertyKeys": [
       "old_property"
     ],
