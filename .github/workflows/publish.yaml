@@ -6,7 +6,6 @@ on:
       - '*-v[0-9]+.[0-9]+.[0-9]+'
 env:
   RUST_VERSION: 1.84.1
-  CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
 
 jobs:
   publish:
@@ -30,5 +29,7 @@ jobs:
 
       - name: "Publish"
         shell: bash
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN:-test}" "${{ steps.tag.outputs.tag }}"
+          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${{ steps.tag.outputs.tag }}"
