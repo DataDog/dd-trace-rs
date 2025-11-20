@@ -762,17 +762,20 @@ mod tests {
     #[test]
     fn test_receiver_sender_timeout() {
         let (tx, rx) = channel(2, 4, Arc::new(dd_trace::Config::builder().build()));
-        // Ensure data is present before waiting so the timeout-driven flush is deterministic
-        tx.add_trace_chunk(vec![empty_span_data()]).unwrap();
-        let (message, chunks) = rx
-            .receive(time::Duration::from_millis(1))
-            .unwrap_or_else(|_| panic!("Failed to receive trace chunk"));
+        std::thread::scope(|s| {
+            s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
+            s.spawn(|| {
+                let (message, chunks) = rx
+                    .receive(time::Duration::from_millis(1))
+                    .unwrap_or_else(|_| panic!("Failed to receive trace chunk"));
 
-        assert_eq!(
-            message,
-            super::TraceExporterMessage::FlushTraceChunksWithTimeout
-        );
-        assert_eq!(chunks.len(), 1);
+                assert_eq!(
+                    message,
+                    super::TraceExporterMessage::FlushTraceChunksWithTimeout
+                );
+                assert_eq!(chunks.len(), 1);
+            });
+        });
     }
 
     #[test]
