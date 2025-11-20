@@ -56,35 +56,6 @@ check_command() {
     fi
 }
 
-check_dependencies() {
-    local check_only=${1:-false}
-    local -a required_commands
-    
-    if [ "$check_only" = true ]; then
-        required_commands=("curl" "jq")
-    else
-        required_commands=("curl" "jq" "cargo" "git")
-    fi
-    
-    local missing_commands=()
-    
-    for cmd in "${required_commands[@]}"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            missing_commands+=("$cmd")
-        fi
-    done
-    
-    if [ ${#missing_commands[@]} -gt 0 ]; then
-        echo -e "${RED}❌ ERROR: Missing required dependencies:${NC}" >&2
-        for cmd in "${missing_commands[@]}"; do
-            echo -e "  ${RED}✗${NC} $cmd" >&2
-        done
-        echo "" >&2
-        echo "Please install the missing dependencies and try again." >&2
-        exit 1
-    fi
-}
-
 validate_tag() {
     local tag=$1
     
@@ -382,10 +353,10 @@ check_publication_status() {
     echo "" >&2
     
     if [ $not_published -gt 0 ]; then
-        exit 1
+        return 1
     else
         echo -e "${GREEN}✓ All crates are published on crates.io!${NC}" >&2
-        exit 0
+        return 0
     fi
 }
 
@@ -393,7 +364,6 @@ main() {
     local dry_run=false
     local check_only=false
     local token="${CARGO_REGISTRY_TOKEN:-}"
-    local verbose=false
     local -a tags=()
     
     while [[ $# -gt 0 ]]; do
@@ -415,7 +385,6 @@ main() {
                 shift 2
                 ;;
             -v|--verbose)
-                verbose=true
                 set -x
                 shift
                 ;;
@@ -438,8 +407,6 @@ main() {
         exit 1
     fi
     
-    check_dependencies "$check_only"
-    
     local sorted_tags
     sorted_tags=($(sort_tags "${tags[@]}"))
     
@@ -447,7 +414,8 @@ main() {
     
     # Check-only mode: just check publication status
     if [ "$check_only" = true ]; then
-        check_publication_status "${sorted_tags[@]}"
+        local ret=check_publication_status "${sorted_tags[@]}"
+        exit ${ret}
     fi
     
     # Normal publication mode
