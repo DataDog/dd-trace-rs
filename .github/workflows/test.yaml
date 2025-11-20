@@ -1,7 +1,11 @@
 name: Test
 permissions:
    contents: read
-on: [push]
+on:
+   push:
+   workflow_dispatch:
+   schedule:
+      - cron:  '00 03 * * 1-5'
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: 1.84.1
