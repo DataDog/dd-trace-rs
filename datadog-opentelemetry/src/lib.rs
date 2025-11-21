@@ -8,7 +8,8 @@
 //!
 //! ## Usage
 //!
-//! The `datadog-opentelemetry` crate provides an easy to use override for the rust opentelemetry-sdk.
+//! The `datadog-opentelemetry` crate provides an easy to use override for the rust
+//! opentelemetry-sdk.
 //!
 //! ### Installation
 //!
@@ -24,8 +25,9 @@
 //!
 //! ### Initialization
 //!
-//! The following exampled will read datadog and opentelemetry configuration from environment variables and other
-//! available sources, initialize and set up the tracer provider and the text map propagator globally.
+//! The following exampled will read datadog and opentelemetry configuration from environment
+//! variables and other available sources, initialize and set up the tracer provider and the text
+//! map propagator globally.
 //!
 //! #### Tracing API
 //!
@@ -36,17 +38,19 @@
 //! use std::time::Duration;
 //! use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 //!
-//! fn main() {
-//!     // This picks up env var configuration and other datadog configuration sources
-//!     let tracer_provider = datadog_opentelemetry::tracing()
-//!         .init();
+//! // This picks up env var configuration and other datadog configuration sources
+//! let tracer_provider = datadog_opentelemetry::tracing().init();
 //!
-//!     tracing_subscriber::registry()
-//!         .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("my_application_name")))
-//!         .init();
+//! tracing_subscriber::registry()
+//!     .with(
+//!         tracing_opentelemetry::layer()
+//!             .with_tracer(tracer_provider.tracer("my_application_name")),
+//!     )
+//!     .init();
 //!
-//!     tracer_provider.shutdown_with_timeout(Duration::from_secs(1)).expect("tracer shutdown error");
-//! }
+//! tracer_provider
+//!     .shutdown_with_timeout(Duration::from_secs(1))
+//!     .expect("tracer shutdown error");
 //! ```
 //!
 //! #### Opentelemetry API
@@ -56,23 +60,22 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! fn main() {
-//!     // This picks up env var configuration and other datadog configuration sources
-//!     let tracer_provider = datadog_opentelemetry::tracing()
-//!         .init();
+//! // This picks up env var configuration and other datadog configuration sources
+//! let tracer_provider = datadog_opentelemetry::tracing().init();
 //!
-//!     // Your code
-//!     // Now use standard OpenTelemetry APIs
-//!     use opentelemetry::global;
-//!     use opentelemetry::trace::Tracer;
+//! // Your code
+//! // Now use standard OpenTelemetry APIs
+//! use opentelemetry::global;
+//! use opentelemetry::trace::Tracer;
 //!
-//!     let tracer = global::tracer("my-service");
-//!     let span = tracer.start("my-operation");
-//!     // ... do work ...
+//! let tracer = global::tracer("my-service");
+//! let span = tracer.start("my-operation");
+//! // ... do work ...
 //!
-//!     // Shutdown the tracer to flush the remaining data
-//!     tracer_provider.shutdown_with_timeout(Duration::from_secs(1)).expect("tracer shutdown error");
-//! }
+//! // Shutdown the tracer to flush the remaining data
+//! tracer_provider
+//!     .shutdown_with_timeout(Duration::from_secs(1))
+//!     .expect("tracer shutdown error");
 //! ```
 //!
 //! ### Configuration
@@ -87,10 +90,10 @@
 //!     .set_env("prod".to_string())
 //!     .build();
 //! let tracer_provider = datadog_opentelemetry::tracing()
-//!         .with_config(config)
-//!         // this also accepts options for the Opentelemetry SDK builder
-//!         .with_max_attributes_per_span(64)
-//!         .init();
+//!     .with_config(config)
+//!     // this also accepts options for the Opentelemetry SDK builder
+//!     .with_max_attributes_per_span(64)
+//!     .init();
 //! ```
 //!
 //! For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.1.0/datadog_opentelemetry/).
@@ -134,8 +137,8 @@
 //!
 //! * MSRV: 1.84
 //! * [opentelemetry](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/) version: 0.32
-//!
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
+//!   version: 0.32
 
 pub mod core;
 pub mod mappings;
