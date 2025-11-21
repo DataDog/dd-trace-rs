@@ -1,0 +1,35 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - '*-v[0-9]+.[0-9]+.[0-9]+'
+env:
+  RUST_VERSION: 1.84.1
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: publish
+    steps:
+      - name: "Install Rust ${RUST_VERSION}"
+        run: rustup install ${RUST_VERSION} && rustup default ${RUST_VERSION}
+
+      - name: "Install nextest"
+        uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # 2.49.15
+        with:
+          tool: nextest@0.9.96
+
+      - name: "Checkout sources"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
+
+      - name: "Get tag"
+        id: tag
+        uses: devops-actions/action-get-tag@fda546b7024dab74c867f31930073a85b5313d3a # 1.1
+
+      - name: "Publish"
+        shell: bash
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${{ steps.tag.outputs.tag }}"
