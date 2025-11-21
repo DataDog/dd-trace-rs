@@ -266,7 +266,10 @@ publish_crate() {
         echo "" >&2
 
         if [ "$dry_run" != "true" ]; then
-            set_ownership "$crate_name" "$LIBDATADOG_OWNERS" "$token"
+            if ! set_ownership "$crate_name" "$LIBDATADOG_OWNERS" "$token"; then
+                echo -e "${RED}❌ Failed to set ${LIBDATADOG_OWNERS} as crate owners${NC}" >&2
+                return 1
+            fi
         fi
         return 0
     else
@@ -414,8 +417,8 @@ main() {
     
     # Check-only mode: just check publication status
     if [ "$check_only" = true ]; then
-        local ret=check_publication_status "${sorted_tags[@]}"
-        exit ${ret}
+        check_publication_status "${sorted_tags[@]}"
+        exit $?
     fi
     
     # Normal publication mode
