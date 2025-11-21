@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Span conversion logic from Opentelemetry to Datadog
+
 mod cached_config;
 mod sdk_span;
 mod transform;
