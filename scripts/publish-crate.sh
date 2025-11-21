@@ -127,7 +127,7 @@ sort_tags() {
     local i=1
     for tag in "${final_sorted[@]}"; do
         echo -e "${BLUE}  $i. $tag${NC}" >&2
-        ((i++))
+        ((++i))
     done
     echo "" >&2
     
@@ -334,12 +334,12 @@ check_publication_status() {
     
     for tag in "${sorted_tags[@]}"; do
         if check_crate_only "$tag"; then
-            ((published++))
+            ((++published))
         else
             if [[ "$tag" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-                ((not_published++))
+                ((++not_published))
             else
-                ((failed++))
+                ((++failed))
             fi
         fi
     done
@@ -425,7 +425,7 @@ main() {
     local failed=0
     for tag in "${sorted_tags[@]}"; do
         if ! publish_crate "$tag" "$dry_run" "$token"; then
-            ((failed++))
+            ((++failed))
         fi
     done
     
