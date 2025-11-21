@@ -819,7 +819,9 @@ mod tests {
     fn test_receiver_sender_timeout() {
         let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         std::thread::scope(|s| {
-            s.spawn(|| tx.add_trace_chunk(vec![empty_span_data()]));
+            let _ = s
+                .spawn(|| tx.add_trace_chunk(vec![empty_span_data()]))
+                .join();
             s.spawn(|| {
                 let (message, chunks) = rx
                     .receive(time::Duration::from_millis(1))
