@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Core components of the SDK
+
 pub mod configuration;
 pub mod constants;
 pub mod sampling;

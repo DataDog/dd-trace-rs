@@ -1,6 +1,11 @@
 # Contributing
 
-## Pull Request Naming
+Contributions are welcomed
+Pull requests for bug fixes are welcome, but before submitting new features or changes to current functionality, please open an issue and discuss your ideas or propose the changes you wish to make first. After a resolution is reached, a PR can be submitted for review.
+
+## Pull request guidelines
+
+### Naming
 
 All pull requests must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Our CI pipeline automatically checks PR titles and will fail if they don't conform to this format. Examples include
 
@@ -9,8 +14,37 @@ All pull requests must follow the [Conventional Commits](https://www.conventiona
 - `chore: update dependencies to latest versions`
 - `docs: add examples for custom span attributes`
 
+### Draft first
+
+When opening a pull request, please open it as a draft to not auto-assign reviewers before the pull request is in a reviewable state.
+
 ## Code Formatting and Linting
+
 Before submitting a pull request, ensure your code passes all formatting and linting checks that run in our CI pipeline. This helps maintain code quality and consistency across the project.
+
+### Prerequisites
+
+The following tooling is needed
+
+- Rust stable
+- Rust nightly - for clippy and rustfmt
+- Docker - for integration tests
+- Python 3.14 - for running the config generation script
+
+Make sure you have the required Rust toolchain installed:
+
+```bash
+# Install the specific nightly toolchain used for formatting
+rustup install nightly-2024-12-16
+
+# Install the minimum supported Rust version
+rustup install 1.84
+
+# Add required components
+rustup component add rustfmt --toolchain nightly-2024-12-16
+rustup component add clippy --toolchain nightly-2024-12-16
+rustup component add clippy --toolchain 1.84
+```
 
 ### Third-party Licenses
 
@@ -24,32 +58,7 @@ To update the license file:
 
 The script uses Docker to ensure the generated file matches our CI environment, avoiding platform-specific differences.
 
-### Prerequisites
-
-Make sure you have the required Rust toolchain installed:
-
-```bash
-# Install the specific nightly toolchain used for formatting
-rustup install nightly-2024-12-16
-
-# Install the minimum supported Rust version
-rustup install 1.81.0
-
-# Add required components
-rustup component add rustfmt --toolchain nightly-2024-12-16
-rustup component add clippy --toolchain nightly-2024-12-16
-rustup component add clippy --toolchain 1.81.0
-```
-
-### Running Format Checks Locally
-
-#### Rust Formatting (rustfmt)
-
-Our project uses rustfmt with a custom configuration defined in `rustfmt.toml`.
-
-#### Linting (clippy)
-
-We run clippy with strict settings that treat all warnings as errors. 
+Otherwise the GH action will generate a correct `LICENSE-3rdparty.csv` file artifact on failure, which you can download and add to your branch.
 
 ### Pre-commit Check
 
@@ -57,13 +66,12 @@ To run all the essential checks before committing:
 
 ```bash
 # Format code
-rustup run nightly-2024-12-16 cargo fmt --all
+cargo +nightly-2024-12-16  fmt --all
 
 # Run clippy on minimum supported version (most restrictive)
-rustup run 1.81.0 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo +1.81.0 clippy --locked --workspace --all-targets -- -D warnings
 
 # Build and test (including doc tests)
-cargo build --workspace --locked
 cargo test --workspace --locked --doc
 cargo test --workspace --locked
 
