@@ -26,7 +26,7 @@
 //! ### Initialization
 //!
 //! The following examples will read datadog and opentelemetry configuration from environment
-//! variables and other available sources, initialize and set up the tracer provider and the text
+//! variables and other available sources, initialize and set up the tracer provider and the
 //! distributed tracing propagators globally.
 //!
 //! #### Tracing API
