@@ -21,7 +21,7 @@
     "DD_DOGSTATSD_PORT": [
       {
         "version": "A",
-        "type": "integer",
+        "type": "int",
         "default": "8125",
         "propertyKeys": ["dogstatsd_agent_port"]
       }
@@ -30,7 +30,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": "",
+        "default": "http://localhost:8125",
         "propertyKeys": ["dogstatsd_agent_url"]
       }
     ],
@@ -77,7 +77,7 @@
     ],
     "DD_SERVICE": [
       {
-        "version": "A",
+        "version": "C",
         "type": "string",
         "default": "unnamed-rust-service",
         "propertyKeys": ["service"]
@@ -93,7 +93,7 @@
     ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
       {
-        "version": "A",
+        "version": "B",
         "type": "decimal",
         "default": "60.0",
         "propertyKeys": ["telemetry_heartbeat_interval"]
@@ -110,7 +110,7 @@
     "DD_TRACE_AGENT_PORT": [
       {
         "version": "A",
-        "type": "integer",
+        "type": "int",
         "default": "8126",
         "propertyKeys": ["trace_agent_port"]
       }
@@ -142,7 +142,7 @@
     "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS": [
       {
         "version": "A",
-        "type": "integer",
+        "type": "int",
         "default": "300",
         "propertyKeys": ["trace_partial_flushed_min_spans"]
       }
@@ -182,7 +182,7 @@
     "DD_TRACE_RATE_LIMIT": [
       {
         "version": "A",
-        "type": "integer",
+        "type": "int",
         "default": "100",
         "propertyKeys": ["trace_rate_limit"]
       }
@@ -197,7 +197,7 @@
     ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
       {
-        "version": "A",
+        "version": "B",
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["trace_stats_computation_enabled"]
@@ -206,7 +206,7 @@
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [
       {
         "version": "A",
-        "type": "integer",
+        "type": "int",
         "default": "512",
         "propertyKeys": ["datadog_tags_max_length"]
       }
