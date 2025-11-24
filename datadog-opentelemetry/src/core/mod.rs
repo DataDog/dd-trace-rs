@@ -21,6 +21,7 @@ pub mod test_utils;
 /// Macro to catch panics and return a fallback value with error logging
 /// The fallback is only evaluated if a panic occurs
 #[macro_export]
+#[doc(hidden)]
 macro_rules! catch_panic {
     ($operation:expr, $fallback:expr) => {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $operation)) {
