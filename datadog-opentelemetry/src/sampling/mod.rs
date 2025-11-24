@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Datadog sampling logic
+
 pub(crate) mod agent_service_sampler;
 pub(crate) mod constants;
 pub(crate) mod datadog_sampler;

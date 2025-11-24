@@ -151,6 +151,7 @@ pub fn print_log(
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! dd_debug {
     // debug!("a {} event", "log")
     ($($arg:tt)+) => {
@@ -159,6 +160,7 @@ macro_rules! dd_debug {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! dd_info {
   // info!("a {} event", "log")
   ($($arg:tt)+) => {
@@ -167,6 +169,7 @@ macro_rules! dd_info {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! dd_warn {
   // warn!("a {} event", "log")
   ($($arg:tt)+) => {
@@ -175,6 +178,7 @@ macro_rules! dd_warn {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! dd_error {
   // error!("a {} event", "log")
   ($($arg:tt)+) => {
@@ -183,6 +187,7 @@ macro_rules! dd_error {
 }
 
 #[macro_export]
+#[doc(hidden)]
 macro_rules! dd_log {
     ($lvl:expr, $first:expr, $($rest:tt)*) => {{
       let lvl = $lvl;
