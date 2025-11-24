@@ -35,8 +35,8 @@ To trace functions, you can either use the `opentelemetry` crate's [API](https:/
 
 ### Initialization
 
-The following exampled will read datadog and opentelemetry configuration from environment variables and other
-available sources, initialize and set up the tracer provider and the text map propagator globally.
+The following examples will read datadog and opentelemetry configuration from environment variables and other
+available sources, initialize and set up the tracer provider and the text distributed tracing propagators globally.
 
 #### Tracing API
 
@@ -112,27 +112,11 @@ For advanced usage and configuration information, check out the [library documen
 DD_SERVICE=my_service DD_ENV=prod cargo run
 ```
 
-Or to pass options to the OpenTelemetry SDK TracerProviderBuilder
+This API call also be used to pass options to the OpenTelemetry SDK TracerProviderBuilder
+
 ```rust
-# #[derive(Debug)]
-# struct MySpanProcessor;
-#
-# impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor {
-#     fn on_start(&self, span: &mut opentelemetry_sdk::trace::Span, cx: &opentelemetry::Context) {
-#     }
-#     fn on_end(&self, span: opentelemetry_sdk::trace::SpanData) {}
-#     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-#         Ok(())
-#     }
-#     fn shutdown_with_timeout(
-#         &self,
-#         timeout: std::time::Duration,
-#     ) -> opentelemetry_sdk::error::OTelSdkResult {
-#         Ok(())
-#     }
-#     fn set_resource(&mut self, _resource: &opentelemetry_sdk::Resource) {}
-# }
-#
+impl opentelemetry_sdk::trace::SpanProcessor for MySpanProcessor { ... }
+
 // Custom otel tracer sdk options
 datadog_opentelemetry::tracing()
     .with_max_attributes_per_span(64)

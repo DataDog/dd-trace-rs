@@ -25,9 +25,9 @@
 //!
 //! ### Initialization
 //!
-//! The following exampled will read datadog and opentelemetry configuration from environment
+//! The following examples will read datadog and opentelemetry configuration from environment
 //! variables and other available sources, initialize and set up the tracer provider and the text
-//! map propagator globally.
+//! distributed tracing propagators globally.
 //!
 //! #### Tracing API
 //!
@@ -340,6 +340,7 @@ pub fn tracing() -> DatadogTracingBuilder {
 }
 
 #[deprecated(note = "Use `datadog_opentelemetry::tracing()` instead")]
+#[doc(hidden)]
 // TODO: update system tests to use the new API and remove this function
 pub fn init_datadog(
     config: Config,

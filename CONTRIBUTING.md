@@ -69,7 +69,7 @@ To run all the essential checks before committing:
 cargo +nightly-2024-12-16  fmt --all
 
 # Run clippy on minimum supported version (most restrictive)
-cargo +1.81.0 clippy --locked --workspace --all-targets -- -D warnings
+cargo +1.84 clippy --locked --workspace --all-targets -- -D warnings
 
 # Build and test (including doc tests)
 cargo test --workspace --locked --doc
