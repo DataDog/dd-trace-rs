@@ -14,9 +14,9 @@ use super::{
 
 use crate::{
     core::{
+        configuration::Config,
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::{SamplingMechanism, SamplingPriority},
-        Config,
     },
     dd_debug, dd_error, dd_warn,
 };

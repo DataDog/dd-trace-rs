@@ -17,6 +17,7 @@ pub trait Extractor {
     fn get(&self, key: &str) -> Option<&str>;
 
     /// Get all keys from the carrier.
+    #[allow(unused)]
     fn keys(&self) -> Vec<&str>;
 }
 

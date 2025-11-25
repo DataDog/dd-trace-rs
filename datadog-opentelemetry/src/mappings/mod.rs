@@ -22,8 +22,4 @@ pub use transform::{
 };
 
 #[cfg(feature = "test-utils")]
-pub use transform::transform_tests;
-
-// Exposed for testing in the sampler
-pub use transform::semconv;
-pub use transform::semconv_shim;
+pub use transform::{semconv_shim, transform_tests};

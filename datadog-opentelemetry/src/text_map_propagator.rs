@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     catch_panic,
-    core::{sampling::priority, Config},
+    core::{configuration::Config, sampling::priority},
     propagation::{
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
         DatadogCompositePropagator,
@@ -239,7 +239,10 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
-    use crate::core::{configuration::TracePropagationStyle, sampling::SamplingDecision, Config};
+    use crate::core::{
+        configuration::{Config, TracePropagationStyle},
+        sampling::SamplingDecision,
+    };
     use assert_unordered::assert_eq_unordered;
     use opentelemetry::{
         propagation::{Extractor, TextMapPropagator},

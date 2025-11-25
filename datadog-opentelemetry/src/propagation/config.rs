@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::{configuration::TracePropagationStyle, Config};
+use crate::configuration::{Config, TracePropagationStyle};
 
 pub fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
     if let Some(extractors) = config.trace_propagation_style_extract() {

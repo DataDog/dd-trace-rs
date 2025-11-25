@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use datadog_opentelemetry::core::{log::LevelFilter, Config};
+use datadog_opentelemetry::{configuration::Config, log::LevelFilter};
 use opentelemetry::{
     trace::{TraceContextExt, TracerProvider},
     Context,

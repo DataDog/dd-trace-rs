@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use datadog_opentelemetry::core::{
-    configuration::TracePropagationStyle,
-    test_utils::benchmarks::{memory_allocated_measurement, MeasurementName, ReportingAllocator},
-    Config,
+use datadog_opentelemetry::configuration::{Config, TracePropagationStyle};
+use datadog_opentelemetry::core::test_utils::benchmarks::{
+    memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
+
 use datadog_opentelemetry::propagation::{carrier::Extractor, DatadogCompositePropagator};
 use std::{collections::HashMap, sync::Arc};
 

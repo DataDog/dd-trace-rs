@@ -9,7 +9,7 @@ use std::{
 };
 
 use datadog_opentelemetry::{
-    core::{Config, ConfigBuilder},
+    configuration::{Config, ConfigBuilder},
     make_test_tracer,
 };
 use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
@@ -25,7 +25,7 @@ pub async fn with_test_agent_session(
     f: impl FnOnce(&mut DatadogTestAgent, SdkTracerProvider, Box<dyn TextMapPropagator>, Arc<Config>),
 ) {
     let mut test_agent = make_test_agent(session_name).await;
-    cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string().into());
+    cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string());
     let cfg = Arc::new(cfg.build());
     let (tracer_provider, propagator) = make_test_tracer(cfg.clone());
     f(

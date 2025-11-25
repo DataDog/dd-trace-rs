@@ -1,12 +1,12 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::core::configuration::SamplingRuleConfig;
 use crate::core::constants::{
     RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
     SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
 use crate::core::sampling::{mechanism, SamplingMechanism, SamplingPriority};
-use crate::core::SamplingRuleConfig;
 
 /// Type alias for sampling rules update callback
 /// Consolidated callback type used across crates for remote config sampling updates
@@ -534,18 +534,19 @@ impl DdSamplingResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mappings::semconv::attribute::{DB_SYSTEM_NAME, MESSAGING_OPERATION_TYPE};
-    use crate::mappings::semconv::trace::HTTP_RESPONSE_STATUS_CODE;
-    use crate::mappings::semconv::{
-        attribute::{HTTP_REQUEST_METHOD, MESSAGING_SYSTEM},
-        trace::NETWORK_PROTOCOL_NAME,
+    use crate::sampling::constants::{
+        attr::{ENV_TAG, RESOURCE_TAG},
+        pattern,
     };
-    use crate::sampling::constants::attr::{ENV_TAG, RESOURCE_TAG};
-    use crate::sampling::constants::pattern;
-    use opentelemetry::trace::SpanKind;
-    use opentelemetry::{Key, KeyValue, Value};
+    use opentelemetry::{trace::SpanKind, Key, KeyValue, Value};
     use opentelemetry_sdk::Resource as SdkResource;
-    use opentelemetry_semantic_conventions as semconv;
+    use opentelemetry_semantic_conventions::{
+        attribute::{
+            DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
+        },
+        resource::SERVICE_NAME,
+        trace::{HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME},
+    };
 
     fn create_empty_resource() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder_empty().build()
@@ -560,7 +561,7 @@ mod tests {
 
     fn create_resource(res: String) -> Arc<RwLock<SdkResource>> {
         let attributes = vec![
-            KeyValue::new(semconv::resource::SERVICE_NAME, res), // String `res` is Into<Value>
+            KeyValue::new(SERVICE_NAME, res), // String `res` is Into<Value>
         ];
         let resource: SdkResource = SdkResource::builder_empty()
             .with_attributes(attributes)
@@ -1727,10 +1728,7 @@ mod tests {
         // Create a resource with a service name that will match our test rule
         let test_resource = Arc::new(RwLock::new(
             opentelemetry_sdk::Resource::builder_empty()
-                .with_attributes(vec![KeyValue::new(
-                    semconv::resource::SERVICE_NAME,
-                    "web-frontend",
-                )])
+                .with_attributes(vec![KeyValue::new(SERVICE_NAME, "web-frontend")])
                 .build(),
         ));
 

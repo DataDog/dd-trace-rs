@@ -11,14 +11,16 @@ use std::{
 
 use crate::{
     core::{
-        configuration::remote_config::{
-            RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
+        configuration::{
+            remote_config::{
+                RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
+            },
+            Config,
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
         telemetry::init_telemetry,
         utils::WorkerError,
-        Config,
     },
     create_dd_resource, dd_debug, dd_error,
     span_exporter::DatadogExporter,
@@ -664,8 +666,8 @@ mod tests {
     };
 
     use crate::core::{
+        configuration::Config,
         sampling::{mechanism, priority, SamplingDecision},
-        Config,
     };
     use opentelemetry::{
         trace::{SpanContext, TraceFlags},

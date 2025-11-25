@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Logging level
+
 use std::{
     fmt::{self, Display},
     mem,
@@ -14,7 +16,7 @@ pub(crate) fn set_max_level(lvl: LevelFilter) {
     MAX_LOG_LEVEL.store(lvl as usize, Ordering::Relaxed)
 }
 
-pub fn max_level() -> LevelFilter {
+pub(crate) fn max_level() -> LevelFilter {
     unsafe { mem::transmute(MAX_LOG_LEVEL.load(Ordering::Relaxed)) }
 }
 
@@ -67,9 +69,10 @@ impl Display for LevelFilter {
 
 #[repr(usize)]
 #[derive(Copy, Debug, Hash)]
-pub enum Level {
+pub(crate) enum Level {
     Error = 1, // this value must match with LogLevelFilter::Error
     Warn,
+    #[allow(dead_code)]
     Info,
     Debug,
 }
@@ -128,7 +131,7 @@ impl PartialOrd<LevelFilter> for Level {
     }
 }
 
-pub fn print_log(
+pub(crate) fn print_log(
     lvl: super::log::Level,
     log: fmt::Arguments,
     file: &str,

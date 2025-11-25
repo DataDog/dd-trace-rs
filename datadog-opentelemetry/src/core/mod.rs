@@ -6,14 +6,12 @@
 pub mod configuration;
 pub mod constants;
 pub mod sampling;
-pub use configuration::{Config, ConfigBuilder, RemoteConfigUpdate, SamplingRuleConfig};
 
 mod error;
-pub use error::{Error, Result};
 
 pub mod log;
-pub mod telemetry;
-pub mod utils;
+pub(crate) mod telemetry;
+pub(crate) mod utils;
 
 #[cfg(feature = "test-utils")]
 pub mod test_utils;

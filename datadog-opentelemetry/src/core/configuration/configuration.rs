@@ -752,7 +752,7 @@ impl_config_value_provider!(option: String);
 ///
 /// # Usage
 /// ```
-/// use datadog_opentelemetry::core::Config;
+/// use datadog_opentelemetry::configuration::Config;
 ///
 ///
 /// let config = Config::builder() // This pulls configuration from the environment and other sources
@@ -1038,7 +1038,7 @@ impl Config {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
 
-    pub fn get_telemetry_configuration(&self) -> Vec<&dyn ConfigurationProvider> {
+    pub(crate) fn get_telemetry_configuration(&self) -> Vec<&dyn ConfigurationProvider> {
         vec![
             &self.service,
             &self.env,
@@ -1196,7 +1196,7 @@ impl Config {
         *self.trace_propagation_extract_first.value()
     }
 
-    pub fn update_sampling_rules_from_remote(
+    pub(crate) fn update_sampling_rules_from_remote(
         &self,
         rules_json: &str,
         config_id: Option<String>,
@@ -1226,7 +1226,7 @@ impl Config {
         Ok(())
     }
 
-    pub fn update_service_name(&self, service_name: Option<String>) {
+    pub(crate) fn update_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
                 ServiceName::Configured(service_name),
@@ -1235,7 +1235,7 @@ impl Config {
         }
     }
 
-    pub fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
+    pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
         self.trace_sampling_rules.unset_override_value();
         self.trace_sampling_rules.set_config_id(config_id);
 
@@ -1252,22 +1252,7 @@ impl Config {
     /// # Arguments
     /// * `callback` - The function to call when sampling rules are updated (receives
     ///   RemoteConfigUpdate enum)
-    ///
-    /// # Example
-    /// ```
-    /// use datadog_opentelemetry::core::{configuration::RemoteConfigUpdate, Config};
-    ///
-    /// let config = Config::builder().build();
-    /// config.set_sampling_rules_callback(|update| {
-    ///     match update {
-    ///         RemoteConfigUpdate::SamplingRules(rules) => {
-    ///             println!("Received {} new sampling rules", rules.len());
-    ///             // Update your sampler here
-    ///         }
-    ///     }
-    /// });
-    /// ```
-    pub fn set_sampling_rules_callback<F>(&self, callback: F)
+    pub(crate) fn set_sampling_rules_callback<F>(&self, callback: F)
     where
         F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
     {
@@ -1279,7 +1264,7 @@ impl Config {
 
     /// Add an extra service discovered at runtime
     /// This is used for remote configuration
-    pub fn add_extra_service(&self, service_name: &str) {
+    pub(crate) fn add_extra_service(&self, service_name: &str) {
         if !self.remote_config_enabled() {
             return;
         }
@@ -1288,7 +1273,7 @@ impl Config {
     }
 
     /// Get all extra services discovered at runtime
-    pub fn get_extra_services(&self) -> Vec<String> {
+    pub(crate) fn get_extra_services(&self) -> Vec<String> {
         if !self.remote_config_enabled() {
             return Vec::new();
         }
@@ -1540,7 +1525,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_agent_host(&mut self, host: Cow<'static, str>) -> &mut Self {
+    pub fn set_agent_host(&mut self, host: String) -> &mut Self {
         self.config
             .agent_host
             .set_code(Cow::Owned(host.to_string()));
@@ -1552,14 +1537,14 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn set_trace_agent_url(&mut self, url: Cow<'static, str>) -> &mut Self {
+    pub fn set_trace_agent_url(&mut self, url: String) -> &mut Self {
         self.config
             .trace_agent_url
             .set_code(Cow::Owned(url.to_string()));
         self
     }
 
-    pub fn set_dogstatsd_agent_host(&mut self, host: Cow<'static, str>) -> &mut Self {
+    pub fn set_dogstatsd_agent_host(&mut self, host: String) -> &mut Self {
         self.config
             .dogstatsd_agent_host
             .set_code(Cow::Owned(host.to_string()));

@@ -502,7 +502,10 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::core::{configuration::TracePropagationStyle, sampling::priority, Config};
+    use crate::core::{
+        configuration::{Config, TracePropagationStyle},
+        sampling::priority,
+    };
 
     use crate::propagation::{
         context::{span_context_to_inject, InjectTraceState},

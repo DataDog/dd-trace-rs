@@ -1,8 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-pub type Result<T> = std::result::Result<T, Error>;
-
 #[repr(transparent)]
 pub struct Error {
     inner: anyhow::Error,
