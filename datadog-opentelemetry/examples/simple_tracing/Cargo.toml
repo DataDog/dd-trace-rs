@@ -14,4 +14,3 @@ bench = false
 [dependencies]
 datadog-opentelemetry = { path = "../../../datadog-opentelemetry" }
 opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }

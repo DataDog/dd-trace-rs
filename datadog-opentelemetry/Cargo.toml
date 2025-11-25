@@ -13,7 +13,6 @@ authors.workspace = true
 
 # External dependencies
 foldhash = { workspace = true }
-futures = { workspace = true }
 hashbrown = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true }
@@ -23,7 +22,6 @@ serde_json = { workspace = true }
 
 # sampling
 lru = "0.12"
-regex = "1.10.3"
 serde = { workspace = true, features = ["derive"] }
 
 # propagation
