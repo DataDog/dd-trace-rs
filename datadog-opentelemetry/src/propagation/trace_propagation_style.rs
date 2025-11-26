@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::{configuration::TracePropagationStyle, Config};
+use crate::core::configuration::{Config, TracePropagationStyle};
 use serde::{Deserialize, Deserializer};
 
 use super::{
@@ -39,6 +39,7 @@ impl Propagator for TracePropagationStyle {
 }
 
 #[allow(clippy::module_name_repetitions)]
+#[allow(unused)]
 pub fn deserialize_trace_propagation_style<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<TracePropagationStyle>>, D::Error>

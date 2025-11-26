@@ -8,7 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{core::Config, dd_debug, dd_error, ddtrace_transform, mappings::CachedConfig};
+use crate::{
+    core::configuration::Config, dd_debug, dd_error, ddtrace_transform, mappings::CachedConfig,
+};
 use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse,
     error::{self as trace_exporter_error, TraceExporterError},
@@ -753,7 +755,7 @@ mod tests {
     use opentelemetry_sdk::trace::{SpanData, SpanEvents, SpanLinks};
 
     use crate::{
-        core::Config,
+        configuration::Config,
         span_exporter::{BatchFullError, SenderError},
     };
 

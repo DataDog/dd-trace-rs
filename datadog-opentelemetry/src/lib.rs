@@ -85,7 +85,8 @@
 //! * Programmatically
 //!
 //! ```rust
-//! let config = datadog_opentelemetry::core::Config::builder()
+//! use datadog_opentelemetry::configuration::Config;
+//! let config = datadog_opentelemetry::configuration::Config::builder()
 //!     .set_service("my_service".to_string())
 //!     .set_env("prod".to_string())
 //!     .build();
@@ -140,10 +141,27 @@
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
 //!   version: 0.32
 
+// Public re-exports
+pub use core::configuration;
+pub use core::log;
+
+#[cfg(feature = "test-utils")]
 pub mod core;
+#[cfg(feature = "test-utils")]
 pub mod mappings;
+#[cfg(feature = "test-utils")]
 pub mod propagation;
-mod sampling;
+#[cfg(feature = "test-utils")]
+pub mod sampling;
+
+#[cfg(not(feature = "test-utils"))]
+pub(crate) mod core;
+#[cfg(not(feature = "test-utils"))]
+pub(crate) mod mappings;
+#[cfg(not(feature = "test-utils"))]
+pub(crate) mod propagation;
+#[cfg(not(feature = "test-utils"))]
+pub(crate) mod sampling;
 
 mod ddtrace_transform;
 mod sampler;
@@ -155,15 +173,16 @@ mod trace_id;
 
 use std::sync::{Arc, RwLock};
 
-use core::configuration::RemoteConfigUpdate;
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
-use sampler::Sampler;
-use span_processor::{DatadogSpanProcessor, TraceRegistry};
-use text_map_propagator::DatadogPropagator;
 
-use crate::core::Config;
+use crate::{
+    core::configuration::{Config, RemoteConfigUpdate},
+    sampler::Sampler,
+    span_processor::{DatadogSpanProcessor, TraceRegistry},
+    text_map_propagator::DatadogPropagator,
+};
 
 pub struct DatadogTracingBuilder {
     config: Option<Config>,
@@ -294,7 +313,7 @@ impl DatadogTracingBuilder {
 /// // Custom datadog configuration
 /// datadog_opentelemetry::tracing()
 ///     .with_config(
-///         datadog_opentelemetry::core::Config::builder()
+///         datadog_opentelemetry::configuration::Config::builder()
 ///             .set_service("my_service".to_string())
 ///             .set_env("my_env".to_string())
 ///             .set_version("1.0.0".to_string())
@@ -337,22 +356,6 @@ pub fn tracing() -> DatadogTracingBuilder {
         tracer_provider: opentelemetry_sdk::trace::SdkTracerProvider::builder(),
         resource: None,
     }
-}
-
-#[deprecated(note = "Use `datadog_opentelemetry::tracing()` instead")]
-#[doc(hidden)]
-// TODO: update system tests to use the new API and remove this function
-pub fn init_datadog(
-    config: Config,
-    tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
-    resource: Option<Resource>,
-) -> SdkTracerProvider {
-    DatadogTracingBuilder {
-        config: Some(config),
-        tracer_provider: tracer_provider_builder,
-        resource,
-    }
-    .init()
 }
 
 /// Create an instance of the tracer provider

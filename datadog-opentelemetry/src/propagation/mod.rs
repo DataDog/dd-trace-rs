@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
-    core::{configuration::TracePropagationStyle, Config},
+    core::configuration::{Config, TracePropagationStyle},
     dd_debug,
     propagation::context::{InjectSpanContext, SpanContext, SpanLink},
 };

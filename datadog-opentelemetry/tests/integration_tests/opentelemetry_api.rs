@@ -3,9 +3,8 @@
 
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use datadog_opentelemetry::core::configuration::{SamplingRuleConfig, TracePropagationStyle};
-use datadog_opentelemetry::core::log::LevelFilter;
-use datadog_opentelemetry::core::Config;
+use datadog_opentelemetry::configuration::{Config, SamplingRuleConfig, TracePropagationStyle};
+use datadog_opentelemetry::log::LevelFilter;
 use datadog_opentelemetry::make_test_tracer;
 use opentelemetry::global::ObjectSafeSpan;
 use opentelemetry::trace::{
@@ -211,7 +210,7 @@ async fn test_remote_config_sampling_rates() {
         .await;
 
     let config = Config::builder()
-        .set_trace_agent_url(test_agent.get_base_uri().await.to_string().into())
+        .set_trace_agent_url(test_agent.get_base_uri().await.to_string())
         .set_trace_sampling_rules(vec![SamplingRuleConfig {
             resource: Some("test-span".into()),
             sample_rate: 0.0,

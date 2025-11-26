@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::Config;
+use crate::core::configuration::Config;
 
 pub const VERSION_KEY: &str = "version";
 

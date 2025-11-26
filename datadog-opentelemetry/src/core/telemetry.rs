@@ -15,7 +15,7 @@ use libdd_telemetry::{
     worker::{self, TelemetryWorkerHandle},
 };
 
-use super::{configuration::ConfigurationProvider, Config};
+use super::configuration::{Config, ConfigurationProvider};
 use crate::{dd_debug, dd_error, dd_warn};
 
 static TELEMETRY: TelemetryCell = OnceLock::new();
@@ -236,6 +236,7 @@ fn make_telemetry_worker(
     }
 }
 
+#[allow(dead_code)]
 pub fn stop_telemetry() {
     stop_telemetry_inner(&TELEMETRY);
 }
@@ -262,6 +263,7 @@ fn add_points_inner(
     });
 }
 
+#[allow(dead_code)]
 pub fn add_point(value: f64, metric: TelemetryMetric) {
     add_point_inner(value, metric, &TELEMETRY)
 }
@@ -304,7 +306,7 @@ fn notify_configuration_update_inner(
         {
             dd_warn!("Telemetry: error sending configuration item {err}");
         } else {
-            dd_debug!("Telemetry: configuration update sent sucessfully");
+            dd_debug!("Telemetry: configuration update sent successfully");
         }
     });
 }
@@ -316,12 +318,11 @@ mod tests {
 
     use crate::{
         core::{
-            configuration::ConfigurationProvider,
+            configuration::{Config, ConfigurationProvider},
             telemetry::{
                 add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
                 TelemetryHandle, TelemetryMetric, TELEMETRY,
             },
-            Config,
         },
         dd_debug, dd_error, dd_warn,
     };
@@ -511,7 +512,7 @@ mod tests {
             "This is an error".to_string(),
             "This is an error with {config:?}".to_string(),
             "This is an error with {:?}".to_string(),
-            "This is an error with mutiple {} {}".to_string(),
+            "This is an error with multiple {} {}".to_string(),
         ];
 
         dd_debug!("This is a debug");
@@ -520,7 +521,7 @@ mod tests {
         dd_error!("This is an error with {config:?}");
         dd_error!("This is an error with {:?}", config);
         dd_error!(
-            "This is an error with mutiple {} {}",
+            "This is an error with multiple {} {}",
             "detail 1",
             "detail 2"
         );

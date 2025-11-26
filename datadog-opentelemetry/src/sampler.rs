@@ -6,7 +6,10 @@ use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    core::{constants::SAMPLING_DECISION_MAKER_TAG_KEY, sampling::SamplingDecision, Config},
+    core::{
+        configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY,
+        sampling::SamplingDecision,
+    },
     sampling::{DatadogSampler, SamplingRule, SamplingRulesCallback},
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},

@@ -93,7 +93,7 @@ Configuration can be passed either:
 * Programmatically
 
 ```rust
-let config = datadog_opentelemetry::core::Config::builder()
+let config = datadog_opentelemetry::configuration::Config::builder()
     .set_service("my_service".to_string())
     .set_env("prod".to_string())
     .build();
