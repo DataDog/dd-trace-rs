@@ -130,10 +130,11 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@fe54df1ab9bb126ffb337b72bb9a2793d2466bf5  # main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@8a65f66d74ca77f34e7e5a2f737e963ce9cec563  # main
     secrets: inherit
     with:
       library: rust
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
+      ref: 8a65f66d74ca77f34e7e5a2f737e963ce9cec563 # main
