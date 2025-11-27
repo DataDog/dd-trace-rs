@@ -1509,7 +1509,8 @@ impl ConfigBuilder {
         self
     }
 
-    /// A list of default tags to be added to every span, in `(key, value)` format
+    /// A list of default tags to be added to every span, in `(key, value)` format. Example:
+    /// `[(layer, api), (team, intake)]`.
     ///
     /// **Default**: `(none)`
     ///
@@ -1519,8 +1520,8 @@ impl ConfigBuilder {
         self
     }
 
-    /// Add a tags to be added to every span, in `key:value` format, separated by commas. Example:
-    /// `layer:api,team:intake`.
+    /// Add a tag to be added to every span, in `(key, value)` format.
+    /// Example: `(layer, api)`.
     pub fn add_global_tag(&mut self, tag: (String, String)) -> &mut Self {
         let mut current_tags = self.config.global_tags.value().clone();
         current_tags.push(tag);
