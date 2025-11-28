@@ -94,6 +94,9 @@ jobs:
           if [ "${{ runner.os }}" == "Windows" ]; then
             ACTUAL_CHECKSUM=$(sha256sum datadog-ci.exe | cut -d' ' -f1)
             chmod +x datadog-ci.exe
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            ACTUAL_CHECKSUM=$(shasum -a 256 datadog-ci | cut -d' ' -f1)
+            chmod +x datadog-ci
           else
             ACTUAL_CHECKSUM=$(sha256sum datadog-ci | cut -d' ' -f1)
             chmod +x datadog-ci
