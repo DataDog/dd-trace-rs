@@ -75,54 +75,45 @@ jobs:
           report_paths: "target/nextest/ci/junit.xml"
           check_name: "[${{ matrix.platform }}:${{ matrix.rust_version }}] test report"
           include_passed: true
-      - name: Download datadog-ci binary
-        if: success() || failure()
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" == "Linux" ]; then
-            curl -L --fail --retry 3 -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_linux-x64
-            EXPECTED_CHECKSUM="3e1e9649d15d3feacced89ec90de66151046a58c7844217e4112362ad8dbf8d1"
-          elif [ "${{ runner.os }}" == "Windows" ]; then
-            curl -L --fail --retry 3 --output datadog-ci.exe https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_win-x64
-            EXPECTED_CHECKSUM="13313279cb884fe098e2f80ca21d23e67b78a090a12e891e8e35be653ee2bbd0"
-          elif [ "${{ runner.os }}" == "macOS" ]; then
-            curl -L --fail --retry 3 -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_darwin-x64
-            EXPECTED_CHECKSUM="071a6140b17438b3f9dd6c65da48b48ea03fc310034fa624ce874fdb6c325da4"
-          fi
-          
-          # Verify checksum
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            ACTUAL_CHECKSUM=$(sha256sum datadog-ci.exe | cut -d' ' -f1)
-            chmod +x datadog-ci.exe
-          elif [ "${{ runner.os }}" == "macOS" ]; then
-            ACTUAL_CHECKSUM=$(shasum -a 256 datadog-ci | cut -d' ' -f1)
-            chmod +x datadog-ci
-          else
-            ACTUAL_CHECKSUM=$(sha256sum datadog-ci | cut -d' ' -f1)
-            chmod +x datadog-ci
-          fi
-          
-          if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
-            echo "Checksum verification failed!"
-            echo "Expected: $EXPECTED_CHECKSUM"
-            echo "Actual: $ACTUAL_CHECKSUM"
-            exit 1
-          fi
-          echo "Checksum verification passed"
-      
       - name: Upload test results to Datadog
         if: success() || failure()
         shell: bash
         run: |
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            DATADOG_CI="./datadog-ci.exe"
-            chmod +x datadog-ci.exe
-          else
-            DATADOG_CI="./datadog-ci"
-            chmod +x datadog-ci
+          # Download datadog-ci binary
+          if [ "${{ runner.os }}" == "Linux" ]; then
+            URL="https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_linux-x64"
+            OUTPUT="datadog-ci"
+            CHECKSUM_CMD="sha256sum"
+            EXPECTED_CHECKSUM="3e1e9649d15d3feacced89ec90de66151046a58c7844217e4112362ad8dbf8d1"
+          elif [ "${{ runner.os }}" == "Windows" ]; then
+            URL="https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_win-x64"
+            OUTPUT="datadog-ci.exe"
+            CHECKSUM_CMD="sha256sum"
+            EXPECTED_CHECKSUM="13313279cb884fe098e2f80ca21d23e67b78a090a12e891e8e35be653ee2bbd0"
+          elif [ "${{ runner.os }}" == "macOS" ]; then
+            URL="https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_darwin-x64"
+            OUTPUT="datadog-ci"
+            CHECKSUM_CMD="shasum -a 256"
+            EXPECTED_CHECKSUM="071a6140b17438b3f9dd6c65da48b48ea03fc310034fa624ce874fdb6c325da4"
           fi
           
-          $DATADOG_CI junit upload \
+          echo "Downloading datadog-ci from $URL"
+          curl -L --fail --retry 3 -o "$OUTPUT" "$URL"
+          chmod +x "$OUTPUT"
+          
+          # Verify checksum
+          ACTUAL_CHECKSUM=$($CHECKSUM_CMD "$OUTPUT" | cut -d' ' -f1)
+          echo "Expected checksum: $EXPECTED_CHECKSUM"
+          echo "Actual checksum: $ACTUAL_CHECKSUM"
+          
+          if [ "$ACTUAL_CHECKSUM" != "$EXPECTED_CHECKSUM" ]; then
+            echo "Checksum verification failed!"
+            exit 1
+          fi
+          echo "Checksum verification passed"
+          
+          # Upload test results
+          ./"$OUTPUT" junit upload \
             --service dd-trace-rs \
             --env ci \
             --tags rustc:${{ matrix.rust_version }},arch:${{ runner.arch }},os:${{ runner.os }},platform:${{ matrix.platform }} \
