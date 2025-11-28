@@ -27,8 +27,6 @@ libdd-data-pipeline = { version = "1.0.0", default-features = false }
 libdd-trace-utils = { version = "1.0.0", default-features = false }
 libdd-telemetry = { version = "1.0.0", default-features = false }
 libdd-common = { version = "1.0.0", default-features = false }
-
-futures = "0.3.31"
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
 ], default-features = false }

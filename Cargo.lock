@@ -471,7 +471,6 @@ dependencies = [
  "criterion",
  "datadog-opentelemetry",
  "foldhash",
- "futures",
  "hashbrown 0.15.5",
  "http-body-util",
  "hyper",
@@ -486,7 +485,6 @@ dependencies = [
  "opentelemetry_sdk",
  "pretty_assertions",
  "rand 0.8.5",
- "regex",
  "rustc_version_runtime",
  "serde",
  "serde_json",
@@ -1657,7 +1655,6 @@ dependencies = [
  "opentelemetry-stdout",
  "opentelemetry_sdk",
  "tokio",
- "tokio-stream",
  "tracing",
  "tracing-core",
  "tracing-subscriber",
@@ -2035,7 +2032,6 @@ version = "0.2.0"
 dependencies = [
  "datadog-opentelemetry",
  "opentelemetry",
- "opentelemetry_sdk",
 ]
 
 [[package]]
@@ -2238,17 +2234,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
 ]
 
 [[package]]
