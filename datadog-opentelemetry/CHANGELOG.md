@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (Nov 27, 2025)
+## 0.2.0 (Dec 01, 2025)
 
 - Remove private APIs from public exports
 - Remove deprecated API to instantiate the SDK
