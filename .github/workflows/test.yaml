@@ -80,13 +80,13 @@ jobs:
         shell: bash
         run: |
           if [ "${{ runner.os }}" == "Linux" ]; then
-            curl -L -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_linux-x64
+            curl -L --fail --retry 3 -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_linux-x64
             EXPECTED_CHECKSUM="3e1e9649d15d3feacced89ec90de66151046a58c7844217e4112362ad8dbf8d1"
           elif [ "${{ runner.os }}" == "Windows" ]; then
-            curl -L -o datadog-ci.exe https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_win-x64.exe
+            curl -L --fail --retry 3 --output datadog-ci.exe https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_win-x64
             EXPECTED_CHECKSUM="13313279cb884fe098e2f80ca21d23e67b78a090a12e891e8e35be653ee2bbd0"
           elif [ "${{ runner.os }}" == "macOS" ]; then
-            curl -L -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_darwin-x64
+            curl -L --fail --retry 3 -o datadog-ci https://github.com/DataDog/datadog-ci/releases/download/v4.2.2/datadog-ci_darwin-x64
             EXPECTED_CHECKSUM="071a6140b17438b3f9dd6c65da48b48ea03fc310034fa624ce874fdb6c325da4"
           fi
           
@@ -113,8 +113,10 @@ jobs:
         run: |
           if [ "${{ runner.os }}" == "Windows" ]; then
             DATADOG_CI="./datadog-ci.exe"
+            chmod +x datadog-ci.exe
           else
             DATADOG_CI="./datadog-ci"
+            chmod +x datadog-ci
           fi
           
           $DATADOG_CI junit upload \
