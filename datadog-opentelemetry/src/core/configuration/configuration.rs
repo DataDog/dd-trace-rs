@@ -1477,6 +1477,11 @@ impl ConfigBuilder {
         config
     }
 
+    /// Sets the service name for your application
+    ///
+    /// **Default**: `unnamed-rust-service`
+    ///
+    /// Env variable: `DD_SERVICE`
     pub fn set_service(&mut self, service: String) -> &mut Self {
         self.config
             .service
@@ -1484,21 +1489,39 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the application's environment, for example: `prod`, `staging`.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_ENV`
     pub fn set_env(&mut self, env: String) -> &mut Self {
         self.config.env.set_code(Some(env));
         self
     }
 
+    /// Set the application's version, for example: `1.2.3` or `6c44da20`.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_VERSION`
     pub fn set_version(&mut self, version: String) -> &mut Self {
         self.config.version.set_code(Some(version));
         self
     }
 
+    /// A list of default tags to be added to every span, in `(key, value)` format. Example:
+    /// `[(layer, api), (team, intake)]`.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_TAGS`
     pub fn set_global_tags(&mut self, tags: Vec<(String, String)>) -> &mut Self {
         self.config.global_tags.set_code(tags);
         self
     }
 
+    /// Add a tag to be added to every span, in `(key, value)` format.
+    /// Example: `(layer, api)`.
     pub fn add_global_tag(&mut self, tag: (String, String)) -> &mut Self {
         let mut current_tags = self.config.global_tags.value().clone();
         current_tags.push(tag);
@@ -1506,11 +1529,21 @@ impl ConfigBuilder {
         self
     }
 
+    /// Enable or disable telemetry data collection and sending.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_INSTRUMENTATION_TELEMETRY_ENABLED`
     pub fn set_telemetry_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.telemetry_enabled.set_code(enabled);
         self
     }
 
+    /// Enable or disable log collection for telemetry.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TELEMETRY_LOG_COLLECTION_ENABLED`
     pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config
             .telemetry_log_collection_enabled
@@ -1518,6 +1551,11 @@ impl ConfigBuilder {
         self
     }
 
+    /// Interval in seconds for sending telemetry heartbeat messages.
+    ///
+    ///  **Default**: `60.0`
+    ///
+    /// Env variable: `DD_TELEMETRY_HEARTBEAT_INTERVAL`
     pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
         self.config
             .telemetry_heartbeat_interval
@@ -1525,6 +1563,11 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the hostname of the Datadog Agent.
+    ///
+    ///  **Default**: `localhost`
+    ///
+    /// Env variable: `DD_AGENT_HOST`
     pub fn set_agent_host(&mut self, host: String) -> &mut Self {
         self.config
             .agent_host
@@ -1532,11 +1575,22 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the port of the Datadog Agent for trace collection.
+    ///
+    ///  **Default**: `8126`
+    ///
+    /// Env variable: `DD_TRACE_AGENT_PORT`
     pub fn set_trace_agent_port(&mut self, port: u32) -> &mut Self {
         self.config.trace_agent_port.set_code(port);
         self
     }
 
+    /// Sets the URL of the Datadog Agent. This takes precedence over `DD_AGENT_HOST` and
+    /// `DD_TRACE_AGENT_PORT`.
+    ///
+    ///  **Default**: `http://localhost:8126`
+    ///
+    /// Env variable: `DD_TRACE_AGENT_URL`
     pub fn set_trace_agent_url(&mut self, url: String) -> &mut Self {
         self.config
             .trace_agent_url
@@ -1544,6 +1598,11 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the hostname for DogStatsD metric collection.
+    ///
+    /// **Default**: `localhost`
+    ///
+    /// Env variable: `DD_DOGSTATSD_HOST`
     pub fn set_dogstatsd_agent_host(&mut self, host: String) -> &mut Self {
         self.config
             .dogstatsd_agent_host
@@ -1551,16 +1610,31 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the port for DogStatsD metric collection.
+    ///
+    /// **Default**: `8125`
+    ///
+    /// Env variable: `DD_DOGSTATSD_PORT`
     pub fn set_dogstatsd_agent_port(&mut self, port: u32) -> &mut Self {
         self.config.dogstatsd_agent_port.set_code(port);
         self
     }
 
+    /// Enable partial flushing of traces.
+    ///
+    /// **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_PARTIAL_FLUSH_ENABLED`
     pub fn set_trace_partial_flush_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.trace_partial_flush_enabled.set_code(enabled);
         self
     }
 
+    /// Minimum number of spans in a trace before partial flush is triggered.
+    ///
+    /// **Default**: `300`
+    ///
+    /// Env variable: `DD_TRACE_PARTIAL_FLUSH_MIN_SPANS`
     pub fn set_trace_partial_flush_min_spans(&mut self, min_spans: usize) -> &mut Self {
         self.config
             .trace_partial_flush_min_spans
@@ -1568,6 +1642,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// A JSON array of objects to apply for trace sampling. Each rule must have a `sample_rate`
+    /// between 0.0 and 1.0 (inclusive).
+    ///
+    /// **Default**: `[]`
+    ///
+    /// Env variable: `DD_TRACE_SAMPLING_RULES`
     pub fn set_trace_sampling_rules(&mut self, rules: Vec<SamplingRuleConfig>) -> &mut Self {
         self.config
             .trace_sampling_rules
@@ -1575,16 +1655,34 @@ impl ConfigBuilder {
         self
     }
 
+    /// Maximum number of traces to sample per second.
+    /// Only applied if trace_sampling_rules are matched
+    ///
+    /// **Default**: `100`
+    ///
+    /// Env variable: `DD_TRACE_RATE_LIMIT`
     pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
         self.config.trace_rate_limit.set_code(rate_limit);
         self
     }
 
+    /// A list of propagation styles to use for both extraction and injection. Supported values are
+    /// `datadog` and `tracecontext`.
+    ///
+    /// **Default**: `[Datadog, TraceContext]`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_STYLE`
     pub fn set_trace_propagation_style(&mut self, styles: Vec<TracePropagationStyle>) -> &mut Self {
         self.config.trace_propagation_style.set_code(Some(styles));
         self
     }
 
+    /// A list of propagation styles to use for extraction. When set, this overrides
+    /// `DD_TRACE_PROPAGATION_STYLE` for extraction.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_STYLE_EXTRACT`
     pub fn set_trace_propagation_style_extract(
         &mut self,
         styles: Vec<TracePropagationStyle>,
@@ -1595,6 +1693,12 @@ impl ConfigBuilder {
         self
     }
 
+    /// A list of propagation styles to use for injection. When set, this overrides
+    /// `DD_TRACE_PROPAGATION_STYLE` for injection.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_STYLE_INJECT`
     pub fn set_trace_propagation_style_inject(
         &mut self,
         styles: Vec<TracePropagationStyle>,
@@ -1605,21 +1709,41 @@ impl ConfigBuilder {
         self
     }
 
+    /// When set to `true`, stops extracting after the first successful trace context extraction.
+    ///
+    /// **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
     pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
         self.config.trace_propagation_extract_first.set_code(first);
         self
     }
 
+    /// Set to `false` to disable tracing.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_ENABLED`
     pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.enabled.set_code(enabled);
         self
     }
 
+    /// Sets the internal log level for the tracer.
+    ///
+    /// **Default**: `Error`
+    ///
+    /// Env variable: `DD_LOG_LEVEL`
     pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
         self.config.log_level_filter.set_code(filter);
         self
     }
 
+    /// Enable computation of trace statistics.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_STATS_COMPUTATION_ENABLED`
     pub fn set_trace_stats_computation_enabled(
         &mut self,
         trace_stats_computation_enabled: bool,
@@ -1630,11 +1754,21 @@ impl ConfigBuilder {
         self
     }
 
+    /// Enable or disable remote configuration.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_REMOTE_CONFIGURATION_ENABLED`
     pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.remote_config_enabled.set_code(enabled);
         self
     }
 
+    /// Interval in seconds for polling remote configuration updates.
+    ///
+    /// **Default**: `5.0`
+    ///
+    /// Env variable: `DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS`
     pub fn set_remote_config_poll_interval(&mut self, seconds: f64) -> &mut Self {
         self.config
             .remote_config_poll_interval
@@ -1642,6 +1776,11 @@ impl ConfigBuilder {
         self
     }
 
+    /// Maximum length of the `x-datadog-tags` header in bytes.
+    ///
+    /// **Default**: `512`
+    ///
+    /// Env variable: `DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH`
     pub fn set_datadog_tags_max_length(&mut self, length: usize) -> &mut Self {
         self.config
             .datadog_tags_max_length
