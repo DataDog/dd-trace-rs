@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.1.0" }
+//! datadog-opentelemetry = { version = "0.2.0" }
 //! ```
 //!
 //! ### Tracing
@@ -97,7 +97,8 @@
 //!     .init();
 //! ```
 //!
-//! For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.1.0/datadog_opentelemetry/).
+//! For advanced usage and configuration information, check out [`DatadogTracingBuilder`] and
+//! [`configuration::ConfigBuilder`]
 //!
 //! * Through env variables
 //!
