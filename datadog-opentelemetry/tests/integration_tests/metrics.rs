@@ -55,10 +55,8 @@ fn create_all_metric_types(meter: &opentelemetry::metrics::Meter) {
 }
 
 #[tokio::test]
-#[allow(clippy::disallowed_methods)]
 async fn test_metrics_export_grpc() {
     const SESSION_NAME: &str = "opentelemetry_api/test_metrics_grpc";
-    std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 
     let test_agent = setup_test_agent(SESSION_NAME).await;
     let base_uri = test_agent.get_base_uri().await;
@@ -69,12 +67,12 @@ async fn test_metrics_export_grpc() {
     let host = url.host().unwrap();
     let otlp_endpoint = format!("{scheme}://{host}:4317");
 
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", &otlp_endpoint);
-
     let config = Arc::new(
         Config::builder()
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
+            .set_metrics_otel_enabled(true)
+            .set_otlp_metrics_endpoint(otlp_endpoint)
             .build(),
     );
 
@@ -96,16 +94,11 @@ async fn test_metrics_export_grpc() {
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
-
-    std::env::remove_var("DD_METRICS_OTEL_ENABLED");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
 }
 
 #[tokio::test]
-#[allow(clippy::disallowed_methods)]
 async fn test_metrics_export_http_protobuf() {
     const SESSION_NAME: &str = "opentelemetry_api/test_metrics_http_protobuf";
-    std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 
     let test_agent = setup_test_agent(SESSION_NAME).await;
     let base_uri = test_agent.get_base_uri().await;
@@ -116,13 +109,13 @@ async fn test_metrics_export_http_protobuf() {
     let host = url.host().unwrap();
     let otlp_endpoint = format!("{scheme}://{host}:4318");
 
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", &otlp_endpoint);
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/protobuf");
-
     let config = Arc::new(
         Config::builder()
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
+            .set_metrics_otel_enabled(true)
+            .set_otlp_metrics_endpoint(otlp_endpoint)
+            .set_otlp_metrics_protocol("http/protobuf".to_string())
             .build(),
     );
 
@@ -144,17 +137,11 @@ async fn test_metrics_export_http_protobuf() {
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
-
-    std::env::remove_var("DD_METRICS_OTEL_ENABLED");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL");
 }
 
 #[tokio::test]
-#[allow(clippy::disallowed_methods)]
 async fn test_metrics_export_http_json() {
     const SESSION_NAME: &str = "opentelemetry_api/test_metrics_http_json";
-    std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 
     let test_agent = setup_test_agent(SESSION_NAME).await;
     let base_uri = test_agent.get_base_uri().await;
@@ -165,13 +152,13 @@ async fn test_metrics_export_http_json() {
     let host = url.host().unwrap();
     let otlp_endpoint = format!("{scheme}://{host}:4318");
 
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", &otlp_endpoint);
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/json");
-
     let config = Arc::new(
         Config::builder()
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
+            .set_metrics_otel_enabled(true)
+            .set_otlp_metrics_endpoint(otlp_endpoint)
+            .set_otlp_metrics_protocol("http/json".to_string())
             .build(),
     );
 
@@ -197,17 +184,11 @@ async fn test_metrics_export_http_json() {
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
-
-    std::env::remove_var("DD_METRICS_OTEL_ENABLED");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL");
 }
 
 #[tokio::test]
-#[allow(clippy::disallowed_methods)]
 async fn test_metrics_export_missing_feature_graceful_degradation() {
     const SESSION_NAME: &str = "opentelemetry_api/test_metrics_missing_feature";
-    std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 
     let test_agent = setup_test_agent(SESSION_NAME).await;
     let base_uri = test_agent.get_base_uri().await;
@@ -218,13 +199,13 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
     let host = url.host().unwrap();
     let otlp_endpoint = format!("{scheme}://{host}:4318");
 
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", &otlp_endpoint);
-    std::env::set_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL", "http/protobuf");
-
     let config = Arc::new(
         Config::builder()
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
+            .set_metrics_otel_enabled(true)
+            .set_otlp_metrics_endpoint(otlp_endpoint)
+            .set_otlp_metrics_protocol("http/protobuf".to_string())
             .build(),
     );
 
@@ -249,8 +230,4 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
-
-    std::env::remove_var("DD_METRICS_OTEL_ENABLED");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    std::env::remove_var("OTEL_EXPORTER_OTLP_METRICS_PROTOCOL");
 }

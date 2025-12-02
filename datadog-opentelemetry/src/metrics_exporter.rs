@@ -5,8 +5,6 @@ use crate::core::configuration::Config;
 
 const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
 const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
-const DEFAULT_EXPORT_INTERVAL_MS: u64 = 60000;
-const DEFAULT_EXPORT_TIMEOUT_MS: u64 = 10000;
 
 pub enum OtlpProtocol {
     Grpc,
@@ -14,18 +12,40 @@ pub enum OtlpProtocol {
     HttpJson,
 }
 
+pub fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
+    let protocol = config.otlp_metrics_protocol();
+    if !protocol.is_empty() {
+        match protocol {
+            s if s.eq_ignore_ascii_case("http/protobuf") => return OtlpProtocol::HttpProtobuf,
+            s if s.eq_ignore_ascii_case("http/json") => return OtlpProtocol::HttpJson,
+            _ => {}
+        }
+    }
+
+    let protocol = config.otlp_protocol();
+    if !protocol.is_empty() {
+        match protocol {
+            s if s.eq_ignore_ascii_case("http/protobuf") => return OtlpProtocol::HttpProtobuf,
+            s if s.eq_ignore_ascii_case("http/json") => return OtlpProtocol::HttpJson,
+            _ => {}
+        }
+    }
+
+    OtlpProtocol::Grpc
+}
+
 pub fn get_otlp_metrics_endpoint(
     config: &Config,
     protocol: &OtlpProtocol,
 ) -> Result<String, String> {
-    #[allow(clippy::disallowed_methods)]
-    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") {
-        return Ok(endpoint);
+    let endpoint = config.otlp_metrics_endpoint();
+    if !endpoint.is_empty() {
+        return Ok(endpoint.to_string());
     }
 
-    #[allow(clippy::disallowed_methods)]
-    if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
-        return Ok(endpoint);
+    let endpoint = config.otlp_endpoint();
+    if !endpoint.is_empty() {
+        return Ok(endpoint.to_string());
     }
 
     let agent_url = config.trace_agent_url();
@@ -48,31 +68,14 @@ pub fn get_otlp_metrics_endpoint(
     Ok(format!("{scheme}://{host}:{port}"))
 }
 
-pub fn get_otlp_metrics_timeout() -> u64 {
-    #[allow(clippy::disallowed_methods)]
-    if let Ok(timeout) = std::env::var("OTEL_EXPORTER_OTLP_METRICS_TIMEOUT") {
-        if let Ok(timeout_ms) = timeout.parse::<u64>() {
-            return timeout_ms;
-        }
+pub fn get_otlp_metrics_timeout(config: &Config) -> u32 {
+    let timeout = config.otlp_metrics_timeout();
+    if timeout != 0 {
+        return timeout;
     }
-
-    #[allow(clippy::disallowed_methods)]
-    if let Ok(timeout) = std::env::var("OTEL_EXPORTER_OTLP_TIMEOUT") {
-        if let Ok(timeout_ms) = timeout.parse::<u64>() {
-            return timeout_ms;
-        }
-    }
-
-    DEFAULT_EXPORT_TIMEOUT_MS
+    config.otlp_timeout()
 }
 
-pub fn get_metric_export_interval_ms() -> u64 {
-    #[allow(clippy::disallowed_methods)]
-    if let Ok(interval) = std::env::var("OTEL_METRIC_EXPORT_INTERVAL") {
-        if let Ok(interval_ms) = interval.parse::<u64>() {
-            return interval_ms;
-        }
-    }
-
-    DEFAULT_EXPORT_INTERVAL_MS
+pub fn get_metric_export_interval_ms(config: &Config) -> u32 {
+    config.metric_export_interval()
 }

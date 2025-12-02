@@ -15,6 +15,7 @@ pub(crate) enum SupportedConfigurations {
     DD_ENV,
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
     DD_LOG_LEVEL,
+    DD_METRICS_OTEL_ENABLED,
     DD_REMOTE_CONFIGURATION_ENABLED,
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
     DD_SERVICE,
@@ -35,6 +36,13 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_STATS_COMPUTATION_ENABLED,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
     DD_VERSION,
+    OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+    OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
+    OTEL_EXPORTER_OTLP_PROTOCOL,
+    OTEL_EXPORTER_OTLP_TIMEOUT,
+    OTEL_METRIC_EXPORT_INTERVAL,
 
     /// Used for testing purposes only
     #[cfg(test)]
@@ -63,6 +71,7 @@ impl SupportedConfigurations {
                 "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
             }
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
+            SupportedConfigurations::DD_METRICS_OTEL_ENABLED => "DD_METRICS_OTEL_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 "DD_REMOTE_CONFIGURATION_ENABLED"
             }
@@ -105,6 +114,19 @@ impl SupportedConfigurations {
                 "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
             }
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => {
+                "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => {
+                "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => {
+                "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
+            SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
             #[cfg(test)]
