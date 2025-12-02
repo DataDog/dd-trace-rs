@@ -23,6 +23,11 @@
 //!
 //! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
+//! ### Metrics
+//!
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html).
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//!
 //! ### Initialization
 //!
 //! The following examples will read datadog and opentelemetry configuration from environment
@@ -100,10 +105,38 @@
 //! For advanced usage and configuration information, check out [`DatadogTracingBuilder`] and
 //! [`configuration::ConfigBuilder`]
 //!
+//! #### Metrics API
+//!
+//! * Requires `opentelemetry` with metrics feature
+//!
+//! ```no_run
+//! use std::time::Duration;
+//!
+//! // Enable metrics via environment variable
+//! std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+//!
+//! // Initialize metrics with default configuration
+//! let meter_provider = datadog_opentelemetry::metrics().init().unwrap();
+//!
+//! // Use standard OpenTelemetry Metrics APIs
+//! use opentelemetry::global;
+//! use opentelemetry::metrics::Counter;
+//! use opentelemetry::KeyValue;
+//!
+//! let meter = global::meter("my-service");
+//! let counter: Counter<u64> = meter.u64_counter("requests").build();
+//! counter.add(1, &[KeyValue::new("method", "GET")]);
+//!
+//! // Shutdown to flush remaining metrics
+//! meter_provider.shutdown().unwrap();
+//! ```
+//!
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//!
 //! * Through env variables
 //!
 //! ```bash
-//! DD_SERVICE=my_service DD_ENV=prod cargo run
+//! DD_METRICS_OTEL_ENABLED=true DD_SERVICE=my_service DD_ENV=prod cargo run
 //! ```
 //!
 //! Or to pass options to the OpenTelemetry SDK TracerProviderBuilder
@@ -165,6 +198,8 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
+pub mod metrics_exporter;
+pub mod metrics_reader;
 mod sampler;
 mod span_exporter;
 mod span_processor;
@@ -476,4 +511,103 @@ pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, Datad
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         None,
     )
+}
+
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+/// Builder for Datadog Metrics with OTLP transport
+pub struct DatadogMetricsBuilder {
+    config: Option<Config>,
+    resource: Option<Resource>,
+    export_interval: Option<std::time::Duration>,
+}
+
+impl DatadogMetricsBuilder {
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub fn with_resource(mut self, resource: Resource) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    pub fn with_export_interval(mut self, interval: std::time::Duration) -> Self {
+        self.export_interval = Some(interval);
+        self
+    }
+
+    pub fn init(self) -> Result<SdkMeterProvider, String> {
+        let (meter_provider, _) = self.init_local()?;
+        opentelemetry::global::set_meter_provider(meter_provider.clone());
+        Ok(meter_provider)
+    }
+
+    pub fn init_local(
+        self,
+    ) -> Result<(SdkMeterProvider, ()), String> {
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
+        let meter_provider = crate::metrics_reader::create_meter_provider(
+            Arc::new(config),
+            self.resource,
+            self.export_interval,
+        )?;
+        Ok((meter_provider, ()))
+    }
+}
+
+/// Initialize a new Datadog Metrics builder with OTLP transport
+///
+/// Metrics are enabled separately from tracing via `DD_METRICS_OTEL_ENABLED=true`.
+/// For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+///
+/// # Usage
+///
+/// ```no_run
+/// use std::time::Duration;
+///
+/// // Enable metrics via environment variable
+/// std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+///
+/// // Default configuration - exports metrics via OTLP/gRPC
+/// let meter_provider = datadog_opentelemetry::metrics().init().unwrap();
+///
+/// // Use standard OpenTelemetry Metrics APIs
+/// use opentelemetry::global;
+/// use opentelemetry::metrics::Counter;
+/// use opentelemetry::KeyValue;
+///
+/// let meter = global::meter("my-service");
+/// let counter: Counter<u64> = meter.u64_counter("my_counter").build();
+/// counter.add(1, &[KeyValue::new("key", "value")]);
+///
+/// // Shutdown to flush remaining metrics
+/// meter_provider.shutdown().unwrap();
+/// ```
+///
+/// With custom configuration:
+///
+/// ```no_run
+/// use std::time::Duration;
+///
+/// std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+///
+/// let meter_provider = datadog_opentelemetry::metrics()
+///     .with_config(
+///         datadog_opentelemetry::configuration::Config::builder()
+///             .set_service("my_service".to_string())
+///             .set_env("prod".to_string())
+///             .build(),
+///     )
+///     .with_export_interval(Duration::from_secs(30))
+///     .init()
+///     .unwrap();
+/// ```
+pub fn metrics() -> DatadogMetricsBuilder {
+    DatadogMetricsBuilder {
+        config: None,
+        resource: None,
+        export_interval: None,
+    }
 }
