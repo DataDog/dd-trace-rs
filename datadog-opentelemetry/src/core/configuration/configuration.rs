@@ -203,6 +203,11 @@ pub trait ConfigurationProvider {
     /// Returns a telemetry configuration object representing the current state of this
     /// configuration item.
     fn get_configuration(&self) -> Configuration;
+
+    /// Returns all configurations that were set for this configuration item.
+    /// e.g. If set through the environment variable,
+    /// returns the environment variable config and the default config.
+    fn get_all_configurations(&self) -> Vec<Configuration>;
 }
 
 /// A trait for converting configuration values to their string representation for telemetry.
@@ -317,6 +322,35 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
             origin: self.source().into(),
             config_id: self.config_id.clone(),
         }
+    }
+
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        let mut configurations = Vec::new();
+        if self.code_value.is_some() {
+            configurations.push(Configuration {
+                name: self.name.to_string(),
+                value: self.code_value.as_ref().unwrap().get_configuration_value(),
+                origin: ConfigSourceOrigin::Code.into(),
+                config_id: self.config_id.clone(),
+            });
+        }
+        if self.env_value.is_some() {
+            configurations.push(Configuration {
+                name: self.name.to_string(),
+                value: self.env_value.as_ref().unwrap().get_configuration_value(),
+                origin: ConfigSourceOrigin::EnvVar.into(),
+                config_id: self.config_id.clone(),
+            });
+        }
+        // Always include the default value
+        configurations.push(Configuration {
+            name: self.name.to_string(),
+            value: self.default_value.get_configuration_value(),
+            origin: ConfigSourceOrigin::Default.into(),
+            config_id: self.config_id.clone(),
+        });
+        configurations
     }
 }
 
@@ -436,6 +470,23 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             origin: self.source().into(),
             config_id,
         }
+    }
+
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        // Also add override value if set
+        let mut configurations = self.config_item.get_all_configurations();
+        let override_value = self.override_value.load();
+        if override_value.is_some() {
+            let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
+            configurations.push(Configuration {
+                name: self.config_item.name.to_string(),
+                value: ConfigItemRef::ArcRef(override_value).get_configuration_value(),
+                origin: self.override_origin.into(),
+                config_id,
+            });
+        }
+        configurations
     }
 }
 
