@@ -5,11 +5,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::Resource;
 
 use crate::core::configuration::Config;
-use crate::metrics_exporter::{get_metric_export_interval_ms, get_otlp_metrics_endpoint, get_otlp_metrics_timeout, OtlpProtocol};
+use crate::metrics_exporter::{
+    get_metric_export_interval_ms, get_otlp_metrics_endpoint, get_otlp_metrics_timeout,
+    OtlpProtocol,
+};
 
 use crate::dd_warn;
 
@@ -65,7 +68,7 @@ pub fn create_meter_provider_with_protocol(
 
     let temporality = opentelemetry_sdk::metrics::Temporality::Delta;
     let timeout = Duration::from_millis(get_otlp_metrics_timeout());
-    
+
     let exporter = match protocol {
         OtlpProtocol::Grpc => {
             #[cfg(feature = "metrics-grpc")]
@@ -107,9 +110,8 @@ pub fn create_meter_provider_with_protocol(
         }
     };
 
-    let interval = export_interval.unwrap_or_else(|| {
-        Duration::from_millis(get_metric_export_interval_ms())
-    });
+    let interval =
+        export_interval.unwrap_or_else(|| Duration::from_millis(get_metric_export_interval_ms()));
 
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
         .with_interval(interval)
@@ -117,25 +119,31 @@ pub fn create_meter_provider_with_protocol(
 
     let resource = resource.unwrap_or_else(|| {
         Resource::builder_empty()
-            .with_attributes(vec![
-                opentelemetry::KeyValue::new("service.name", config.service().to_string()),
-            ])
+            .with_attributes(vec![opentelemetry::KeyValue::new(
+                "service.name",
+                config.service().to_string(),
+            )])
             .build()
     });
 
-    let mut resource_builder = Resource::builder_empty()
-        .with_attributes(resource.iter().map(|(k, v)| opentelemetry::KeyValue::new(k.clone(), v.clone())));
+    let mut resource_builder = Resource::builder_empty().with_attributes(
+        resource
+            .iter()
+            .map(|(k, v)| opentelemetry::KeyValue::new(k.clone(), v.clone())),
+    );
 
     if let Some(env) = config.env() {
-        resource_builder = resource_builder.with_attributes(vec![
-            opentelemetry::KeyValue::new("deployment.environment", env.to_string()),
-        ]);
+        resource_builder = resource_builder.with_attributes(vec![opentelemetry::KeyValue::new(
+            "deployment.environment",
+            env.to_string(),
+        )]);
     }
 
     if let Some(version) = config.version() {
-        resource_builder = resource_builder.with_attributes(vec![
-            opentelemetry::KeyValue::new("service.version", version.to_string()),
-        ]);
+        resource_builder = resource_builder.with_attributes(vec![opentelemetry::KeyValue::new(
+            "service.version",
+            version.to_string(),
+        )]);
     }
 
     let final_resource = resource_builder.build();

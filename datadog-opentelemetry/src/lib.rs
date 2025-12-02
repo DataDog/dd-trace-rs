@@ -544,9 +544,7 @@ impl DatadogMetricsBuilder {
         Ok(meter_provider)
     }
 
-    pub fn init_local(
-        self,
-    ) -> Result<(SdkMeterProvider, ()), String> {
+    pub fn init_local(self) -> Result<(SdkMeterProvider, ()), String> {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
         let meter_provider = crate::metrics_reader::create_meter_provider(
             Arc::new(config),

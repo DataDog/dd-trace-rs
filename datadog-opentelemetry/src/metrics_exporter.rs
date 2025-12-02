@@ -14,7 +14,10 @@ pub enum OtlpProtocol {
     HttpJson,
 }
 
-pub fn get_otlp_metrics_endpoint(config: &Config, protocol: &OtlpProtocol) -> Result<String, String> {
+pub fn get_otlp_metrics_endpoint(
+    config: &Config,
+    protocol: &OtlpProtocol,
+) -> Result<String, String> {
     #[allow(clippy::disallowed_methods)]
     if let Ok(endpoint) = std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") {
         return Ok(endpoint);
@@ -34,7 +37,7 @@ pub fn get_otlp_metrics_endpoint(config: &Config, protocol: &OtlpProtocol) -> Re
     let host = url
         .host()
         .ok_or_else(|| "Missing host in agent URL".to_string())?;
-    
+
     let port = match protocol {
         OtlpProtocol::Grpc => url.port_u16().unwrap_or(DEFAULT_OTLP_GRPC_PORT),
         OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => {
