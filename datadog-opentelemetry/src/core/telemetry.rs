@@ -161,11 +161,14 @@ impl TelemetryHandle for TelemetryHandleWrapper {
                 .get_telemetry_configuration()
                 .into_iter()
                 .for_each(|config_provider| {
-                    self.handle
-                        .try_send_msg(worker::TelemetryActions::AddConfig(
-                            config_provider.get_configuration(),
-                        ))
-                        .ok();
+                    config_provider
+                        .get_all_configurations()
+                        .into_iter()
+                        .for_each(|config| {
+                            self.handle
+                                .try_send_msg(worker::TelemetryActions::AddConfig(config))
+                                .ok();
+                        });
                 });
         }
 
@@ -410,6 +413,10 @@ mod tests {
                 origin: self.origin.clone(),
                 config_id: self.config_id.clone(),
             }
+        }
+
+        fn get_all_configurations(&self) -> Vec<data::Configuration> {
+            vec![self.get_configuration()]
         }
     }
 
