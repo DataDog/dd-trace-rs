@@ -333,7 +333,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id: self.config_id.clone(),
-            seq_id: self.seq_id().clone(),
+            seq_id: self.seq_id(),
         }
     }
 
