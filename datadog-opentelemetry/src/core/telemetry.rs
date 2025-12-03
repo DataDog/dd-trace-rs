@@ -412,6 +412,7 @@ mod tests {
                 value: self.value.clone(),
                 origin: self.origin.clone(),
                 config_id: self.config_id.clone(),
+                seq_id: None,
             }
         }
 

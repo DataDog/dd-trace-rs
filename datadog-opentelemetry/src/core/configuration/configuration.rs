@@ -300,6 +300,18 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             .unwrap_or(&self.default_value)
     }
 
+    /// Gets the sequence id of the current value
+    fn seq_id(&self) -> Option<u64> {
+        let mut seq_id = 1;
+        if self.env_value.is_some() {
+            seq_id += 1;
+        }
+        if self.code_value.is_some() {
+            seq_id += 1;
+        }
+        Some(seq_id)
+    }
+
     /// Gets the source of the current value
     #[allow(dead_code)] // Used in tests and will be used for remote configuration
     fn source(&self) -> ConfigSourceOrigin {
@@ -321,35 +333,44 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id: self.config_id.clone(),
+            seq_id: self.seq_id().clone(),
         }
     }
 
     /// Returns all configurations that were set for this configuration item.
     fn get_all_configurations(&self) -> Vec<Configuration> {
         let mut configurations = Vec::new();
-        if self.code_value.is_some() {
-            configurations.push(Configuration {
-                name: self.name.to_string(),
-                value: self.code_value.as_ref().unwrap().get_configuration_value(),
-                origin: ConfigSourceOrigin::Code.into(),
-                config_id: self.config_id.clone(),
-            });
-        }
-        if self.env_value.is_some() {
-            configurations.push(Configuration {
-                name: self.name.to_string(),
-                value: self.env_value.as_ref().unwrap().get_configuration_value(),
-                origin: ConfigSourceOrigin::EnvVar.into(),
-                config_id: self.config_id.clone(),
-            });
-        }
+        let mut seq_id = 1;
+        // /!\ Order is important for the seq_id
+        //
         // Always include the default value
         configurations.push(Configuration {
             name: self.name.to_string(),
             value: self.default_value.get_configuration_value(),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
+            seq_id: Some(seq_id),
         });
+        if self.env_value.is_some() {
+            seq_id += 1;
+            configurations.push(Configuration {
+                name: self.name.to_string(),
+                value: self.env_value.as_ref().unwrap().get_configuration_value(),
+                origin: ConfigSourceOrigin::EnvVar.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(seq_id),
+            });
+        }
+        if self.code_value.is_some() {
+            seq_id += 1;
+            configurations.push(Configuration {
+                name: self.name.to_string(),
+                value: self.code_value.as_ref().unwrap().get_configuration_value(),
+                origin: ConfigSourceOrigin::Code.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(seq_id),
+            });
+        }
         configurations
     }
 }
@@ -456,6 +477,16 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             ConfigItemRef::Ref(self.config_item.value())
         }
     }
+
+    /// Gets the sequence id of the current value
+    fn seq_id(&self) -> Option<u64> {
+        let override_value = self.override_value.load();
+        if override_value.is_some() {
+            self.config_item.seq_id().map(|id| id + 1)
+        } else {
+            self.config_item.seq_id()
+        }
+    }
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
@@ -469,6 +500,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id,
+            seq_id: self.seq_id(),
         }
     }
 
@@ -484,6 +516,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
                 value: ConfigItemRef::ArcRef(override_value).get_configuration_value(),
                 origin: self.override_origin.into(),
                 config_id,
+                seq_id: self.config_item.seq_id().map(|id| id + 1),
             });
         }
         configurations
@@ -1736,6 +1769,7 @@ impl ConfigBuilder {
         let mut config = self.config.clone();
 
         // resolve trace_agent_url
+        // this will send the the config through telemetry with code origin. There's no `derived` origin.
         if config.trace_agent_url.value().is_empty() {
             let host = &config.agent_host.value();
             let port = *config.trace_agent_port.value();
@@ -1745,6 +1779,7 @@ impl ConfigBuilder {
         }
 
         // resolve dogstatsd_agent_url
+        // this will send the the config through telemetry with code origin. There's no `derived` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
             let host = &config.dogstatsd_agent_host.value();
             let port = *config.dogstatsd_agent_port.value();
