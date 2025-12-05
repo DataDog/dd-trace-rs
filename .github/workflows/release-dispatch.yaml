@@ -23,10 +23,10 @@ jobs:
     outputs:
       frozen: false
     steps:
-      # - name: Debug OIDC Claims
-      #   uses: github/actions-oidc-debugger@9649f894cd935032350792327ca5354e88e662e3 # main
-      #   with:
-      #     audience: "octo-debugger"
+      - name: Debug OIDC Claims
+        uses: github/actions-oidc-debugger@0705a46041e35206455b781a260e4af1c6e60b6d # main
+        with:
+          audience: "octo-debugger"
       - name: Get token
         uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
         id: octo-sts
