@@ -1,0 +1,12 @@
+issuer: https://token.actions.githubusercontent.com
+
+subject: repo:DataDog/dd-trace-rs:.*
+
+claim_pattern:
+  event_name: (workflow_dispatch|push)
+  ref: refs/heads/(main|igor/versioning/.*)
+  ref_protected: "true"
+  job_workflow_ref: DataDog/dd-trace-rs/.github/workflows/release-dispatch.yaml@.*
+
+permissions:
+  admin: write
