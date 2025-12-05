@@ -3020,7 +3020,9 @@ mod tests {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
-                ("DD_TRACE_AGENT_URL", ""),
+                // Explicitly setting the environment variable to empty
+                // will make the tracer use that empty value, not the calculated value.
+                // ("DD_TRACE_AGENT_URL", ""),
                 ("DD_AGENT_HOST", "agent-host"),
                 ("DD_TRACE_AGENT_PORT", "4242"),
             ],
