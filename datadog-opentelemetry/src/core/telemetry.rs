@@ -114,7 +114,10 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
         stack_trace: Option<String>,
     ) -> Result<(), anyhow::Error>;
 
-    fn add_configuration(&mut self, configuration: Configuration) -> Result<(), anyhow::Error>;
+    fn add_configurations(
+        &mut self,
+        configurations: Vec<Configuration>,
+    ) -> Result<(), anyhow::Error>;
 
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
@@ -150,9 +153,16 @@ impl TelemetryHandle for TelemetryHandleWrapper {
             .add_log(message.clone(), message, data::LogLevel::Error, stack_trace)
     }
 
-    fn add_configuration(&mut self, config_item: Configuration) -> Result<(), anyhow::Error> {
-        self.handle
-            .try_send_msg(worker::TelemetryActions::AddConfig(config_item))
+    fn add_configurations(
+        &mut self,
+        configurations: Vec<Configuration>,
+    ) -> Result<(), anyhow::Error> {
+        configurations.into_iter().for_each(|config| {
+            self.handle
+                .try_send_msg(worker::TelemetryActions::AddConfig(config))
+                .ok();
+        });
+        Ok(())
     }
 
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
@@ -311,7 +321,7 @@ fn notify_configuration_update_inner(
     with_telemetry_handle(telemetry_cell, |t| {
         if let Err(err) = t
             .handle
-            .add_configuration(config_provider.get_configuration())
+            .add_configurations(config_provider.get_all_configurations())
         {
             dd_warn!("Telemetry: error sending configuration item {err}");
         } else {
@@ -366,11 +376,11 @@ mod tests {
             Ok(())
         }
 
-        fn add_configuration(
+        fn add_configurations(
             &mut self,
-            configuration: data::Configuration,
+            configurations: Vec<data::Configuration>,
         ) -> Result<(), anyhow::Error> {
-            self.configurations.push(configuration);
+            self.configurations.extend(configurations);
             Ok(())
         }
 
@@ -406,18 +416,14 @@ mod tests {
     }
 
     impl ConfigurationProvider for TestConfigurationProvider {
-        fn get_configuration(&self) -> data::Configuration {
-            data::Configuration {
+        fn get_all_configurations(&self) -> Vec<data::Configuration> {
+            vec![data::Configuration {
                 name: self.name.clone(),
                 value: self.value.clone(),
                 origin: self.origin.clone(),
                 config_id: self.config_id.clone(),
                 seq_id: None,
-            }
-        }
-
-        fn get_all_configurations(&self) -> Vec<data::Configuration> {
-            vec![self.get_configuration()]
+            }]
         }
     }
 
