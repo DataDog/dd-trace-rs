@@ -327,7 +327,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         //
         // Always include the default value
         configurations.push(Configuration {
-            name: self.name.to_string(),
+            name: self.name.as_str().to_string(),
             value: self.default_value.get_configuration_value(),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
@@ -336,7 +336,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(calculated_value) = calculated_value {
             seq_id += 1;
             configurations.push(Configuration {
-                name: self.name.to_string(),
+                name: self.name.as_str().to_string(),
                 value: calculated_value,
                 origin: ConfigSourceOrigin::Calculated.into(),
                 config_id: self.config_id.clone(),
@@ -346,7 +346,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if self.env_value.is_some() {
             seq_id += 1;
             configurations.push(Configuration {
-                name: self.name.to_string(),
+                name: self.name.as_str().to_string(),
                 value: self.env_value.as_ref().unwrap().get_configuration_value(),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
@@ -356,7 +356,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if self.code_value.is_some() {
             seq_id += 1;
             configurations.push(Configuration {
-                name: self.name.to_string(),
+                name: self.name.as_str().to_string(),
                 value: self.code_value.as_ref().unwrap().get_configuration_value(),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
@@ -535,7 +535,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
         if override_value.is_some() && self.source() != ConfigSourceOrigin::Calculated {
             let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
             configurations.push(Configuration {
-                name: self.config_item.name.to_string(),
+                name: self.config_item.name.as_str().to_string(),
                 value: self.value().get_configuration_value(),
                 origin: self.source().into(),
                 config_id,
