@@ -9,4 +9,4 @@ claim_pattern:
   job_workflow_ref: DataDog/dd-trace-rs/.github/workflows/release-dispatch.yaml@.*
 
 permissions:
-  admin: write
+  administration: write
