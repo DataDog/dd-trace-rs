@@ -5,8 +5,8 @@ subject: repo:DataDog/dd-trace-rs:.*
 claim_pattern:
   event_name: (workflow_dispatch|push)
   ref: refs/heads/(main|igor/versioning/.*)
-  ref_protected: "true"
+  # ref_protected: "true" # TODO: Uncomment this once the workflow is working
   job_workflow_ref: DataDog/dd-trace-rs/.github/workflows/release-dispatch.yaml@.*
 
 permissions:
-  admin: write
+  administration: write
