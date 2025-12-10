@@ -557,21 +557,16 @@ impl DatadogMetricsBuilder {
 
 /// Initialize a new Datadog Metrics builder with OTLP transport
 ///
-/// Metrics are enabled separately from tracing via `DD_METRICS_OTEL_ENABLED=true`.
+/// Metrics are enabled via `DD_METRICS_OTEL_ENABLED=true`. Default transport is gRPC (port 4317).
 /// For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
 ///
 /// # Usage
 ///
 /// ```no_run
-/// use std::time::Duration;
-///
-/// // Enable metrics via environment variable
 /// std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 ///
-/// // Default configuration - exports metrics via OTLP/gRPC
 /// let meter_provider = datadog_opentelemetry::metrics().init().unwrap();
 ///
-/// // Use standard OpenTelemetry Metrics APIs
 /// use opentelemetry::global;
 /// use opentelemetry::metrics::Counter;
 /// use opentelemetry::KeyValue;
@@ -580,27 +575,7 @@ impl DatadogMetricsBuilder {
 /// let counter: Counter<u64> = meter.u64_counter("my_counter").build();
 /// counter.add(1, &[KeyValue::new("key", "value")]);
 ///
-/// // Shutdown to flush remaining metrics
 /// meter_provider.shutdown().unwrap();
-/// ```
-///
-/// With custom configuration:
-///
-/// ```no_run
-/// use std::time::Duration;
-///
-/// std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-///
-/// let meter_provider = datadog_opentelemetry::metrics()
-///     .with_config(
-///         datadog_opentelemetry::configuration::Config::builder()
-///             .set_service("my_service".to_string())
-///             .set_env("prod".to_string())
-///             .build(),
-///     )
-///     .with_export_interval(Duration::from_secs(30))
-///     .init()
-///     .unwrap();
 /// ```
 pub fn metrics() -> DatadogMetricsBuilder {
     DatadogMetricsBuilder {

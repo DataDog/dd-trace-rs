@@ -19,7 +19,7 @@ opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = [
     "metrics",
-], default-features = false }
+], default-features = false, optional = true }
 opentelemetry-proto = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
@@ -80,8 +80,8 @@ criterion = "0.5.1"
 
 [features]
 default = ["metrics-grpc"]
-metrics-grpc = ["opentelemetry-otlp/grpc-tonic"]
-metrics-http = ["opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
+metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
+metrics-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
 test-utils = ["libdd-data-pipeline/test-utils", "criterion", "metrics-grpc", "metrics-http"]
 
 [[bench]]
