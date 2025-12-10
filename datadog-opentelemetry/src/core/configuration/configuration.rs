@@ -241,6 +241,7 @@ trait ConfigurationValueProvider {
 /// tracking is essential for implementing proper configuration precedence rules and
 /// for telemetry reporting.
 trait ValueSourceUpdater<T> {
+    fn name(&self) -> SupportedConfigurations;
     /// Updates the configuration value while recording its source origin.
     fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin);
 }
@@ -249,7 +250,7 @@ trait ValueSourceUpdater<T> {
 /// This allows us to manage configuration precedence
 #[derive(Debug)]
 struct ConfigItem<T: ConfigurationValueProvider> {
-    name: &'static str,
+    name: SupportedConfigurations,
     default_value: T,
     env_value: Option<T>,
     code_value: Option<T>,
@@ -272,7 +273,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     /// Creates a new ConfigItem with a default value
     fn new(name: SupportedConfigurations, default: T) -> Self {
         Self {
-            name: name.as_str(),
+            name,
             default_value: default,
             env_value: None,
             code_value: None,
@@ -311,7 +312,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
     /// Gets a Configuration object used as telemetry payload
     fn get_configuration(&self) -> Configuration {
         Configuration {
-            name: self.name.to_string(),
+            name: self.name.as_str().to_string(),
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id: self.config_id.clone(),
@@ -320,6 +321,10 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
 }
 
 impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
+    fn name(&self) -> SupportedConfigurations {
+        self.name
+    }
+
     /// Sets a value from a specific source
     fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
         match source {
@@ -426,7 +431,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     fn get_configuration(&self) -> Configuration {
         let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
         Configuration {
-            name: self.config_item.name.to_string(),
+            name: self.config_item.name.as_str().to_string(),
             value: self.value().get_configuration_value(),
             origin: self.source().into(),
             config_id,
@@ -437,6 +442,10 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
 impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater<T>
     for ConfigItemWithOverride<T>
 {
+    fn name(&self) -> SupportedConfigurations {
+        self.config_item.name()
+    }
+
     /// Sets a value from a specific source
     fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin) {
         if source == self.override_origin {
@@ -454,7 +463,6 @@ struct ConfigItemSourceUpdater<'a> {
 impl ConfigItemSourceUpdater<'_> {
     fn apply_result<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
-        item_name: SupportedConfigurations,
         mut item: ConfigItemType,
         result: CompositeConfigSourceResult<RawConfig>,
         transform: F,
@@ -467,7 +475,7 @@ impl ConfigItemSourceUpdater<'_> {
         if !result.errors.is_empty() {
             dd_error!(
                 "Configuration: Error parsing property {} - {:?}",
-                item_name.as_str(),
+                item.name().as_str(),
                 result.errors
             );
         }
@@ -479,24 +487,19 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value (no transformation)
-    fn update_parsed<ParsedConfig, ConfigItemType>(
-        &self,
-        item_name: SupportedConfigurations,
-        default: ConfigItemType,
-    ) -> ConfigItemType
+    fn update_parsed<ParsedConfig, ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
     where
         ParsedConfig: Clone + FromStr + ConfigurationValueProvider,
         ParsedConfig::Err: std::fmt::Display,
         ConfigItemType: ValueSourceUpdater<ParsedConfig>,
     {
-        let result = self.sources.get_parse::<ParsedConfig>(item_name);
-        self.apply_result(item_name, default, result, |value| value)
+        let result = self.sources.get_parse::<ParsedConfig>(default.name());
+        self.apply_result(default, result, |value| value)
     }
 
     /// Updates a ConfigItem from sources string with transformation
     pub fn update_string<ParsedConfig, ConfigItemType, F>(
         &self,
-        item_name: SupportedConfigurations,
         default: ConfigItemType,
         transform: F,
     ) -> ConfigItemType
@@ -505,14 +508,13 @@ impl ConfigItemSourceUpdater<'_> {
         ConfigItemType: ValueSourceUpdater<ParsedConfig>,
         F: FnOnce(String) -> ParsedConfig,
     {
-        let result = self.sources.get(item_name);
-        self.apply_result(item_name, default, result, transform)
+        let result = self.sources.get(default.name());
+        self.apply_result(default, result, transform)
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
-        item_name: SupportedConfigurations,
         default: ConfigItemType,
         transform: F,
     ) -> ConfigItemType
@@ -523,8 +525,8 @@ impl ConfigItemSourceUpdater<'_> {
         ConfigItemType: ValueSourceUpdater<ParsedConfig>,
         F: FnOnce(RawConfig) -> ParsedConfig,
     {
-        let result = self.sources.get_parse::<RawConfig>(item_name);
-        self.apply_result(item_name, default, result, transform)
+        let result = self.sources.get_parse::<RawConfig>(default.name());
+        self.apply_result(default, result, transform)
     }
 }
 
@@ -925,159 +927,73 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string(
-                SupportedConfigurations::DD_SERVICE,
-                default.service,
-                ServiceName::Configured,
-            ),
-            env: cisu.update_string(SupportedConfigurations::DD_ENV, default.env, Some),
-            version: cisu.update_string(SupportedConfigurations::DD_VERSION, default.version, Some),
+            service: cisu.update_string(default.service, ServiceName::Configured),
+            env: cisu.update_string(default.env, Some),
+            version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
-            global_tags: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TAGS,
-                default.global_tags,
-                |DdKeyValueTags(tags)| tags,
-            ),
-            agent_host: cisu.update_string(
-                SupportedConfigurations::DD_AGENT_HOST,
-                default.agent_host,
-                Cow::Owned,
-            ),
-            trace_agent_port: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_AGENT_PORT,
-                default.trace_agent_port,
-            ),
-            trace_agent_url: cisu.update_string(
-                SupportedConfigurations::DD_TRACE_AGENT_URL,
-                default.trace_agent_url,
-                Cow::Owned,
-            ),
-            dogstatsd_agent_host: cisu.update_string(
-                SupportedConfigurations::DD_DOGSTATSD_HOST,
-                default.dogstatsd_agent_host,
-                Cow::Owned,
-            ),
-            dogstatsd_agent_port: cisu.update_parsed(
-                SupportedConfigurations::DD_DOGSTATSD_PORT,
-                default.dogstatsd_agent_port,
-            ),
-            dogstatsd_agent_url: cisu.update_string(
-                SupportedConfigurations::DD_DOGSTATSD_URL,
-                default.dogstatsd_agent_url,
-                Cow::Owned,
-            ),
+            global_tags: cisu
+                .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
+            agent_host: cisu.update_string(default.agent_host, Cow::Owned),
+            trace_agent_port: cisu.update_parsed(default.trace_agent_port),
+            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
+            dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
+            dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
+            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
 
-            trace_partial_flush_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
-                default.trace_partial_flush_enabled,
-            ),
-            trace_partial_flush_min_spans: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
-                default.trace_partial_flush_min_spans,
-            ),
+            trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
+            trace_partial_flush_min_spans: cisu
+                .update_parsed(default.trace_partial_flush_min_spans),
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_rate_limit: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_RATE_LIMIT,
-                default.trace_rate_limit,
-            ),
+            trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
-            enabled: cisu.update_parsed(SupportedConfigurations::DD_TRACE_ENABLED, default.enabled),
-            log_level_filter: cisu.update_parsed(
-                SupportedConfigurations::DD_LOG_LEVEL,
-                default.log_level_filter,
-            ),
-            trace_stats_computation_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
-                default.trace_stats_computation_enabled,
-            ),
-            telemetry_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED,
-                default.telemetry_enabled,
-            ),
-            telemetry_log_collection_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
-                default.telemetry_log_collection_enabled,
-            ),
+            enabled: cisu.update_parsed(default.enabled),
+            log_level_filter: cisu.update_parsed(default.log_level_filter),
+            trace_stats_computation_enabled: cisu
+                .update_parsed(default.trace_stats_computation_enabled),
+            telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
+            telemetry_log_collection_enabled: cisu
+                .update_parsed(default.telemetry_log_collection_enabled),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
-            trace_propagation_style: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
-                default.trace_propagation_style,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
-            ),
+            trace_propagation_style: cisu
+                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
+                    TracePropagationStyle::from_tags(Some(tags))
+                }),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_style_inject: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT,
                 default.trace_propagation_style_inject,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
-            trace_propagation_extract_first: cisu.update_parsed(
-                SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
-                default.trace_propagation_extract_first,
-            ),
+            trace_propagation_extract_first: cisu
+                .update_parsed(default.trace_propagation_extract_first),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
-            remote_config_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
-                default.remote_config_enabled,
-            ),
+            remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
             remote_config_poll_interval: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
                 default.remote_config_poll_interval,
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-            datadog_tags_max_length: cisu.update_parsed_with_transform(
-                SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
-                default.datadog_tags_max_length,
-                |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
-            ),
-            metrics_otel_enabled: cisu.update_parsed(
-                SupportedConfigurations::DD_METRICS_OTEL_ENABLED,
-                default.metrics_otel_enabled,
-            ),
-            otlp_metrics_endpoint: cisu.update_string(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-                default.otlp_metrics_endpoint,
-                Cow::Owned,
-            ),
-            otlp_endpoint: cisu.update_string(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT,
-                default.otlp_endpoint,
-                Cow::Owned,
-            ),
-            otlp_metrics_protocol: cisu.update_string(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
-                default.otlp_metrics_protocol,
-                Cow::Owned,
-            ),
-            otlp_protocol: cisu.update_string(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL,
-                default.otlp_protocol,
-                Cow::Owned,
-            ),
-            otlp_metrics_timeout: cisu.update_parsed(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
-                default.otlp_metrics_timeout,
-            ),
-            otlp_timeout: cisu.update_parsed(
-                SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT,
-                default.otlp_timeout,
-            ),
-            metric_export_interval: cisu.update_parsed(
-                SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
-                default.metric_export_interval,
-            ),
+            datadog_tags_max_length: cisu
+                .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
+                    max.min(DATADOG_TAGS_MAX_LENGTH)
+                }),
+            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
+            otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
+            otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
+            otlp_metrics_protocol: cisu.update_string(default.otlp_metrics_protocol, Cow::Owned),
+            otlp_protocol: cisu.update_string(default.otlp_protocol, Cow::Owned),
+            otlp_metrics_timeout: cisu.update_parsed(default.otlp_metrics_timeout),
+            otlp_timeout: cisu.update_parsed(default.otlp_timeout),
+            metric_export_interval: cisu.update_parsed(default.metric_export_interval),
         }
     }
 
@@ -2838,13 +2754,12 @@ mod tests {
         assert!(default.enabled());
         assert_eq!(default.global_tags().collect::<Vec<_>>(), vec![]);
 
-        let env = cisu.update_string(SupportedConfigurations::DD_ENV, default.env, Some);
+        let env = cisu.update_string(default.env, Some);
         assert_eq!(env.default_value, None);
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled =
-            cisu.update_parsed(SupportedConfigurations::DD_TRACE_ENABLED, default.enabled);
+        let enabled = cisu.update_parsed(default.enabled);
         assert!(enabled.default_value);
         assert_eq!(enabled.env_value, None);
         assert_eq!(enabled.code_value, None);
@@ -2864,11 +2779,7 @@ mod tests {
             }
         }
 
-        let tags = cisu.update_parsed_with_transform(
-            SupportedConfigurations::DD_TAGS,
-            default.global_tags,
-            |Tags(tags)| tags,
-        );
+        let tags = cisu.update_parsed_with_transform(default.global_tags, |Tags(tags)| tags);
         assert_eq!(tags.default_value, vec![]);
         assert_eq!(tags.env_value, None);
         assert_eq!(
