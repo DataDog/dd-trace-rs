@@ -15,8 +15,7 @@ use opentelemetry::KeyValue;
 use crate::integration_tests::make_test_agent;
 
 async fn setup_test_agent(session_name: &'static str) -> DatadogTestAgent {
-    let test_agent = make_test_agent(session_name).await;
-    test_agent
+    make_test_agent(session_name).await
 }
 
 fn create_all_metric_types(meter: &opentelemetry::metrics::Meter) {
