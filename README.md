@@ -26,7 +26,7 @@ The `datadog-opentelemetry` crate provides an easy to use override for the rust 
 Add to you Cargo.toml
 
 ```toml
-datadog-opentelemetry = { version = "0.2.0" }
+datadog-opentelemetry = { version = "0.2.1" }
 ```
 
 ### Tracing
@@ -104,7 +104,7 @@ let tracer_provider = datadog_opentelemetry::tracing()
         .init();
 ```
 
-For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.2.0/datadog_opentelemetry/).
+For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.2.1/datadog_opentelemetry/).
 
 * Through env variables
 
