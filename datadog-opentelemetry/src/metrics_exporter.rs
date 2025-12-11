@@ -58,11 +58,10 @@ pub fn get_otlp_metrics_endpoint(
         .host()
         .ok_or_else(|| "Missing host in agent URL".to_string())?;
 
+    // When falling back to agent URL, use the host but replace with OTLP default ports
     let port = match protocol {
-        OtlpProtocol::Grpc => url.port_u16().unwrap_or(DEFAULT_OTLP_GRPC_PORT),
-        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => {
-            url.port_u16().unwrap_or(DEFAULT_OTLP_HTTP_PORT)
-        }
+        OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
+        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
     };
 
     Ok(format!("{scheme}://{host}:{port}"))

@@ -31,7 +31,8 @@ pub fn create_meter_provider_with_protocol(
     export_interval: Option<Duration>,
     protocol: Option<OtlpProtocol>,
 ) -> Result<SdkMeterProvider, String> {
-    if !config.metrics_otel_enabled() {
+    let metrics_enabled = config.metrics_otel_enabled();
+    if !metrics_enabled {
         return Ok(SdkMeterProvider::builder().build());
     }
 
