@@ -121,7 +121,7 @@ fn default_provenance() -> String {
     "default".to_string()
 }
 
-pub const TRACER_VERSION: &str = "0.0.1";
+pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
