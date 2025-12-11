@@ -1,6 +1,6 @@
 [package]
 name = "simple_tracing"
-version = "0.2.1"
+version.workspace = true
 edition = "2021"
 publish = false
 autobenches = false
