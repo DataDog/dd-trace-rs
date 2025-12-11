@@ -631,7 +631,8 @@ impl RemoteConfigClient {
 
             for file in target_files {
                 // Extract product and config_id from path to determine which handler to use
-                // Path format is like "datadog/2/{PRODUCT}/{config_id}/config"
+                // Path format is: ^(datadog/\d+|employee)/[^/]+/[^/]+/[^/]+$
+                // Where the three last groups represent product/config_id/name
                 let Some((product, config_id)) = extract_product_and_id_from_path(&file.path)
                 else {
                     crate::dd_debug!(
@@ -857,18 +858,25 @@ impl ProductRegistry {
     }
 }
 
-/// Extract product name and id from remote config path
-/// Path format is: datadog/2/{PRODUCT}/{config_id}/config
+/// Extract product and id from remote config path
+/// Path format is: ^(datadog/\d+|employee)/[^/]+/[^/]+/[^/]+$
+/// Where the three last groups represent product/config_id/name
 fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
     let mut components = path
-        .strip_prefix("datadog/2/")?
-        .strip_suffix("/config")?
+        .strip_prefix("datadog/")
+        .map_or_else(
+            || path.strip_prefix("employee/"),
+            |rest| Some(rest.trim_start_matches(|c| c == '/' || char::is_numeric(c))),
+        )?
         .split("/");
+
     let (product, config_id) = (
         components.next()?.to_string(),
         components.next()?.to_string(),
     );
-    // Check if there are any remaining components after product and config_id
+    // Remove the last name part
+    let _ = components.next()?;
+    // Check if there are any remaining components after product, config_id, name
     if components.next().is_some() {
         return None;
     }
