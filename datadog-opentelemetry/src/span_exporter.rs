@@ -170,8 +170,8 @@ impl DatadogExporter {
         let trace_exporter = {
             let mut builder = TraceExporterBuilder::default();
             builder
-                .set_url(config.trace_agent_url())
-                .set_dogstatsd_url(config.dogstatsd_agent_url())
+                .set_url(&config.trace_agent_url())
+                .set_dogstatsd_url(&config.dogstatsd_agent_url())
                 .set_tracer_version(config.tracer_version())
                 .set_language(config.language())
                 .set_language_version(config.language_version())

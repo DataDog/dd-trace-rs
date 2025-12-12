@@ -13,6 +13,7 @@ use super::supported_configurations::{is_alias_deprecated, SupportedConfiguratio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSourceOrigin {
     Default,
+    Calculated,
     EnvVar,
     Code,
     RemoteConfig,
@@ -22,6 +23,7 @@ impl From<ConfigSourceOrigin> for ConfigurationOrigin {
     fn from(val: ConfigSourceOrigin) -> Self {
         match val {
             ConfigSourceOrigin::Default => ConfigurationOrigin::Default,
+            ConfigSourceOrigin::Calculated => ConfigurationOrigin::Calculated,
             ConfigSourceOrigin::Code => ConfigurationOrigin::Code,
             ConfigSourceOrigin::EnvVar => ConfigurationOrigin::EnvVar,
             ConfigSourceOrigin::RemoteConfig => ConfigurationOrigin::RemoteConfig,
