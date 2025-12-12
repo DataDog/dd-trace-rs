@@ -33,6 +33,7 @@ Options:
     -h, --help              Show this help message
     -d, --dry-run           Perform a dry run without actually publishing
     -c, --check-published   Only check if crates are already published (no build/test/publish)
+    -o, --set-ownership     Set crate ownership after publishing (adds libdatadog-owners team)
     -t, --token TOKEN       Cargo registry token (defaults to CARGO_REGISTRY_TOKEN env var)
     -v, --verbose           Enable verbose output
 
@@ -180,6 +181,7 @@ publish_crate() {
     local tag=$1
     local dry_run=$2
     local token=$3
+    local set_ownership_flag=$4
     
     echo "Processing tag: $tag" >&2
     
@@ -265,7 +267,7 @@ publish_crate() {
         echo -e "${GREEN}✓ Published $crate_name v$crate_version successfully${NC}" >&2
         echo "" >&2
 
-        if [ "$dry_run" != "true" ]; then
+        if [ "$dry_run" != "true" ] && [ "$set_ownership_flag" = "true" ]; then
             if ! set_ownership "$crate_name" "$LIBDATADOG_OWNERS" "$token"; then
                 echo -e "${RED}❌ Failed to set ${LIBDATADOG_OWNERS} as crate owners${NC}" >&2
                 return 1
@@ -366,6 +368,7 @@ check_publication_status() {
 main() {
     local dry_run=false
     local check_only=false
+    local set_ownership=false
     local token="${CARGO_REGISTRY_TOKEN:-}"
     local -a tags=()
     
@@ -381,6 +384,10 @@ main() {
                 ;;
             -c|--check-published)
                 check_only=true
+                shift
+                ;;
+            -o|--set-ownership)
+                set_ownership=true
                 shift
                 ;;
             -t|--token)
@@ -424,7 +431,7 @@ main() {
     # Normal publication mode
     local failed=0
     for tag in "${sorted_tags[@]}"; do
-        if ! publish_crate "$tag" "$dry_run" "$token"; then
+        if ! publish_crate "$tag" "$dry_run" "$token" "$set_ownership"; then
             ((++failed))
         fi
     done
