@@ -780,6 +780,12 @@ pub struct Config {
     /// A list of default tags to be added to every span
     /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
     global_tags: ConfigItem<Vec<(String, String)>>,
+    /// OTEL resource attributes parsed from OTEL_RESOURCE_ATTRIBUTES env var
+    otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
+    /// OTEL metrics exporter type
+    otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
+    /// OTEL metrics temporality preference
+    otel_metrics_temporality_preference: ConfigItem<Cow<'static, str>>,
     /// host of the trace agent
     agent_host: ConfigItem<Cow<'static, str>>,
     /// port of the trace agent
@@ -859,8 +865,12 @@ pub struct Config {
     otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
     /// OTLP general endpoint (fallback for metrics endpoint)
     otlp_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP general headers
+    otlp_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP metrics protocol (grpc, http/protobuf, http/json)
     otlp_metrics_protocol: ConfigItem<Cow<'static, str>>,
+    /// OTLP metrics headers
+    otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP general protocol (fallback for metrics protocol)
     otlp_protocol: ConfigItem<Cow<'static, str>>,
     /// OTLP metrics timeout in milliseconds
@@ -869,6 +879,8 @@ pub struct Config {
     otlp_timeout: ConfigItem<u32>,
     /// Metric export interval in milliseconds
     metric_export_interval: ConfigItem<u32>,
+    /// Metric export timeout in milliseconds
+    metric_export_timeout: ConfigItem<u32>,
 }
 
 impl Config {
@@ -907,6 +919,24 @@ impl Config {
             }
         }
 
+        /// Wrapper to parse "," separated key=value OTEL resource attributes
+        struct OtelResourceAttributes(Vec<(String, String)>);
+
+        impl FromStr for OtelResourceAttributes {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(OtelResourceAttributes(
+                    s.split(',')
+                        .filter_map(|s| {
+                            s.split_once('=')
+                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                        })
+                        .collect(),
+                ))
+            }
+        }
+
         let parsed_sampling_rules_config = sources
             .get_parse::<ParsedSamplingRules>(SupportedConfigurations::DD_TRACE_SAMPLING_RULES);
 
@@ -930,9 +960,15 @@ impl Config {
             service: cisu.update_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
-            // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
+            otel_resource_attributes: cisu.update_parsed_with_transform(
+                default.otel_resource_attributes,
+                |OtelResourceAttributes(attrs)| attrs,
+            ),
+            otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
+            otel_metrics_temporality_preference: cisu
+                .update_string(default.otel_metrics_temporality_preference, Cow::Owned),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
             trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
@@ -989,11 +1025,14 @@ impl Config {
             metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
             otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
             otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
+            otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
             otlp_metrics_protocol: cisu.update_string(default.otlp_metrics_protocol, Cow::Owned),
+            otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
             otlp_protocol: cisu.update_string(default.otlp_protocol, Cow::Owned),
             otlp_metrics_timeout: cisu.update_parsed(default.otlp_metrics_timeout),
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
+            metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
         }
     }
 
@@ -1037,6 +1076,16 @@ impl Config {
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
+            &self.otlp_endpoint,
+            &self.otlp_timeout,
+            &self.otlp_headers,
+            &self.otlp_protocol,
+            &self.otlp_metrics_endpoint,
+            &self.otlp_metrics_timeout,
+            &self.otlp_metrics_headers,
+            &self.otlp_metrics_protocol,
+            &self.metric_export_interval,
+            &self.metric_export_timeout,
         ]
     }
 
@@ -1080,6 +1129,21 @@ impl Config {
             .value()
             .iter()
             .map(|tag| (tag.0.as_str(), tag.1.as_str()))
+    }
+
+    pub fn otel_resource_attributes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.otel_resource_attributes
+            .value()
+            .iter()
+            .map(|attr| (attr.0.as_str(), attr.1.as_str()))
+    }
+
+    pub fn otel_metrics_exporter(&self) -> &str {
+        self.otel_metrics_exporter.value().as_ref()
+    }
+
+    pub fn otel_metrics_temporality_preference(&self) -> &str {
+        self.otel_metrics_temporality_preference.value().as_ref()
     }
 
     pub fn trace_agent_url(&self) -> &Cow<'static, str> {
@@ -1154,8 +1218,16 @@ impl Config {
         self.otlp_endpoint.value().as_ref()
     }
 
+    pub fn otlp_headers(&self) -> &str {
+        self.otlp_headers.value().as_ref()
+    }
+
     pub fn otlp_metrics_protocol(&self) -> &str {
         self.otlp_metrics_protocol.value().as_ref()
+    }
+
+    pub fn otlp_metrics_headers(&self) -> &str {
+        self.otlp_metrics_headers.value().as_ref()
     }
 
     pub fn otlp_protocol(&self) -> &str {
@@ -1172,6 +1244,10 @@ impl Config {
 
     pub fn metric_export_interval(&self) -> u32 {
         *self.metric_export_interval.value()
+    }
+
+    pub fn metric_export_timeout(&self) -> u32 {
+        *self.metric_export_timeout.value()
     }
 
     pub fn trace_partial_flush_enabled(&self) -> bool {
@@ -1353,6 +1429,18 @@ fn default_config() -> Config {
         ),
         version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
         global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
+        otel_resource_attributes: ConfigItem::new(
+            SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES,
+            Vec::new(),
+        ),
+        otel_metrics_exporter: ConfigItem::new(
+            SupportedConfigurations::OTEL_METRICS_EXPORTER,
+            Cow::Borrowed("otlp"),
+        ),
+        otel_metrics_temporality_preference: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
+            Cow::Borrowed("delta"),
+        ),
 
         agent_host: ConfigItem::new(
             SupportedConfigurations::DD_AGENT_HOST,
@@ -1457,8 +1545,16 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT,
             Cow::Borrowed(""),
         ),
+        otlp_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS,
+            Cow::Borrowed(""),
+        ),
         otlp_metrics_protocol: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+            Cow::Borrowed(""),
+        ),
+        otlp_metrics_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS,
             Cow::Borrowed(""),
         ),
         otlp_protocol: ConfigItem::new(
@@ -1467,12 +1563,16 @@ fn default_config() -> Config {
         ),
         otlp_metrics_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
-            7500u32,
+            10000u32,
         ),
         otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 7500u32),
         metric_export_interval: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
             10000u32,
+        ),
+        metric_export_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
+            7500u32,
         ),
     }
 }
@@ -1710,6 +1810,16 @@ impl ConfigBuilder {
     /// Env variable: `OTEL_METRIC_EXPORT_INTERVAL`
     pub fn set_metric_export_interval(&mut self, interval: u32) -> &mut Self {
         self.config.metric_export_interval.set_code(interval);
+        self
+    }
+
+    /// Set the metric export timeout in milliseconds.
+    ///
+    /// **Default**: `7500`
+    ///
+    /// Env variable: `OTEL_METRIC_EXPORT_TIMEOUT`
+    pub fn set_metric_export_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.metric_export_timeout.set_code(timeout);
         self
     }
 

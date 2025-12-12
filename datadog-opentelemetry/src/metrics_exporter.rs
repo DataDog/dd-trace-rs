@@ -6,6 +6,7 @@ use crate::core::configuration::Config;
 const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
 const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 
+#[derive(Debug, Clone, Copy)]
 pub enum OtlpProtocol {
     Grpc,
     HttpProtobuf,

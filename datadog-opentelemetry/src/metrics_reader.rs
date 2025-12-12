@@ -14,6 +14,7 @@ use crate::metrics_exporter::{
     get_metric_export_interval_ms, get_otlp_metrics_endpoint, get_otlp_metrics_timeout,
     get_otlp_protocol, OtlpProtocol,
 };
+use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 
 use crate::dd_warn;
 
@@ -36,6 +37,11 @@ pub fn create_meter_provider_with_protocol(
         return Ok(SdkMeterProvider::builder().build());
     }
 
+    if config.otel_metrics_exporter() == "none" {
+        dd_warn!("OTEL_METRICS_EXPORTER is set to 'none'. Metrics will not be exported.");
+        return Ok(SdkMeterProvider::builder().build());
+    }
+
     #[cfg(not(any(feature = "metrics-grpc", feature = "metrics-http")))]
     {
         dd_warn!("Metrics export requested but no transport feature is enabled. Enable 'metrics-grpc' or 'metrics-http' feature to export metrics.");
@@ -48,29 +54,47 @@ pub fn create_meter_provider_with_protocol(
 
         #[cfg(not(feature = "metrics-grpc"))]
         if matches!(protocol, OtlpProtocol::Grpc) {
-            dd_warn!("gRPC protocol configured but 'metrics-grpc' feature is not enabled. Metrics will not be exported. Enable the 'metrics-grpc' feature or configure a different protocol.");
+            dd_warn!("FEATURE MISMATCH: Protocol 'grpc' configured (OTEL_EXPORTER_OTLP_PROTOCOL or OTEL_EXPORTER_OTLP_METRICS_PROTOCOL) but 'metrics-grpc' feature is NOT enabled. Metrics will not be exported. Enable the 'metrics-grpc' feature in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf.");
             return Ok(SdkMeterProvider::builder().build());
         }
 
         #[cfg(not(feature = "metrics-http"))]
         if matches!(protocol, OtlpProtocol::HttpProtobuf) {
-            dd_warn!("HTTP/protobuf protocol configured but 'metrics-http' feature is not enabled. Metrics will not be exported. Enable the 'metrics-http' feature or configure a different protocol.");
+            dd_warn!("FEATURE MISMATCH: Protocol 'http/protobuf' configured (OTEL_EXPORTER_OTLP_PROTOCOL or OTEL_EXPORTER_OTLP_METRICS_PROTOCOL) but 'metrics-http' feature is NOT enabled. Metrics will not be exported. Enable the 'metrics-http' feature in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=grpc.");
             return Ok(SdkMeterProvider::builder().build());
         }
 
         if matches!(protocol, OtlpProtocol::HttpJson) {
-            dd_warn!("HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Metrics will not be exported.");
+            dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Metrics will not be exported. Use 'grpc' or 'http/protobuf' instead.");
             return Ok(SdkMeterProvider::builder().build());
         }
 
-        let endpoint = get_otlp_metrics_endpoint(&config, &protocol)?;
+        let mut endpoint = get_otlp_metrics_endpoint(&config, &protocol)?;
 
-        let temporality = opentelemetry_sdk::metrics::Temporality::Delta;
+        if matches!(protocol, OtlpProtocol::HttpProtobuf) && !endpoint.ends_with("/v1/metrics") {
+            endpoint = endpoint.trim_end_matches('/').to_string();
+            if !endpoint.is_empty() {
+                endpoint.push_str("/v1/metrics");
+            }
+        }
+
+        let temporality = match config
+            .otel_metrics_temporality_preference()
+            .to_lowercase()
+            .as_str()
+        {
+            "cumulative" => opentelemetry_sdk::metrics::Temporality::Cumulative,
+            _ => opentelemetry_sdk::metrics::Temporality::Delta,
+        };
         let timeout = Duration::from_millis(get_otlp_metrics_timeout(&config) as u64);
 
-        let exporter = match build_exporter(protocol, endpoint, timeout, temporality) {
+        let exporter = match build_exporter(protocol, endpoint.clone(), timeout, temporality) {
             Ok(exporter) => exporter,
-            Err(_) => {
+            Err(err) => {
+                dd_warn!(
+                    "Failed to create metrics exporter: {}. Metrics will not be exported.",
+                    err
+                );
                 return Ok(SdkMeterProvider::builder().build());
             }
         };
@@ -79,43 +103,77 @@ pub fn create_meter_provider_with_protocol(
             Duration::from_millis(get_metric_export_interval_ms(&config) as u64)
         });
 
-        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+        let telemetry_exporter = TelemetryTrackingExporter::new(exporter, protocol);
+
+        let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(telemetry_exporter)
             .with_interval(interval)
             .build();
 
-        let mut resource_builder = Resource::builder_empty();
+        let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
+
+        for (key, value) in config.otel_resource_attributes() {
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                key.to_string(),
+                value.to_string(),
+            ));
+        }
+
+        for (key, value) in config.global_tags() {
+            let otel_key = match key {
+                "service" => "service.name",
+                "env" => "deployment.environment",
+                "version" => "service.version",
+                _ => key,
+            };
+
+            resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                otel_key.to_string(),
+                value.to_string(),
+            ));
+        }
 
         if let Some(resource) = resource {
-            resource_builder = resource_builder.with_attributes(
-                resource
-                    .iter()
-                    .map(|(k, v)| opentelemetry::KeyValue::new(k.clone(), v.clone())),
-            );
-        } else {
-            resource_builder =
-                resource_builder.with_attributes(vec![opentelemetry::KeyValue::new(
-                    "service.name",
-                    config.service().to_string(),
-                )]);
+            for (k, v) in resource.iter() {
+                resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
+            }
+        }
+
+        if !config.service_is_default() {
+            resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.name",
+                config.service().to_string(),
+            ));
+        } else if !resource_attrs
+            .iter()
+            .any(|kv| kv.key.as_str() == "service.name")
+        {
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.name",
+                config.service().to_string(),
+            ));
         }
 
         if let Some(env) = config.env() {
-            resource_builder =
-                resource_builder.with_attributes(vec![opentelemetry::KeyValue::new(
-                    "deployment.environment",
-                    env.to_string(),
-                )]);
+            resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "deployment.environment",
+                env.to_string(),
+            ));
         }
 
         if let Some(version) = config.version() {
-            resource_builder =
-                resource_builder.with_attributes(vec![opentelemetry::KeyValue::new(
-                    "service.version",
-                    version.to_string(),
-                )]);
+            resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.version",
+                version.to_string(),
+            ));
         }
 
-        let final_resource = resource_builder.build();
+        let final_resource = Resource::builder_empty()
+            .with_attributes(resource_attrs)
+            .build();
 
         let provider = SdkMeterProvider::builder()
             .with_reader(reader)
