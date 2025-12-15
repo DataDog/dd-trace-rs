@@ -267,6 +267,14 @@
         "propertyKeys": ["otlp_metrics_protocol"]
       }
     ],
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": [
+      {
+        "version": "A",
+        "type": "string",
+        "default_value": "delta",
+        "propertyKeys": ["otel_metrics_temporality_preference"]
+      }
+    ],
     "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": [
       {
         "version": "A",
@@ -291,6 +299,14 @@
         "propertyKeys": ["otlp_timeout"]
       }
     ],
+    "OTEL_METRICS_EXPORTER": [
+      {
+        "version": "A",
+        "type": "string",
+        "default_value": "otlp",
+        "propertyKeys": ["otel_metrics_exporter"]
+      }
+    ],
     "OTEL_METRIC_EXPORT_INTERVAL": [
       {
         "version": "A",
@@ -313,22 +329,6 @@
         "type": "map",
         "default_value": "",
         "propertyKeys": []
-      }
-    ],
-    "OTEL_METRICS_EXPORTER": [
-      {
-        "version": "A",
-        "type": "string",
-        "default_value": "otlp",
-        "propertyKeys": ["otel_metrics_exporter"]
-      }
-    ],
-    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": [
-      {
-        "version": "A",
-        "type": "string",
-        "default_value": "delta",
-        "propertyKeys": ["otel_metrics_temporality_preference"]
       }
     ]
   }
