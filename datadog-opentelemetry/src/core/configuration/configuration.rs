@@ -863,7 +863,7 @@ pub struct Config {
     metrics_otel_enabled: ConfigItem<bool>,
     /// OTLP metrics endpoint
     otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
-    /// OTLP general endpoint (fallback for metrics endpoint)
+    /// OTLP general endpoint
     otlp_endpoint: ConfigItem<Cow<'static, str>>,
     /// OTLP general headers
     otlp_headers: ConfigItem<Cow<'static, str>>,
@@ -875,7 +875,7 @@ pub struct Config {
     otlp_protocol: ConfigItem<Cow<'static, str>>,
     /// OTLP metrics timeout in milliseconds
     otlp_metrics_timeout: ConfigItem<u32>,
-    /// OTLP general timeout (fallback for metrics timeout)
+    /// OTLP general timeout
     otlp_timeout: ConfigItem<u32>,
     /// Metric export interval in milliseconds
     metric_export_interval: ConfigItem<u32>,
@@ -960,6 +960,7 @@ impl Config {
             service: cisu.update_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
+            // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
             otel_resource_attributes: cisu.update_parsed_with_transform(
