@@ -41,14 +41,15 @@ pub(crate) enum SupportedConfigurations {
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_HEADERS,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+    OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
     OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TIMEOUT,
-    OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
+    OTEL_METRICS_EXPORTER,
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
-    OTEL_METRICS_EXPORTER,
     OTEL_RESOURCE_ATTRIBUTES,
+
     /// Used for testing purposes only
     #[cfg(test)]
     #[allow(unused)]
@@ -119,8 +120,8 @@ impl SupportedConfigurations {
                 "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
             }
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => {
                 "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
             }
@@ -130,17 +131,17 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => {
                 "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"
             }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => {
+                "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"
+            }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => {
                 "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT"
             }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => {
-                "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"
-            }
+            SupportedConfigurations::OTEL_METRICS_EXPORTER => "OTEL_METRICS_EXPORTER",
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",
-            SupportedConfigurations::OTEL_METRICS_EXPORTER => "OTEL_METRICS_EXPORTER",
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES => "OTEL_RESOURCE_ATTRIBUTES",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
