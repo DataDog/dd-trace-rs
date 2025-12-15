@@ -475,9 +475,9 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "libdd-common",
+ "libdd-common 1.0.0 (git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6)",
  "libdd-data-pipeline",
- "libdd-telemetry",
+ "libdd-telemetry 1.0.0 (git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6)",
  "libdd-trace-utils",
  "lru",
  "opentelemetry",
@@ -1139,6 +1139,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-common"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6#435107c245112397914935c0f7148a18b91cafc6"
+dependencies = [
+ "anyhow",
+ "cc",
+ "const_format",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hex",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "nix",
+ "pin-project",
+ "regex",
+ "serde",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-service",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
 name = "libdd-data-pipeline"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1152,10 +1181,10 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "libdd-common",
- "libdd-ddsketch",
+ "libdd-common 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-ddsketch 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libdd-dogstatsd-client",
- "libdd-telemetry",
+ "libdd-telemetry 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libdd-tinybytes",
  "libdd-trace-protobuf",
  "libdd-trace-stats",
@@ -1180,6 +1209,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-ddsketch"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6#435107c245112397914935c0f7148a18b91cafc6"
+dependencies = [
+ "prost",
+]
+
+[[package]]
 name = "libdd-dogstatsd-client"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1188,7 +1225,7 @@ dependencies = [
  "anyhow",
  "cadence",
  "http",
- "libdd-common",
+ "libdd-common 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "tracing",
 ]
@@ -1208,8 +1245,34 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
- "libdd-common",
- "libdd-ddsketch",
+ "libdd-common 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-ddsketch 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_json",
+ "sys-info",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "winver",
+]
+
+[[package]]
+name = "libdd-telemetry"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6#435107c245112397914935c0f7148a18b91cafc6"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "futures",
+ "hashbrown 0.15.5",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "libdd-common 1.0.0 (git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6)",
+ "libdd-ddsketch 1.0.0 (git+https://github.com/DataDog/libdatadog.git?rev=435107c245112397914935c0f7148a18b91cafc6)",
  "serde",
  "serde_json",
  "sys-info",
@@ -1257,7 +1320,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee15203528e63afff238bb49ea3b35e3865d9f137ca6416e79db678da237ef0"
 dependencies = [
  "hashbrown 0.15.5",
- "libdd-ddsketch",
+ "libdd-ddsketch 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libdd-trace-protobuf",
  "libdd-trace-utils",
 ]
@@ -1277,7 +1340,7 @@ dependencies = [
  "httpmock",
  "hyper",
  "indexmap",
- "libdd-common",
+ "libdd-common 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libdd-tinybytes",
  "libdd-trace-normalization",
  "libdd-trace-protobuf",
