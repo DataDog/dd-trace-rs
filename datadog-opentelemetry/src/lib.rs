@@ -185,6 +185,7 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
+/// Builder for configuring and initializing Datadog tracing with OpenTelemetry.
 pub struct DatadogTracingBuilder {
     config: Option<Config>,
     resource: Option<opentelemetry_sdk::Resource>,
