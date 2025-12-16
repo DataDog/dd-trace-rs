@@ -95,7 +95,7 @@ impl SamplingMechanism {
         self.value
     }
 
-    pub(crate) fn to_priority(&self, is_keep: bool) -> SamplingPriority {
+    pub(crate) fn to_priority(self, is_keep: bool) -> SamplingPriority {
         const AUTO_PAIR: PriorityPair = PriorityPair {
             keep: priority::AUTO_KEEP,
             reject: priority::AUTO_REJECT,
@@ -104,7 +104,7 @@ impl SamplingMechanism {
             keep: priority::USER_KEEP,
             reject: priority::USER_REJECT,
         };
-        let pair = match *self {
+        let pair = match self {
             mechanism::AGENT_RATE_BY_SERVICE | mechanism::DEFAULT => AUTO_PAIR,
             mechanism::MANUAL
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE
