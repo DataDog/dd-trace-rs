@@ -71,7 +71,7 @@ macro_rules! telemetry_metrics {
                     $(
                         $variant => ($name, $ns, $ty, vec![
                             $(
-                                libdd_common::tag!($key, $val)
+                                libdd_common::tag!($key, $val),
                             )*
                         ]),
                     )*
@@ -97,6 +97,12 @@ telemetry_metrics!(
     TraceSegmentsCreated => ("trace_segments_created", Tracers, Count, []),
     TraceSegmentsClosed => ("trace_segments_closed", Tracers, Count, []),
     TracePartialFlushCount => ("trace_partial_flush.count", Tracers, Count, []),
+    OtelMetricsExportAttemptsGrpc => ("otel.metrics_export_attempts", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelMetricsExportSuccessesGrpc => ("otel.metrics_export_successes", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelMetricsExportFailuresGrpc => ("otel.metrics_export_failures", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelMetricsExportAttemptsHttp => ("otel.metrics_export_attempts", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelMetricsExportSuccessesHttp => ("otel.metrics_export_successes", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelMetricsExportFailuresHttp => ("otel.metrics_export_failures", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
 );
 
 trait TelemetryHandle: Sync + Send + 'static + Any {
