@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#![allow(missing_docs)]
+
 pub mod benchmarks {
     //! Scaffolding for memory usage benchmarks
     //!

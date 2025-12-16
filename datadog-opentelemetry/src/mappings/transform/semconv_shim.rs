@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![allow(unused)]
+#![allow(missing_docs)]
 
 //! This module contains constants for OpenTelemetry semantic conventions that are currently missing
 //! in the `opentelemetry-semantic-conventions` crate.

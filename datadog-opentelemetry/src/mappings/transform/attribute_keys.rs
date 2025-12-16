@@ -105,7 +105,7 @@ pub struct AttributeKey {
 }
 
 impl AttributeKey {
-    pub fn key(&self) -> &'static str {
+    pub(crate) fn key(&self) -> &'static str {
         self.key
     }
 }
@@ -124,7 +124,7 @@ impl AttributeIndices {
         self.0[key.idx] = val as u32;
     }
 
-    pub fn get(&self, key: AttributeKey) -> Option<usize> {
+    pub(crate) fn get(&self, key: AttributeKey) -> Option<usize> {
         let val = self.0[key.idx];
         if val == u32::MAX {
             None
@@ -135,7 +135,7 @@ impl AttributeIndices {
 }
 
 impl AttributeIndices {
-    pub fn from_attribute_slice(attributes: &[opentelemetry::KeyValue]) -> Self {
+    pub(crate) fn from_attribute_slice(attributes: &[opentelemetry::KeyValue]) -> Self {
         let mut s = Self::default();
         for (i, KeyValue { key, .. }) in attributes.iter().enumerate() {
             let Some(idx) = get_attribute_idx(key.as_str()) else {

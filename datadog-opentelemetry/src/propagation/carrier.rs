@@ -1,8 +1,15 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-/// Code inspired, and copied, by OpenTelemetry Rust project.
-/// <https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry/src/propagation/mod.rs>
+//! Carrier traits for trace context propagation.
+//!
+//! This module provides the [`Injector`] trait for injecting trace context
+//! into carriers (e.g., HTTP headers), with implementations for common types
+//! like [`HashMap`] and OpenTelemetry's propagation traits.
+//!
+//! Code inspired by the OpenTelemetry Rust project.
+//! <https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry/src/propagation/mod.rs>
+
 use std::collections::HashMap;
 
 /// Injector provides an interface for a carrier to be used
@@ -12,12 +19,13 @@ pub trait Injector {
     fn set(&mut self, key: &str, value: String);
 }
 
+/// Extractor provides an interface for a carrier to be used
+/// with a Propagator to extract a Context from the carrier.
 pub trait Extractor {
-    /// Get a value from the carrier.
+    /// Get a value from the carrier by key.
     fn get(&self, key: &str) -> Option<&str>;
 
     /// Get all keys from the carrier.
-    #[allow(unused)]
     fn keys(&self) -> Vec<&str>;
 }
 
