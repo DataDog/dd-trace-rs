@@ -8,7 +8,7 @@
 //! # Source
 //!
 //! This should be a 1:1 port of this commit
-//! https://github.com/DataDog/datadog-agent/blob/97e6db0d4130c8545ede77111a2590eb034c2f11/pkg/trace/transform/transform.go
+//! <https://github.com/DataDog/datadog-agent/blob/97e6db0d4130c8545ede77111a2590eb034c2f11/pkg/trace/transform/transform.go>
 //!
 //! It performs a mapping between otel span data and datadog spans. The conversion is done using the
 //! default configuration of the datadog agent, thus compared to the original code, we have removed
