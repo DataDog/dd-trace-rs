@@ -639,10 +639,16 @@ impl ExtraServicesTracker {
     }
 }
 
+/// Trace context propagation style.
+///
+/// Defines how trace context is propagated across service boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TracePropagationStyle {
+    /// Datadog proprietary propagation format using `x-datadog-*` headers.
     Datadog,
+    /// W3C Trace Context propagation format using `traceparent` and `tracestate` headers.
     TraceContext,
+    /// No propagation - trace context is not propagated.
     None,
 }
 
@@ -1014,26 +1020,32 @@ impl Config {
         ]
     }
 
+    /// Returns the unique runtime identifier for this process.
     pub fn runtime_id(&self) -> &str {
         self.runtime_id
     }
 
+    /// Returns the version of the Datadog tracer.
     pub fn tracer_version(&self) -> &str {
         self.tracer_version
     }
 
+    /// Returns the programming language identifier (e.g., "rust").
     pub fn language(&self) -> &str {
         self.language
     }
 
+    /// Returns the version of the programming language runtime.
     pub fn language_version(&self) -> &str {
         self.language_version.as_str()
     }
 
+    /// Returns the configured service name.
     pub fn service(&self) -> impl Deref<Target = str> + use<'_> {
         self.service.value()
     }
 
+    /// Returns whether the service name is using the default value.
     pub fn service_is_default(&self) -> bool {
         match self.service.value() {
             ConfigItemRef::Ref(t) => t.is_default(),
@@ -1041,14 +1053,17 @@ impl Config {
         }
     }
 
+    /// Returns the configured environment name (e.g., "production", "staging").
     pub fn env(&self) -> Option<&str> {
         self.env.value().as_deref()
     }
 
+    /// Returns the configured application version.
     pub fn version(&self) -> Option<&str> {
         self.version.value().as_deref()
     }
 
+    /// Returns an iterator over the configured global tags as key-value pairs.
     pub fn global_tags(&self) -> impl Iterator<Item = (&str, &str)> {
         self.global_tags
             .value()
@@ -1056,44 +1071,53 @@ impl Config {
             .map(|tag| (tag.0.as_str(), tag.1.as_str()))
     }
 
+    /// Returns the URL of the Datadog trace agent.
     pub fn trace_agent_url(&self) -> &Cow<'static, str> {
         self.trace_agent_url.value()
     }
 
+    /// Returns the host of the DogStatsD agent.
     pub fn dogstatsd_agent_host(&self) -> &Cow<'static, str> {
         self.dogstatsd_agent_host.value()
     }
 
+    /// Returns the port of the DogStatsD agent.
     pub fn dogstatsd_agent_port(&self) -> &u32 {
         self.dogstatsd_agent_port.value()
     }
 
+    /// Returns the full URL of the DogStatsD agent.
     pub fn dogstatsd_agent_url(&self) -> &Cow<'static, str> {
         self.dogstatsd_agent_url.value()
     }
 
+    /// Returns the configured trace sampling rules.
     pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
         self.trace_sampling_rules.value()
     }
 
+    /// Returns the maximum number of traces per second (rate limit).
     pub fn trace_rate_limit(&self) -> i32 {
         *self.trace_rate_limit.value()
     }
 
+    /// Returns whether tracing is enabled.
     pub fn enabled(&self) -> bool {
         *self.enabled.value()
     }
 
+    /// Returns the configured log level filter.
     pub fn log_level_filter(&self) -> &LevelFilter {
         self.log_level_filter.value()
     }
 
+    /// Returns whether client-side trace stats computation is enabled.
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn __internal_wait_agent_info_ready(&self) -> bool {
+    pub(crate) fn __internal_wait_agent_info_ready(&self) -> bool {
         self.wait_agent_info_ready
     }
 
@@ -1104,38 +1128,47 @@ impl Config {
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
     }
 
+    /// Returns whether telemetry collection is enabled.
     pub fn telemetry_enabled(&self) -> bool {
         *self.telemetry_enabled.value()
     }
 
+    /// Returns whether telemetry log collection is enabled.
     pub fn telemetry_log_collection_enabled(&self) -> bool {
         *self.telemetry_log_collection_enabled.value()
     }
 
+    /// Returns the telemetry heartbeat interval in seconds.
     pub fn telemetry_heartbeat_interval(&self) -> f64 {
         *self.telemetry_heartbeat_interval.value()
     }
 
+    /// Returns whether partial trace flushing is enabled.
     pub fn trace_partial_flush_enabled(&self) -> bool {
         *self.trace_partial_flush_enabled.value()
     }
 
+    /// Returns the minimum number of spans required to trigger a partial flush.
     pub fn trace_partial_flush_min_spans(&self) -> usize {
         *self.trace_partial_flush_min_spans.value()
     }
 
+    /// Returns the configured trace propagation styles for both injection and extraction.
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style.value().as_deref()
     }
 
+    /// Returns the configured trace propagation styles for context extraction.
     pub fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style_extract.value().as_deref()
     }
 
+    /// Returns the configured trace propagation styles for context injection.
     pub fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style_inject.value().as_deref()
     }
 
+    /// Returns whether to stop extraction after the first successful propagator.
     pub fn trace_propagation_extract_first(&self) -> bool {
         *self.trace_propagation_extract_first.value()
     }
@@ -1390,6 +1423,9 @@ fn default_config() -> Config {
     }
 }
 
+/// Builder for constructing a [`Config`] instance.
+///
+/// Use [`Config::builder()`] to create a new builder instance.
 pub struct ConfigBuilder {
     config: Config,
 }
@@ -1733,13 +1769,14 @@ impl ConfigBuilder {
     }
 
     #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
     pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
         self.config.datadog_tags_max_length.set_code(length);
         self
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn __internal_set_wait_agent_info_ready(
+    pub(crate) fn __internal_set_wait_agent_info_ready(
         &mut self,
         wait_agent_info_ready: bool,
     ) -> &mut Self {

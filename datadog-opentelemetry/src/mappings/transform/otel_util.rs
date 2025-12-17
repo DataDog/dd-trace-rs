@@ -10,7 +10,7 @@ use opentelemetry_semantic_conventions::{self as semconv};
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
-pub trait OtelSpan<'a> {
+pub(crate) trait OtelSpan<'a> {
     fn name(&self) -> &'a str;
     fn span_kind(&self) -> SpanKind;
     fn has_attr(&self, attr_key: AttributeKey) -> bool;
@@ -198,7 +198,7 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
-pub fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> u32 {
+pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> u32 {
     if let Some(code) = span.get_attr_num(HTTP_RESPONSE_STATUS_CODE) {
         return code;
     }

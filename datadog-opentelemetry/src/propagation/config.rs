@@ -3,7 +3,7 @@
 
 use crate::configuration::{Config, TracePropagationStyle};
 
-pub fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
+pub(super) fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
     if let Some(extractors) = config.trace_propagation_style_extract() {
         extractors
     } else {
@@ -11,7 +11,7 @@ pub fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
     }
 }
 
-pub fn get_injectors(config: &Config) -> &[TracePropagationStyle] {
+pub(super) fn get_injectors(config: &Config) -> &[TracePropagationStyle] {
     if let Some(injectors) = config.trace_propagation_style_inject() {
         injectors
     } else {

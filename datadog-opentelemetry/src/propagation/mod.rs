@@ -16,19 +16,23 @@ use datadog::DATADOG_LAST_PARENT_ID_KEY;
 use tracecontext::TRACESTATE_KEY;
 
 pub mod carrier;
-pub mod config;
+pub(crate) mod config;
 pub mod context;
 mod datadog;
 mod error;
-pub mod trace_propagation_style;
-pub mod tracecontext;
+pub(crate) mod trace_propagation_style;
+pub(crate) mod tracecontext;
 
-pub trait Propagator {
+pub(crate) trait Propagator {
     fn extract(&self, carrier: &dyn Extractor, config: &Config) -> Option<SpanContext>;
     fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config);
     fn keys(&self) -> &[String];
 }
 
+/// A composite propagator that supports multiple trace context propagation formats.
+///
+/// This propagator can extract and inject trace context using multiple formats
+/// (e.g., Datadog, W3C Trace Context) based on the provided configuration.
 #[derive(Debug)]
 pub struct DatadogCompositePropagator {
     config: Arc<Config>,
@@ -38,6 +42,10 @@ pub struct DatadogCompositePropagator {
 }
 
 impl DatadogCompositePropagator {
+    /// Creates a new composite propagator with the given configuration.
+    ///
+    /// The propagator will use the extraction and injection styles configured in the
+    /// provided [`Config`], respecting settings like `trace_propagation_extract_first`.
     #[must_use]
     pub fn new(config: Arc<Config>) -> Self {
         let extractors = get_extractors(&config);
@@ -75,6 +83,9 @@ impl DatadogCompositePropagator {
         }
     }
 
+    /// Extracts trace context from the carrier using the configured extraction styles.
+    ///
+    /// Returns `None` if no valid trace context is found in the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         let contexts = self.extract_available_contexts(carrier, &self.config);
         if contexts.is_empty() {
@@ -86,12 +97,14 @@ impl DatadogCompositePropagator {
         Some(context)
     }
 
+    /// Injects trace context into the carrier using the configured injection styles.
     pub fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector) {
         self.injectors
             .iter()
             .for_each(|propagator| propagator.inject(context, carrier, &self.config));
     }
 
+    /// Returns the header keys used by the configured extractors.
     pub fn keys(&self) -> &[String] {
         &self.keys
     }
@@ -217,7 +230,7 @@ macro_rules! const_concat {
 pub(crate) use const_concat;
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use std::{collections::HashMap, str::FromStr, sync::LazyLock, vec};
 
     use assert_unordered::assert_eq_unordered;
