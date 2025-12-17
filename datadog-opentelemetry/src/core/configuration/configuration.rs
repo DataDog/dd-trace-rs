@@ -1117,7 +1117,7 @@ impl Config {
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn __internal_wait_agent_info_ready(&self) -> bool {
+    pub(crate) fn __internal_wait_agent_info_ready(&self) -> bool {
         self.wait_agent_info_ready
     }
 
@@ -1769,13 +1769,14 @@ impl ConfigBuilder {
     }
 
     #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
     pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
         self.config.datadog_tags_max_length.set_code(length);
         self
     }
 
     #[cfg(feature = "test-utils")]
-    pub fn __internal_set_wait_agent_info_ready(
+    pub(crate) fn __internal_set_wait_agent_info_ready(
         &mut self,
         wait_agent_info_ready: bool,
     ) -> &mut Self {

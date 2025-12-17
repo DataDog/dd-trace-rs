@@ -142,6 +142,8 @@
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
 //!   version: 0.32
 
+#![deny(missing_docs)]
+
 // Public re-exports
 pub use core::configuration;
 pub use core::log;
@@ -472,6 +474,7 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
 
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, DatadogPropagator) {
+    #![allow(missing_docs)]
     make_tracer(
         shared_config,
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),
