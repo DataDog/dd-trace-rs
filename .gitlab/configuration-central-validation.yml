@@ -2,7 +2,7 @@
 # This URL is available in the dd-gitlab/publish-content-addresable-templates job whenever
 # a change is made on the one-pipeline template.
 variables:
-  SCRIPTS_BASE_URL: https://gitlab-templates.ddbuild.io/libdatadog/one-pipeline/ca/04f6a88e3db67cb88821632d138a2a5c3105ba59760bd3dfc60b54733501ecc3/scripts/
+  SCRIPTS_BASE_URL: https://gitlab-templates.ddbuild.io/libdatadog/one-pipeline/ca/58b2e8d06c714848c8577c8ac9b460b7413823d75ee96d068ebff547d109f5d0/scripts/
 
 .download-scripts-from-template: &download-scripts-from-template
   - mkdir -p scripts/config-inversion
