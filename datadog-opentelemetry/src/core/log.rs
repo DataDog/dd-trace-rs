@@ -25,11 +25,16 @@ pub(crate) fn max_level() -> LevelFilter {
 #[non_exhaustive]
 /// The level at which the library will log
 pub enum LevelFilter {
+    /// Logging is completely disabled.
     Off,
+    /// Only error messages are logged.
     #[default]
     Error,
+    /// Error and warning messages are logged.
     Warn,
+    /// Error, warning, and informational messages are logged.
     Info,
+    /// All messages including debug information are logged.
     Debug,
 }
 

@@ -1,6 +1,12 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Span context types for trace propagation.
+//!
+//! This module provides types representing span context information that is
+//! propagated across service boundaries, including trace IDs, span IDs,
+//! sampling decisions, and W3C tracestate data.
+
 use std::{borrow::Cow, collections::HashMap, str::FromStr, vec};
 
 use crate::{
@@ -13,26 +19,37 @@ use crate::{
 
 use super::tracecontext::TRACESTATE_KEY;
 
-pub const DATADOG_PROPAGATION_TAG_PREFIX: &str = "_dd.p.";
+pub(super) const DATADOG_PROPAGATION_TAG_PREFIX: &str = "_dd.p.";
 
+/// Sampling information extracted from or to be injected into trace context.
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Sampling {
+    /// The sampling priority indicating whether the trace should be kept or rejected.
     pub priority: Option<SamplingPriority>,
+    /// The mechanism that made the sampling decision.
     pub mechanism: Option<SamplingMechanism>,
 }
 
+/// A link to another span, used to represent causal relationships between spans.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct SpanLink {
+    /// Lower 64 bits of the linked trace ID.
     pub trace_id: u64,
+    /// Upper 64 bits of the linked trace ID (for 128-bit trace IDs).
     pub trace_id_high: Option<u64>,
+    /// The linked span ID.
     pub span_id: u64,
+    /// Additional attributes associated with the link.
     pub attributes: Option<HashMap<String, String>>,
+    /// W3C tracestate header value from the linked context.
     pub tracestate: Option<String>,
+    /// Trace flags from the linked context.
     pub flags: Option<u32>,
 }
 
 impl SpanLink {
-    pub fn terminated_context(context: &SpanContext, style: TracePropagationStyle) -> Self {
+    /// Creates a span link for a terminated context scenario.
+    pub(super) fn terminated_context(context: &SpanContext, style: TracePropagationStyle) -> Self {
         let attributes = Some(HashMap::from([
             ("reason".to_string(), "terminated_context".to_string()),
             ("context_headers".to_string(), style.to_string()),
@@ -41,7 +58,8 @@ impl SpanLink {
         SpanLink::new(context, style, attributes)
     }
 
-    pub fn new(
+    /// Creates a new span link from a span context.
+    pub(super) fn new(
         context: &SpanContext,
         style: TracePropagationStyle,
         attributes: Option<HashMap<String, String>>,
@@ -69,14 +87,24 @@ impl SpanLink {
     }
 }
 
+/// Span context data prepared for injection into outgoing requests.
+///
+/// This is a borrowed view of span context optimized for the injection process,
+/// avoiding unnecessary clones during propagation.
 pub struct InjectSpanContext<'a> {
+    /// The 128-bit trace identifier.
     pub trace_id: u128,
+    /// The 64-bit span identifier.
     pub span_id: u64,
+    /// Sampling information for this trace.
     pub sampling: Sampling,
+    /// The origin of the trace (e.g., "synthetics", "rum").
     pub origin: Option<&'a str>,
-    // tags needs to be mutable because we insert the error meta field
+    /// Propagation tags (mutable to allow adding error metadata).
     pub tags: &'a mut HashMap<String, String>,
+    /// Whether this context was received from a remote service.
     pub is_remote: bool,
+    /// W3C tracestate data to inject.
     pub tracestate: Option<InjectTraceState>,
 }
 
@@ -105,31 +133,43 @@ pub(crate) fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'
     }
 }
 
+/// Context information for a span that can be propagated across service boundaries.
+///
+/// Contains trace identification, sampling decisions, and propagation metadata.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct SpanContext {
+    /// The 128-bit trace identifier.
     pub trace_id: u128,
+    /// The 64-bit span identifier.
     pub span_id: u64,
+    /// Sampling information for this trace.
     pub sampling: Sampling,
+    /// The origin of the trace (e.g., "synthetics", "rum").
     pub origin: Option<String>,
+    /// Propagation tags (prefixed with `_dd.p.`).
     pub tags: HashMap<String, String>,
+    /// Links to related spans.
     pub links: Vec<SpanLink>,
+    /// Whether this context was received from a remote service.
     pub is_remote: bool,
+    /// W3C tracestate information.
     pub tracestate: Option<Tracestate>,
 }
 
-/// A tracestate we grab from the parent span
+/// Tracestate data to be injected into outgoing requests.
 ///
-/// Only non-dd keys in the tracestate are injected
+/// Contains non-Datadog tracestate entries from the parent span that should
+/// be propagated to downstream services.
 pub struct InjectTraceState {
     header: String,
 }
 
 impl InjectTraceState {
-    pub fn from_header(header: String) -> Self {
+    pub(crate) fn from_header(header: String) -> Self {
         Self { header }
     }
 
-    pub fn additional_values(&self) -> impl Iterator<Item = &str> {
+    pub(crate) fn additional_values(&self) -> impl Iterator<Item = &str> {
         self.header.split(',').filter(|part| {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
             key != "dd"
@@ -141,19 +181,23 @@ impl InjectTraceState {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Traceparent {
+pub(crate) struct Traceparent {
     pub sampling_priority: SamplingPriority,
     pub trace_id: u128,
     pub span_id: u64,
 }
 
+/// Parsed W3C tracestate header containing Datadog-specific and vendor values.
+///
+/// The tracestate header allows vendors to propagate additional trace context
+/// alongside the standard traceparent header.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Tracestate {
-    pub sampling: Option<Sampling>,
-    pub origin: Option<String>,
-    pub lower_order_trace_id: Option<String>,
-    pub propagation_tags: Option<HashMap<String, String>>,
-    pub additional_values: Option<Vec<(String, String)>>,
+    pub(crate) sampling: Option<Sampling>,
+    pub(crate) origin: Option<String>,
+    pub(crate) lower_order_trace_id: Option<String>,
+    pub(crate) propagation_tags: Option<HashMap<String, String>>,
+    pub(crate) additional_values: Option<Vec<(String, String)>>,
 }
 
 /// Code inspired, and copied, by OpenTelemetry Rust project.
@@ -300,7 +344,7 @@ fn decode_tag_value(value: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn encode_tag_value(tag: &str) -> Cow<'_, str> {
+pub(crate) fn encode_tag_value(tag: &str) -> Cow<'_, str> {
     if tag.as_bytes().contains(&b'=') {
         Cow::Owned(tag.replace('=', "~"))
     } else {
@@ -308,7 +352,7 @@ pub fn encode_tag_value(tag: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
+pub(crate) fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
     let trace_id_lower_order_bits = trace_id as u64;
 
     let higher = (trace_id >> 64) as u64;
@@ -317,7 +361,7 @@ pub fn split_trace_id(trace_id: u128) -> (Option<u64>, u64) {
     (trace_id_higher_order_bits, trace_id_lower_order_bits)
 }
 
-pub fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128 {
+pub(crate) fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) -> u128 {
     if let Some(combined_trace_id) = higher_bits_hex
         .and_then(|higher| u64::from_str_radix(higher, 16).ok())
         .map(|higher| {

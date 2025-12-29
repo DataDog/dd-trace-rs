@@ -631,7 +631,8 @@ impl RemoteConfigClient {
 
             for file in target_files {
                 // Extract product and config_id from path to determine which handler to use
-                // Path format is like "datadog/2/{PRODUCT}/{config_id}/config"
+                // Path format is: ^(datadog/\d+|employee)/[^/]+/[^/]+/[^/]+$
+                // Where the three last groups represent product/config_id/name
                 let Some((product, config_id)) = extract_product_and_id_from_path(&file.path)
                 else {
                     crate::dd_debug!(
@@ -857,19 +858,32 @@ impl ProductRegistry {
     }
 }
 
-/// Extract product name and id from remote config path
-/// Path format is: datadog/2/{PRODUCT}/{config_id}/config
+/// Extract product and id from remote config path
+/// Path format is: ^(datadog/\d+|employee)/[^/]+/[^/]+/[^/]+$
+/// Where the three last groups represent product/config_id/name
 fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
     let mut components = path
-        .strip_prefix("datadog/2/")?
-        .strip_suffix("/config")?
+        .strip_prefix("datadog/")
+        .map_or_else(
+            || path.strip_prefix("employee/"),
+            |rest| {
+                if !rest.starts_with(char::is_numeric) {
+                    None
+                } else {
+                    rest.trim_start_matches(char::is_numeric).strip_prefix("/")
+                }
+            },
+        )?
         .split("/");
+
     let (product, config_id) = (
         components.next()?.to_string(),
         components.next()?.to_string(),
     );
-    // Check if there are any remaining components after product and config_id
-    if components.next().is_some() {
+    // Remove the last name part
+    let _ = components.next()?;
+    // Check if there are any remaining components after product, config_id, name
+    if components.next().is_some() || product.is_empty() || config_id.is_empty() {
         return None;
     }
     Some((product, config_id))
@@ -878,6 +892,9 @@ fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
+    use proptest::prelude::*;
+    use test_case::test_case;
 
     #[test]
     fn test_client_capabilities() {
@@ -1512,75 +1529,292 @@ mod tests {
         assert_eq!(cws_custom.get("v").unwrap().as_u64().unwrap(), 1);
     }
 
-    #[test]
-    fn test_extract_product_from_path() {
-        // Test APM_TRACING path
-        assert_eq!(
-            extract_product_and_id_from_path("datadog/2/APM_TRACING/config123/config")
-                .map(|(p, _)| p),
-            Some("APM_TRACING".to_string())
-        );
+    // ===== Valid Path Tests =====
 
-        // Test LIVE_DEBUGGING path
+    #[test_case("datadog/2/APM_TRACING/config123/config", "APM_TRACING", "config123")]
+    #[test_case(
+        "datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config",
+        "LIVE_DEBUGGING",
+        "LIVE_DEBUGGING-base"
+    )]
+    #[test_case(
+        "datadog/2/AGENT_CONFIG/dynamic_rates/config",
+        "AGENT_CONFIG",
+        "dynamic_rates"
+    )]
+    #[test_case(
+        "datadog/2/ASM_FEATURES/ASM_FEATURES-base/config",
+        "ASM_FEATURES",
+        "ASM_FEATURES-base"
+    )]
+    #[test_case(
+        "datadog/2/APM_SAMPLING/dynamic_rates/config",
+        "APM_SAMPLING",
+        "dynamic_rates"
+    )]
+    fn test_valid_datadog_paths(path: &str, expected_product: &str, expected_id: &str) {
+        let result = extract_product_and_id_from_path(path);
         assert_eq!(
-            extract_product_and_id_from_path("datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config")
-                .map(|(p, _)| p),
-            Some("LIVE_DEBUGGING".to_string())
+            result,
+            Some((expected_product.to_string(), expected_id.to_string()))
         );
-
-        // Test AGENT_CONFIG path
-        assert_eq!(
-            extract_product_and_id_from_path("datadog/2/AGENT_CONFIG/dynamic_rates/config")
-                .map(|(p, _)| p),
-            Some("AGENT_CONFIG".to_string())
-        );
-
-        // Test invalid paths
-        assert_eq!(
-            extract_product_and_id_from_path("invalid/path").map(|(p, _)| p),
-            None
-        );
-        assert_eq!(
-            extract_product_and_id_from_path("datadog/1/APM_TRACING/config").map(|(p, _)| p),
-            None
-        );
-        assert_eq!(
-            extract_product_and_id_from_path("datadog/APM_TRACING/config").map(|(p, _)| p),
-            None
-        );
-        assert_eq!(extract_product_and_id_from_path("").map(|(p, _)| p), None);
     }
 
-    #[test]
-    fn test_extract_config_id_from_path() {
-        // Test APM_TRACING path
+    #[test_case(
+        "employee/ASM_DD/1.recommended.json/config",
+        "ASM_DD",
+        "1.recommended.json"
+    )]
+    #[test_case(
+        "employee/CWS_DD/4.default.policy/config",
+        "CWS_DD",
+        "4.default.policy"
+    )]
+    #[test_case("employee/TEST_PRODUCT/test-id/some-name", "TEST_PRODUCT", "test-id")]
+    fn test_valid_employee_paths(path: &str, expected_product: &str, expected_id: &str) {
+        let result = extract_product_and_id_from_path(path);
         assert_eq!(
-            extract_product_and_id_from_path("datadog/2/APM_TRACING/config123/config")
-                .map(|(_, id)| id),
-            Some("config123".to_string())
+            result,
+            Some((expected_product.to_string(), expected_id.to_string()))
         );
+    }
 
-        // Test ASM_FEATURES path
+    #[test_case("datadog/0/PRODUCT/id/name", "PRODUCT", "id")]
+    #[test_case("datadog/1/PRODUCT/id/name", "PRODUCT", "id")]
+    #[test_case("datadog/2/PRODUCT/id/name", "PRODUCT", "id")]
+    #[test_case("datadog/99/PRODUCT/id/name", "PRODUCT", "id")]
+    #[test_case("datadog/123/PRODUCT/id/name", "PRODUCT", "id")]
+    #[test_case("datadog/999999/PRODUCT/id/name", "PRODUCT", "id")]
+    fn test_various_numeric_versions(path: &str, expected_product: &str, expected_id: &str) {
+        let result = extract_product_and_id_from_path(path);
         assert_eq!(
-            extract_product_and_id_from_path("datadog/2/ASM_FEATURES/ASM_FEATURES-base/config")
-                .map(|(_, id)| id),
-            Some("ASM_FEATURES-base".to_string())
+            result,
+            Some((expected_product.to_string(), expected_id.to_string()))
         );
+    }
 
-        // Test invalid paths
+    #[test_case("datadog/2/PRODUCT-NAME/config-id-123/file.json", "PRODUCT-NAME", "config-id-123" ; "hyphens")]
+    #[test_case("datadog/2/PRODUCT_NAME/config_id_123/file_name", "PRODUCT_NAME", "config_id_123" ; "underscores")]
+    #[test_case("datadog/2/PRODUCT.NAME/config.id.123/file.name", "PRODUCT.NAME", "config.id.123" ; "dots")]
+    #[test_case("employee/PR0D-UCT_123/id-with.chars/name", "PR0D-UCT_123", "id-with.chars" ; "mixed special chars")]
+    fn test_special_characters_in_components(
+        path: &str,
+        expected_product: &str,
+        expected_id: &str,
+    ) {
+        let result = extract_product_and_id_from_path(path);
         assert_eq!(
-            extract_product_and_id_from_path("invalid/path").map(|(_, id)| id),
-            None
+            result,
+            Some((expected_product.to_string(), expected_id.to_string()))
         );
+    }
+
+    // ===== Invalid Path Tests =====
+
+    #[test_case("" ; "empty string")]
+    #[test_case(" " ; "single space")]
+    #[test_case("   " ; "multiple spaces")]
+    fn test_empty_and_whitespace(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    #[test_case("invalid/path" ; "invalid prefix")]
+    #[test_case("invalid/2/PRODUCT/id/name" ; "invalid prefix with components")]
+    #[test_case("datadogs/2/PRODUCT/id/name" ; "typo in datadog")]
+    #[test_case("employe/PRODUCT/id/name" ; "typo in employee")]
+    #[test_case("PRODUCT/id/name" ; "missing prefix entirely")]
+    #[test_case("2/PRODUCT/id/name" ; "numeric prefix only")]
+    fn test_missing_prefix(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    #[test_case("datadog/2" ; "datadog only version")]
+    #[test_case("datadog/2/PRODUCT" ; "datadog missing id and name")]
+    #[test_case("datadog/2/PRODUCT/config" ; "datadog missing name")]
+    #[test_case("employee/PRODUCT" ; "employee missing id and name")]
+    #[test_case("employee/PRODUCT/id" ; "employee missing name")]
+    fn test_insufficient_components(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    #[test_case("datadog/2/PRODUCT/id/name/extra" ; "datadog one extra")]
+    #[test_case("datadog/2/PRODUCT/id/name/extra/more" ; "datadog two extra")]
+    #[test_case("employee/PRODUCT/id/name/extra" ; "employee one extra")]
+    #[test_case("employee/PRODUCT/id/name/extra/and/more" ; "employee three extra")]
+    fn test_too_many_components(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    #[test_case("datadog/2/PROD/UCT/id/name" ; "slash in product")]
+    #[test_case("datadog/2/PRODUCT/conf/ig/name" ; "slash in config_id")]
+    #[test_case("datadog/2/PRODUCT/id/na/me" ; "slash in name")]
+    fn test_slashes_in_components(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    #[test_case("/datadog/2/PRODUCT/id/name" ; "leading slash datadog")]
+    #[test_case("datadog/2/PRODUCT/id/name/" ; "trailing slash datadog")]
+    #[test_case("/employee/PRODUCT/id/name" ; "leading slash employee")]
+    fn test_leading_trailing_slashes(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
+    }
+
+    // ===== Property-Based Tests =====
+
+    proptest! {
+        #[test]
+        fn test_valid_datadog_paths_property(
+            version in 0u32..1000000,
+            product in "[A-Z_]{1,20}",
+            config_id in "[a-zA-Z0-9_-]{1,30}",
+            name in "[a-zA-Z0-9_.-]{1,30}"
+        ) {
+            let path = format!("datadog/{}/{}/{}/{}", version, product, config_id, name);
+            let result = extract_product_and_id_from_path(&path);
+
+            prop_assert_eq!(
+                result,
+                Some((product.clone(), config_id.clone())),
+                "Valid datadog path should parse successfully: {}",
+                path
+            );
+        }
+
+        #[test]
+        fn test_valid_employee_paths_property(
+            product in "[A-Z_]{1,20}",
+            config_id in "[a-zA-Z0-9_.-]{1,30}",
+            name in "[a-zA-Z0-9_.-]{1,30}"
+        ) {
+            let path = format!("employee/{}/{}/{}", product, config_id, name);
+            let result = extract_product_and_id_from_path(&path);
+
+            prop_assert_eq!(
+                result,
+                Some((product.clone(), config_id.clone())),
+                "Valid employee path should parse successfully: {}",
+                path
+            );
+        }
+
+        #[test]
+        fn test_invalid_prefix_property(
+            prefix in "[a-z]{1,20}",
+            rest in "[a-zA-Z0-9/_-]{1,50}"
+        ) {
+            prop_assume!(prefix != "datadog" && prefix != "employee");
+            let path = format!("{}/{}", prefix, rest);
+            let result = extract_product_and_id_from_path(&path);
+
+            prop_assert_eq!(
+                result,
+                None,
+                "Path with invalid prefix should fail: {}",
+                path
+            );
+        }
+
+        #[test]
+        fn test_too_few_components_property(
+            version in 0u32..100,
+            component_count in 0usize..3
+        ) {
+            let mut components = vec![format!("datadog/{}", version)];
+            for i in 0..component_count {
+                components.push(format!("comp{}", i));
+            }
+            let path = components.join("/");
+            let result = extract_product_and_id_from_path(&path);
+
+            prop_assert_eq!(
+                result,
+                None,
+                "Path with {} components should fail: {}",
+                component_count,
+                path
+            );
+        }
+
+        #[test]
+        fn test_too_many_components_property(
+            version in 0u32..100,
+            product in "[A-Z_]{1,20}",
+            config_id in "[a-zA-Z0-9_-]{1,30}",
+            name in "[a-zA-Z0-9_.-]{1,30}",
+            extra_count in 1usize..5
+        ) {
+            let mut path = format!("datadog/{}/{}/{}/{}", version, product, config_id, name);
+            for i in 0..extra_count {
+                path.push_str(&format!("/extra{}", i));
+            }
+            let result = extract_product_and_id_from_path(&path);
+
+            prop_assert_eq!(
+                result,
+                None,
+                "Path with {} extra components should fail: {}",
+                extra_count,
+                path
+            );
+        }
+    }
+
+    // ===== Regression Tests for Real-World Paths =====
+
+    #[test_case(
+        "datadog/2/APM_SAMPLING/dynamic_rates/config",
+        "APM_SAMPLING",
+        "dynamic_rates"
+    )]
+    #[test_case(
+        "employee/ASM_DD/1.recommended.json/config",
+        "ASM_DD",
+        "1.recommended.json"
+    )]
+    #[test_case(
+        "employee/CWS_DD/4.default.policy/config",
+        "CWS_DD",
+        "4.default.policy"
+    )]
+    #[test_case(
+        "datadog/2/APM_TRACING/apm-tracing-sampling/config",
+        "APM_TRACING",
+        "apm-tracing-sampling"
+    )]
+    #[test_case(
+        "datadog/2/ASM_FEATURES/ASM_FEATURES-base/config",
+        "ASM_FEATURES",
+        "ASM_FEATURES-base"
+    )]
+    #[test_case(
+        "datadog/2/LIVE_DEBUGGING/LIVE_DEBUGGING-base/config",
+        "LIVE_DEBUGGING",
+        "LIVE_DEBUGGING-base"
+    )]
+    fn test_real_world_examples(path: &str, expected_product: &str, expected_id: &str) {
+        let result = extract_product_and_id_from_path(path);
         assert_eq!(
-            extract_product_and_id_from_path("datadog/2/APM_TRACING/config").map(|(_, id)| id),
-            None
-        ); // Missing /config at end
-        assert_eq!(
-            extract_product_and_id_from_path("datadog/2/APM_TRACING").map(|(_, id)| id),
-            None
-        ); // Too short
-        assert_eq!(extract_product_and_id_from_path("").map(|(_, id)| id), None);
+            result,
+            Some((expected_product.to_string(), expected_id.to_string()))
+        );
+    }
+
+    // ===== Edge Cases =====
+
+    #[test_case("datadog/2/PRODUCT/id-\u{00E9}/name" ; "unicode e with acute")]
+    #[test_case("employee/PRODUCT/id-\u{4E2D}/name" ; "unicode chinese character")]
+    fn test_unicode_in_components(path: &str) {
+        // These should parse successfully since unicode chars are valid in [^/]+
+        let result = extract_product_and_id_from_path(path);
+        assert!(result.is_some());
+    }
+
+    #[test_case("DATADOG/2/PRODUCT/id/name" ; "uppercase DATADOG")]
+    #[test_case("Datadog/2/PRODUCT/id/name" ; "capitalized Datadog")]
+    #[test_case("EMPLOYEE/PRODUCT/id/name" ; "uppercase EMPLOYEE")]
+    #[test_case("Employee/PRODUCT/id/name" ; "capitalized Employee")]
+    fn test_case_sensitivity(path: &str) {
+        assert_eq!(extract_product_and_id_from_path(path), None);
     }
 
     #[test]

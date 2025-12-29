@@ -309,7 +309,7 @@ impl DatadogSampler {
         self.service_samplers.update_rates(rates);
     }
 
-    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+    pub(crate) fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
         let service_samplers = self.service_samplers.clone();
         Box::new(move |s: &str| {
             let Ok(new_rates) = serde_json::de::from_str::<AgentRates>(s) else {
@@ -372,7 +372,7 @@ impl DatadogSampler {
     }
 
     /// Sample an incoming span based on the parent context and attributes
-    pub fn sample(
+    pub(crate) fn sample(
         &self,
         is_parent_sampled: Option<bool>,
         trace_id: TraceId,
@@ -458,12 +458,12 @@ impl DatadogSampler {
     }
 }
 
-pub struct DdSamplingResult {
+pub(crate) struct DdSamplingResult {
     pub is_keep: bool,
     pub trace_root_info: Option<TraceRootSamplingInfo>,
 }
 
-pub struct TraceRootSamplingInfo {
+pub(crate) struct TraceRootSamplingInfo {
     pub priority: SamplingPriority,
     pub mechanism: SamplingMechanism,
     pub rate: f64,

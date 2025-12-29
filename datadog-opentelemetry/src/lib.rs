@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.2.0" }
+//! datadog-opentelemetry = { version = "0.2.1" }
 //! ```
 //!
 //! ### Tracing
@@ -175,7 +175,9 @@
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
 //!   version: 0.32
 
-// Public re-exports - only what external users need
+#![deny(missing_docs)]
+
+// Public re-exports
 pub use core::configuration;
 pub use core::log;
 
@@ -228,6 +230,7 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
+/// Builder for configuring and initializing Datadog tracing with OpenTelemetry.
 pub struct DatadogTracingBuilder {
     config: Option<Config>,
     resource: Option<opentelemetry_sdk::Resource>,
@@ -514,6 +517,7 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
 
 #[cfg(feature = "test-utils")]
 pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, DatadogPropagator) {
+    #![allow(missing_docs)]
     make_tracer(
         shared_config,
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),

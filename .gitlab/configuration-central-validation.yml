@@ -1,0 +1,48 @@
+# This CI jobs are copied from libdatadog-build one-pipeline.yml gitlab template.
+# This URL is available in the dd-gitlab/publish-content-addresable-templates job whenever
+# a change is made on the one-pipeline template.
+variables:
+  SCRIPTS_BASE_URL: https://gitlab-templates.ddbuild.io/libdatadog/one-pipeline/ca/b25d75b719db32596ab12646eec487524fa3dc3517ea7e4cbe76161973cebe60/scripts/
+
+.download-scripts-from-template: &download-scripts-from-template
+  - mkdir -p scripts/config-inversion
+  - |
+    for script_file in "config-inversion-local-validation.py" "config-inversion-update-supported-range.py"
+    do
+      curl --location --fail --show-error --output "scripts/config-inversion/${script_file}" "${SCRIPTS_BASE_URL}/config-inversion/${script_file}"
+      if [[ $script_file == *sh ]] || [[ $script_file == *py ]]
+      then
+         chmod +x scripts/config-inversion/$script_file
+      fi
+    done
+
+.validate_supported_configurations_v2_local_file:
+  allow_failure: false
+  rules:
+    - when: on_success
+  variables:
+    LOCAL_JSON_PATH: ""
+    BACKFILLED: "false"
+  before_script:
+    - *download-scripts-from-template
+    - pip3 install requests
+  script:
+    - scripts/config-inversion/config-inversion-local-validation.py
+
+.update_central_configurations_version_range_v2:
+  allow_failure: false
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+$/'
+      when: on_success
+  variables:
+    LOCAL_JSON_PATH: ""
+    LANGUAGE_NAME: ""
+    MULTIPLE_RELEASE_LINES: "false" # expect "true" or "false" as a value to determine if a new "branch" identifier is needed to differentiate between multiple release lines
+    SEND_ALIASES: "false"
+    TAG_PREFIX: "v"
+  before_script:
+    - *download-scripts-from-template
+    - pip3 install requests
+    - export FP_API_KEY=$(aws ssm get-parameter --region us-east-1 --name ci.$CI_PROJECT_NAME.FP_API_KEY --with-decryption --query "Parameter.Value" --out text)
+  script:
+    - scripts/config-inversion/config-inversion-update-supported-range.py

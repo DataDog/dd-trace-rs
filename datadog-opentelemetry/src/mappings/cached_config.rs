@@ -3,10 +3,10 @@
 
 use crate::core::configuration::Config;
 
-pub const VERSION_KEY: &str = "version";
+pub(crate) const VERSION_KEY: &str = "version";
 
 #[derive(Debug, Clone)]
-pub struct CachedConfig {
+pub(crate) struct CachedConfig {
     service: String,
     global_tags: Vec<(String, String)>,
     version: Option<String>,

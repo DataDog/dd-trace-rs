@@ -6,7 +6,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "localhost",
+        "default": "localhost",
         "propertyKeys": ["agent_host"]
       }
     ],
@@ -14,15 +14,15 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "localhost",
+        "default": "localhost",
         "propertyKeys": ["dogstatsd_agent_host"]
       }
     ],
     "DD_DOGSTATSD_PORT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "8125",
+        "type": "int",
+        "default": "8125",
         "propertyKeys": ["dogstatsd_agent_port"]
       }
     ],
@@ -30,7 +30,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": "http://localhost:8125",
         "propertyKeys": ["dogstatsd_agent_url"]
       }
     ],
@@ -38,7 +38,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["env"]
       }
     ],
@@ -46,7 +46,7 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "true",
+        "default": "true",
         "propertyKeys": ["telemetry_enabled"]
       }
     ],
@@ -54,7 +54,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "ERROR",
+        "default": "ERROR",
         "propertyKeys": ["log_level_filter"]
       }
     ],
@@ -70,7 +70,7 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "true",
+        "default": "true",
         "propertyKeys": ["remote_config_enabled"],
         "aliases": ["DD_REMOTE_CONFIG_ENABLED"]
       }
@@ -79,15 +79,15 @@
       {
         "version": "A",
         "type": "decimal",
-        "default_value": "5.0",
+        "default": "5.0",
         "propertyKeys": ["remote_config_poll_interval"]
       }
     ],
     "DD_SERVICE": [
       {
-        "version": "A",
+        "version": "C",
         "type": "string",
-        "default_value": "unnamed-rust-service",
+        "default": "unnamed-rust-service",
         "propertyKeys": ["service"]
       }
     ],
@@ -95,15 +95,15 @@
       {
         "version": "A",
         "type": "map",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["global_tags"]
       }
     ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
       {
-        "version": "A",
+        "version": "B",
         "type": "decimal",
-        "default_value": "60.0",
+        "default": "60.0",
         "propertyKeys": ["telemetry_heartbeat_interval"]
       }
     ],
@@ -111,15 +111,15 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "true",
+        "default": "true",
         "propertyKeys": ["telemetry_log_collection_enabled"]
       }
     ],
     "DD_TRACE_AGENT_PORT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "8126",
+        "type": "int",
+        "default": "8126",
         "propertyKeys": ["trace_agent_port"]
       }
     ],
@@ -127,7 +127,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["trace_agent_url"]
       }
     ],
@@ -135,7 +135,7 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "true",
+        "default": "true",
         "propertyKeys": ["enabled"]
       }
     ],
@@ -143,15 +143,15 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "false",
+        "default": "false",
         "propertyKeys": ["trace_partial_flushed_enabled"]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "300",
+        "type": "int",
+        "default": "300",
         "propertyKeys": ["trace_partial_flushed_min_spans"]
       }
     ],
@@ -159,7 +159,7 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "false",
+        "default": "false",
         "propertyKeys": ["trace_propagation_extract_first"]
       }
     ],
@@ -167,7 +167,7 @@
       {
         "version": "A",
         "type": "array",
-        "default_value": "datadog,tracecontext",
+        "default": "datadog,tracecontext",
         "propertyKeys": ["trace_propagation_style"]
       }
     ],
@@ -175,7 +175,7 @@
       {
         "version": "A",
         "type": "array",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["trace_propagation_style_extract"]
       }
     ],
@@ -183,15 +183,15 @@
       {
         "version": "A",
         "type": "array",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["trace_propagation_style_inject"]
       }
     ],
     "DD_TRACE_RATE_LIMIT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "100",
+        "type": "int",
+        "default": "100",
         "propertyKeys": ["trace_rate_limit"]
       }
     ],
@@ -199,23 +199,23 @@
       {
         "version": "A",
         "type": "array",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["trace_sampling_rules"]
       }
     ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
       {
-        "version": "A",
+        "version": "B",
         "type": "boolean",
-        "default_value": "true",
+        "default": "true",
         "propertyKeys": ["trace_stats_computation_enabled"]
       }
     ],
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "512",
+        "type": "int",
+        "default": "512",
         "propertyKeys": ["datadog_tags_max_length"]
       }
     ],
@@ -223,7 +223,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": "",
         "propertyKeys": ["version"]
       }
     ],

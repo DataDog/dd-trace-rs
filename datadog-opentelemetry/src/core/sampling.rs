@@ -1,39 +1,62 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Sampling types and mechanisms for Datadog distributed tracing.
+//!
+//! This module provides types for representing sampling decisions, priorities,
+//! and mechanisms used in Datadog's trace sampling system.
+
 use std::{borrow::Cow, fmt, str::FromStr};
 
+/// Represents a sampling decision for a trace.
+///
+/// Contains the priority level and the mechanism that made the decision.
 #[derive(Clone, Copy, Debug)]
 pub struct SamplingDecision {
+    /// The sampling priority indicating whether the trace should be kept or rejected.
     pub priority: Option<SamplingPriority>,
+    /// The mechanism that made the sampling decision.
     pub mechanism: Option<SamplingMechanism>,
 }
 
+/// Represents the sampling priority of a trace.
+///
+/// Positive values indicate the trace should be kept, while zero or negative
+/// values indicate rejection. Use the constants in the [`priority`] module
+/// for standard priority values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SamplingPriority {
     value: i8,
 }
 
 impl SamplingPriority {
-    pub const fn from_i8(value: i8) -> Self {
+    pub(crate) const fn from_i8(value: i8) -> Self {
         Self { value }
     }
 
-    pub fn into_i8(self) -> i8 {
+    pub(crate) fn into_i8(self) -> i8 {
         self.value
     }
 
-    pub fn is_keep(&self) -> bool {
+    pub(crate) fn is_keep(&self) -> bool {
         self.value > 0
     }
 }
 
+/// Sampling priority constants.
+///
+/// These values indicate whether a trace should be kept or rejected,
+/// and whether the decision was made automatically or by the user.
 pub mod priority {
     use super::SamplingPriority;
 
+    /// User explicitly rejected this trace (priority -1).
     pub const USER_REJECT: SamplingPriority = SamplingPriority::from_i8(-1);
+    /// User explicitly requested to keep this trace (priority 2).
     pub const USER_KEEP: SamplingPriority = SamplingPriority::from_i8(2);
+    /// Automatically rejected by the sampler (priority 0).
     pub const AUTO_REJECT: SamplingPriority = SamplingPriority::from_i8(0);
+    /// Automatically kept by the sampler (priority 1).
     pub const AUTO_KEEP: SamplingPriority = SamplingPriority::from_i8(1);
 }
 
@@ -54,21 +77,25 @@ impl FromStr for SamplingPriority {
     }
 }
 
+/// Represents the mechanism that made a sampling decision.
+///
+/// The sampling mechanism identifies which component or rule determined
+/// whether a trace should be sampled (kept or rejected).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SamplingMechanism {
     value: u8,
 }
 
 impl SamplingMechanism {
-    pub const fn from_u8(value: u8) -> Self {
+    pub(crate) const fn from_u8(value: u8) -> Self {
         Self { value }
     }
 
-    pub fn into_u8(self) -> u8 {
+    pub(crate) fn into_u8(self) -> u8 {
         self.value
     }
 
-    pub fn to_priority(&self, is_keep: bool) -> SamplingPriority {
+    pub(crate) fn to_priority(self, is_keep: bool) -> SamplingPriority {
         const AUTO_PAIR: PriorityPair = PriorityPair {
             keep: priority::AUTO_KEEP,
             reject: priority::AUTO_REJECT,
@@ -77,7 +104,7 @@ impl SamplingMechanism {
             keep: priority::USER_KEEP,
             reject: priority::USER_REJECT,
         };
-        let pair = match *self {
+        let pair = match self {
             mechanism::AGENT_RATE_BY_SERVICE | mechanism::DEFAULT => AUTO_PAIR,
             mechanism::MANUAL
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE
@@ -96,6 +123,7 @@ impl SamplingMechanism {
         }
     }
 
+    /// Returns the string representation of the sampling mechanism.
     pub fn to_cow(&self) -> Cow<'static, str> {
         match *self {
             mechanism::DEFAULT => Cow::Borrowed("-0"),
@@ -116,21 +144,37 @@ impl SamplingMechanism {
     }
 }
 
+/// Sampling mechanism constants.
+///
+/// These constants identify which component or rule made a sampling decision.
 pub mod mechanism {
     use super::SamplingMechanism;
 
+    /// Default sampling mechanism.
     pub const DEFAULT: SamplingMechanism = SamplingMechanism::from_u8(0);
+    /// Agent-based rate sampling by service.
     pub const AGENT_RATE_BY_SERVICE: SamplingMechanism = SamplingMechanism::from_u8(1);
+    /// Remote configuration rate sampling.
     pub const REMOTE_RATE: SamplingMechanism = SamplingMechanism::from_u8(2);
+    /// Local user-defined trace sampling rule.
     pub const LOCAL_USER_TRACE_SAMPLING_RULE: SamplingMechanism = SamplingMechanism::from_u8(3);
+    /// Manual sampling decision via API.
     pub const MANUAL: SamplingMechanism = SamplingMechanism::from_u8(4);
+    /// Application Security (AppSec) sampling.
     pub const APPSEC: SamplingMechanism = SamplingMechanism::from_u8(5);
+    /// Remote user rate sampling.
     pub const REMOTE_RATE_USER: SamplingMechanism = SamplingMechanism::from_u8(6);
+    /// Remote Datadog rate sampling.
     pub const REMOTE_RATE_DATADOG: SamplingMechanism = SamplingMechanism::from_u8(7);
+    /// Span-level sampling rule.
     pub const SPAN_SAMPLING_RULE: SamplingMechanism = SamplingMechanism::from_u8(8);
+    /// OTLP ingest probabilistic sampling.
     pub const OTLP_INGEST_PROBABILISTIC_SAMPLING: SamplingMechanism = SamplingMechanism::from_u8(9);
+    /// Data Jobs Monitoring sampling.
     pub const DATA_JOBS_MONITORING: SamplingMechanism = SamplingMechanism::from_u8(10);
+    /// Remote user-defined trace sampling rule.
     pub const REMOTE_USER_TRACE_SAMPLING_RULE: SamplingMechanism = SamplingMechanism::from_u8(11);
+    /// Remote dynamic trace sampling rule.
     pub const REMOTE_DYNAMIC_TRACE_SAMPLING_RULE: SamplingMechanism =
         SamplingMechanism::from_u8(12);
 }
