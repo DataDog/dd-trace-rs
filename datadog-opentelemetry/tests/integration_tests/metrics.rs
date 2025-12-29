@@ -12,7 +12,9 @@ use opentelemetry::KeyValue;
 
 use crate::integration_tests::make_test_agent;
 
-async fn setup_test_agent(session_name: &'static str) -> libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent {
+async fn setup_test_agent(
+    session_name: &'static str,
+) -> libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent {
     make_test_agent(session_name).await
 }
 

@@ -8,10 +8,14 @@ use crate::core::configuration::Config;
 const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
 const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 
+/// OTLP protocol types for metrics export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtlpProtocol {
+    /// gRPC protocol
     Grpc,
+    /// HTTP with protobuf encoding
     HttpProtobuf,
+    /// HTTP with JSON encoding
     HttpJson,
 }
 

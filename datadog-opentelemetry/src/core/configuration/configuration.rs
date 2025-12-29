@@ -1194,6 +1194,7 @@ impl Config {
             .map(|tag| (tag.0.as_str(), tag.1.as_str()))
     }
 
+    /// Returns OpenTelemetry resource attributes parsed from OTEL_RESOURCE_ATTRIBUTES env var.
     pub fn otel_resource_attributes(&self) -> impl Iterator<Item = (&str, &str)> {
         self.otel_resource_attributes
             .value()
@@ -1201,10 +1202,12 @@ impl Config {
             .map(|attr| (attr.0.as_str(), attr.1.as_str()))
     }
 
+    /// Returns the OpenTelemetry metrics exporter type.
     pub fn otel_metrics_exporter(&self) -> &str {
         self.otel_metrics_exporter.value().as_ref()
     }
 
+    /// Returns the OpenTelemetry metrics temporality preference (Delta or Cumulative).
     pub fn otel_metrics_temporality_preference(
         &self,
     ) -> Option<opentelemetry_sdk::metrics::Temporality> {
@@ -1283,46 +1286,57 @@ impl Config {
         *self.telemetry_heartbeat_interval.value()
     }
 
+    /// Returns whether OpenTelemetry metrics export is enabled.
     pub fn metrics_otel_enabled(&self) -> bool {
         *self.metrics_otel_enabled.value()
     }
 
+    /// Returns the OTLP metrics endpoint URL.
     pub fn otlp_metrics_endpoint(&self) -> &str {
         self.otlp_metrics_endpoint.value().as_ref()
     }
 
+    /// Returns the OTLP endpoint URL (fallback for metrics if metrics endpoint is not set).
     pub fn otlp_endpoint(&self) -> &str {
         self.otlp_endpoint.value().as_ref()
     }
 
+    /// Returns the OTLP headers (fallback for metrics if metrics headers are not set).
     pub fn otlp_headers(&self) -> &str {
         self.otlp_headers.value().as_ref()
     }
 
+    /// Returns the OTLP metrics protocol (gRPC, HTTP/protobuf, or HTTP/JSON).
     pub fn otlp_metrics_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
         *self.otlp_metrics_protocol.value()
     }
 
+    /// Returns the OTLP metrics headers.
     pub fn otlp_metrics_headers(&self) -> &str {
         self.otlp_metrics_headers.value().as_ref()
     }
 
+    /// Returns the OTLP protocol (fallback for metrics if metrics protocol is not set).
     pub fn otlp_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
         *self.otlp_protocol.value()
     }
 
+    /// Returns the OTLP metrics timeout in milliseconds.
     pub fn otlp_metrics_timeout(&self) -> u32 {
         *self.otlp_metrics_timeout.value()
     }
 
+    /// Returns the OTLP timeout in milliseconds (fallback for metrics if metrics timeout is not set).
     pub fn otlp_timeout(&self) -> u32 {
         *self.otlp_timeout.value()
     }
 
+    /// Returns the metric export interval in milliseconds.
     pub fn metric_export_interval(&self) -> u32 {
         *self.metric_export_interval.value()
     }
 
+    /// Returns the metric export timeout in milliseconds.
     pub fn metric_export_timeout(&self) -> u32 {
         *self.metric_export_timeout.value()
     }

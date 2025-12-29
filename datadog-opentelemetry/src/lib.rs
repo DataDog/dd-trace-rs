@@ -535,27 +535,32 @@ pub struct DatadogMetricsBuilder {
 }
 
 impl DatadogMetricsBuilder {
+    /// Sets the configuration for the metrics builder.
     pub fn with_config(mut self, config: Config) -> Self {
         self.config = Some(config);
         self
     }
 
+    /// Sets the OpenTelemetry resource for the metrics builder.
     pub fn with_resource(mut self, resource: Resource) -> Self {
         self.resource = Some(resource);
         self
     }
 
+    /// Sets the export interval for metrics.
     pub fn with_export_interval(mut self, interval: std::time::Duration) -> Self {
         self.export_interval = Some(interval);
         self
     }
 
+    /// Initializes the metrics provider and sets it as the global meter provider.
     pub fn init(self) -> SdkMeterProvider {
         let (meter_provider, _) = self.init_local();
         opentelemetry::global::set_meter_provider(meter_provider.clone());
         meter_provider
     }
 
+    /// Initializes the metrics provider without setting it as the global meter provider.
     pub fn init_local(self) -> (SdkMeterProvider, ()) {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
         let meter_provider = match crate::metrics_reader::create_meter_provider(

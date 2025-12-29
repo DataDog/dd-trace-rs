@@ -17,6 +17,7 @@ use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 
 use crate::dd_warn;
 
+/// Creates a meter provider with the given configuration.
 pub fn create_meter_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
@@ -25,6 +26,8 @@ pub fn create_meter_provider(
     create_meter_provider_with_protocol(config, resource, export_interval, None)
 }
 
+/// Creates a meter provider with the given configuration and protocol override.
+#[doc(hidden)]
 pub fn create_meter_provider_with_protocol(
     config: Arc<Config>,
     resource: Option<Resource>,
