@@ -285,7 +285,7 @@
     ],
     "OTEL_EXPORTER_OTLP_PROTOCOL": [
       {
-        "version": "B",
+        "version": "C",
         "type": "string",
         "default": "grpc",
         "propertyKeys": ["otlp_protocol"]
