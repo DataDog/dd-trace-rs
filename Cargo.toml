@@ -23,8 +23,8 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "e7c2ff864ff3ecca090abe07291a2207c9e413c7", default-features = false }
 libdd-data-pipeline = { version = "1.0.0", default-features = false }
-libdd-trace-utils = { version = "1.0.0", default-features = false }
 libdd-telemetry = { version = "1.0.0", default-features = false }
 libdd-common = { version = "1.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
