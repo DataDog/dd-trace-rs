@@ -1326,7 +1326,8 @@ impl Config {
         *self.otlp_metrics_timeout.value()
     }
 
-    /// Returns the OTLP timeout in milliseconds (fallback for metrics if metrics timeout is not set).
+    /// Returns the OTLP timeout in milliseconds (fallback for metrics if metrics timeout is not
+    /// set).
     pub fn otlp_timeout(&self) -> u32 {
         *self.otlp_timeout.value()
     }
