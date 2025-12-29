@@ -62,7 +62,7 @@
       {
         "version": "A",
         "type": "boolean",
-        "default_value": "false",
+        "default": "false",
         "propertyKeys": ["metrics_otel_enabled"]
       }
     ],
@@ -231,15 +231,15 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": null,
         "propertyKeys": ["otlp_endpoint"]
       }
     ],
     "OTEL_EXPORTER_OTLP_HEADERS": [
       {
         "version": "A",
-        "type": "string",
-        "default_value": "",
+        "type": "map",
+        "default": "",
         "propertyKeys": ["otlp_headers"]
       }
     ],
@@ -247,15 +247,15 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": null,
         "propertyKeys": ["otlp_metrics_endpoint"]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_HEADERS": [
       {
         "version": "A",
-        "type": "string",
-        "default_value": "",
+        "type": "map",
+        "default": null,
         "propertyKeys": ["otlp_metrics_headers"]
       }
     ],
@@ -263,7 +263,7 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "",
+        "default": null,
         "propertyKeys": ["otlp_metrics_protocol"]
       }
     ],
@@ -271,31 +271,31 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "delta",
+        "default": "delta",
         "propertyKeys": ["otel_metrics_temporality_preference"]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "7500",
+        "type": "int",
+        "default": null,
         "propertyKeys": ["otlp_metrics_timeout"]
       }
     ],
     "OTEL_EXPORTER_OTLP_PROTOCOL": [
       {
-        "version": "A",
+        "version": "B",
         "type": "string",
-        "default_value": "",
+        "default": "grpc",
         "propertyKeys": ["otlp_protocol"]
       }
     ],
     "OTEL_EXPORTER_OTLP_TIMEOUT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "7500",
+        "type": "int",
+        "default": "10000",
         "propertyKeys": ["otlp_timeout"]
       }
     ],
@@ -303,23 +303,23 @@
       {
         "version": "A",
         "type": "string",
-        "default_value": "otlp",
+        "default": "otlp",
         "propertyKeys": ["otel_metrics_exporter"]
       }
     ],
     "OTEL_METRIC_EXPORT_INTERVAL": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "10000",
+        "type": "int",
+        "default": "10000",
         "propertyKeys": ["metric_export_interval"]
       }
     ],
     "OTEL_METRIC_EXPORT_TIMEOUT": [
       {
         "version": "A",
-        "type": "integer",
-        "default_value": "7500",
+        "type": "int",
+        "default": "7500",
         "propertyKeys": ["metric_export_timeout"]
       }
     ],
