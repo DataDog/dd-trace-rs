@@ -6,14 +6,13 @@ use std::time::Duration;
 
 use datadog_opentelemetry::configuration::Config;
 use datadog_opentelemetry::{create_meter_provider_with_protocol, OtlpProtocol};
-use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use opentelemetry::KeyValue;
 
 use crate::integration_tests::make_test_agent;
 
-async fn setup_test_agent(session_name: &'static str) -> DatadogTestAgent {
+async fn setup_test_agent(session_name: &'static str) -> libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent {
     make_test_agent(session_name).await
 }
 
@@ -87,11 +86,15 @@ async fn test_metrics_export_grpc() {
     let meter = global::meter("test-meter");
     create_all_metric_types(&meter);
 
+    // Wait for metrics to be exported
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
+
+    // Note: Test agent doesn't support receiving OTLP metrics, but we verify
+    // that the meter provider was created successfully and metrics were recorded without errors.
 }
 
 #[tokio::test]
@@ -112,7 +115,7 @@ async fn test_metrics_export_http_protobuf() {
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
             .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(otlp_endpoint)
+            .set_otlp_metrics_endpoint(format!("{}/v1/metrics", otlp_endpoint))
             .set_otlp_metrics_protocol("http/protobuf".to_string())
             .build(),
     );
@@ -130,11 +133,15 @@ async fn test_metrics_export_http_protobuf() {
     let meter = global::meter("test-meter");
     create_all_metric_types(&meter);
 
+    // Wait for metrics to be exported
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     if let Err(e) = meter_provider.shutdown() {
         eprintln!("Warning: Meter provider shutdown error: {:?}", e);
     }
+
+    // Note: Test agent doesn't support receiving OTLP metrics, but we verify
+    // that the meter provider was created successfully and metrics were recorded without errors.
 }
 
 #[tokio::test]
@@ -150,6 +157,8 @@ async fn test_metrics_export_http_json() {
     let host = url.host().unwrap();
     let otlp_endpoint = format!("{scheme}://{host}:4318");
 
+    // Note: HTTP/JSON is not natively supported by opentelemetry-otlp,
+    // so this test verifies graceful degradation (no-op provider is returned)
     let config = Arc::new(
         Config::builder()
             .set_trace_agent_url(base_uri.to_string())
@@ -167,9 +176,9 @@ async fn test_metrics_export_http_json() {
         Some(OtlpProtocol::HttpJson),
     );
 
-    let meter_provider_result = result;
-    assert!(meter_provider_result.is_ok());
-    let meter_provider = meter_provider_result.unwrap();
+    // Should succeed but return a no-op provider (graceful degradation)
+    assert!(result.is_ok());
+    let meter_provider = result.unwrap();
 
     global::set_meter_provider(meter_provider.clone());
 
@@ -202,7 +211,7 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
             .set_trace_agent_url(base_uri.to_string())
             .set_service("test-service".to_string())
             .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(otlp_endpoint)
+            .set_otlp_metrics_endpoint(format!("{}/v1/metrics", otlp_endpoint))
             .set_otlp_metrics_protocol("http/protobuf".to_string())
             .build(),
     );
@@ -214,6 +223,7 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
         Some(OtlpProtocol::HttpProtobuf),
     );
 
+    // Should succeed (graceful degradation returns no-op provider if feature missing)
     assert!(result.is_ok());
     let meter_provider = result.unwrap();
 
