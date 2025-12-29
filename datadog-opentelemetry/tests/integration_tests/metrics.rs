@@ -5,8 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use datadog_opentelemetry::configuration::Config;
-use datadog_opentelemetry::metrics_exporter::OtlpProtocol;
-use datadog_opentelemetry::metrics_reader::create_meter_provider_with_protocol;
+use datadog_opentelemetry::{create_meter_provider_with_protocol, OtlpProtocol};
 use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};

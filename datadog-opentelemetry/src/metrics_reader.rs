@@ -11,8 +11,7 @@ use opentelemetry_sdk::Resource;
 
 use crate::core::configuration::Config;
 use crate::metrics_exporter::{
-    get_metric_export_interval_ms, get_otlp_metrics_endpoint, get_otlp_metrics_timeout,
-    get_otlp_protocol, OtlpProtocol,
+    get_otlp_metrics_endpoint, get_otlp_metrics_timeout, get_otlp_protocol, OtlpProtocol,
 };
 use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 
@@ -78,14 +77,9 @@ pub fn create_meter_provider_with_protocol(
             }
         }
 
-        let temporality = match config
+        let temporality = config
             .otel_metrics_temporality_preference()
-            .to_lowercase()
-            .as_str()
-        {
-            "cumulative" => opentelemetry_sdk::metrics::Temporality::Cumulative,
-            _ => opentelemetry_sdk::metrics::Temporality::Delta,
-        };
+            .unwrap_or(opentelemetry_sdk::metrics::Temporality::Delta);
         let timeout = Duration::from_millis(get_otlp_metrics_timeout(&config) as u64);
 
         let exporter = match build_exporter(protocol, endpoint.clone(), timeout, temporality) {
@@ -99,9 +93,8 @@ pub fn create_meter_provider_with_protocol(
             }
         };
 
-        let interval = export_interval.unwrap_or_else(|| {
-            Duration::from_millis(get_metric_export_interval_ms(&config) as u64)
-        });
+        let interval = export_interval
+            .unwrap_or_else(|| Duration::from_millis(config.metric_export_interval() as u64));
 
         let telemetry_exporter = TelemetryTrackingExporter::new(exporter, protocol);
 
@@ -109,71 +102,7 @@ pub fn create_meter_provider_with_protocol(
             .with_interval(interval)
             .build();
 
-        let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
-
-        for (key, value) in config.otel_resource_attributes() {
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                key.to_string(),
-                value.to_string(),
-            ));
-        }
-
-        for (key, value) in config.global_tags() {
-            let otel_key = match key {
-                "service" => "service.name",
-                "env" => "deployment.environment",
-                "version" => "service.version",
-                _ => key,
-            };
-
-            resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                otel_key.to_string(),
-                value.to_string(),
-            ));
-        }
-
-        if let Some(resource) = resource {
-            for (k, v) in resource.iter() {
-                resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
-            }
-        }
-
-        if !config.service_is_default() {
-            resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                "service.name",
-                config.service().to_string(),
-            ));
-        } else if !resource_attrs
-            .iter()
-            .any(|kv| kv.key.as_str() == "service.name")
-        {
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                "service.name",
-                config.service().to_string(),
-            ));
-        }
-
-        if let Some(env) = config.env() {
-            resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                "deployment.environment",
-                env.to_string(),
-            ));
-        }
-
-        if let Some(version) = config.version() {
-            resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
-            resource_attrs.push(opentelemetry::KeyValue::new(
-                "service.version",
-                version.to_string(),
-            ));
-        }
-
-        let final_resource = Resource::builder_empty()
-            .with_attributes(resource_attrs)
-            .build();
+        let final_resource = build_metrics_resource(&config, resource);
 
         let provider = SdkMeterProvider::builder()
             .with_reader(reader)
@@ -182,6 +111,87 @@ pub fn create_meter_provider_with_protocol(
 
         Ok(provider)
     }
+}
+
+/// Builds the OpenTelemetry Resource for metrics by merging Datadog config with provided resource.
+///
+/// Priority order (highest to lowest):
+/// 1. Config service/env/version (if explicitly set)
+/// 2. Provided resource attributes
+/// 3. Global tags (with DD -> OTel key mapping)
+/// 4. OTel resource attributes from config
+fn build_metrics_resource(config: &Config, resource: Option<Resource>) -> Resource {
+    let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
+
+    // Start with OTel resource attributes from config (lowest priority)
+    for (key, value) in config.otel_resource_attributes() {
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    // Add global tags with DD -> OTel key mapping
+    for (key, value) in config.global_tags() {
+        let otel_key = match key {
+            "service" => "service.name",
+            "env" => "deployment.environment",
+            "version" => "service.version",
+            _ => key,
+        };
+
+        resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            otel_key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    // Merge with provided resource
+    if let Some(resource) = resource {
+        for (k, v) in resource.iter() {
+            resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
+        }
+    }
+
+    // Set service.name with proper precedence
+    if !config.service_is_default() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.name",
+            config.service().to_string(),
+        ));
+    } else if !resource_attrs
+        .iter()
+        .any(|kv| kv.key.as_str() == "service.name")
+    {
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.name",
+            config.service().to_string(),
+        ));
+    }
+
+    // Set deployment.environment if configured
+    if let Some(env) = config.env() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "deployment.environment",
+            env.to_string(),
+        ));
+    }
+
+    // Set service.version if configured
+    if let Some(version) = config.version() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.version",
+            version.to_string(),
+        ));
+    }
+
+    Resource::builder_empty()
+        .with_attributes(resource_attrs)
+        .build()
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]

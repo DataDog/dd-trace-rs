@@ -1,38 +1,53 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::str::FromStr;
+
 use crate::core::configuration::Config;
 
 const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
 const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtlpProtocol {
     Grpc,
     HttpProtobuf,
     HttpJson,
 }
 
+impl FromStr for OtlpProtocol {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("grpc") {
+            Ok(OtlpProtocol::Grpc)
+        } else if s.eq_ignore_ascii_case("http/protobuf") {
+            Ok(OtlpProtocol::HttpProtobuf)
+        } else if s.eq_ignore_ascii_case("http/json") {
+            Ok(OtlpProtocol::HttpJson)
+        } else {
+            Err(format!("Invalid OTLP protocol: {}", s))
+        }
+    }
+}
+
+impl OtlpProtocol {
+    /// Parse a protocol string, returning None for empty strings
+    pub(crate) fn parse_optional(s: String) -> Option<Self> {
+        if s.trim().is_empty() {
+            None
+        } else {
+            s.parse().ok()
+        }
+    }
+}
+
 pub fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
-    let protocol = config.otlp_metrics_protocol();
-    if !protocol.is_empty() {
-        match protocol {
-            s if s.eq_ignore_ascii_case("http/protobuf") => return OtlpProtocol::HttpProtobuf,
-            s if s.eq_ignore_ascii_case("http/json") => return OtlpProtocol::HttpJson,
-            _ => {}
-        }
-    }
-
-    let protocol = config.otlp_protocol();
-    if !protocol.is_empty() {
-        match protocol {
-            s if s.eq_ignore_ascii_case("http/protobuf") => return OtlpProtocol::HttpProtobuf,
-            s if s.eq_ignore_ascii_case("http/json") => return OtlpProtocol::HttpJson,
-            _ => {}
-        }
-    }
-
-    OtlpProtocol::Grpc
+    config
+        .otlp_metrics_protocol()
+        .or_else(|| config.otlp_protocol())
+        .unwrap_or(OtlpProtocol::Grpc)
 }
 
 pub fn get_otlp_metrics_endpoint(
@@ -76,6 +91,14 @@ pub fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     config.otlp_timeout()
 }
 
-pub fn get_metric_export_interval_ms(config: &Config) -> u32 {
-    config.metric_export_interval()
+/// Parse a temporality preference string to Temporality enum
+pub(crate) fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporality> {
+    let s = s.trim().to_lowercase();
+    if s == "cumulative" {
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
+    } else if s == "delta" || s.is_empty() {
+        Some(opentelemetry_sdk::metrics::Temporality::Delta)
+    } else {
+        None
+    }
 }

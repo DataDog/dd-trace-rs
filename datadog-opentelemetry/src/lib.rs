@@ -116,7 +116,7 @@
 //! std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
 //!
 //! // Initialize metrics with default configuration
-//! let meter_provider = datadog_opentelemetry::metrics().init().unwrap();
+//! let meter_provider = datadog_opentelemetry::metrics().init();
 //!
 //! // Use standard OpenTelemetry Metrics APIs
 //! use opentelemetry::global;
@@ -175,9 +175,16 @@
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
 //!   version: 0.32
 
-// Public re-exports
+// Public re-exports - only what external users need
 pub use core::configuration;
 pub use core::log;
+
+// Re-exports for tests (tests are in a separate crate, so these must be public)
+// Marked as doc(hidden) to indicate they're not part of the public API
+#[doc(hidden)]
+pub use metrics_exporter::OtlpProtocol;
+#[doc(hidden)]
+pub use metrics_reader::create_meter_provider_with_protocol;
 
 #[cfg(feature = "test-utils")]
 pub mod core;
@@ -198,8 +205,8 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
-pub mod metrics_exporter;
-pub mod metrics_reader;
+pub(crate) mod metrics_exporter;
+pub(crate) mod metrics_reader;
 mod sampler;
 mod span_exporter;
 mod span_processor;
@@ -539,20 +546,29 @@ impl DatadogMetricsBuilder {
         self
     }
 
-    pub fn init(self) -> Result<SdkMeterProvider, String> {
-        let (meter_provider, _) = self.init_local()?;
+    pub fn init(self) -> SdkMeterProvider {
+        let (meter_provider, _) = self.init_local();
         opentelemetry::global::set_meter_provider(meter_provider.clone());
-        Ok(meter_provider)
+        meter_provider
     }
 
-    pub fn init_local(self) -> Result<(SdkMeterProvider, ()), String> {
+    pub fn init_local(self) -> (SdkMeterProvider, ()) {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        let meter_provider = crate::metrics_reader::create_meter_provider(
+        let meter_provider = match crate::metrics_reader::create_meter_provider(
             Arc::new(config),
             self.resource,
             self.export_interval,
-        )?;
-        Ok((meter_provider, ()))
+        ) {
+            Ok(provider) => provider,
+            Err(err) => {
+                crate::dd_error!(
+                    "Failed to initialize Datadog metrics provider: {}. A no-op metrics provider will be used instead. Metrics will not be exported.",
+                    err
+                );
+                SdkMeterProvider::builder().build()
+            }
+        };
+        (meter_provider, ())
     }
 }
 
