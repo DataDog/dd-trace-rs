@@ -69,22 +69,18 @@ pub fn get_otlp_metrics_endpoint(
     }
 
     let agent_url = config.trace_agent_url();
-    let url = agent_url
+    let host = agent_url
         .parse::<hyper::http::Uri>()
-        .map_err(|e| format!("Invalid agent URL: {e}"))?;
+        .ok()
+        .and_then(|url| url.host().map(|h| h.to_string()))
+        .unwrap_or_else(|| "localhost".to_string());
 
-    let scheme = url.scheme_str().unwrap_or("http");
-    let host = url
-        .host()
-        .ok_or_else(|| "Missing host in agent URL".to_string())?;
-
-    // When falling back to agent URL, use the host but replace with OTLP default ports
     let port = match protocol {
         OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
         OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
     };
 
-    Ok(format!("{scheme}://{host}:{port}"))
+    Ok(format!("http://{host}:{port}"))
 }
 
 pub fn get_otlp_metrics_timeout(config: &Config) -> u32 {
