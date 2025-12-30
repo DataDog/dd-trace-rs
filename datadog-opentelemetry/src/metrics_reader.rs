@@ -18,60 +18,63 @@ use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 use crate::dd_warn;
 
 /// Creates a meter provider with the given configuration.
+///
+/// Returns a no-op meter provider if metrics are disabled or if initialization fails.
+/// Errors are logged but not returned to ensure metrics functionality is always available.
 pub fn create_meter_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,
-) -> Result<SdkMeterProvider, String> {
+) -> SdkMeterProvider {
     create_meter_provider_with_protocol(config, resource, export_interval, None)
 }
 
 /// Creates a meter provider with the given configuration and protocol override.
+///
+/// Returns a no-op meter provider if metrics are disabled or if initialization fails.
+/// Errors are logged but not returned to ensure metrics functionality is always available.
 #[doc(hidden)]
 pub fn create_meter_provider_with_protocol(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,
     protocol: Option<OtlpProtocol>,
-) -> Result<SdkMeterProvider, String> {
+) -> SdkMeterProvider {
     let metrics_enabled = config.metrics_otel_enabled();
     if !metrics_enabled {
-        return Ok(SdkMeterProvider::builder().build());
+        return SdkMeterProvider::builder().build();
     }
 
     if config.otel_metrics_exporter() == "none" {
         dd_warn!("OTEL_METRICS_EXPORTER is set to 'none'. Metrics will not be exported.");
-        return Ok(SdkMeterProvider::builder().build());
+        return SdkMeterProvider::builder().build();
     }
 
     #[cfg(not(any(feature = "metrics-grpc", feature = "metrics-http")))]
     {
         dd_warn!("Metrics export requested but no transport feature is enabled. Enable 'metrics-grpc' or 'metrics-http' feature to export metrics.");
-        return Ok(SdkMeterProvider::builder().build());
+        return SdkMeterProvider::builder().build();
     }
 
     #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
     {
         let protocol = protocol.unwrap_or_else(|| get_otlp_protocol(&config));
 
-        #[cfg(not(feature = "metrics-grpc"))]
-        if matches!(protocol, OtlpProtocol::Grpc) {
-            dd_warn!("FEATURE MISMATCH: Protocol 'grpc' configured (OTEL_EXPORTER_OTLP_PROTOCOL or OTEL_EXPORTER_OTLP_METRICS_PROTOCOL) but 'metrics-grpc' feature is NOT enabled. Metrics will not be exported. Enable the 'metrics-grpc' feature in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf.");
-            return Ok(SdkMeterProvider::builder().build());
-        }
-
-        #[cfg(not(feature = "metrics-http"))]
-        if matches!(protocol, OtlpProtocol::HttpProtobuf) {
-            dd_warn!("FEATURE MISMATCH: Protocol 'http/protobuf' configured (OTEL_EXPORTER_OTLP_PROTOCOL or OTEL_EXPORTER_OTLP_METRICS_PROTOCOL) but 'metrics-http' feature is NOT enabled. Metrics will not be exported. Enable the 'metrics-http' feature in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=grpc.");
-            return Ok(SdkMeterProvider::builder().build());
-        }
-
         if matches!(protocol, OtlpProtocol::HttpJson) {
             dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Metrics will not be exported. Use 'grpc' or 'http/protobuf' instead.");
-            return Ok(SdkMeterProvider::builder().build());
+            return SdkMeterProvider::builder().build();
         }
 
-        let mut endpoint = get_otlp_metrics_endpoint(&config, &protocol)?;
+        let mut endpoint = match get_otlp_metrics_endpoint(&config, &protocol) {
+            Ok(endpoint) => endpoint,
+            Err(err) => {
+                dd_warn!(
+                    "Failed to get OTLP metrics endpoint: {}. Metrics will not be exported.",
+                    err
+                );
+                return SdkMeterProvider::builder().build();
+            }
+        };
 
         if matches!(protocol, OtlpProtocol::HttpProtobuf) && !endpoint.ends_with("/v1/metrics") {
             endpoint = endpoint.trim_end_matches('/').to_string();
@@ -92,7 +95,7 @@ pub fn create_meter_provider_with_protocol(
                     "Failed to create metrics exporter: {}. Metrics will not be exported.",
                     err
                 );
-                return Ok(SdkMeterProvider::builder().build());
+                return SdkMeterProvider::builder().build();
             }
         };
 
@@ -107,12 +110,10 @@ pub fn create_meter_provider_with_protocol(
 
         let final_resource = build_metrics_resource(&config, resource);
 
-        let provider = SdkMeterProvider::builder()
+        SdkMeterProvider::builder()
             .with_reader(reader)
             .with_resource(final_resource)
-            .build();
-
-        Ok(provider)
+            .build()
     }
 }
 
@@ -218,7 +219,8 @@ fn build_exporter(
             }
             #[cfg(not(feature = "metrics-grpc"))]
             {
-                Err("metrics-grpc feature required".to_string())
+                compile_error!("gRPC protocol requires 'metrics-grpc' feature. Set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf or enable 'metrics-grpc' in Cargo.toml.");
+                unreachable!()
             }
         }
         OtlpProtocol::HttpProtobuf => {
@@ -234,7 +236,8 @@ fn build_exporter(
             }
             #[cfg(not(feature = "metrics-http"))]
             {
-                Err("metrics-http feature required".to_string())
+                compile_error!("HTTP/protobuf protocol requires 'metrics-http' feature. Set OTEL_EXPORTER_OTLP_PROTOCOL=grpc or enable 'metrics-http' in Cargo.toml.");
+                unreachable!()
             }
         }
         OtlpProtocol::HttpJson => Err("HTTP/JSON protocol not supported".to_string()),

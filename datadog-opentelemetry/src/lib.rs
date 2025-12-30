@@ -406,48 +406,63 @@ pub fn tracing() -> DatadogTracingBuilder {
 }
 
 /// Create an instance of the tracer provider
+///
+/// Returns a no-op tracer provider if initialization fails.
+/// Errors are logged but not returned to ensure tracing functionality is always available.
 fn make_tracer(
     config: Arc<Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let registry = TraceRegistry::new(config.clone());
-    let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
-    // Sampler only needs config for initialization (reads initial sampling rules)
-    // Runtime updates come via config callback, so no need for shared config
-    let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let registry = TraceRegistry::new(config.clone());
+        let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        // Sampler only needs config for initialization (reads initial sampling rules)
+        // Runtime updates come via config callback, so no need for shared config
+        let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
 
-    let agent_response_handler = sampler.on_agent_response();
+        let agent_response_handler = sampler.on_agent_response();
 
-    let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
-    tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
-    let propagator = DatadogPropagator::new(config.clone(), registry.clone());
+        let dd_resource =
+            create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+        tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
+        let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
-    if config.remote_config_enabled() {
-        let sampler_callback = sampler.on_rules_update();
+        if config.remote_config_enabled() {
+            let sampler_callback = sampler.on_rules_update();
 
-        config.set_sampling_rules_callback(move |update| match update {
-            RemoteConfigUpdate::SamplingRules(rules) => {
-                sampler_callback(rules);
-            }
-        });
-    };
+            config.set_sampling_rules_callback(move |update| match update {
+                RemoteConfigUpdate::SamplingRules(rules) => {
+                    sampler_callback(rules);
+                }
+            });
+        };
 
-    let mut tracer_provider_builder = tracer_provider_builder
-        .with_sampler(sampler) // Use the sampler created above
-        .with_id_generator(trace_id::TraceidGenerator);
-    if config.enabled() {
-        let span_processor = DatadogSpanProcessor::new(
-            config.clone(),
-            registry.clone(),
-            resource_slot.clone(),
-            Some(agent_response_handler),
-        );
-        tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+        let mut tracer_provider_builder = tracer_provider_builder
+            .with_sampler(sampler) // Use the sampler created above
+            .with_id_generator(trace_id::TraceidGenerator);
+        if config.enabled() {
+            let span_processor = DatadogSpanProcessor::new(
+                config.clone(),
+                registry.clone(),
+                resource_slot.clone(),
+                Some(agent_response_handler),
+            );
+            tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+        }
+        let tracer_provider = tracer_provider_builder.build();
+
+        (tracer_provider, propagator)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            crate::dd_error!("Failed to initialize Datadog tracer provider. A no-op tracer provider will be used instead. Traces will not be exported.");
+            (
+                SdkTracerProvider::builder().build(),
+                DatadogPropagator::new(config.clone(), TraceRegistry::new(config)),
+            )
+        }
     }
-    let tracer_provider = tracer_provider_builder.build();
-
-    (tracer_provider, propagator)
 }
 
 fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
@@ -563,20 +578,11 @@ impl DatadogMetricsBuilder {
     /// Initializes the metrics provider without setting it as the global meter provider.
     pub fn init_local(self) -> (SdkMeterProvider, ()) {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        let meter_provider = match crate::metrics_reader::create_meter_provider(
+        let meter_provider = crate::metrics_reader::create_meter_provider(
             Arc::new(config),
             self.resource,
             self.export_interval,
-        ) {
-            Ok(provider) => provider,
-            Err(err) => {
-                crate::dd_error!(
-                    "Failed to initialize Datadog metrics provider: {}. A no-op metrics provider will be used instead. Metrics will not be exported.",
-                    err
-                );
-                SdkMeterProvider::builder().build()
-            }
-        };
+        );
         (meter_provider, ())
     }
 }

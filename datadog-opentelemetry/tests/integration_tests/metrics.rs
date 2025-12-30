@@ -80,8 +80,7 @@ async fn test_metrics_export_grpc() {
         None,
         Some(Duration::from_millis(100)),
         Some(OtlpProtocol::Grpc),
-    )
-    .expect("Failed to create meter provider");
+    );
 
     global::set_meter_provider(meter_provider.clone());
 
@@ -127,8 +126,7 @@ async fn test_metrics_export_http_protobuf() {
         None,
         Some(Duration::from_millis(100)),
         Some(OtlpProtocol::HttpProtobuf),
-    )
-    .expect("Failed to create meter provider");
+    );
 
     global::set_meter_provider(meter_provider.clone());
 
@@ -171,7 +169,7 @@ async fn test_metrics_export_http_json() {
             .build(),
     );
 
-    let result = create_meter_provider_with_protocol(
+    let meter_provider = create_meter_provider_with_protocol(
         config,
         None,
         Some(Duration::from_millis(100)),
@@ -179,8 +177,6 @@ async fn test_metrics_export_http_json() {
     );
 
     // Should succeed but return a no-op provider (graceful degradation)
-    assert!(result.is_ok());
-    let meter_provider = result.unwrap();
 
     global::set_meter_provider(meter_provider.clone());
 
@@ -218,7 +214,7 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
             .build(),
     );
 
-    let result = create_meter_provider_with_protocol(
+    let meter_provider = create_meter_provider_with_protocol(
         config,
         None,
         Some(Duration::from_millis(100)),
@@ -226,8 +222,6 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
     );
 
     // Should succeed (graceful degradation returns no-op provider if feature missing)
-    assert!(result.is_ok());
-    let meter_provider = result.unwrap();
 
     global::set_meter_provider(meter_provider.clone());
 
