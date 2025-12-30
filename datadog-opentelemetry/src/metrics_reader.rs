@@ -238,7 +238,9 @@ fn build_exporter(
             .build()
             .map_err(|e| format!("Failed to build OTLP HTTP/protobuf exporter: {e}")),
         #[cfg(not(feature = "metrics-http"))]
-        OtlpProtocol::HttpProtobuf => Err("HTTP/protobuf protocol requires 'metrics-http' feature".to_string()),
+        OtlpProtocol::HttpProtobuf => {
+            Err("HTTP/protobuf protocol requires 'metrics-http' feature".to_string())
+        }
         OtlpProtocol::HttpJson => Err("HTTP/JSON protocol not supported".to_string()),
     }
 }
