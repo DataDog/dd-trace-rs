@@ -23,6 +23,11 @@
 //!
 //! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
+//! ### Metrics
+//!
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html).
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//!
 //! ### Initialization
 //!
 //! The following examples will read datadog and opentelemetry configuration from environment
@@ -100,6 +105,34 @@
 //! For advanced usage and configuration information, check out [`DatadogTracingBuilder`] and
 //! [`configuration::ConfigBuilder`]
 //!
+//! #### Metrics API
+//!
+//! * Requires `opentelemetry` with metrics feature
+//!
+//! ```no_run
+//! use std::time::Duration;
+//!
+//! // Enable metrics via environment variable
+//! std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+//!
+//! // Initialize metrics with default configuration
+//! let meter_provider = datadog_opentelemetry::metrics().init();
+//!
+//! // Use standard OpenTelemetry Metrics APIs
+//! use opentelemetry::global;
+//! use opentelemetry::metrics::Counter;
+//! use opentelemetry::KeyValue;
+//!
+//! let meter = global::meter("my-service");
+//! let counter: Counter<u64> = meter.u64_counter("requests").build();
+//! counter.add(1, &[KeyValue::new("method", "GET")]);
+//!
+//! // Shutdown to flush remaining metrics
+//! meter_provider.shutdown().unwrap();
+//! ```
+//!
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//!
 //! * Through env variables
 //!
 //! ```bash
@@ -148,6 +181,13 @@
 pub use core::configuration;
 pub use core::log;
 
+// Re-exports for tests (tests are in a separate crate, so these must be public)
+// Marked as doc(hidden) to indicate they're not part of the public API
+#[doc(hidden)]
+pub use metrics_exporter::OtlpProtocol;
+#[doc(hidden)]
+pub use metrics_reader::create_meter_provider_with_protocol;
+
 #[cfg(feature = "test-utils")]
 pub mod core;
 #[cfg(feature = "test-utils")]
@@ -167,10 +207,13 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
+pub(crate) mod metrics_exporter;
+pub(crate) mod metrics_reader;
 mod sampler;
 mod span_exporter;
 mod span_processor;
 mod spans_metrics;
+mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
 
@@ -363,48 +406,63 @@ pub fn tracing() -> DatadogTracingBuilder {
 }
 
 /// Create an instance of the tracer provider
+///
+/// Returns a no-op tracer provider if initialization fails.
+/// Errors are logged but not returned to ensure tracing functionality is always available.
 fn make_tracer(
     config: Arc<Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
-    let registry = TraceRegistry::new(config.clone());
-    let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
-    // Sampler only needs config for initialization (reads initial sampling rules)
-    // Runtime updates come via config callback, so no need for shared config
-    let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let registry = TraceRegistry::new(config.clone());
+        let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        // Sampler only needs config for initialization (reads initial sampling rules)
+        // Runtime updates come via config callback, so no need for shared config
+        let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
 
-    let agent_response_handler = sampler.on_agent_response();
+        let agent_response_handler = sampler.on_agent_response();
 
-    let dd_resource = create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
-    tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
-    let propagator = DatadogPropagator::new(config.clone(), registry.clone());
+        let dd_resource =
+            create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+        tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
+        let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
-    if config.remote_config_enabled() {
-        let sampler_callback = sampler.on_rules_update();
+        if config.remote_config_enabled() {
+            let sampler_callback = sampler.on_rules_update();
 
-        config.set_sampling_rules_callback(move |update| match update {
-            RemoteConfigUpdate::SamplingRules(rules) => {
-                sampler_callback(rules);
-            }
-        });
-    };
+            config.set_sampling_rules_callback(move |update| match update {
+                RemoteConfigUpdate::SamplingRules(rules) => {
+                    sampler_callback(rules);
+                }
+            });
+        };
 
-    let mut tracer_provider_builder = tracer_provider_builder
-        .with_sampler(sampler) // Use the sampler created above
-        .with_id_generator(trace_id::TraceidGenerator);
-    if config.enabled() {
-        let span_processor = DatadogSpanProcessor::new(
-            config.clone(),
-            registry.clone(),
-            resource_slot.clone(),
-            Some(agent_response_handler),
-        );
-        tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+        let mut tracer_provider_builder = tracer_provider_builder
+            .with_sampler(sampler) // Use the sampler created above
+            .with_id_generator(trace_id::TraceidGenerator);
+        if config.enabled() {
+            let span_processor = DatadogSpanProcessor::new(
+                config.clone(),
+                registry.clone(),
+                resource_slot.clone(),
+                Some(agent_response_handler),
+            );
+            tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+        }
+        let tracer_provider = tracer_provider_builder.build();
+
+        (tracer_provider, propagator)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            crate::dd_error!("Failed to initialize Datadog tracer provider. A no-op tracer provider will be used instead. Traces will not be exported.");
+            (
+                SdkTracerProvider::builder().build(),
+                DatadogPropagator::new(config.clone(), TraceRegistry::new(config)),
+            )
+        }
     }
-    let tracer_provider = tracer_provider_builder.build();
-
-    (tracer_provider, propagator)
 }
 
 fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
@@ -480,4 +538,60 @@ pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, Datad
         opentelemetry_sdk::trace::TracerProviderBuilder::default(),
         None,
     )
+}
+
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+/// Builder for Datadog Metrics with OTLP transport
+pub struct DatadogMetricsBuilder {
+    config: Option<Config>,
+    resource: Option<Resource>,
+    export_interval: Option<std::time::Duration>,
+}
+
+impl DatadogMetricsBuilder {
+    /// Sets the configuration for the metrics builder.
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Sets the OpenTelemetry resource for the metrics builder.
+    pub fn with_resource(mut self, resource: Resource) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    /// Sets the export interval for metrics.
+    pub fn with_export_interval(mut self, interval: std::time::Duration) -> Self {
+        self.export_interval = Some(interval);
+        self
+    }
+
+    /// Initializes the metrics provider and sets it as the global meter provider.
+    pub fn init(self) -> SdkMeterProvider {
+        let (meter_provider, _) = self.init_local();
+        opentelemetry::global::set_meter_provider(meter_provider.clone());
+        meter_provider
+    }
+
+    /// Initializes the metrics provider without setting it as the global meter provider.
+    pub fn init_local(self) -> (SdkMeterProvider, ()) {
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
+        let meter_provider = crate::metrics_reader::create_meter_provider(
+            Arc::new(config),
+            self.resource,
+            self.export_interval,
+        );
+        (meter_provider, ())
+    }
+}
+
+/// Initialize a new Datadog Metrics builder with OTLP transport
+pub fn metrics() -> DatadogMetricsBuilder {
+    DatadogMetricsBuilder {
+        config: None,
+        resource: None,
+        export_interval: None,
+    }
 }
