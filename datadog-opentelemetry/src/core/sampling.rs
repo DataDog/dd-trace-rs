@@ -124,8 +124,8 @@ impl SamplingMechanism {
     }
 
     /// Returns the string representation of the sampling mechanism.
-    pub fn to_cow(&self) -> Cow<'static, str> {
-        match *self {
+    pub fn to_cow(self) -> Cow<'static, str> {
+        match self {
             mechanism::DEFAULT => Cow::Borrowed("-0"),
             mechanism::AGENT_RATE_BY_SERVICE => Cow::Borrowed("-1"),
             mechanism::REMOTE_RATE => Cow::Borrowed("-2"),
