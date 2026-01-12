@@ -53,45 +53,17 @@ fn create_meter_provider_with_config_no_interval(
 async fn test_metrics_default_configuration() {
     let config = Config::builder().build();
 
-    assert!(
-        !config.metrics_otel_enabled(),
-        "Metrics should be disabled by default"
-    );
-    assert_eq!(
-        config.otlp_metrics_endpoint(),
-        "",
-        "Endpoint should be empty by default"
-    );
-    assert_eq!(
-        config.otlp_metrics_protocol(),
-        None,
-        "Protocol should be None by default"
-    );
-    assert_eq!(
-        config.otlp_metrics_timeout(),
-        10000,
-        "Timeout should be 10000ms by default"
-    );
+    assert!(!config.metrics_otel_enabled());
+    assert_eq!(config.otlp_metrics_endpoint(), "");
+    assert_eq!(config.otlp_metrics_protocol(), None);
+    assert_eq!(config.otlp_metrics_timeout(), 10000);
     assert_eq!(
         config.otel_metrics_temporality_preference(),
-        Some(opentelemetry_sdk::metrics::Temporality::Delta),
-        "Temporality should be Delta by default"
+        Some(opentelemetry_sdk::metrics::Temporality::Delta)
     );
-    assert_eq!(
-        config.metric_export_interval(),
-        10000,
-        "Export interval should be 10000ms by default"
-    );
-    assert_eq!(
-        config.metric_export_timeout(),
-        7500,
-        "Export timeout should be 7500ms by default"
-    );
-    assert_eq!(
-        config.otel_resource_attributes().count(),
-        0,
-        "Resource attributes should be empty by default"
-    );
+    assert_eq!(config.metric_export_interval(), 10000);
+    assert_eq!(config.metric_export_timeout(), 7500);
+    assert_eq!(config.otel_resource_attributes().count(), 0);
 }
 
 #[tokio::test]
@@ -149,15 +121,9 @@ async fn test_metrics_resource_attributes() {
         .build();
 
     let attributes: Vec<(&str, &str)> = config.otel_resource_attributes().collect();
-    assert_eq!(attributes.len(), 2, "Should have 2 resource attributes");
-    assert!(
-        attributes.contains(&("custom.attribute", "custom.value")),
-        "Should contain custom.attribute"
-    );
-    assert!(
-        attributes.contains(&("another.attr", "another.value")),
-        "Should contain another.attr"
-    );
+    assert_eq!(attributes.len(), 2);
+    assert!(attributes.contains(&("custom.attribute", "custom.value")));
+    assert!(attributes.contains(&("another.attr", "another.value")));
 
     let _meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
@@ -174,8 +140,7 @@ async fn test_metrics_temporality_preference_delta() {
 
     assert_eq!(
         config.otel_metrics_temporality_preference(),
-        Some(opentelemetry_sdk::metrics::Temporality::Delta),
-        "Temporality should be Delta"
+        Some(opentelemetry_sdk::metrics::Temporality::Delta)
     );
 
     let _meter_provider = create_meter_provider_with_config(config);
@@ -195,8 +160,7 @@ async fn test_metrics_temporality_preference_cumulative() {
 
     assert_eq!(
         config.otel_metrics_temporality_preference(),
-        Some(opentelemetry_sdk::metrics::Temporality::Cumulative),
-        "Temporality should be Cumulative"
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
     );
 
     let _meter_provider = create_meter_provider_with_config(config);
@@ -239,7 +203,7 @@ async fn test_metrics_export_http_protobuf() {
 async fn test_metrics_disabled_returns_noop() {
     let config = Config::builder().set_metrics_otel_enabled(false).build();
 
-    assert!(!config.metrics_otel_enabled(), "Metrics should be disabled");
+    assert!(!config.metrics_otel_enabled());
 
     let _meter_provider = create_meter_provider_with_config_no_interval(config);
     let meter = global::meter(TEST_METER_NAME);

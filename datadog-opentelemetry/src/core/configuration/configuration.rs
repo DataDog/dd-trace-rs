@@ -775,7 +775,7 @@ impl ConfigurationValueProvider for opentelemetry_sdk::metrics::Temporality {
         match self {
             opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
             opentelemetry_sdk::metrics::Temporality::Delta => "delta",
-            _ => "delta", // Default to delta for any future variants
+            _ => "delta",
         }
         .to_string()
     }
@@ -964,7 +964,6 @@ impl Config {
             }
         }
 
-        /// Wrapper to parse "," separated key=value OTEL resource attributes
         struct OtelResourceAttributes(Vec<(String, String)>);
 
         impl FromStr for OtelResourceAttributes {
