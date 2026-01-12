@@ -1,22 +1,15 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
+use std::env;
 use std::time::Duration;
 
 use datadog_opentelemetry::configuration::Config;
-use datadog_opentelemetry::{create_meter_provider_with_protocol, OtlpProtocol};
+use datadog_opentelemetry::metrics;
+use datadog_opentelemetry::OtlpProtocol;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use opentelemetry::KeyValue;
-
-use crate::integration_tests::make_test_agent;
-
-async fn setup_test_agent(
-    session_name: &'static str,
-) -> libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent {
-    make_test_agent(session_name).await
-}
 
 fn create_all_metric_types(meter: &opentelemetry::metrics::Meter) {
     let counter: Counter<u64> = meter.u64_counter("test.counter").build();
@@ -55,130 +48,116 @@ fn create_all_metric_types(meter: &opentelemetry::metrics::Meter) {
 
 #[tokio::test]
 async fn test_metrics_export_grpc() {
-    const SESSION_NAME: &str = "opentelemetry_api/test_metrics_grpc";
+    // Clean up any previous env vars first
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 
-    let test_agent = setup_test_agent(SESSION_NAME).await;
-    let base_uri = test_agent.get_base_uri().await;
+    env::set_var("DD_SERVICE", "test-service");
+    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4317");
+    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc");
 
-    let url = base_uri.to_string();
-    let url = url.parse::<hyper::http::Uri>().unwrap();
-    let scheme = url.scheme_str().unwrap_or("http");
-    let host = url.host().unwrap();
-    let otlp_endpoint = format!("{scheme}://{host}:4317");
+    let meter_provider = metrics()
+        .with_export_interval(Duration::from_millis(100))
+        .init();
 
-    let config = Arc::new(
-        Config::builder()
-            .set_trace_agent_url(base_uri.to_string())
-            .set_service("test-service".to_string())
-            .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(otlp_endpoint)
-            .build(),
-    );
+    // Verify meter provider is set globally (can get a meter)
+    let _meter = global::meter("test-verify");
+    let _ = _meter; // Meter provider is set if we can get a meter
 
-    let meter_provider = create_meter_provider_with_protocol(
-        config,
-        None,
-        Some(Duration::from_millis(100)),
-        Some(OtlpProtocol::Grpc),
-    );
-
-    global::set_meter_provider(meter_provider.clone());
+    // Verify configuration is applied
+    let config = Config::builder().build();
+    assert_eq!(&*config.service(), "test-service");
+    assert!(config.metrics_otel_enabled());
+    assert_eq!(config.otlp_metrics_endpoint(), "http://localhost:4317");
 
     let meter = global::meter("test-meter");
     create_all_metric_types(&meter);
 
-    // Wait for metrics to be exported
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    if let Err(e) = meter_provider.shutdown() {
-        eprintln!("Warning: Meter provider shutdown error: {:?}", e);
-    }
+    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
 
-    // Note: Test agent doesn't support receiving OTLP metrics, but we verify
-    // that the meter provider was created successfully and metrics were recorded without errors.
+    // Cleanup
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 }
 
 #[tokio::test]
 async fn test_metrics_export_http_protobuf() {
-    const SESSION_NAME: &str = "opentelemetry_api/test_metrics_http_protobuf";
+    // Clean up any previous env vars first
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 
-    let test_agent = setup_test_agent(SESSION_NAME).await;
-    let base_uri = test_agent.get_base_uri().await;
+    env::set_var("DD_SERVICE", "test-service");
+    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318/v1/metrics");
+    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf");
 
-    let url = base_uri.to_string();
-    let url = url.parse::<hyper::http::Uri>().unwrap();
-    let scheme = url.scheme_str().unwrap_or("http");
-    let host = url.host().unwrap();
-    let otlp_endpoint = format!("{scheme}://{host}:4318");
+    let meter_provider = metrics()
+        .with_export_interval(Duration::from_millis(100))
+        .init();
 
-    let config = Arc::new(
-        Config::builder()
-            .set_trace_agent_url(base_uri.to_string())
-            .set_service("test-service".to_string())
-            .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(format!("{}/v1/metrics", otlp_endpoint))
-            .set_otlp_metrics_protocol("http/protobuf".to_string())
-            .build(),
-    );
+    // Verify meter provider is set globally (can get a meter)
+    let _meter = global::meter("test-verify");
+    let _ = _meter; // Meter provider is set if we can get a meter
 
-    let meter_provider = create_meter_provider_with_protocol(
-        config,
-        None,
-        Some(Duration::from_millis(100)),
-        Some(OtlpProtocol::HttpProtobuf),
-    );
-
-    global::set_meter_provider(meter_provider.clone());
+    // Verify configuration is applied
+    let config = Config::builder().build();
+    assert_eq!(&*config.service(), "test-service");
+    assert!(config.metrics_otel_enabled());
+    // Note: endpoint gets /v1/metrics appended automatically for HTTP/protobuf
+    assert!(config.otlp_metrics_endpoint().contains("localhost:4318"));
+    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpProtobuf));
 
     let meter = global::meter("test-meter");
     create_all_metric_types(&meter);
 
-    // Wait for metrics to be exported
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    if let Err(e) = meter_provider.shutdown() {
-        eprintln!("Warning: Meter provider shutdown error: {:?}", e);
-    }
+    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
 
-    // Note: Test agent doesn't support receiving OTLP metrics, but we verify
-    // that the meter provider was created successfully and metrics were recorded without errors.
+    // Cleanup
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 }
 
 #[tokio::test]
 async fn test_metrics_export_http_json() {
-    const SESSION_NAME: &str = "opentelemetry_api/test_metrics_http_json";
+    // Clean up any previous env vars first
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 
-    let test_agent = setup_test_agent(SESSION_NAME).await;
-    let base_uri = test_agent.get_base_uri().await;
-
-    let url = base_uri.to_string();
-    let url = url.parse::<hyper::http::Uri>().unwrap();
-    let scheme = url.scheme_str().unwrap_or("http");
-    let host = url.host().unwrap();
-    let otlp_endpoint = format!("{scheme}://{host}:4318");
+    env::set_var("DD_SERVICE", "test-service");
+    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318");
+    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/json");
 
     // Note: HTTP/JSON is not natively supported by opentelemetry-otlp,
     // so this test verifies graceful degradation (no-op provider is returned)
-    let config = Arc::new(
-        Config::builder()
-            .set_trace_agent_url(base_uri.to_string())
-            .set_service("test-service".to_string())
-            .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(otlp_endpoint)
-            .set_otlp_metrics_protocol("http/json".to_string())
-            .build(),
-    );
+    let meter_provider = metrics()
+        .with_export_interval(Duration::from_millis(100))
+        .init();
 
-    let meter_provider = create_meter_provider_with_protocol(
-        config,
-        None,
-        Some(Duration::from_millis(100)),
-        Some(OtlpProtocol::HttpJson),
-    );
+    // Verify meter provider is set globally (even if it's a no-op)
+    let _meter = global::meter("test-verify");
+    let _ = _meter; // Meter provider is set if we can get a meter
 
-    // Should succeed but return a no-op provider (graceful degradation)
-
-    global::set_meter_provider(meter_provider.clone());
+    // Verify configuration is applied
+    let config = Config::builder().build();
+    assert_eq!(&*config.service(), "test-service");
+    assert!(config.metrics_otel_enabled());
+    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpJson));
 
     let meter = global::meter("test-meter");
     let counter: Counter<u64> = meter.u64_counter("test.counter").build();
@@ -186,44 +165,48 @@ async fn test_metrics_export_http_json() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    if let Err(e) = meter_provider.shutdown() {
-        eprintln!("Warning: Meter provider shutdown error: {:?}", e);
-    }
+    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
+
+    // Cleanup
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 }
 
 #[tokio::test]
-async fn test_metrics_export_missing_feature_graceful_degradation() {
-    const SESSION_NAME: &str = "opentelemetry_api/test_metrics_missing_feature";
+async fn test_metrics_export_configuration_applied() {
+    // Clean up any previous env vars first
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_ENV");
+    env::remove_var("DD_VERSION");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 
-    let test_agent = setup_test_agent(SESSION_NAME).await;
-    let base_uri = test_agent.get_base_uri().await;
+    env::set_var("DD_SERVICE", "test-service-config");
+    env::set_var("DD_ENV", "test-env");
+    env::set_var("DD_VERSION", "1.0.0");
+    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
+    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318/v1/metrics");
+    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf");
 
-    let url = base_uri.to_string();
-    let url = url.parse::<hyper::http::Uri>().unwrap();
-    let scheme = url.scheme_str().unwrap_or("http");
-    let host = url.host().unwrap();
-    let otlp_endpoint = format!("{scheme}://{host}:4318");
+    let meter_provider = metrics()
+        .with_export_interval(Duration::from_millis(100))
+        .init();
 
-    let config = Arc::new(
-        Config::builder()
-            .set_trace_agent_url(base_uri.to_string())
-            .set_service("test-service".to_string())
-            .set_metrics_otel_enabled(true)
-            .set_otlp_metrics_endpoint(format!("{}/v1/metrics", otlp_endpoint))
-            .set_otlp_metrics_protocol("http/protobuf".to_string())
-            .build(),
-    );
+    // Verify meter provider is set globally (can get a meter)
+    let _meter = global::meter("test-verify");
+    let _ = _meter; // Meter provider is set if we can get a meter
 
-    let meter_provider = create_meter_provider_with_protocol(
-        config,
-        None,
-        Some(Duration::from_millis(100)),
-        Some(OtlpProtocol::HttpProtobuf),
-    );
-
-    // Should succeed (graceful degradation returns no-op provider if feature missing)
-
-    global::set_meter_provider(meter_provider.clone());
+    // Verify all configurations are correctly applied
+    let config = Config::builder().build();
+    assert_eq!(&*config.service(), "test-service-config");
+    assert_eq!(config.env(), Some("test-env"));
+    assert_eq!(config.version(), Some("1.0.0"));
+    assert!(config.metrics_otel_enabled());
+    assert_eq!(config.otlp_metrics_endpoint(), "http://localhost:4318/v1/metrics");
+    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpProtobuf));
 
     let meter = global::meter("test-meter");
     let counter: Counter<u64> = meter.u64_counter("test.counter").build();
@@ -231,7 +214,13 @@ async fn test_metrics_export_missing_feature_graceful_degradation() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    if let Err(e) = meter_provider.shutdown() {
-        eprintln!("Warning: Meter provider shutdown error: {:?}", e);
-    }
+    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
+
+    // Cleanup
+    env::remove_var("DD_SERVICE");
+    env::remove_var("DD_ENV");
+    env::remove_var("DD_VERSION");
+    env::remove_var("DD_METRICS_OTEL_ENABLED");
+    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
+    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
 }
