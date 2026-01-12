@@ -1758,6 +1758,16 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set OpenTelemetry resource attributes as a list of `(key, value)` pairs.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `OTEL_RESOURCE_ATTRIBUTES`
+    pub fn set_otel_resource_attributes(&mut self, attributes: Vec<(String, String)>) -> &mut Self {
+        self.config.otel_resource_attributes.set_code(attributes);
+        self
+    }
+
     /// Enable or disable telemetry data collection and sending.
     ///
     /// **Default**: `true`

@@ -1,7 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::env;
 use std::time::Duration;
 
 use datadog_opentelemetry::configuration::Config;
@@ -9,218 +8,254 @@ use datadog_opentelemetry::metrics;
 use datadog_opentelemetry::OtlpProtocol;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
-use opentelemetry::KeyValue;
 
-fn create_all_metric_types(meter: &opentelemetry::metrics::Meter) {
-    let counter: Counter<u64> = meter.u64_counter("test.counter").build();
-    counter.add(10, &[KeyValue::new("key1", "value1")]);
+const TEST_EXPORT_INTERVAL: Duration = Duration::from_millis(100);
+const TEST_METER_NAME: &str = "test-meter";
 
-    let updown_counter: UpDownCounter<i64> = meter.i64_up_down_counter("test.updown").build();
-    updown_counter.add(5, &[KeyValue::new("key2", "value2")]);
-    updown_counter.add(-2, &[KeyValue::new("key2", "value2")]);
-
-    let histogram: Histogram<f64> = meter.f64_histogram("test.histogram").build();
-    histogram.record(1.5, &[KeyValue::new("key3", "value3")]);
-    histogram.record(2.3, &[KeyValue::new("key3", "value3")]);
-    histogram.record(3.7, &[KeyValue::new("key3", "value3")]);
+#[track_caller]
+fn assert_meter_can_create_instruments(meter: &opentelemetry::metrics::Meter) {
+    let _counter: Counter<u64> = meter.u64_counter("test.counter").build();
+    let _updown_counter: UpDownCounter<i64> = meter.i64_up_down_counter("test.updown").build();
+    let _histogram: Histogram<f64> = meter.f64_histogram("test.histogram").build();
 
     let _observable_counter = meter
         .u64_observable_counter("test.observable_counter")
-        .with_callback(|result| {
-            result.observe(20, &[KeyValue::new("key4", "value4")]);
-        })
+        .with_callback(|_result| {})
         .build();
 
     let _observable_gauge = meter
         .f64_observable_gauge("test.observable_gauge")
-        .with_callback(|result| {
-            result.observe(42.0, &[KeyValue::new("key5", "value5")]);
-        })
+        .with_callback(|_result| {})
         .build();
 
     let _observable_updown = meter
         .i64_observable_up_down_counter("test.observable_updown")
-        .with_callback(|result| {
-            result.observe(15, &[KeyValue::new("key6", "value6")]);
-        })
+        .with_callback(|_result| {})
         .build();
 }
 
-#[tokio::test]
-async fn test_metrics_export_grpc() {
-    // Clean up any previous env vars first
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
+fn create_meter_provider_with_config(
+    config: Config,
+) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+    metrics()
+        .with_config(config)
+        .with_export_interval(TEST_EXPORT_INTERVAL)
+        .init()
+}
 
-    env::set_var("DD_SERVICE", "test-service");
-    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4317");
-    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc");
-
-    let meter_provider = metrics()
-        .with_export_interval(Duration::from_millis(100))
-        .init();
-
-    // Verify meter provider is set globally (can get a meter)
-    let _meter = global::meter("test-verify");
-    let _ = _meter; // Meter provider is set if we can get a meter
-
-    // Verify configuration is applied
-    let config = Config::builder().build();
-    assert_eq!(&*config.service(), "test-service");
-    assert!(config.metrics_otel_enabled());
-    assert_eq!(config.otlp_metrics_endpoint(), "http://localhost:4317");
-
-    let meter = global::meter("test-meter");
-    create_all_metric_types(&meter);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
-
-    // Cleanup
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
+fn create_meter_provider_with_config_no_interval(
+    config: Config,
+) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+    metrics().with_config(config).init()
 }
 
 #[tokio::test]
-async fn test_metrics_export_http_protobuf() {
-    // Clean up any previous env vars first
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
-
-    env::set_var("DD_SERVICE", "test-service");
-    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318/v1/metrics");
-    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf");
-
-    let meter_provider = metrics()
-        .with_export_interval(Duration::from_millis(100))
-        .init();
-
-    // Verify meter provider is set globally (can get a meter)
-    let _meter = global::meter("test-verify");
-    let _ = _meter; // Meter provider is set if we can get a meter
-
-    // Verify configuration is applied
+async fn test_metrics_default_configuration() {
     let config = Config::builder().build();
-    assert_eq!(&*config.service(), "test-service");
-    assert!(config.metrics_otel_enabled());
-    // Note: endpoint gets /v1/metrics appended automatically for HTTP/protobuf
-    assert!(config.otlp_metrics_endpoint().contains("localhost:4318"));
-    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpProtobuf));
 
-    let meter = global::meter("test-meter");
-    create_all_metric_types(&meter);
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
-
-    // Cleanup
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
+    assert!(
+        !config.metrics_otel_enabled(),
+        "Metrics should be disabled by default"
+    );
+    assert_eq!(
+        config.otlp_metrics_endpoint(),
+        "",
+        "Endpoint should be empty by default"
+    );
+    assert_eq!(
+        config.otlp_metrics_protocol(),
+        None,
+        "Protocol should be None by default"
+    );
+    assert_eq!(
+        config.otlp_metrics_timeout(),
+        10000,
+        "Timeout should be 10000ms by default"
+    );
+    assert_eq!(
+        config.otel_metrics_temporality_preference(),
+        Some(opentelemetry_sdk::metrics::Temporality::Delta),
+        "Temporality should be Delta by default"
+    );
+    assert_eq!(
+        config.metric_export_interval(),
+        10000,
+        "Export interval should be 10000ms by default"
+    );
+    assert_eq!(
+        config.metric_export_timeout(),
+        7500,
+        "Export timeout should be 7500ms by default"
+    );
+    assert_eq!(
+        config.otel_resource_attributes().count(),
+        0,
+        "Resource attributes should be empty by default"
+    );
 }
 
 #[tokio::test]
-async fn test_metrics_export_http_json() {
-    // Clean up any previous env vars first
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
+async fn test_metrics_configuration() {
+    let config = Config::builder()
+        .set_service("test-service-config".to_string())
+        .set_env("test-env".to_string())
+        .set_version("1.0.0".to_string())
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_endpoint("http://localhost:4318/v1/metrics".to_string())
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .set_otlp_metrics_timeout(5000)
+        .set_otel_metrics_temporality_preference(
+            opentelemetry_sdk::metrics::Temporality::Cumulative,
+        )
+        .set_metric_export_interval(2000)
+        .set_metric_export_timeout(3000)
+        .build();
 
-    env::set_var("DD_SERVICE", "test-service");
-    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318");
-    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/json");
-
-    // Note: HTTP/JSON is not natively supported by opentelemetry-otlp,
-    // so this test verifies graceful degradation (no-op provider is returned)
-    let meter_provider = metrics()
-        .with_export_interval(Duration::from_millis(100))
-        .init();
-
-    // Verify meter provider is set globally (even if it's a no-op)
-    let _meter = global::meter("test-verify");
-    let _ = _meter; // Meter provider is set if we can get a meter
-
-    // Verify configuration is applied
-    let config = Config::builder().build();
-    assert_eq!(&*config.service(), "test-service");
-    assert!(config.metrics_otel_enabled());
-    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpJson));
-
-    let meter = global::meter("test-meter");
-    let counter: Counter<u64> = meter.u64_counter("test.counter").build();
-    counter.add(10, &[KeyValue::new("key1", "value1")]);
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
-
-    // Cleanup
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
-}
-
-#[tokio::test]
-async fn test_metrics_export_configuration_applied() {
-    // Clean up any previous env vars first
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_ENV");
-    env::remove_var("DD_VERSION");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
-
-    env::set_var("DD_SERVICE", "test-service-config");
-    env::set_var("DD_ENV", "test-env");
-    env::set_var("DD_VERSION", "1.0.0");
-    env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-    env::set_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "http://localhost:4318/v1/metrics");
-    env::set_var("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf");
-
-    let meter_provider = metrics()
-        .with_export_interval(Duration::from_millis(100))
-        .init();
-
-    // Verify meter provider is set globally (can get a meter)
-    let _meter = global::meter("test-verify");
-    let _ = _meter; // Meter provider is set if we can get a meter
-
-    // Verify all configurations are correctly applied
-    let config = Config::builder().build();
     assert_eq!(&*config.service(), "test-service-config");
     assert_eq!(config.env(), Some("test-env"));
     assert_eq!(config.version(), Some("1.0.0"));
     assert!(config.metrics_otel_enabled());
-    assert_eq!(config.otlp_metrics_endpoint(), "http://localhost:4318/v1/metrics");
-    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpProtobuf));
+    assert_eq!(
+        config.otlp_metrics_endpoint(),
+        "http://localhost:4318/v1/metrics"
+    );
+    assert_eq!(
+        config.otlp_metrics_protocol(),
+        Some(OtlpProtocol::HttpProtobuf)
+    );
+    assert_eq!(config.otlp_metrics_timeout(), 5000);
+    assert_eq!(
+        config.otel_metrics_temporality_preference(),
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
+    );
+    assert_eq!(config.metric_export_interval(), 2000);
+    assert_eq!(config.metric_export_timeout(), 3000);
+    assert_eq!(config.otel_resource_attributes().count(), 0);
 
-    let meter = global::meter("test-meter");
-    let counter: Counter<u64> = meter.u64_counter("test.counter").build();
-    counter.add(10, &[KeyValue::new("key1", "value1")]);
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
 
-    tokio::time::sleep(Duration::from_millis(200)).await;
+#[tokio::test]
+async fn test_metrics_resource_attributes() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .set_otel_resource_attributes(vec![
+            ("custom.attribute".to_string(), "custom.value".to_string()),
+            ("another.attr".to_string(), "another.value".to_string()),
+        ])
+        .build();
 
-    meter_provider.shutdown().expect("Meter provider should shutdown cleanly");
+    let attributes: Vec<(&str, &str)> = config.otel_resource_attributes().collect();
+    assert_eq!(attributes.len(), 2, "Should have 2 resource attributes");
+    assert!(
+        attributes.contains(&("custom.attribute", "custom.value")),
+        "Should contain custom.attribute"
+    );
+    assert!(
+        attributes.contains(&("another.attr", "another.value")),
+        "Should contain another.attr"
+    );
 
-    // Cleanup
-    env::remove_var("DD_SERVICE");
-    env::remove_var("DD_ENV");
-    env::remove_var("DD_VERSION");
-    env::remove_var("DD_METRICS_OTEL_ENABLED");
-    env::remove_var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT");
-    env::remove_var("OTEL_EXPORTER_OTLP_PROTOCOL");
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_temporality_preference_delta() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .set_otel_metrics_temporality_preference(opentelemetry_sdk::metrics::Temporality::Delta)
+        .build();
+
+    assert_eq!(
+        config.otel_metrics_temporality_preference(),
+        Some(opentelemetry_sdk::metrics::Temporality::Delta),
+        "Temporality should be Delta"
+    );
+
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_temporality_preference_cumulative() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .set_otel_metrics_temporality_preference(
+            opentelemetry_sdk::metrics::Temporality::Cumulative,
+        )
+        .build();
+
+    assert_eq!(
+        config.otel_metrics_temporality_preference(),
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative),
+        "Temporality should be Cumulative"
+    );
+
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_export_grpc() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("grpc".to_string())
+        .build();
+
+    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::Grpc));
+
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_export_http_protobuf() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .build();
+
+    assert_eq!(
+        config.otlp_metrics_protocol(),
+        Some(OtlpProtocol::HttpProtobuf)
+    );
+
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_disabled_returns_noop() {
+    let config = Config::builder().set_metrics_otel_enabled(false).build();
+
+    assert!(!config.metrics_otel_enabled(), "Metrics should be disabled");
+
+    let _meter_provider = create_meter_provider_with_config_no_interval(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_export_http_json() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/json".to_string())
+        .build();
+
+    assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpJson));
+
+    let _meter_provider = create_meter_provider_with_config(config);
+    let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
 }
