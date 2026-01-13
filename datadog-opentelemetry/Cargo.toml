@@ -20,7 +20,6 @@ opentelemetry-semantic-conventions = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = [
     "metrics",
 ], default-features = false, optional = true }
-opentelemetry-proto = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 
