@@ -1632,7 +1632,7 @@ fn default_config() -> Config {
         ),
         metrics_otel_enabled: ConfigItem::new(
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED,
-            false,
+            true,
         ),
         otlp_metrics_endpoint: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,

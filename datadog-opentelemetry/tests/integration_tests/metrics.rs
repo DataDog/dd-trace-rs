@@ -53,7 +53,7 @@ fn create_meter_provider_with_config_no_interval(
 async fn test_metrics_default_configuration() {
     let config = Config::builder().build();
 
-    assert!(!config.metrics_otel_enabled());
+    assert!(config.metrics_otel_enabled());
     assert_eq!(config.otlp_metrics_endpoint(), "");
     assert_eq!(config.otlp_metrics_protocol(), None);
     assert_eq!(config.otlp_metrics_timeout(), 10000);
@@ -72,7 +72,7 @@ async fn test_metrics_configuration() {
         .set_service("test-service-config".to_string())
         .set_env("test-env".to_string())
         .set_version("1.0.0".to_string())
-        .set_metrics_otel_enabled(true)
+        .set_metrics_otel_enabled(false)
         .set_otlp_metrics_endpoint("http://localhost:4318/v1/metrics".to_string())
         .set_otlp_metrics_protocol("http/protobuf".to_string())
         .set_otlp_metrics_timeout(5000)
@@ -86,7 +86,7 @@ async fn test_metrics_configuration() {
     assert_eq!(&*config.service(), "test-service-config");
     assert_eq!(config.env(), Some("test-env"));
     assert_eq!(config.version(), Some("1.0.0"));
-    assert!(config.metrics_otel_enabled());
+    assert!(!config.metrics_otel_enabled());
     assert_eq!(
         config.otlp_metrics_endpoint(),
         "http://localhost:4318/v1/metrics"

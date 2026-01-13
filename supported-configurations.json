@@ -60,9 +60,9 @@
     ],
     "DD_METRICS_OTEL_ENABLED": [
       {
-        "version": "A",
+        "version": "B",
         "type": "boolean",
-        "default": "false",
+        "default": "true",
         "propertyKeys": ["metrics_otel_enabled"]
       }
     ],
