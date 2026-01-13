@@ -5,12 +5,12 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::Temporality;
-use std::fmt::Debug;
 use std::time::Duration;
 
 use crate::core::telemetry;
 use crate::metrics_exporter::OtlpProtocol;
 
+#[derive(Debug)]
 pub struct TelemetryTrackingExporter<E> {
     inner: E,
     protocol: OtlpProtocol,
@@ -22,17 +22,6 @@ impl<E> TelemetryTrackingExporter<E> {
             inner: exporter,
             protocol,
         }
-    }
-}
-
-impl<E> Debug for TelemetryTrackingExporter<E>
-where
-    E: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TelemetryTrackingExporter")
-            .field("inner", &self.inner)
-            .finish()
     }
 }
 
