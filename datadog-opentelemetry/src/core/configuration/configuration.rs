@@ -1518,6 +1518,11 @@ impl Config {
         }
     }
 
+    /// Sets the service name to a value with calculated precedence.
+    /// The value is calculated by the `dd_resource` Otel Resource,
+    /// which is created in `create_dd_resource` function.
+    /// The result will depend on which environment variable was set,
+    /// orif it returns an `unknown_service` name, which is why it is a calculated source.
     pub fn set_calculated_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
