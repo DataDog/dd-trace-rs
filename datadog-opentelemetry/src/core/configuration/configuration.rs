@@ -1807,7 +1807,8 @@ impl ConfigBuilder {
         let mut config = self.config.clone();
 
         // resolve trace_agent_url
-        // this will send the the config through telemetry with code origin. There's no `derived` origin.
+        // this will send the the config through telemetry with code origin. There's no `derived`
+        // origin.
         if config.trace_agent_url.value().is_empty() {
             let host = &config.agent_host.value();
             let port = *config.trace_agent_port.value();
@@ -1817,7 +1818,8 @@ impl ConfigBuilder {
         }
 
         // resolve dogstatsd_agent_url
-        // this will send the the config through telemetry with code origin. There's no `derived` origin.
+        // this will send the the config through telemetry with code origin. There's no `derived`
+        // origin.
         if config.dogstatsd_agent_url.value().is_empty() {
             let host = &config.dogstatsd_agent_host.value();
             let port = *config.dogstatsd_agent_port.value();
