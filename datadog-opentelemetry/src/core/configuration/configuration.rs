@@ -751,6 +751,44 @@ impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
     }
 }
 
+impl ConfigurationValueProvider for crate::metrics_exporter::OtlpProtocol {
+    fn get_configuration_value(&self) -> String {
+        match self {
+            crate::metrics_exporter::OtlpProtocol::Grpc => "grpc",
+            crate::metrics_exporter::OtlpProtocol::HttpProtobuf => "http/protobuf",
+            crate::metrics_exporter::OtlpProtocol::HttpJson => "http/json",
+        }
+        .to_string()
+    }
+}
+
+impl ConfigurationValueProvider for Option<crate::metrics_exporter::OtlpProtocol> {
+    fn get_configuration_value(&self) -> String {
+        self.as_ref()
+            .map(|p| p.get_configuration_value())
+            .unwrap_or_default()
+    }
+}
+
+impl ConfigurationValueProvider for opentelemetry_sdk::metrics::Temporality {
+    fn get_configuration_value(&self) -> String {
+        match self {
+            opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
+            opentelemetry_sdk::metrics::Temporality::Delta => "delta",
+            _ => "delta",
+        }
+        .to_string()
+    }
+}
+
+impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporality> {
+    fn get_configuration_value(&self) -> String {
+        self.as_ref()
+            .map(|t| t.get_configuration_value())
+            .unwrap_or_else(|| "delta".to_string())
+    }
+}
+
 impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
 impl_config_value_provider!(option: String);
 
@@ -786,6 +824,13 @@ pub struct Config {
     /// A list of default tags to be added to every span
     /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
     global_tags: ConfigItem<Vec<(String, String)>>,
+    /// OTEL resource attributes parsed from OTEL_RESOURCE_ATTRIBUTES env var
+    otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
+    /// OTEL metrics exporter type
+    otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
+    /// OTEL metrics temporality preference
+    otel_metrics_temporality_preference:
+        ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
     /// host of the trace agent
     agent_host: ConfigItem<Cow<'static, str>>,
     /// port of the trace agent
@@ -857,6 +902,30 @@ pub struct Config {
     /// Max length of x-datadog-tags header. It only accepts values between 0 and 512.
     /// The default value is 512 and x-datadog-tags header is not injected if value is 0.
     datadog_tags_max_length: ConfigItem<usize>,
+
+    // # OpenTelemetry Metrics
+    /// Enables OpenTelemetry metrics export
+    metrics_otel_enabled: ConfigItem<bool>,
+    /// OTLP metrics endpoint
+    otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP general endpoint
+    otlp_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP general headers
+    otlp_headers: ConfigItem<Cow<'static, str>>,
+    /// OTLP metrics protocol (grpc, http/protobuf, http/json)
+    otlp_metrics_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    /// OTLP metrics headers
+    otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
+    /// OTLP general protocol (fallback for metrics protocol)
+    otlp_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    /// OTLP metrics timeout in milliseconds
+    otlp_metrics_timeout: ConfigItem<u32>,
+    /// OTLP general timeout
+    otlp_timeout: ConfigItem<u32>,
+    /// Metric export interval in milliseconds
+    metric_export_interval: ConfigItem<u32>,
+    /// Metric export timeout in milliseconds
+    metric_export_timeout: ConfigItem<u32>,
 }
 
 impl Config {
@@ -895,6 +964,23 @@ impl Config {
             }
         }
 
+        struct OtelResourceAttributes(Vec<(String, String)>);
+
+        impl FromStr for OtelResourceAttributes {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Ok(OtelResourceAttributes(
+                    s.split(',')
+                        .filter_map(|s| {
+                            s.split_once('=')
+                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                        })
+                        .collect(),
+                ))
+            }
+        }
+
         let parsed_sampling_rules_config = sources
             .get_parse::<ParsedSamplingRules>(SupportedConfigurations::DD_TRACE_SAMPLING_RULES);
 
@@ -921,6 +1007,15 @@ impl Config {
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
+            otel_resource_attributes: cisu.update_parsed_with_transform(
+                default.otel_resource_attributes,
+                |OtelResourceAttributes(attrs)| attrs,
+            ),
+            otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
+            otel_metrics_temporality_preference: cisu.update_string(
+                default.otel_metrics_temporality_preference,
+                crate::metrics_exporter::parse_temporality,
+            ),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
             trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
@@ -974,6 +1069,23 @@ impl Config {
                 .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
                     max.min(DATADOG_TAGS_MAX_LENGTH)
                 }),
+            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
+            otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
+            otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
+            otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
+            otlp_metrics_protocol: cisu.update_string(
+                default.otlp_metrics_protocol,
+                crate::metrics_exporter::OtlpProtocol::parse_optional,
+            ),
+            otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
+            otlp_protocol: cisu.update_string(
+                default.otlp_protocol,
+                crate::metrics_exporter::OtlpProtocol::parse_optional,
+            ),
+            otlp_metrics_timeout: cisu.update_parsed(default.otlp_metrics_timeout),
+            otlp_timeout: cisu.update_parsed(default.otlp_timeout),
+            metric_export_interval: cisu.update_parsed(default.metric_export_interval),
+            metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
         }
     }
 
@@ -1017,6 +1129,16 @@ impl Config {
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
+            &self.otlp_endpoint,
+            &self.otlp_timeout,
+            &self.otlp_headers,
+            &self.otlp_protocol,
+            &self.otlp_metrics_endpoint,
+            &self.otlp_metrics_timeout,
+            &self.otlp_metrics_headers,
+            &self.otlp_metrics_protocol,
+            &self.metric_export_interval,
+            &self.metric_export_timeout,
         ]
     }
 
@@ -1069,6 +1191,26 @@ impl Config {
             .value()
             .iter()
             .map(|tag| (tag.0.as_str(), tag.1.as_str()))
+    }
+
+    /// Returns OpenTelemetry resource attributes parsed from OTEL_RESOURCE_ATTRIBUTES env var.
+    pub fn otel_resource_attributes(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.otel_resource_attributes
+            .value()
+            .iter()
+            .map(|attr| (attr.0.as_str(), attr.1.as_str()))
+    }
+
+    /// Returns the OpenTelemetry metrics exporter type.
+    pub fn otel_metrics_exporter(&self) -> &str {
+        self.otel_metrics_exporter.value().as_ref()
+    }
+
+    /// Returns the OpenTelemetry metrics temporality preference (Delta or Cumulative).
+    pub fn otel_metrics_temporality_preference(
+        &self,
+    ) -> Option<opentelemetry_sdk::metrics::Temporality> {
+        *self.otel_metrics_temporality_preference.value()
     }
 
     /// Returns the URL of the Datadog trace agent.
@@ -1141,6 +1283,62 @@ impl Config {
     /// Returns the telemetry heartbeat interval in seconds.
     pub fn telemetry_heartbeat_interval(&self) -> f64 {
         *self.telemetry_heartbeat_interval.value()
+    }
+
+    /// Returns whether OpenTelemetry metrics export is enabled.
+    pub fn metrics_otel_enabled(&self) -> bool {
+        *self.metrics_otel_enabled.value()
+    }
+
+    /// Returns the OTLP metrics endpoint URL.
+    pub fn otlp_metrics_endpoint(&self) -> &str {
+        self.otlp_metrics_endpoint.value().as_ref()
+    }
+
+    /// Returns the OTLP endpoint URL (fallback for metrics if metrics endpoint is not set).
+    pub fn otlp_endpoint(&self) -> &str {
+        self.otlp_endpoint.value().as_ref()
+    }
+
+    /// Returns the OTLP headers (fallback for metrics if metrics headers are not set).
+    pub fn otlp_headers(&self) -> &str {
+        self.otlp_headers.value().as_ref()
+    }
+
+    /// Returns the OTLP metrics protocol (gRPC, HTTP/protobuf, or HTTP/JSON).
+    pub fn otlp_metrics_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
+        *self.otlp_metrics_protocol.value()
+    }
+
+    /// Returns the OTLP metrics headers.
+    pub fn otlp_metrics_headers(&self) -> &str {
+        self.otlp_metrics_headers.value().as_ref()
+    }
+
+    /// Returns the OTLP protocol (fallback for metrics if metrics protocol is not set).
+    pub fn otlp_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
+        *self.otlp_protocol.value()
+    }
+
+    /// Returns the OTLP metrics timeout in milliseconds.
+    pub fn otlp_metrics_timeout(&self) -> u32 {
+        *self.otlp_metrics_timeout.value()
+    }
+
+    /// Returns the OTLP timeout in milliseconds (fallback for metrics if metrics timeout is not
+    /// set).
+    pub fn otlp_timeout(&self) -> u32 {
+        *self.otlp_timeout.value()
+    }
+
+    /// Returns the metric export interval in milliseconds.
+    pub fn metric_export_interval(&self) -> u32 {
+        *self.metric_export_interval.value()
+    }
+
+    /// Returns the metric export timeout in milliseconds.
+    pub fn metric_export_timeout(&self) -> u32 {
+        *self.metric_export_timeout.value()
     }
 
     /// Returns whether partial trace flushing is enabled.
@@ -1328,6 +1526,18 @@ fn default_config() -> Config {
         ),
         version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
         global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
+        otel_resource_attributes: ConfigItem::new(
+            SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES,
+            Vec::new(),
+        ),
+        otel_metrics_exporter: ConfigItem::new(
+            SupportedConfigurations::OTEL_METRICS_EXPORTER,
+            Cow::Borrowed("otlp"),
+        ),
+        otel_metrics_temporality_preference: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
+            Some(opentelemetry_sdk::metrics::Temporality::Delta),
+        ),
 
         agent_host: ConfigItem::new(
             SupportedConfigurations::DD_AGENT_HOST,
@@ -1420,6 +1630,44 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
             DATADOG_TAGS_MAX_LENGTH,
         ),
+        metrics_otel_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_METRICS_OTEL_ENABLED,
+            true,
+        ),
+        otlp_metrics_endpoint: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_endpoint: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS,
+            Cow::Borrowed(""),
+        ),
+        otlp_metrics_protocol: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
+            None,
+        ),
+        otlp_metrics_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS,
+            Cow::Borrowed(""),
+        ),
+        otlp_protocol: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL, None),
+        otlp_metrics_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
+            10000u32,
+        ),
+        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 7500u32),
+        metric_export_interval: ConfigItem::new(
+            SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
+            10000u32,
+        ),
+        metric_export_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
+            7500u32,
+        ),
     }
 }
 
@@ -1509,6 +1757,16 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set OpenTelemetry resource attributes as a list of `(key, value)` pairs.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `OTEL_RESOURCE_ATTRIBUTES`
+    pub fn set_otel_resource_attributes(&mut self, attributes: Vec<(String, String)>) -> &mut Self {
+        self.config.otel_resource_attributes.set_code(attributes);
+        self
+    }
+
     /// Enable or disable telemetry data collection and sending.
     ///
     /// **Default**: `true`
@@ -1575,6 +1833,119 @@ impl ConfigBuilder {
         self.config
             .trace_agent_url
             .set_code(Cow::Owned(url.to_string()));
+        self
+    }
+
+    /// Enable or disable OpenTelemetry metrics export.
+    ///
+    /// **Default**: `false`
+    ///
+    /// Env variable: `DD_METRICS_OTEL_ENABLED`
+    pub fn set_metrics_otel_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.metrics_otel_enabled.set_code(enabled);
+        self
+    }
+
+    /// Set the OTLP metrics endpoint URL.
+    ///
+    /// **Default**: `(empty, falls back to OTEL_EXPORTER_OTLP_ENDPOINT or agent URL)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+    pub fn set_otlp_metrics_endpoint(&mut self, endpoint: String) -> &mut Self {
+        self.config
+            .otlp_metrics_endpoint
+            .set_code(Cow::Owned(endpoint));
+        self
+    }
+
+    /// Set the OTLP general endpoint URL (fallback for metrics endpoint).
+    ///
+    /// **Default**: `(empty)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_ENDPOINT`
+    pub fn set_otlp_endpoint(&mut self, endpoint: String) -> &mut Self {
+        self.config.otlp_endpoint.set_code(Cow::Owned(endpoint));
+        self
+    }
+
+    /// Set the OTLP metrics protocol (grpc, http/protobuf, http/json).
+    ///
+    /// **Default**: `(empty, defaults to grpc)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`
+    pub fn set_otlp_metrics_protocol(&mut self, protocol: String) -> &mut Self {
+        self.config.otlp_metrics_protocol.set_code(
+            crate::metrics_exporter::OtlpProtocol::parse_optional(protocol),
+        );
+        self
+    }
+
+    /// Set the OTLP general protocol (fallback for metrics protocol).
+    ///
+    /// **Default**: `(empty)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_PROTOCOL`
+    pub fn set_otlp_protocol(&mut self, protocol: String) -> &mut Self {
+        self.config
+            .otlp_protocol
+            .set_code(crate::metrics_exporter::OtlpProtocol::parse_optional(
+                protocol,
+            ));
+        self
+    }
+
+    /// Set the OTLP metrics timeout in milliseconds.
+    ///
+    /// **Default**: `7500`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`
+    pub fn set_otlp_metrics_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.otlp_metrics_timeout.set_code(timeout);
+        self
+    }
+
+    /// Set the OTLP general timeout in milliseconds (fallback for metrics timeout).
+    ///
+    /// **Default**: `7500`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TIMEOUT`
+    pub fn set_otlp_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.otlp_timeout.set_code(timeout);
+        self
+    }
+
+    /// Set the OTLP metrics temporality preference.
+    ///
+    /// **Default**: `Delta`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`
+    pub fn set_otel_metrics_temporality_preference(
+        &mut self,
+        temporality: opentelemetry_sdk::metrics::Temporality,
+    ) -> &mut Self {
+        self.config
+            .otel_metrics_temporality_preference
+            .set_code(Some(temporality));
+        self
+    }
+
+    /// Set the metric export interval in milliseconds.
+    ///
+    /// **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_METRIC_EXPORT_INTERVAL`
+    pub fn set_metric_export_interval(&mut self, interval: u32) -> &mut Self {
+        self.config.metric_export_interval.set_code(interval);
+        self
+    }
+
+    /// Set the metric export timeout in milliseconds.
+    ///
+    /// **Default**: `7500`
+    ///
+    /// Env variable: `OTEL_METRIC_EXPORT_TIMEOUT`
+    pub fn set_metric_export_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.metric_export_timeout.set_code(timeout);
         self
     }
 

@@ -16,6 +16,7 @@ use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::propagation::{Extractor, TextMapPropagator};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
+mod metrics;
 mod opentelemetry_api;
 mod tracing_api;
 

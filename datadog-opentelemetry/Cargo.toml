@@ -17,6 +17,9 @@ hashbrown = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = [
+    "metrics",
+], default-features = false, optional = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 
@@ -26,6 +29,7 @@ serde = { workspace = true, features = ["derive"] }
 
 # propagation
 thiserror = { version = "1.0", default-features = false }
+
 
 # core
 anyhow = "1.0.97"
@@ -76,7 +80,10 @@ tracing-subscriber = { version = "0.3" }
 criterion = "0.5.1"
 
 [features]
-test-utils = ["libdd-data-pipeline/test-utils", "criterion"]
+default = ["metrics-grpc"]
+metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
+metrics-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
+test-utils = ["libdd-data-pipeline/test-utils", "criterion", "metrics-grpc", "metrics-http"]
 
 [[bench]]
 name = "smoke"
