@@ -14,7 +14,10 @@ authors.workspace = true
 # External dependencies
 foldhash = { workspace = true }
 hashbrown = { workspace = true }
-opentelemetry_sdk = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = [
+    "experimental_metrics_periodicreader_with_async_runtime",
+    "rt-tokio",
+], default-features = false }
 opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = [

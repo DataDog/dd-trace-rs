@@ -5,17 +5,10 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::Temporality;
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::telemetry;
 use crate::metrics_exporter::OtlpProtocol;
-
-#[cfg(feature = "metrics-http")]
-use std::sync::OnceLock;
-
-#[cfg(feature = "metrics-http")]
-static HTTP_RUNTIME: OnceLock<Option<Arc<tokio::runtime::Runtime>>> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct TelemetryTrackingExporter<E> {
@@ -29,42 +22,6 @@ impl<E> TelemetryTrackingExporter<E> {
             inner: exporter,
             protocol,
         }
-    }
-
-    #[cfg(feature = "metrics-http")]
-    fn get_http_runtime() -> Option<Arc<tokio::runtime::Runtime>> {
-        HTTP_RUNTIME.get_or_init(|| {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map(Arc::new)
-                .ok()
-        })
-        .clone()
-    }
-
-    #[cfg(feature = "metrics-http")]
-    async fn export_http(
-        &self,
-        metrics: &ResourceMetrics,
-    ) -> OTelSdkResult
-    where
-        E: PushMetricExporter + Send + Sync,
-    {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            return self.inner.export(metrics).await;
-        }
-
-        let Some(runtime) = Self::get_http_runtime() else {
-            return self.inner.export(metrics).await;
-        };
-
-        // SAFETY: metrics valid for duration of block_on
-        let metrics_ptr = metrics as *const ResourceMetrics;
-        let inner = &self.inner;
-        runtime.block_on(async move {
-            unsafe { inner.export(&*metrics_ptr).await }
-        })
     }
 }
 
@@ -90,14 +47,6 @@ where
 
         telemetry::add_point(1.0, attempts);
 
-        #[cfg(feature = "metrics-http")]
-        let result = if matches!(self.protocol, OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson) {
-            self.export_http(metrics).await
-        } else {
-            self.inner.export(metrics).await
-        };
-
-        #[cfg(not(feature = "metrics-http"))]
         let result = self.inner.export(metrics).await;
 
         match result {

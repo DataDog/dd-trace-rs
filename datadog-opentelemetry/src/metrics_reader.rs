@@ -117,11 +117,26 @@ pub fn create_meter_provider_with_protocol(
 
         let telemetry_exporter = TelemetryTrackingExporter::new(exporter, protocol);
 
+        let final_resource = build_metrics_resource(&config, resource);
+
+        #[cfg(feature = "metrics-http")]
+        {
+            if matches!(protocol, OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson) {
+                use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
+                use opentelemetry_sdk::runtime;
+                let reader = PeriodicReader::builder(telemetry_exporter, runtime::Tokio)
+                    .with_interval(interval)
+                    .build();
+                return SdkMeterProvider::builder()
+                    .with_reader(reader)
+                    .with_resource(final_resource)
+                    .build();
+            }
+        }
+
         let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(telemetry_exporter)
             .with_interval(interval)
             .build();
-
-        let final_resource = build_metrics_resource(&config, resource);
 
         SdkMeterProvider::builder()
             .with_reader(reader)

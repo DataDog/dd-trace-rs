@@ -104,9 +104,17 @@ async fn test_metrics_configuration() {
     assert_eq!(config.metric_export_timeout(), 3000);
     assert_eq!(config.otel_resource_attributes().count(), 0);
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -125,9 +133,17 @@ async fn test_metrics_resource_attributes() {
     assert!(attributes.contains(&("custom.attribute", "custom.value")));
     assert!(attributes.contains(&("another.attr", "another.value")));
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -143,9 +159,17 @@ async fn test_metrics_temporality_preference_delta() {
         Some(opentelemetry_sdk::metrics::Temporality::Delta)
     );
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -163,9 +187,17 @@ async fn test_metrics_temporality_preference_cumulative() {
         Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
     );
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -177,9 +209,17 @@ async fn test_metrics_export_grpc() {
 
     assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::Grpc));
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -194,9 +234,17 @@ async fn test_metrics_export_http_protobuf() {
         Some(OtlpProtocol::HttpProtobuf)
     );
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
 
 #[tokio::test]
@@ -219,7 +267,15 @@ async fn test_metrics_export_http_json() {
 
     assert_eq!(config.otlp_metrics_protocol(), Some(OtlpProtocol::HttpJson));
 
-    let _meter_provider = create_meter_provider_with_config(config);
+    let meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+    
+    // Shutdown needs to be called from a blocking context to avoid deadlock
+    // with periodic_reader_with_async_runtime's internal block_on
+    tokio::task::spawn_blocking(move || {
+        let _ = meter_provider.shutdown();
+    })
+    .await
+    .ok();
 }
