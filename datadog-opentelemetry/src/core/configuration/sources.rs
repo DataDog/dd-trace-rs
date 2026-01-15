@@ -10,18 +10,20 @@ use crate::dd_warn;
 use super::supported_configurations::{is_alias_deprecated, SupportedConfigurations};
 
 /// Source of a configuration value
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigSourceOrigin {
-    Default,
-    EnvVar,
-    Code,
-    RemoteConfig,
+    Default = 1,
+    Calculated = 2,
+    EnvVar = 3,
+    Code = 4,
+    RemoteConfig = 5,
 }
 
 impl From<ConfigSourceOrigin> for ConfigurationOrigin {
     fn from(val: ConfigSourceOrigin) -> Self {
         match val {
             ConfigSourceOrigin::Default => ConfigurationOrigin::Default,
+            ConfigSourceOrigin::Calculated => ConfigurationOrigin::Calculated,
             ConfigSourceOrigin::Code => ConfigurationOrigin::Code,
             ConfigSourceOrigin::EnvVar => ConfigurationOrigin::EnvVar,
             ConfigSourceOrigin::RemoteConfig => ConfigurationOrigin::RemoteConfig,
