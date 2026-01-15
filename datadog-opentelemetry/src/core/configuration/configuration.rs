@@ -296,18 +296,6 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             .unwrap_or(&self.default_value)
     }
 
-    /// Gets the sequence id of the current value
-    fn seq_id(&self) -> Option<u64> {
-        let mut seq_id = 1;
-        if self.env_value.is_some() {
-            seq_id += 1;
-        }
-        if self.code_value.is_some() {
-            seq_id += 1;
-        }
-        Some(seq_id)
-    }
-
     /// Gets the source of the current value
     #[allow(dead_code)] // Used in tests and will be used for remote configuration
     fn source(&self) -> ConfigSourceOrigin {
@@ -322,45 +310,39 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
         let mut configurations = Vec::new();
-        let mut seq_id = 1;
-        // /!\ Order is important for the seq_id
-        //
         // Always include the default value
         configurations.push(Configuration {
             name: self.name.as_str().to_string(),
             value: self.default_value.get_configuration_value(),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
-            seq_id: Some(seq_id),
+            seq_id: Some(ConfigSourceOrigin::Default as u64),
         });
         if let Some(calculated_value) = calculated_value {
-            seq_id += 1;
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
                 value: calculated_value,
                 origin: ConfigSourceOrigin::Calculated.into(),
                 config_id: self.config_id.clone(),
-                seq_id: Some(seq_id),
+                seq_id: Some(ConfigSourceOrigin::Calculated as u64),
             });
         }
         if self.env_value.is_some() {
-            seq_id += 1;
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
                 value: self.env_value.as_ref().unwrap().get_configuration_value(),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
-                seq_id: Some(seq_id),
+                seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
             });
         }
         if self.code_value.is_some() {
-            seq_id += 1;
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
                 value: self.code_value.as_ref().unwrap().get_configuration_value(),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
-                seq_id: Some(seq_id),
+                seq_id: Some(ConfigSourceOrigin::Code as u64),
             });
         }
         configurations
@@ -442,14 +424,8 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         let config_item_source = self.config_item.source();
         if self.override_value.load().is_none() {
             config_item_source
-        } else if self.override_origin == ConfigSourceOrigin::Calculated {
-            if config_item_source == ConfigSourceOrigin::Default {
-                ConfigSourceOrigin::Calculated
-            } else {
-                config_item_source
-            }
         } else {
-            self.override_origin
+            config_item_source.max(self.override_origin)
         }
     }
 
@@ -498,23 +474,6 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             ConfigItemRef::Ref(self.config_item.value())
         }
     }
-
-    /// Gets the sequence id of the current value
-    /// Because calculated is after default, and default is always present,
-    /// we can return 2 if the source is calculated.
-    /// Other overriding sources are all at the end of the sequence.
-    fn seq_id(&self) -> Option<u64> {
-        let override_value = self.override_value.load();
-        if override_value.is_some() {
-            if self.source() == ConfigSourceOrigin::Calculated {
-                Some(2)
-            } else {
-                self.config_item.seq_id().map(|id| id + 1)
-            }
-        } else {
-            self.config_item.seq_id()
-        }
-    }
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
@@ -539,7 +498,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
                 value: self.value().get_configuration_value(),
                 origin: self.source().into(),
                 config_id,
-                seq_id: self.seq_id(),
+                seq_id: Some(self.source() as u64),
             });
         }
         configurations
@@ -1522,7 +1481,7 @@ impl Config {
     /// The value is calculated by the `dd_resource` Otel Resource,
     /// which is created in `create_dd_resource` function.
     /// The result will depend on which environment variable was set,
-    /// orif it returns an `unknown_service` name, which is why it is a calculated source.
+    /// or if it returns an `unknown_service` name, which is why it is a calculated source.
     pub fn set_calculated_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
@@ -1807,8 +1766,7 @@ impl ConfigBuilder {
         let mut config = self.config.clone();
 
         // resolve trace_agent_url
-        // this will send the the config through telemetry with code origin. There's no `derived`
-        // origin.
+        // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
             let host = &config.agent_host.value();
             let port = *config.trace_agent_port.value();
@@ -1818,8 +1776,7 @@ impl ConfigBuilder {
         }
 
         // resolve dogstatsd_agent_url
-        // this will send the the config through telemetry with code origin. There's no `derived`
-        // origin.
+        // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
             let host = &config.dogstatsd_agent_host.value();
             let port = *config.dogstatsd_agent_port.value();
@@ -3027,9 +2984,6 @@ mod tests {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
-                // Explicitly setting the environment variable to empty
-                // will make the tracer use that empty value, not the calculated value.
-                // ("DD_TRACE_AGENT_URL", ""),
                 ("DD_AGENT_HOST", "agent-host"),
                 ("DD_TRACE_AGENT_PORT", "4242"),
             ],
