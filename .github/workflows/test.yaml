@@ -3,6 +3,7 @@ permissions:
    contents: read
 on:
    push:
+   pull_request:
    workflow_dispatch:
    schedule:
       - cron:  '00 03 * * 1-5'
