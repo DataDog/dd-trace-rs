@@ -84,8 +84,8 @@ criterion = "0.5.1"
 default = ["metrics-grpc", "logs-grpc"]
 metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
 metrics-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
-logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic", "opentelemetry_sdk/logs", "opentelemetry/logs"]
-logs-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client", "opentelemetry_sdk/logs", "opentelemetry/logs"]
+logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
+logs-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
 test-utils = ["libdd-data-pipeline/test-utils", "criterion", "metrics-grpc", "metrics-http"]
 
 [[bench]]

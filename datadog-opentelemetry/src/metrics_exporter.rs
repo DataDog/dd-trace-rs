@@ -91,47 +91,6 @@ pub fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     config.otlp_timeout()
 }
 
-pub fn get_otlp_logs_protocol(config: &Config) -> OtlpProtocol {
-    config
-        .otlp_logs_protocol()
-        .or_else(|| config.otlp_protocol())
-        .unwrap_or(OtlpProtocol::Grpc)
-}
-
-pub fn get_otlp_logs_endpoint(config: &Config, protocol: &OtlpProtocol) -> Result<String, String> {
-    let endpoint = config.otlp_logs_endpoint();
-    if !endpoint.is_empty() {
-        return Ok(endpoint.to_string());
-    }
-
-    let endpoint = config.otlp_endpoint();
-    if !endpoint.is_empty() {
-        return Ok(endpoint.to_string());
-    }
-
-    let agent_url = config.trace_agent_url();
-    let host = agent_url
-        .parse::<hyper::http::Uri>()
-        .ok()
-        .and_then(|url| url.host().map(|h| h.to_string()))
-        .unwrap_or_else(|| "localhost".to_string());
-
-    let port = match protocol {
-        OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
-        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
-    };
-
-    Ok(format!("http://{host}:{port}"))
-}
-
-pub fn get_otlp_logs_timeout(config: &Config) -> u32 {
-    let timeout = config.otlp_logs_timeout();
-    if timeout != 0 {
-        return timeout;
-    }
-    config.otlp_timeout()
-}
-
 /// Parse a temporality preference string to Temporality enum
 pub(crate) fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporality> {
     let s = s.trim().to_lowercase();

@@ -11,9 +11,10 @@ use opentelemetry_sdk::Resource;
 
 use crate::core::configuration::Config;
 use crate::dd_warn;
-use crate::metrics_exporter::{
-    get_otlp_logs_endpoint, get_otlp_logs_protocol, get_otlp_logs_timeout, OtlpProtocol,
-};
+use crate::metrics_exporter::OtlpProtocol;
+
+const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
+const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 
 /// Creates a logger provider with the given configuration.
 ///
@@ -54,7 +55,12 @@ pub fn create_logger_provider_with_protocol(
 
     #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
     {
-        let protocol = protocol.unwrap_or_else(|| get_otlp_logs_protocol(&config));
+        let protocol = protocol.unwrap_or_else(|| {
+            config
+                .otlp_logs_protocol()
+                .or_else(|| config.otlp_protocol())
+                .unwrap_or(OtlpProtocol::Grpc)
+        });
 
         if matches!(protocol, OtlpProtocol::HttpJson) {
             dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Logs will not be exported. Use 'grpc' or 'http/protobuf' instead.");
@@ -73,14 +79,29 @@ pub fn create_logger_provider_with_protocol(
             return SdkLoggerProvider::builder().build();
         }
 
-        let mut endpoint = match get_otlp_logs_endpoint(&config, &protocol) {
-            Ok(endpoint) => endpoint,
-            Err(err) => {
-                dd_warn!(
-                    "Failed to get OTLP logs endpoint: {}. Logs will not be exported.",
-                    err
-                );
-                return SdkLoggerProvider::builder().build();
+        let mut endpoint = {
+            let endpoint = config.otlp_logs_endpoint();
+            if !endpoint.is_empty() {
+                endpoint.to_string()
+            } else {
+                let endpoint = config.otlp_endpoint();
+                if !endpoint.is_empty() {
+                    endpoint.to_string()
+                } else {
+                    let agent_url = config.trace_agent_url();
+                    let host = agent_url
+                        .parse::<hyper::http::Uri>()
+                        .ok()
+                        .and_then(|url| url.host().map(|h| h.to_string()))
+                        .unwrap_or_else(|| "localhost".to_string());
+
+                    let port = match protocol {
+                        OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
+                        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
+                    };
+
+                    format!("http://{host}:{port}")
+                }
             }
         };
 
@@ -91,7 +112,15 @@ pub fn create_logger_provider_with_protocol(
             }
         }
 
-        let timeout = Duration::from_millis(get_otlp_logs_timeout(&config) as u64);
+        let timeout = {
+            let timeout = config.otlp_logs_timeout();
+            let timeout_ms = if timeout != 0 {
+                timeout
+            } else {
+                config.otlp_timeout()
+            };
+            Duration::from_millis(timeout_ms as u64)
+        };
 
         let exporter = match build_logs_exporter(protocol, endpoint.clone(), timeout) {
             Ok(exporter) => exporter,
