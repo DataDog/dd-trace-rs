@@ -30,13 +30,16 @@ libdd-common = { version = "1.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry = { version = "0.31.0", features = [
     "trace",
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry-otlp = { version = "0.31.0", features = [
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry-semantic-conventions = { version = "0.31.0", features = [
     "semconv_experimental",

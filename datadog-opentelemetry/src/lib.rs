@@ -207,6 +207,7 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
+pub(crate) mod logs_reader;
 pub(crate) mod metrics_exporter;
 pub(crate) mod metrics_reader;
 mod sampler;
@@ -588,10 +589,56 @@ impl DatadogMetricsBuilder {
 }
 
 /// Initialize a new Datadog Metrics builder with OTLP transport
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub fn metrics() -> DatadogMetricsBuilder {
     DatadogMetricsBuilder {
         config: None,
         resource: None,
         export_interval: None,
+    }
+}
+
+/// Builder for Datadog Logs with OTLP transport
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+pub struct DatadogLogsBuilder {
+    config: Option<Config>,
+    resource: Option<Resource>,
+}
+
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+impl DatadogLogsBuilder {
+    /// Sets the configuration for the logs builder.
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Sets the OpenTelemetry resource for the logs builder.
+    pub fn with_resource(mut self, resource: Resource) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    /// Initializes the logger provider and sets it as the global logger provider.
+    pub fn init(self) -> opentelemetry_sdk::logs::SdkLoggerProvider {
+        let (logger_provider, _) = self.init_local();
+        logger_provider
+    }
+
+    /// Initializes the logger provider without setting it as the global logger provider.
+    pub fn init_local(self) -> (opentelemetry_sdk::logs::SdkLoggerProvider, ()) {
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
+        let logger_provider =
+            crate::logs_reader::create_logger_provider(Arc::new(config), self.resource);
+        (logger_provider, ())
+    }
+}
+
+/// Initialize a new Datadog Logs builder with OTLP transport
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+pub fn logs() -> DatadogLogsBuilder {
+    DatadogLogsBuilder {
+        config: None,
+        resource: None,
     }
 }
