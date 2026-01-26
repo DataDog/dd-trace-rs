@@ -86,7 +86,7 @@ pub fn create_meter_provider_with_protocol(
                     err
                 );
                 return SdkMeterProvider::builder().build();
-            }
+        }
         };
 
         if matches!(protocol, OtlpProtocol::HttpProtobuf) && !endpoint.ends_with("/v1/metrics") {
@@ -138,76 +138,76 @@ pub fn create_meter_provider_with_protocol(
 /// 3. Global tags (with DD -> OTel key mapping)
 /// 4. OTel resource attributes from config
 fn build_metrics_resource(config: &Config, resource: Option<Resource>) -> Resource {
-    let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
+        let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
 
     // Start with OTel resource attributes from config (lowest priority)
-    for (key, value) in config.otel_resource_attributes() {
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            key.to_string(),
-            value.to_string(),
-        ));
-    }
+        for (key, value) in config.otel_resource_attributes() {
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                key.to_string(),
+                value.to_string(),
+            ));
+        }
 
     // Add global tags with DD -> OTel key mapping
-    for (key, value) in config.global_tags() {
-        let otel_key = match key {
-            "service" => "service.name",
-            "env" => "deployment.environment",
-            "version" => "service.version",
-            _ => key,
-        };
+        for (key, value) in config.global_tags() {
+            let otel_key = match key {
+                "service" => "service.name",
+                "env" => "deployment.environment",
+                "version" => "service.version",
+                _ => key,
+            };
 
-        resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            otel_key.to_string(),
-            value.to_string(),
-        ));
-    }
+            resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                otel_key.to_string(),
+                value.to_string(),
+            ));
+        }
 
     // Merge with provided resource
-    if let Some(resource) = resource {
-        for (k, v) in resource.iter() {
-            resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
+        if let Some(resource) = resource {
+            for (k, v) in resource.iter() {
+                resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
+            }
         }
-    }
 
     // Set service.name with proper precedence
-    if !config.service_is_default() {
-        resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            "service.name",
-            config.service().to_string(),
-        ));
-    } else if !resource_attrs
-        .iter()
-        .any(|kv| kv.key.as_str() == "service.name")
-    {
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            "service.name",
-            config.service().to_string(),
-        ));
-    }
+        if !config.service_is_default() {
+            resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.name",
+                config.service().to_string(),
+            ));
+        } else if !resource_attrs
+            .iter()
+            .any(|kv| kv.key.as_str() == "service.name")
+        {
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.name",
+                config.service().to_string(),
+            ));
+        }
 
     // Set deployment.environment if configured
-    if let Some(env) = config.env() {
-        resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            "deployment.environment",
-            env.to_string(),
-        ));
-    }
+        if let Some(env) = config.env() {
+            resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "deployment.environment",
+                env.to_string(),
+            ));
+        }
 
     // Set service.version if configured
-    if let Some(version) = config.version() {
-        resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
-        resource_attrs.push(opentelemetry::KeyValue::new(
-            "service.version",
-            version.to_string(),
-        ));
-    }
+        if let Some(version) = config.version() {
+            resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
+            resource_attrs.push(opentelemetry::KeyValue::new(
+                "service.version",
+                version.to_string(),
+            ));
+        }
 
     Resource::builder_empty()
-        .with_attributes(resource_attrs)
+            .with_attributes(resource_attrs)
         .build()
 }
 
@@ -219,25 +219,25 @@ fn build_exporter(
     temporality: opentelemetry_sdk::metrics::Temporality,
 ) -> Result<MetricExporter, String> {
     match protocol {
-        #[cfg(feature = "metrics-grpc")]
+            #[cfg(feature = "metrics-grpc")]
         OtlpProtocol::Grpc => opentelemetry_otlp::MetricExporter::builder()
-            .with_tonic()
-            .with_endpoint(endpoint)
-            .with_timeout(timeout)
-            .with_temporality(temporality)
-            .build()
+                    .with_tonic()
+                    .with_endpoint(endpoint)
+                    .with_timeout(timeout)
+                    .with_temporality(temporality)
+                    .build()
             .map_err(|e| format!("Failed to build OTLP gRPC exporter: {e}")),
-        #[cfg(not(feature = "metrics-grpc"))]
+            #[cfg(not(feature = "metrics-grpc"))]
         OtlpProtocol::Grpc => Err("gRPC protocol requires 'metrics-grpc' feature".to_string()),
-        #[cfg(feature = "metrics-http")]
+            #[cfg(feature = "metrics-http")]
         OtlpProtocol::HttpProtobuf => opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(endpoint)
-            .with_timeout(timeout)
-            .with_temporality(temporality)
-            .build()
+                    .with_http()
+                    .with_endpoint(endpoint)
+                    .with_timeout(timeout)
+                    .with_temporality(temporality)
+                    .build()
             .map_err(|e| format!("Failed to build OTLP HTTP/protobuf exporter: {e}")),
-        #[cfg(not(feature = "metrics-http"))]
+            #[cfg(not(feature = "metrics-http"))]
         OtlpProtocol::HttpProtobuf => {
             Err("HTTP/protobuf protocol requires 'metrics-http' feature".to_string())
         }

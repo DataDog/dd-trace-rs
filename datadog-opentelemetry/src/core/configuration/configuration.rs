@@ -1719,23 +1719,23 @@ fn default_config() -> Config {
             7500u32,
         ),
         logs_otel_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_METRICS_OTEL_ENABLED, // Reuse metrics config for now
+            SupportedConfigurations::DD_LOGS_OTEL_ENABLED,
             true,
         ),
         otel_logs_exporter: ConfigItem::new(
-            SupportedConfigurations::OTEL_METRICS_EXPORTER, // Reuse metrics config for now
+            SupportedConfigurations::OTEL_LOGS_EXPORTER,
             Cow::Borrowed("otlp"),
         ),
         otlp_logs_endpoint: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, // Reuse metrics config for now
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
             Cow::Borrowed(""),
         ),
         otlp_logs_protocol: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, // Reuse metrics config for now
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL,
             None,
         ),
         otlp_logs_timeout: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT, // Reuse metrics config for now
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
             10000u32,
         ),
     }
@@ -1985,12 +1985,20 @@ impl ConfigBuilder {
     }
 
     /// Enable or disable OpenTelemetry logs export.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_LOGS_OTEL_ENABLED`
     pub fn set_logs_otel_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config.logs_otel_enabled.set_code(enabled);
         self
     }
 
     /// Set the OTLP logs endpoint URL.
+    ///
+    /// **Default**: `""`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
     pub fn set_otlp_logs_endpoint(&mut self, endpoint: String) -> &mut Self {
         self.config
             .otlp_logs_endpoint
@@ -1999,6 +2007,10 @@ impl ConfigBuilder {
     }
 
     /// Set the OTLP logs protocol (grpc, http/protobuf, http/json).
+    ///
+    /// **Default**: `None` (falls back to `OTEL_EXPORTER_OTLP_PROTOCOL`)
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`
     pub fn set_otlp_logs_protocol(&mut self, protocol: String) -> &mut Self {
         self.config.otlp_logs_protocol.set_code(
             crate::metrics_exporter::OtlpProtocol::parse_optional(protocol),
@@ -2007,6 +2019,10 @@ impl ConfigBuilder {
     }
 
     /// Set the OTLP logs timeout in milliseconds.
+    ///
+    /// **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`
     pub fn set_otlp_logs_timeout(&mut self, timeout: u32) -> &mut Self {
         self.config.otlp_logs_timeout.set_code(timeout);
         self
