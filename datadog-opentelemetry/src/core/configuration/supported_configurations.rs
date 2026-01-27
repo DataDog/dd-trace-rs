@@ -40,6 +40,7 @@ pub(crate) enum SupportedConfigurations {
     OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_HEADERS,
     OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
     OTEL_EXPORTER_OTLP_LOGS_PROTOCOL,
     OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
@@ -130,6 +131,9 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => {
                 "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => {
+                "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
             }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => {
                 "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"

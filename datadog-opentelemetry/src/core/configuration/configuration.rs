@@ -934,6 +934,8 @@ pub struct Config {
     otel_logs_exporter: ConfigItem<Cow<'static, str>>,
     /// OTLP logs endpoint
     otlp_logs_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP logs headers
+    otlp_logs_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP logs protocol (grpc, http/protobuf, http/json)
     otlp_logs_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
     /// OTLP logs timeout in milliseconds
@@ -1101,6 +1103,7 @@ impl Config {
             logs_otel_enabled: cisu.update_parsed(default.logs_otel_enabled),
             otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
             otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
+            otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
             otlp_logs_protocol: cisu.update_string(
                 default.otlp_logs_protocol,
                 crate::metrics_exporter::OtlpProtocol::parse_optional,
@@ -1162,6 +1165,7 @@ impl Config {
             &self.logs_otel_enabled,
             &self.otel_logs_exporter,
             &self.otlp_logs_endpoint,
+            &self.otlp_logs_headers,
             &self.otlp_logs_protocol,
             &self.otlp_logs_timeout,
         ]
@@ -1377,8 +1381,14 @@ impl Config {
     }
 
     /// Returns the OTLP logs endpoint URL.
+    /// Returns the OTLP logs endpoint URL.
     pub fn otlp_logs_endpoint(&self) -> &str {
         self.otlp_logs_endpoint.value().as_ref()
+    }
+
+    /// Returns the OTLP logs headers.
+    pub fn otlp_logs_headers(&self) -> &str {
+        self.otlp_logs_headers.value().as_ref()
     }
 
     /// Returns the OTLP logs protocol.
@@ -1709,7 +1719,7 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
             10000u32,
         ),
-        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 7500u32),
+        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 10000u32),
         metric_export_interval: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
             10000u32,
@@ -1728,6 +1738,10 @@ fn default_config() -> Config {
         ),
         otlp_logs_endpoint: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_logs_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS,
             Cow::Borrowed(""),
         ),
         otlp_logs_protocol: ConfigItem::new(

@@ -267,6 +267,14 @@
         "propertyKeys": ["otlp_metrics_headers"]
       }
     ],
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS": [
+      {
+        "version": "A",
+        "type": "map",
+        "default": null,
+        "propertyKeys": ["otlp_logs_headers"]
+      }
+    ],
     "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
       {
         "version": "A",
