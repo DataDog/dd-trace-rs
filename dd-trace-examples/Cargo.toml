@@ -1,0 +1,34 @@
+[package]
+name = "dd-trace-examples"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+
+[dependencies]
+# Datadog OpenTelemetry
+datadog-opentelemetry = { path = "../datadog-opentelemetry" }
+
+# Tracing ecosystem
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-opentelemetry = "0.32"
+
+# HTTP server
+axum = "0.7"
+tokio = { version = "1.44.1", features = ["full"] }
+
+# OpenTelemetry
+opentelemetry = { version = "0.31.0", features = ["trace"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["trace"] }
+opentelemetry-http = { version = "0.31.0" }
+
+# Utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+rand = "0.8"
