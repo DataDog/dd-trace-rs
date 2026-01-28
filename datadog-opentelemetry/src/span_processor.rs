@@ -648,8 +648,14 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        self.config.update_service_name(service_name);
-
+        // Only set calculated service name if DD_SERVICE is default
+        // and otel service name is not default
+        if self.config.service_is_default()
+            && service_name.is_some()
+            && service_name.as_ref().unwrap().as_str() != self.config.service().to_string()
+        {
+            self.config.set_calculated_service_name(service_name);
+        }
         init_telemetry(&self.config);
     }
 }
