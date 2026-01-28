@@ -926,6 +926,20 @@ pub struct Config {
     metric_export_interval: ConfigItem<u32>,
     /// Metric export timeout in milliseconds
     metric_export_timeout: ConfigItem<u32>,
+
+    // # OpenTelemetry Logs
+    /// Enables OpenTelemetry logs export
+    logs_otel_enabled: ConfigItem<bool>,
+    /// OTEL logs exporter type
+    otel_logs_exporter: ConfigItem<Cow<'static, str>>,
+    /// OTLP logs endpoint
+    otlp_logs_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP logs headers
+    otlp_logs_headers: ConfigItem<Cow<'static, str>>,
+    /// OTLP logs protocol (grpc, http/protobuf, http/json)
+    otlp_logs_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    /// OTLP logs timeout in milliseconds
+    otlp_logs_timeout: ConfigItem<u32>,
 }
 
 impl Config {
@@ -1086,6 +1100,15 @@ impl Config {
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
             metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
+            logs_otel_enabled: cisu.update_parsed(default.logs_otel_enabled),
+            otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
+            otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
+            otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
+            otlp_logs_protocol: cisu.update_string(
+                default.otlp_logs_protocol,
+                crate::metrics_exporter::OtlpProtocol::parse_optional,
+            ),
+            otlp_logs_timeout: cisu.update_parsed(default.otlp_logs_timeout),
         }
     }
 
@@ -1139,6 +1162,12 @@ impl Config {
             &self.otlp_metrics_protocol,
             &self.metric_export_interval,
             &self.metric_export_timeout,
+            &self.logs_otel_enabled,
+            &self.otel_logs_exporter,
+            &self.otlp_logs_endpoint,
+            &self.otlp_logs_headers,
+            &self.otlp_logs_protocol,
+            &self.otlp_logs_timeout,
         ]
     }
 
@@ -1339,6 +1368,37 @@ impl Config {
     /// Returns the metric export timeout in milliseconds.
     pub fn metric_export_timeout(&self) -> u32 {
         *self.metric_export_timeout.value()
+    }
+
+    /// Returns whether OpenTelemetry logs export is enabled.
+    pub fn logs_otel_enabled(&self) -> bool {
+        *self.logs_otel_enabled.value()
+    }
+
+    /// Returns the OpenTelemetry logs exporter type.
+    pub fn otel_logs_exporter(&self) -> &str {
+        self.otel_logs_exporter.value().as_ref()
+    }
+
+    /// Returns the OTLP logs endpoint URL.
+    /// Returns the OTLP logs endpoint URL.
+    pub fn otlp_logs_endpoint(&self) -> &str {
+        self.otlp_logs_endpoint.value().as_ref()
+    }
+
+    /// Returns the OTLP logs headers.
+    pub fn otlp_logs_headers(&self) -> &str {
+        self.otlp_logs_headers.value().as_ref()
+    }
+
+    /// Returns the OTLP logs protocol.
+    pub fn otlp_logs_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
+        *self.otlp_logs_protocol.value()
+    }
+
+    /// Returns the OTLP logs timeout in milliseconds.
+    pub fn otlp_logs_timeout(&self) -> u32 {
+        *self.otlp_logs_timeout.value()
     }
 
     /// Returns whether partial trace flushing is enabled.
@@ -1659,7 +1719,7 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
             10000u32,
         ),
-        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 7500u32),
+        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 10000u32),
         metric_export_interval: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
             10000u32,
@@ -1667,6 +1727,30 @@ fn default_config() -> Config {
         metric_export_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
             7500u32,
+        ),
+        logs_otel_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_LOGS_OTEL_ENABLED,
+            true,
+        ),
+        otel_logs_exporter: ConfigItem::new(
+            SupportedConfigurations::OTEL_LOGS_EXPORTER,
+            Cow::Borrowed("otlp"),
+        ),
+        otlp_logs_endpoint: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_logs_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+            Cow::Borrowed(""),
+        ),
+        otlp_logs_protocol: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL,
+            None,
+        ),
+        otlp_logs_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
+            10000u32,
         ),
     }
 }
@@ -1911,6 +1995,50 @@ impl ConfigBuilder {
     /// Env variable: `OTEL_EXPORTER_OTLP_TIMEOUT`
     pub fn set_otlp_timeout(&mut self, timeout: u32) -> &mut Self {
         self.config.otlp_timeout.set_code(timeout);
+        self
+    }
+
+    /// Enable or disable OpenTelemetry logs export.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_LOGS_OTEL_ENABLED`
+    pub fn set_logs_otel_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.logs_otel_enabled.set_code(enabled);
+        self
+    }
+
+    /// Set the OTLP logs endpoint URL.
+    ///
+    /// **Default**: `""`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
+    pub fn set_otlp_logs_endpoint(&mut self, endpoint: String) -> &mut Self {
+        self.config
+            .otlp_logs_endpoint
+            .set_code(Cow::Owned(endpoint));
+        self
+    }
+
+    /// Set the OTLP logs protocol (grpc, http/protobuf, http/json).
+    ///
+    /// **Default**: `None` (falls back to `OTEL_EXPORTER_OTLP_PROTOCOL`)
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`
+    pub fn set_otlp_logs_protocol(&mut self, protocol: String) -> &mut Self {
+        self.config.otlp_logs_protocol.set_code(
+            crate::metrics_exporter::OtlpProtocol::parse_optional(protocol),
+        );
+        self
+    }
+
+    /// Set the OTLP logs timeout in milliseconds.
+    ///
+    /// **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`
+    pub fn set_otlp_logs_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.otlp_logs_timeout.set_code(timeout);
         self
     }
 

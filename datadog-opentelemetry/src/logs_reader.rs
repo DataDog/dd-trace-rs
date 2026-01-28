@@ -1,0 +1,255 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+use std::sync::Arc;
+use std::time::Duration;
+
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+use opentelemetry_otlp::{LogExporter, WithExportConfig};
+use opentelemetry_sdk::logs::SdkLoggerProvider;
+use opentelemetry_sdk::Resource;
+
+use crate::core::configuration::Config;
+use crate::dd_warn;
+use crate::metrics_exporter::OtlpProtocol;
+use crate::telemetry_logs_exporter::TelemetryTrackingLogExporter;
+
+const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
+const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
+
+/// Creates a logger provider with the given configuration.
+///
+/// Returns a no-op logger provider if logs are disabled or if initialization fails.
+/// Errors are logged but not returned to ensure logs functionality is always available.
+pub fn create_logger_provider(
+    config: Arc<Config>,
+    resource: Option<Resource>,
+) -> SdkLoggerProvider {
+    create_logger_provider_with_protocol(config, resource, None)
+}
+
+/// Creates a logger provider with the given configuration and protocol override.
+///
+/// Returns a no-op logger provider if logs are disabled or if initialization fails.
+/// Errors are logged but not returned to ensure logs functionality is always available.
+#[doc(hidden)]
+pub fn create_logger_provider_with_protocol(
+    config: Arc<Config>,
+    resource: Option<Resource>,
+    protocol: Option<OtlpProtocol>,
+) -> SdkLoggerProvider {
+    let logs_enabled = config.logs_otel_enabled();
+    if !logs_enabled {
+        return SdkLoggerProvider::builder().build();
+    }
+
+    if config.otel_logs_exporter() == "none" {
+        dd_warn!("OTEL_LOGS_EXPORTER is set to 'none'. Logs will not be exported.");
+        return SdkLoggerProvider::builder().build();
+    }
+
+    #[cfg(not(any(feature = "logs-grpc", feature = "logs-http")))]
+    {
+        dd_warn!("Logs export requested but no transport feature is enabled. Enable 'logs-grpc' or 'logs-http' feature to export logs.");
+        return SdkLoggerProvider::builder().build();
+    }
+
+    #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+    {
+        let protocol = protocol.unwrap_or_else(|| {
+            config
+                .otlp_logs_protocol()
+                .or_else(|| config.otlp_protocol())
+                .unwrap_or(OtlpProtocol::Grpc)
+        });
+
+        if matches!(protocol, OtlpProtocol::HttpJson) {
+            dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Logs will not be exported. Use 'grpc' or 'http/protobuf' instead.");
+            return SdkLoggerProvider::builder().build();
+        }
+
+        #[cfg(not(feature = "logs-grpc"))]
+        if matches!(protocol, OtlpProtocol::Grpc) {
+            dd_warn!("FEATURE MISMATCH: Protocol 'grpc' configured but 'logs-grpc' feature is not enabled. Logs will not be exported. Enable 'logs-grpc' in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf.");
+            return SdkLoggerProvider::builder().build();
+        }
+
+        #[cfg(not(feature = "logs-http"))]
+        if matches!(protocol, OtlpProtocol::HttpProtobuf) {
+            dd_warn!("FEATURE MISMATCH: Protocol 'http/protobuf' configured but 'logs-http' feature is not enabled. Logs will not be exported. Enable 'logs-http' in Cargo.toml or set OTEL_EXPORTER_OTLP_PROTOCOL=grpc.");
+            return SdkLoggerProvider::builder().build();
+        }
+
+        let mut endpoint = {
+            let endpoint = config.otlp_logs_endpoint();
+            if !endpoint.is_empty() {
+                endpoint.to_string()
+            } else {
+                let endpoint = config.otlp_endpoint();
+                if !endpoint.is_empty() {
+                    endpoint.to_string()
+                } else {
+                    let agent_url = config.trace_agent_url();
+                    let host = agent_url
+                        .parse::<hyper::http::Uri>()
+                        .ok()
+                        .and_then(|url| url.host().map(|h| h.to_string()))
+                        .unwrap_or_else(|| "localhost".to_string());
+
+                    let port = match protocol {
+                        OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
+                        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
+                    };
+
+                    format!("http://{host}:{port}")
+                }
+            }
+        };
+
+        if matches!(protocol, OtlpProtocol::HttpProtobuf) && !endpoint.ends_with("/v1/logs") {
+            endpoint = endpoint.trim_end_matches('/').to_string();
+            if !endpoint.is_empty() {
+                endpoint.push_str("/v1/logs");
+            }
+        }
+
+        let timeout = {
+            let timeout = config.otlp_logs_timeout();
+            let timeout_ms = if timeout != 0 {
+                timeout
+            } else {
+                config.otlp_timeout()
+            };
+            Duration::from_millis(timeout_ms as u64)
+        };
+
+        let exporter = match build_logs_exporter(protocol, endpoint.clone(), timeout) {
+            Ok(exporter) => exporter,
+            Err(err) => {
+                dd_warn!(
+                    "Failed to create logs exporter: {}. Logs will not be exported.",
+                    err
+                );
+                return SdkLoggerProvider::builder().build();
+            }
+        };
+
+        let telemetry_exporter = TelemetryTrackingLogExporter::new(exporter, protocol);
+
+        let final_resource = build_logs_resource(&config, resource);
+
+        SdkLoggerProvider::builder()
+            .with_log_processor(
+                opentelemetry_sdk::logs::BatchLogProcessor::builder(telemetry_exporter).build(),
+            )
+            .with_resource(final_resource.clone())
+            .build()
+    }
+}
+
+/// Builds the OpenTelemetry Resource for logs by merging Datadog config with provided resource.
+///
+/// Priority order (highest to lowest):
+/// 1. Config service/env/version (if explicitly set)
+/// 2. Provided resource attributes
+/// 3. Global tags (with DD -> OTel key mapping)
+/// 4. OTel resource attributes from config
+fn build_logs_resource(config: &Config, resource: Option<Resource>) -> Resource {
+    let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
+
+    for (key, value) in config.otel_resource_attributes() {
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    // Add global tags with DD -> OTel key mapping
+    for (key, value) in config.global_tags() {
+        let otel_key = match key {
+            "service" => "service.name",
+            "env" => "deployment.environment",
+            "version" => "service.version",
+            _ => key,
+        };
+
+        resource_attrs.retain(|kv| kv.key.as_str() != otel_key);
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            otel_key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    if let Some(resource) = resource {
+        for (k, v) in resource.iter() {
+            resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
+        }
+    }
+
+    if !config.service_is_default() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "service.name");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.name",
+            config.service().to_string(),
+        ));
+    } else if !resource_attrs
+        .iter()
+        .any(|kv| kv.key.as_str() == "service.name")
+    {
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.name",
+            config.service().to_string(),
+        ));
+    }
+
+    if let Some(env) = config.env() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "deployment.environment",
+            env.to_string(),
+        ));
+    }
+
+    if let Some(version) = config.version() {
+        resource_attrs.retain(|kv| kv.key.as_str() != "service.version");
+        resource_attrs.push(opentelemetry::KeyValue::new(
+            "service.version",
+            version.to_string(),
+        ));
+    }
+
+    Resource::builder_empty()
+        .with_attributes(resource_attrs)
+        .build()
+}
+
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+fn build_logs_exporter(
+    protocol: OtlpProtocol,
+    endpoint: String,
+    timeout: Duration,
+) -> Result<LogExporter, String> {
+    match protocol {
+        #[cfg(feature = "logs-grpc")]
+        OtlpProtocol::Grpc => opentelemetry_otlp::LogExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .with_timeout(timeout)
+            .build()
+            .map_err(|e| format!("Failed to build OTLP gRPC exporter: {e}")),
+        #[cfg(not(feature = "logs-grpc"))]
+        OtlpProtocol::Grpc => Err("gRPC protocol requires 'logs-grpc' feature".to_string()),
+        #[cfg(feature = "logs-http")]
+        OtlpProtocol::HttpProtobuf => opentelemetry_otlp::LogExporter::builder()
+            .with_http()
+            .with_endpoint(endpoint)
+            .with_timeout(timeout)
+            .build()
+            .map_err(|e| format!("Failed to build OTLP HTTP/protobuf exporter: {e}")),
+        #[cfg(not(feature = "logs-http"))]
+        OtlpProtocol::HttpProtobuf => {
+            Err("HTTP/protobuf protocol requires 'logs-http' feature".to_string())
+        }
+        OtlpProtocol::HttpJson => Err("HTTP/JSON protocol not supported".to_string()),
+    }
+}
