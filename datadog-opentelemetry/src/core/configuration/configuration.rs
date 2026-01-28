@@ -1719,7 +1719,10 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
             10000u32,
         ),
-        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 10000u32),
+        otlp_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT,
+            10000u32,
+        ),
         metric_export_interval: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
             10000u32,
@@ -1728,10 +1731,7 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
             7500u32,
         ),
-        logs_otel_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_LOGS_OTEL_ENABLED,
-            true,
-        ),
+        logs_otel_enabled: ConfigItem::new(SupportedConfigurations::DD_LOGS_OTEL_ENABLED, true),
         otel_logs_exporter: ConfigItem::new(
             SupportedConfigurations::OTEL_LOGS_EXPORTER,
             Cow::Borrowed("otlp"),

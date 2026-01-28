@@ -214,6 +214,7 @@ mod sampler;
 mod span_exporter;
 mod span_processor;
 mod spans_metrics;
+mod telemetry_logs_exporter;
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;

@@ -131,4 +131,3 @@ async fn test_logs_export_http_json() {
     let logger_provider = create_logger_provider_with_config(config);
     assert_logger_provider_can_create_logger(&logger_provider);
 }
-

@@ -12,6 +12,7 @@ use opentelemetry_sdk::Resource;
 use crate::core::configuration::Config;
 use crate::dd_warn;
 use crate::metrics_exporter::OtlpProtocol;
+use crate::telemetry_logs_exporter::TelemetryTrackingLogExporter;
 
 const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
 const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
@@ -97,7 +98,9 @@ pub fn create_logger_provider_with_protocol(
 
                     let port = match protocol {
                         OtlpProtocol::Grpc => DEFAULT_OTLP_GRPC_PORT,
-                        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => DEFAULT_OTLP_HTTP_PORT,
+                        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => {
+                            DEFAULT_OTLP_HTTP_PORT
+                        }
                     };
 
                     format!("http://{host}:{port}")
@@ -133,17 +136,26 @@ pub fn create_logger_provider_with_protocol(
             }
         };
 
+        let telemetry_exporter = TelemetryTrackingLogExporter::new(exporter, protocol);
+
         let final_resource = build_logs_resource(&config, resource);
 
         SdkLoggerProvider::builder()
             .with_log_processor(
-                opentelemetry_sdk::logs::BatchLogProcessor::builder(exporter).build(),
+                opentelemetry_sdk::logs::BatchLogProcessor::builder(telemetry_exporter).build(),
             )
-            .with_resource(final_resource)
+            .with_resource(final_resource.clone())
             .build()
     }
 }
 
+/// Builds the OpenTelemetry Resource for logs by merging Datadog config with provided resource.
+///
+/// Priority order (highest to lowest):
+/// 1. Config service/env/version (if explicitly set)
+/// 2. Provided resource attributes
+/// 3. Global tags (with DD -> OTel key mapping)
+/// 4. OTel resource attributes from config
 fn build_logs_resource(config: &Config, resource: Option<Resource>) -> Resource {
     let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
 
@@ -154,6 +166,7 @@ fn build_logs_resource(config: &Config, resource: Option<Resource>) -> Resource 
         ));
     }
 
+    // Add global tags with DD -> OTel key mapping
     for (key, value) in config.global_tags() {
         let otel_key = match key {
             "service" => "service.name",
