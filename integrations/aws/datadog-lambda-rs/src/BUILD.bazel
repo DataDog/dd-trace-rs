@@ -1,0 +1,2 @@
+load("//rules/rust:defs.bzl", "dd_cargo_dot_toml")
+dd_cargo_dot_toml(src = "Cargo.toml")

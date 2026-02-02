@@ -1,0 +1,19 @@
+[package]
+name = "datadog-lambda-rs"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+description.workspace = true
+authors.workspace = true
+
+[dependencies]
+lambda_runtime = { workspace = true }
+aws_lambda_events = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

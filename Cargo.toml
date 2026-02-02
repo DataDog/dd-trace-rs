@@ -6,6 +6,7 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
+    "integrations/aws/datadog-lambda-rs"
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
@@ -49,6 +50,12 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
+
+# Lambda-specific dependencies
+lambda_runtime = { version = "0.13" }
+aws_lambda_events = { version = "0.17" }
+reqwest = { version = "0.12", features = ["json"] }
+thiserror = { version = "2.0" }
 
 
 [profile.dev]
