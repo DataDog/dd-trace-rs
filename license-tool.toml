@@ -2,3 +2,6 @@
 # Tagged incorrectly by crates.io
 # https://github.com/pluots/stringmetrics/blob/v2.2.2/LICENSE
 "stringmetrics-2.2.2" = { license = "Apache-2.0" }
+
+# Missing repository metadata
+"openssl-macros" = { origin = "https://github.com/sfackler/rust-openssl" }

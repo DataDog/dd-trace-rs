@@ -1,19 +1,19 @@
 [package]
 name = "datadog-lambda-rs"
-rust-version.workspace = true
-edition.workspace = true
-version.workspace = true
-license.workspace = true
-repository.workspace = true
-readme.workspace = true
-description.workspace = true
-authors.workspace = true
+rust-version = "1.85.0"  # Requires edition2024 support for transitive dependencies
+edition = "2021"
+version = "0.2.1"
+license = "Apache-2.0"
+repository = "https://github.com/DataDog/dd-trace-rs"
+readme = "README.md"
+description = "Reserved future DataDog package, contact info@datadoghq.com if you think this package name shouldn't be used."
+authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [dependencies]
-lambda_runtime = { workspace = true }
-aws_lambda_events = { workspace = true }
-reqwest = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+lambda_runtime = "0.13"
+aws_lambda_events = "0.17"
+reqwest = { version = "0.12", features = ["json"] }
+thiserror = "2.0"
+tokio = "1.44.1"
+serde = "1.0.194"
+serde_json = "1.0.140"

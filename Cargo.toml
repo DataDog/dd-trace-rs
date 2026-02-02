@@ -6,8 +6,11 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
-    "integrations/aws/datadog-lambda-rs"
 ]
+# Exclude lambda crate as it requires Rust 1.85.0+ (edition2024 dependencies)
+# while the main crate maintains MSRV of 1.84.1
+# Build it separately: cd integrations/aws/datadog-lambda-rs && cargo build
+exclude = ["integrations/aws/datadog-lambda-rs"]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
 resolver = "2"
