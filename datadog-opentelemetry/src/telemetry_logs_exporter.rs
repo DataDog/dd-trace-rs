@@ -62,4 +62,8 @@ impl opentelemetry_sdk::logs::LogExporter for TelemetryTrackingLogExporter {
             }
         }
     }
+
+    fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
+        self.inner.set_resource(resource);
+    }
 }
