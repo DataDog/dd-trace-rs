@@ -7,7 +7,13 @@
         "version": "A",
         "type": "string",
         "default": "localhost",
-        "propertyKeys": ["agent_host"]
+        "description": {
+          "rustPublicDoc": "Sets the hostname of the Datadog Agent.",
+          "codeComment": "Sets the hostname of the Datadog Agent."
+        },
+        "propertyKeys": [
+          "agent_host"
+        ]
       }
     ],
     "DD_DOGSTATSD_HOST": [
@@ -15,7 +21,13 @@
         "version": "A",
         "type": "string",
         "default": "localhost",
-        "propertyKeys": ["dogstatsd_agent_host"]
+        "description": {
+          "rustPublicDoc": "Sets the hostname for DogStatsD metric collection.",
+          "codeComment": "Sets the hostname for DogStatsD metric collection."
+        },
+        "propertyKeys": [
+          "dogstatsd_agent_host"
+        ]
       }
     ],
     "DD_DOGSTATSD_PORT": [
@@ -23,7 +35,13 @@
         "version": "A",
         "type": "int",
         "default": "8125",
-        "propertyKeys": ["dogstatsd_agent_port"]
+        "description": {
+          "rustPublicDoc": "Sets the port for DogStatsD metric collection.",
+          "codeComment": "Sets the port for DogStatsD metric collection."
+        },
+        "propertyKeys": [
+          "dogstatsd_agent_port"
+        ]
       }
     ],
     "DD_DOGSTATSD_URL": [
@@ -31,7 +49,12 @@
         "version": "A",
         "type": "string",
         "default": "http://localhost:8125",
-        "propertyKeys": ["dogstatsd_agent_url"]
+        "description": {
+          "rustPublicDoc": "Sets the URL for DogStatsD. This takes precedence over `DD_DOGSTATSD_HOST` and `DD_DOGSTATSD_PORT`."
+        },
+        "propertyKeys": [
+          "dogstatsd_agent_url"
+        ]
       }
     ],
     "DD_ENV": [
@@ -39,7 +62,13 @@
         "version": "A",
         "type": "string",
         "default": "",
-        "propertyKeys": ["env"]
+        "description": {
+          "rustPublicDoc": "Set the application's environment, for example: `prod`, `staging`.",
+          "codeComment": "Set the application's environment, for example: `prod`, `staging`."
+        },
+        "propertyKeys": [
+          "env"
+        ]
       }
     ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
@@ -47,7 +76,13 @@
         "version": "A",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["telemetry_enabled"]
+        "description": {
+          "rustPublicDoc": "Enable or disable telemetry data collection and sending.",
+          "codeComment": "Enable or disable telemetry data collection and sending."
+        },
+        "propertyKeys": [
+          "telemetry_enabled"
+        ]
       }
     ],
     "DD_LOG_LEVEL": [
@@ -55,7 +90,13 @@
         "version": "A",
         "type": "string",
         "default": "ERROR",
-        "propertyKeys": ["log_level_filter"]
+        "description": {
+          "rustPublicDoc": "Sets the internal log level for the tracer. Valid values: `DEBUG`, `INFO`, `WARN`, `ERROR`.",
+          "codeComment": "Sets the internal log level for the tracer."
+        },
+        "propertyKeys": [
+          "log_level_filter"
+        ]
       }
     ],
     "DD_METRICS_OTEL_ENABLED": [
@@ -63,7 +104,13 @@
         "version": "B",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["metrics_otel_enabled"]
+        "description": {
+          "codeComment": "Enable or disable OpenTelemetry metrics export.",
+          "llmCodeDeduction": "When `false`, metrics export is disabled and the library returns a no-op `SdkMeterProvider`. When `true`, metrics are exported via OTLP unless disabled by `OTEL_METRICS_EXPORTER=none`, an unsupported protocol (`http/json`), or missing transport features (`metrics-grpc`/`metrics-http`)."
+        },
+        "propertyKeys": [
+          "metrics_otel_enabled"
+        ]
       }
     ],
     "DD_REMOTE_CONFIGURATION_ENABLED": [
@@ -71,8 +118,16 @@
         "version": "A",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["remote_config_enabled"],
-        "aliases": ["DD_REMOTE_CONFIG_ENABLED"]
+        "description": {
+          "rustPublicDoc": "Enable or disable remote configuration. Also accepts the alias `DD_REMOTE_CONFIG_ENABLED`.",
+          "codeComment": "Enable or disable remote configuration."
+        },
+        "propertyKeys": [
+          "remote_config_enabled"
+        ],
+        "aliases": [
+          "DD_REMOTE_CONFIG_ENABLED"
+        ]
       }
     ],
     "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS": [
@@ -80,7 +135,13 @@
         "version": "A",
         "type": "decimal",
         "default": "5.0",
-        "propertyKeys": ["remote_config_poll_interval"]
+        "description": {
+          "rustPublicDoc": "Interval in seconds for polling remote configuration updates.",
+          "codeComment": "Interval in seconds for polling remote configuration updates."
+        },
+        "propertyKeys": [
+          "remote_config_poll_interval"
+        ]
       }
     ],
     "DD_SERVICE": [
@@ -88,7 +149,13 @@
         "version": "C",
         "type": "string",
         "default": "unnamed-rust-service",
-        "propertyKeys": ["service"]
+        "description": {
+          "rustPublicDoc": "Sets the service name for your application.",
+          "codeComment": "Sets the service name for your application"
+        },
+        "propertyKeys": [
+          "service"
+        ]
       }
     ],
     "DD_TAGS": [
@@ -96,7 +163,13 @@
         "version": "A",
         "type": "map",
         "default": "",
-        "propertyKeys": ["global_tags"]
+        "description": {
+          "rustPublicDoc": "A list of default tags to be added to every span, in `key:value` format, separated by commas. Example: `layer:api,team:intake`.",
+          "codeComment": "A list of default tags to be added to every span, in `(key, value)` format. Example: `[(layer, api), (team, intake)]`."
+        },
+        "propertyKeys": [
+          "global_tags"
+        ]
       }
     ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
@@ -104,7 +177,13 @@
         "version": "B",
         "type": "decimal",
         "default": "60.0",
-        "propertyKeys": ["telemetry_heartbeat_interval"]
+        "description": {
+          "rustPublicDoc": "Interval in seconds for sending telemetry heartbeat messages.",
+          "codeComment": "Interval in seconds for sending telemetry heartbeat messages."
+        },
+        "propertyKeys": [
+          "telemetry_heartbeat_interval"
+        ]
       }
     ],
     "DD_TELEMETRY_LOG_COLLECTION_ENABLED": [
@@ -112,7 +191,13 @@
         "version": "A",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["telemetry_log_collection_enabled"]
+        "description": {
+          "rustPublicDoc": "Enable or disable log collection for telemetry.",
+          "codeComment": "Enable or disable log collection for telemetry."
+        },
+        "propertyKeys": [
+          "telemetry_log_collection_enabled"
+        ]
       }
     ],
     "DD_TRACE_AGENT_PORT": [
@@ -120,7 +205,13 @@
         "version": "A",
         "type": "int",
         "default": "8126",
-        "propertyKeys": ["trace_agent_port"]
+        "description": {
+          "rustPublicDoc": "Sets the port of the Datadog Agent for trace collection.",
+          "codeComment": "Sets the port of the Datadog Agent for trace collection."
+        },
+        "propertyKeys": [
+          "trace_agent_port"
+        ]
       }
     ],
     "DD_TRACE_AGENT_URL": [
@@ -128,7 +219,13 @@
         "version": "A",
         "type": "string",
         "default": "",
-        "propertyKeys": ["trace_agent_url"]
+        "description": {
+          "rustPublicDoc": "Sets the URL of the Datadog Agent. Example: `http://localhost:8126`. This takes precedence over `DD_AGENT_HOST` and `DD_TRACE_AGENT_PORT`.",
+          "codeComment": "Sets the URL of the Datadog Agent. This takes precedence over `DD_AGENT_HOST` and `DD_TRACE_AGENT_PORT`."
+        },
+        "propertyKeys": [
+          "trace_agent_url"
+        ]
       }
     ],
     "DD_TRACE_ENABLED": [
@@ -136,7 +233,13 @@
         "version": "A",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["enabled"]
+        "description": {
+          "rustPublicDoc": "Set to `false` to disable tracing.",
+          "codeComment": "Set to `false` to disable tracing."
+        },
+        "propertyKeys": [
+          "enabled"
+        ]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_ENABLED": [
@@ -144,7 +247,13 @@
         "version": "A",
         "type": "boolean",
         "default": "false",
-        "propertyKeys": ["trace_partial_flushed_enabled"]
+        "description": {
+          "rustPublicDoc": "Enable partial flushing of traces.",
+          "codeComment": "Enable partial flushing of traces."
+        },
+        "propertyKeys": [
+          "trace_partial_flushed_enabled"
+        ]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS": [
@@ -152,7 +261,13 @@
         "version": "A",
         "type": "int",
         "default": "300",
-        "propertyKeys": ["trace_partial_flushed_min_spans"]
+        "description": {
+          "rustPublicDoc": "Minimum number of spans in a trace before partial flush is triggered.",
+          "codeComment": "Minimum number of spans in a trace before partial flush is triggered."
+        },
+        "propertyKeys": [
+          "trace_partial_flushed_min_spans"
+        ]
       }
     ],
     "DD_TRACE_PROPAGATION_EXTRACT_FIRST": [
@@ -160,7 +275,13 @@
         "version": "A",
         "type": "boolean",
         "default": "false",
-        "propertyKeys": ["trace_propagation_extract_first"]
+        "description": {
+          "rustPublicDoc": "When set to `true`, stops extracting after the first successful trace context extraction.",
+          "codeComment": "When set to `true`, stops extracting after the first successful trace context extraction."
+        },
+        "propertyKeys": [
+          "trace_propagation_extract_first"
+        ]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE": [
@@ -168,7 +289,13 @@
         "version": "A",
         "type": "array",
         "default": "datadog,tracecontext",
-        "propertyKeys": ["trace_propagation_style"]
+        "description": {
+          "rustPublicDoc": "A comma-separated list of propagation styles to use for both extraction and injection. Supported values are `datadog` and `tracecontext`. See Propagating Rust Trace Context for more information.",
+          "codeComment": "A list of propagation styles to use for both extraction and injection. Supported values are `datadog` and `tracecontext`."
+        },
+        "propertyKeys": [
+          "trace_propagation_style"
+        ]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_EXTRACT": [
@@ -176,7 +303,13 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_propagation_style_extract"]
+        "description": {
+          "rustPublicDoc": "A comma-separated list of propagation styles to use for extraction. When set, this overrides `DD_TRACE_PROPAGATION_STYLE` for extraction.",
+          "codeComment": "A list of propagation styles to use for extraction. When set, this overrides `DD_TRACE_PROPAGATION_STYLE` for extraction."
+        },
+        "propertyKeys": [
+          "trace_propagation_style_extract"
+        ]
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_INJECT": [
@@ -184,7 +317,13 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_propagation_style_inject"]
+        "description": {
+          "rustPublicDoc": "A comma-separated list of propagation styles to use for injection. When set, this overrides `DD_TRACE_PROPAGATION_STYLE` for injection.",
+          "codeComment": "A list of propagation styles to use for injection. When set, this overrides `DD_TRACE_PROPAGATION_STYLE` for injection."
+        },
+        "propertyKeys": [
+          "trace_propagation_style_inject"
+        ]
       }
     ],
     "DD_TRACE_RATE_LIMIT": [
@@ -192,7 +331,13 @@
         "version": "A",
         "type": "int",
         "default": "100",
-        "propertyKeys": ["trace_rate_limit"]
+        "description": {
+          "rustPublicDoc": "Maximum number of traces to sample per second.",
+          "codeComment": "Maximum number of traces to sample per second. Only applied if trace_sampling_rules are matched"
+        },
+        "propertyKeys": [
+          "trace_rate_limit"
+        ]
       }
     ],
     "DD_TRACE_SAMPLING_RULES": [
@@ -200,7 +345,13 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_sampling_rules"]
+        "description": {
+          "rustPublicDoc": "A JSON array of objects to apply for trace sampling. Each rule must have a `sample_rate` between 0.0 and 1.0 (inclusive).",
+          "codeComment": "A JSON array of objects to apply for trace sampling. Each rule must have a `sample_rate` between 0.0 and 1.0 (inclusive)."
+        },
+        "propertyKeys": [
+          "trace_sampling_rules"
+        ]
       }
     ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
@@ -208,7 +359,13 @@
         "version": "B",
         "type": "boolean",
         "default": "true",
-        "propertyKeys": ["trace_stats_computation_enabled"]
+        "description": {
+          "rustPublicDoc": "Enable computation of trace statistics.",
+          "codeComment": "Enable computation of trace statistics."
+        },
+        "propertyKeys": [
+          "trace_stats_computation_enabled"
+        ]
       }
     ],
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [
@@ -216,7 +373,13 @@
         "version": "A",
         "type": "int",
         "default": "512",
-        "propertyKeys": ["datadog_tags_max_length"]
+        "description": {
+          "rustPublicDoc": "Maximum length of the `x-datadog-tags` header in bytes.",
+          "codeComment": "Maximum length of the `x-datadog-tags` header in bytes."
+        },
+        "propertyKeys": [
+          "datadog_tags_max_length"
+        ]
       }
     ],
     "DD_VERSION": [
@@ -224,7 +387,13 @@
         "version": "A",
         "type": "string",
         "default": "",
-        "propertyKeys": ["version"]
+        "description": {
+          "rustPublicDoc": "Set the application's version, for example: `1.2.3` or `6c44da20`.",
+          "codeComment": "Set the application's version, for example: `1.2.3` or `6c44da20`."
+        },
+        "propertyKeys": [
+          "version"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_ENDPOINT": [
@@ -232,7 +401,14 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_endpoint"]
+        "description": {
+          "codeComment": "Set the OTLP general endpoint URL (fallback for metrics endpoint).",
+          "opentelemetryPublicDoc": "Specifies the base URL for sending OTLP data for all signals unless overridden.",
+          "llmCodeDeduction": "Used only for OTLP metrics export: if `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is unset/empty, this value is used. If both endpoints are empty, the library derives the host from `DD_TRACE_AGENT_URL` (or `localhost` if unparsable) and uses port `4317` (gRPC) or `4318` (HTTP)."
+        },
+        "propertyKeys": [
+          "otlp_endpoint"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_HEADERS": [
@@ -240,7 +416,14 @@
         "version": "A",
         "type": "map",
         "default": "",
-        "propertyKeys": ["otlp_headers"]
+        "description": {
+          "opentelemetryPublicDoc": "Specifies a comma-separated list of key-value pairs to be used as headers on all outgoing OTLP requests (for example, `api-key=key,other-config=value`).",
+          "llmCodeDeduction": "Currently parsed/stored but not applied to outgoing OTLP metrics requests (headers are not set on the exporter), so it has no effect.",
+          "_comment": "llm deduction is wrong. As dd-trace-rs is a layer on top of opentelemtry crate, It does have an effect."
+        },
+        "propertyKeys": [
+          "otlp_headers"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": [
@@ -248,7 +431,14 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_metrics_endpoint"]
+        "description": {
+          "codeComment": "Set the OTLP metrics endpoint URL.",
+          "opentelemetryPublicDoc": "Specifies the URL for sending OTLP metrics data. Takes precedence over the general `OTEL_EXPORTER_OTLP_ENDPOINT`.",
+          "llmCodeDeduction": "If non-empty, used as the OTLP metrics endpoint. Otherwise falls back to `OTEL_EXPORTER_OTLP_ENDPOINT`, then to `http://<DD_TRACE_AGENT_URL host>:4317/4318` based on protocol. For `http/protobuf`, `/v1/metrics` is appended if missing."
+        },
+        "propertyKeys": [
+          "otlp_metrics_endpoint"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_HEADERS": [
@@ -256,7 +446,14 @@
         "version": "A",
         "type": "map",
         "default": null,
-        "propertyKeys": ["otlp_metrics_headers"]
+        "description": {
+          "opentelemetryPublicDoc": "Specifies a comma-separated list of key-value pairs to be used as headers on outgoing OTLP metrics requests (for example, `api-key=key,other-config=value`). Takes precedence over the general `OTEL_EXPORTER_OTLP_HEADERS`.",
+          "llmCodeDeduction": "Currently parsed/stored but not applied to outgoing OTLP metrics requests (headers are not set on the exporter), so it has no effect.",
+          "_comment": "llm deduction is wrong. As dd-trace-rs is a layer on top of opentelemtry crate, It does have an effect."
+        },
+        "propertyKeys": [
+          "otlp_metrics_headers"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": [
@@ -264,7 +461,14 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_metrics_protocol"]
+        "description": {
+          "codeComment": "Set the OTLP metrics protocol (grpc, http/protobuf, http/json).",
+          "opentelemetryPublicDoc": "Specifies the OTLP transport protocol to use for metrics data. Takes precedence over the general `OTEL_EXPORTER_OTLP_PROTOCOL`.",
+          "llmCodeDeduction": "Overrides `OTEL_EXPORTER_OTLP_PROTOCOL` for metrics export. Parsed values: `grpc`, `http/protobuf`, `http/json` (case-insensitive). Note: `http/json` is currently unsupported for metrics and disables metrics export; `grpc`/`http/protobuf` require the corresponding Cargo features (`metrics-grpc`/`metrics-http`)."
+        },
+        "propertyKeys": [
+          "otlp_metrics_protocol"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": [
@@ -272,7 +476,14 @@
         "version": "A",
         "type": "string",
         "default": "delta",
-        "propertyKeys": ["otel_metrics_temporality_preference"]
+        "description": {
+          "codeComment": "Set the OTLP metrics temporality preference.",
+          "opentelemetryPublicDoc": "Specifies the aggregation `temporality` to use for each instrument kind.",
+          "llmCodeDeduction": "Controls metrics aggregation temporality. Accepted values: `delta` or `cumulative` (case-insensitive); empty/invalid values are treated as `delta`."
+        },
+        "propertyKeys": [
+          "otel_metrics_temporality_preference"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": [
@@ -280,7 +491,14 @@
         "version": "A",
         "type": "int",
         "default": null,
-        "propertyKeys": ["otlp_metrics_timeout"]
+        "description": {
+          "codeComment": "Set the OTLP metrics timeout in milliseconds.",
+          "opentelemetryPublicDoc": "Specifies the timeout (in milliseconds) for a single outgoing OTLP metrics request. Takes precedence over the general `OTEL_EXPORTER_OTLP_TIMEOUT`.",
+          "llmCodeDeduction": "Used as the exporter network timeout (ms) for OTLP metrics requests. If set to `0`, the library falls back to `OTEL_EXPORTER_OTLP_TIMEOUT`."
+        },
+        "propertyKeys": [
+          "otlp_metrics_timeout"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_PROTOCOL": [
@@ -288,7 +506,14 @@
         "version": "C",
         "type": "string",
         "default": "grpc",
-        "propertyKeys": ["otlp_protocol"]
+        "description": {
+          "codeComment": "Set the OTLP general protocol (fallback for metrics protocol).",
+          "opentelemetryPublicDoc": "Specifies the transport protocol to use for all signals unless overridden.",
+          "llmCodeDeduction": "Used as the fallback OTLP protocol for metrics when `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL` is unset. Parsed values: `grpc`, `http/protobuf`, `http/json` (case-insensitive). Note: `http/json` is currently unsupported for metrics and disables metrics export; `grpc`/`http/protobuf` require the corresponding Cargo features (`metrics-grpc`/`metrics-http`)."
+        },
+        "propertyKeys": [
+          "otlp_protocol"
+        ]
       }
     ],
     "OTEL_EXPORTER_OTLP_TIMEOUT": [
@@ -296,7 +521,14 @@
         "version": "A",
         "type": "int",
         "default": "10000",
-        "propertyKeys": ["otlp_timeout"]
+        "description": {
+          "codeComment": "Set the OTLP general timeout in milliseconds (fallback for metrics timeout).",
+          "opentelemetryPublicDoc": "Specifies the timeout (in milliseconds) for all outgoing OTLP requests unless overridden.",
+          "llmCodeDeduction": "Used as the OTLP exporter request timeout (ms) for metrics only when `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` is `0`; otherwise metrics timeout takes precedence."
+        },
+        "propertyKeys": [
+          "otlp_timeout"
+        ]
       }
     ],
     "OTEL_METRICS_EXPORTER": [
@@ -304,7 +536,13 @@
         "version": "A",
         "type": "string",
         "default": "otlp",
-        "propertyKeys": ["otel_metrics_exporter"]
+        "description": {
+          "opentelemetryPublicDoc": "Specifies the metrics exporter to be used.",
+          "llmCodeDeduction": "If set to `none`, metrics export is disabled (no-op meter provider). Any other value is treated as enabled (the library always uses the OTLP exporter)."
+        },
+        "propertyKeys": [
+          "otel_metrics_exporter"
+        ]
       }
     ],
     "OTEL_METRIC_EXPORT_INTERVAL": [
@@ -312,7 +550,14 @@
         "version": "A",
         "type": "int",
         "default": "10000",
-        "propertyKeys": ["metric_export_interval"]
+        "description": {
+          "codeComment": "Set the metric export interval in milliseconds.",
+          "opentelemetryPublicDoc": "Specifies the time interval (in milliseconds) between metric export attempts.",
+          "llmCodeDeduction": "Used as the periodic export interval (ms) for the OpenTelemetry `PeriodicReader`."
+        },
+        "propertyKeys": [
+          "metric_export_interval"
+        ]
       }
     ],
     "OTEL_METRIC_EXPORT_TIMEOUT": [
@@ -320,7 +565,14 @@
         "version": "A",
         "type": "int",
         "default": "7500",
-        "propertyKeys": ["metric_export_timeout"]
+        "description": {
+          "codeComment": "Set the metric export timeout in milliseconds.",
+          "opentelemetryPublicDoc": "Specifies the maximum allowed time (in milliseconds) to collect and export metrics.",
+          "llmCodeDeduction": "Currently parsed but not used to configure the periodic metrics reader/exporter, so it has no effect."
+        },
+        "propertyKeys": [
+          "metric_export_timeout"
+        ]
       }
     ],
     "OTEL_RESOURCE_ATTRIBUTES": [
@@ -328,6 +580,11 @@
         "version": "A",
         "type": "map",
         "default_value": "",
+        "description": {
+          "codeComment": "Set OpenTelemetry resource attributes as a list of `(key, value)` pairs.",
+          "opentelemetryPublicDoc": "Key-value pairs to be used as OpenTelemetry resource attributes.",
+          "llmCodeDeduction": "Parsed as comma-separated `key=value` pairs and used as the lowest-priority OpenTelemetry Resource attributes for metrics export (then overridden by `DD_TAGS` and explicit service/env/version)."
+        },
         "propertyKeys": []
       }
     ]
