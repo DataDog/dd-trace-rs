@@ -270,7 +270,7 @@
     "OTEL_EXPORTER_OTLP_LOGS_HEADERS": [
       {
         "version": "A",
-        "type": "string",
+        "type": "map",
         "default": null,
         "propertyKeys": ["otlp_logs_headers"]
       }
@@ -279,7 +279,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": "SDK-dependent, but will typically be either http/protobuf or grpc.",
+        "default": null,
         "propertyKeys": ["otlp_logs_protocol"]
       }
     ],
