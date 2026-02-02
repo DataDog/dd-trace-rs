@@ -14,8 +14,8 @@ pub(crate) enum SupportedConfigurations {
     DD_DOGSTATSD_URL,
     DD_ENV,
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
-    DD_LOG_LEVEL,
     DD_LOGS_OTEL_ENABLED,
+    DD_LOG_LEVEL,
     DD_METRICS_OTEL_ENABLED,
     DD_REMOTE_CONFIGURATION_ENABLED,
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
@@ -82,8 +82,8 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => {
                 "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
             }
-            SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
             SupportedConfigurations::DD_LOGS_OTEL_ENABLED => "DD_LOGS_OTEL_ENABLED",
+            SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED => "DD_METRICS_OTEL_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 "DD_REMOTE_CONFIGURATION_ENABLED"

@@ -53,7 +53,7 @@
     "DD_LOGS_OTEL_ENABLED": [
       {
         "version": "B",
-        "type": null,
+        "type": "boolean",
         "default": "True",
         "propertyKeys": ["logs_otel_enabled"]
       }
@@ -251,6 +251,38 @@
         "propertyKeys": ["otlp_headers"]
       }
     ],
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["otlp_logs_endpoint"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["otlp_logs_headers"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "SDK-dependent, but will typically be either http/protobuf or grpc.",
+        "propertyKeys": ["otlp_logs_protocol"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "10000",
+        "propertyKeys": ["otlp_logs_timeout"]
+      }
+    ],
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": [
       {
         "version": "A",
@@ -267,22 +299,6 @@
         "propertyKeys": ["otlp_metrics_headers"]
       }
     ],
-    "OTEL_EXPORTER_OTLP_LOGS_HEADERS": [
-      {
-        "version": "A",
-        "type": null,
-        "default": null,
-        "propertyKeys": ["otlp_logs_headers"]
-      }
-    ],
-    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
-      {
-        "version": "A",
-        "type": null,
-        "default": "SDK-dependent, but will typically be either http/protobuf or grpc.",
-        "propertyKeys": ["otlp_logs_protocol"]
-      }
-    ],
     "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": [
       {
         "version": "A",
@@ -297,14 +313,6 @@
         "type": "string",
         "default": "delta",
         "propertyKeys": ["otel_metrics_temporality_preference"]
-      }
-    ],
-    "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT": [
-      {
-        "version": "A",
-        "type": null,
-        "default": "10000",
-        "propertyKeys": ["otlp_logs_timeout"]
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": [
