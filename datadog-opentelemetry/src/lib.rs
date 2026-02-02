@@ -184,9 +184,9 @@ pub use core::log;
 // Re-exports for tests (tests are in a separate crate, so these must be public)
 // Marked as doc(hidden) to indicate they're not part of the public API
 #[doc(hidden)]
-pub use metrics_exporter::OtlpProtocol;
-#[doc(hidden)]
 pub use metrics_reader::create_meter_provider_with_protocol;
+#[doc(hidden)]
+pub use otlp_utils::OtlpProtocol;
 
 #[cfg(feature = "test-utils")]
 pub mod core;
@@ -208,8 +208,8 @@ pub(crate) mod sampling;
 
 mod ddtrace_transform;
 pub(crate) mod logs_reader;
-pub(crate) mod metrics_exporter;
 pub(crate) mod metrics_reader;
+mod otlp_utils;
 mod sampler;
 mod span_exporter;
 mod span_processor;

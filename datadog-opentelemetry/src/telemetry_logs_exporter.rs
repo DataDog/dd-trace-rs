@@ -6,7 +6,7 @@ use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::LogBatch;
 
 use crate::core::telemetry;
-use crate::metrics_exporter::OtlpProtocol;
+use crate::otlp_utils::OtlpProtocol;
 
 #[derive(Debug)]
 pub struct TelemetryTrackingLogExporter {
@@ -23,8 +23,6 @@ impl TelemetryTrackingLogExporter {
     }
 }
 
-// Delegate to the inner exporter's trait implementation
-// Following the pattern from telemetry_metrics_exporter.rs
 impl opentelemetry_sdk::logs::LogExporter for TelemetryTrackingLogExporter {
     async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
         use telemetry::TelemetryMetric::*;
