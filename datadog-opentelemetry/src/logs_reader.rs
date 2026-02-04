@@ -38,8 +38,7 @@ pub fn create_logger_provider_with_protocol(
     resource: Option<Resource>,
     protocol: Option<OtlpProtocol>,
 ) -> SdkLoggerProvider {
-    let logs_enabled = config.logs_otel_enabled();
-    if !logs_enabled {
+    if !config.logs_otel_enabled() {
         return SdkLoggerProvider::builder().build();
     }
 
