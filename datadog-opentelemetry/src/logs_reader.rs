@@ -32,8 +32,7 @@ pub fn create_logger_provider(
 ///
 /// Returns a no-op logger provider if logs are disabled or if initialization fails.
 /// Errors are logged but not returned to ensure logs functionality is always available.
-#[doc(hidden)]
-pub fn create_logger_provider_with_protocol(
+pub(crate) fn create_logger_provider_with_protocol(
     config: Arc<Config>,
     resource: Option<Resource>,
     protocol: Option<OtlpProtocol>,

@@ -34,8 +34,7 @@ pub fn create_meter_provider(
 ///
 /// Returns a no-op meter provider if metrics are disabled or if initialization fails.
 /// Errors are logged but not returned to ensure metrics functionality is always available.
-#[doc(hidden)]
-pub fn create_meter_provider_with_protocol(
+pub(crate) fn create_meter_provider_with_protocol(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,

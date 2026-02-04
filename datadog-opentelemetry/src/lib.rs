@@ -184,8 +184,6 @@ pub use core::log;
 // Re-exports for tests (tests are in a separate crate, so these must be public)
 // Marked as doc(hidden) to indicate they're not part of the public API
 #[doc(hidden)]
-pub use metrics_reader::create_meter_provider_with_protocol;
-#[doc(hidden)]
 pub use otlp_utils::OtlpProtocol;
 
 #[cfg(feature = "test-utils")]
