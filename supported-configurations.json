@@ -54,7 +54,7 @@
       {
         "version": "B",
         "type": "boolean",
-        "default": "True",
+        "default": "true",
         "propertyKeys": ["logs_otel_enabled"]
       }
     ],
