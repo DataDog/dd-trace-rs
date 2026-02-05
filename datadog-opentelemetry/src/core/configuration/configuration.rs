@@ -327,19 +327,19 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
                 seq_id: Some(ConfigSourceOrigin::Calculated as u64),
             });
         }
-        if self.env_value.is_some() {
+        if let Some(ref env_value) = self.env_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: self.env_value.as_ref().unwrap().get_configuration_value(),
+                value: env_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
             });
         }
-        if self.code_value.is_some() {
+        if let Some(ref code_value) = self.code_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: self.code_value.as_ref().unwrap().get_configuration_value(),
+                value: code_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Code as u64),
