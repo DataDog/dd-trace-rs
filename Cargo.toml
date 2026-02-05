@@ -25,8 +25,8 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 # Libdatadog dependencies - change to a stable version once we release
 libdd-data-pipeline = { version = "1.0.0", default-features = false }
 libdd-trace-utils = { version = "1.0.0", default-features = false }
-libdd-telemetry = { version = "1.0.0", default-features = false }
-libdd-common = { version = "1.0.0", default-features = false }
+libdd-telemetry = { version = "2.0.0", default-features = false }
+libdd-common = { version = "1.1.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
