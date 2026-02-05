@@ -477,7 +477,7 @@ dependencies = [
  "hyper-util",
  "libdd-common",
  "libdd-data-pipeline",
- "libdd-telemetry",
+ "libdd-telemetry 2.0.0",
  "libdd-trace-utils",
  "lru",
  "opentelemetry",
@@ -1147,9 +1147,9 @@ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 
 [[package]]
 name = "libdd-common"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee58537655793508cc5282ecf1507f15a8fa4616a08c728e01a29ee2f035e8fa"
+checksum = "9b33d0c3d2be3e73f3ba3ac155fef19209c2ce62286f2939ba3f752661ccc55a"
 dependencies = [
  "anyhow",
  "cc",
@@ -1192,7 +1192,7 @@ dependencies = [
  "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
- "libdd-telemetry",
+ "libdd-telemetry 1.0.0",
  "libdd-tinybytes",
  "libdd-trace-protobuf",
  "libdd-trace-stats",
@@ -1235,6 +1235,33 @@ name = "libdd-telemetry"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a22b77c71009cdc2566357ee7162cbd703c2d707a23e5d3e063c1890ee487461"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "futures",
+ "hashbrown 0.15.5",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "libdd-common",
+ "libdd-ddsketch",
+ "serde",
+ "serde_json",
+ "sys-info",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "winver",
+]
+
+[[package]]
+name = "libdd-telemetry"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d8ac017a61ef2317fdf53866174104f37a3e66e8a353f0391f0d9e93d3637a"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

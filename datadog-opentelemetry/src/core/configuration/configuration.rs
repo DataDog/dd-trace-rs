@@ -200,9 +200,10 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
 /// It enables the configuration system to report configuration values, their
 /// origins, and associated metadata to Datadog.
 pub trait ConfigurationProvider {
-    /// Returns a telemetry configuration object representing the current state of this
-    /// configuration item.
-    fn get_configuration(&self) -> Configuration;
+    /// Returns all configurations that were set for this configuration item.
+    /// e.g. If set through the environment variable,
+    /// returns the environment variable config and the default config.
+    fn get_all_configurations(&self) -> Vec<Configuration>;
 }
 
 /// A trait for converting configuration values to their string representation for telemetry.
@@ -306,17 +307,52 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             ConfigSourceOrigin::Default
         }
     }
+
+    fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
+        let mut configurations = Vec::new();
+        // Always include the default value
+        configurations.push(Configuration {
+            name: self.name.as_str().to_string(),
+            value: self.default_value.get_configuration_value(),
+            origin: ConfigSourceOrigin::Default.into(),
+            config_id: self.config_id.clone(),
+            seq_id: Some(ConfigSourceOrigin::Default as u64),
+        });
+        if let Some(calculated_value) = calculated_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: calculated_value,
+                origin: ConfigSourceOrigin::Calculated.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::Calculated as u64),
+            });
+        }
+        if let Some(ref env_value) = self.env_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: env_value.get_configuration_value(),
+                origin: ConfigSourceOrigin::EnvVar.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
+            });
+        }
+        if let Some(ref code_value) = self.code_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: code_value.get_configuration_value(),
+                origin: ConfigSourceOrigin::Code.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::Code as u64),
+            });
+        }
+        configurations
+    }
 }
 
 impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
-    /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self) -> Configuration {
-        Configuration {
-            name: self.name.as_str().to_string(),
-            value: self.value().get_configuration_value(),
-            origin: self.source().into(),
-            config_id: self.config_id.clone(),
-        }
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        self.build_configurations_list(None)
     }
 }
 
@@ -330,6 +366,9 @@ impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
         match source {
             ConfigSourceOrigin::Code => self.code_value = Some(value),
             ConfigSourceOrigin::EnvVar => self.env_value = Some(value),
+            ConfigSourceOrigin::Calculated => {
+                dd_warn!("Cannot set a calculated value");
+            }
             ConfigSourceOrigin::RemoteConfig => {
                 dd_warn!("Cannot set a value from RC");
             }
@@ -339,7 +378,6 @@ impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
         }
     }
 }
-
 /// Configuration item that tracks the value of a setting and where it came from
 /// And allows to update the corresponding value with a ConfigSourceOrigin
 #[derive(Debug)]
@@ -362,11 +400,11 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
 }
 
 impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
-    fn new_code(name: SupportedConfigurations, default: T) -> Self {
+    fn new_calculated(name: SupportedConfigurations, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
-            override_origin: ConfigSourceOrigin::Code,
+            override_origin: ConfigSourceOrigin::Calculated,
             config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
@@ -380,11 +418,14 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         }
     }
 
+    /// Gets the source of the current value based on priority:
+    /// remote_config > code > env_var > calculated > default
     fn source(&self) -> ConfigSourceOrigin {
-        if self.override_value.load().is_some() {
-            self.override_origin
+        let config_item_source = self.config_item.source();
+        if self.override_value.load().is_none() {
+            config_item_source
         } else {
-            self.config_item.source()
+            config_item_source.max(self.override_origin)
         }
     }
 
@@ -402,6 +443,12 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         }
     }
 
+    #[cfg(test)]
+    /// Used for testing only
+    fn get_config_id(&self) -> Option<String> {
+        self.config_id.load().as_ref().map(|id| (**id).clone())
+    }
+
     /// Unsets the override value
     fn unset_override_value(&self) {
         self.override_value.store(None);
@@ -412,11 +459,16 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         self.set_value_source(value, ConfigSourceOrigin::Code);
     }
 
+    /// Sets Calculated value only if source_type is Calculated
+    fn set_calculated(&mut self, value: T) {
+        self.set_value_source(value, ConfigSourceOrigin::Calculated);
+    }
+
     /// Gets the current value based on priority:
-    /// remote_config > code > env_var > default
+    /// remote_config > code > env_var > calculated > default
     fn value(&self) -> ConfigItemRef<'_, T> {
         let override_value = self.override_value.load();
-        if override_value.is_some() {
+        if override_value.is_some() && self.source() == self.override_origin {
             ConfigItemRef::ArcRef(override_value)
         } else {
             ConfigItemRef::Ref(self.config_item.value())
@@ -427,15 +479,29 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     for ConfigItemWithOverride<T>
 {
-    /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self) -> Configuration {
-        let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
-        Configuration {
-            name: self.config_item.name.as_str().to_string(),
-            value: self.value().get_configuration_value(),
-            origin: self.source().into(),
-            config_id,
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        // Also add override value if set
+        let override_value = self.override_value.load();
+        let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
+            Some(override_value.as_ref().unwrap().get_configuration_value())
+        } else {
+            None
+        };
+        let mut configurations = self
+            .config_item
+            .build_configurations_list(calculated_option);
+        if override_value.is_some() && self.source() != ConfigSourceOrigin::Calculated {
+            let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
+            configurations.push(Configuration {
+                name: self.config_item.name.as_str().to_string(),
+                value: self.value().get_configuration_value(),
+                origin: self.source().into(),
+                config_id,
+                seq_id: Some(self.source() as u64),
+            });
         }
+        configurations
     }
 }
 
@@ -836,13 +902,13 @@ pub struct Config {
     /// port of the trace agent
     trace_agent_port: ConfigItem<u32>,
     /// url of the trace agent
-    trace_agent_url: ConfigItem<Cow<'static, str>>,
+    trace_agent_url: ConfigItemWithOverride<Cow<'static, str>>,
     /// host of the dogstatsd agent
     dogstatsd_agent_host: ConfigItem<Cow<'static, str>>,
     /// port of the dogstatsd agent
     dogstatsd_agent_port: ConfigItem<u32>,
     /// url of the dogstatsd agent
-    dogstatsd_agent_url: ConfigItem<Cow<'static, str>>,
+    dogstatsd_agent_url: ConfigItemWithOverride<Cow<'static, str>>,
 
     // # Sampling
     ///  A list of sampling rules. Each rule is matched against the root span of a trace
@@ -1214,7 +1280,7 @@ impl Config {
     }
 
     /// Returns the URL of the Datadog trace agent.
-    pub fn trace_agent_url(&self) -> &Cow<'static, str> {
+    pub fn trace_agent_url(&self) -> impl Deref<Target = str> + use<'_> {
         self.trace_agent_url.value()
     }
 
@@ -1229,7 +1295,7 @@ impl Config {
     }
 
     /// Returns the full URL of the DogStatsD agent.
-    pub fn dogstatsd_agent_url(&self) -> &Cow<'static, str> {
+    pub fn dogstatsd_agent_url(&self) -> impl Deref<Target = str> + use<'_> {
         self.dogstatsd_agent_url.value()
     }
 
@@ -1401,11 +1467,26 @@ impl Config {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn update_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
                 ServiceName::Configured(service_name),
                 ConfigSourceOrigin::Code,
+            );
+        }
+    }
+
+    /// Sets the service name to a value with calculated precedence.
+    /// The value is calculated by the `dd_resource` Otel Resource,
+    /// which is created in `create_dd_resource` function.
+    /// The result will depend on which environment variable was set,
+    /// or if it returns an `unknown_service` name, which is why it is a calculated source.
+    pub fn set_calculated_service_name(&self, service_name: Option<String>) {
+        if let Some(service_name) = service_name {
+            self.service.set_override_value(
+                ServiceName::Configured(service_name),
+                ConfigSourceOrigin::Calculated,
             );
         }
     }
@@ -1520,7 +1601,7 @@ fn default_config() -> Config {
         runtime_id: Config::process_runtime_id(),
         env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
         // TODO(paullgdc): Default service naming detection, probably from arg0
-        service: ConfigItemWithOverride::new_code(
+        service: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_SERVICE,
             ServiceName::Default,
         ),
@@ -1544,7 +1625,7 @@ fn default_config() -> Config {
             Cow::Borrowed("localhost"),
         ),
         trace_agent_port: ConfigItem::new(SupportedConfigurations::DD_TRACE_AGENT_PORT, 8126),
-        trace_agent_url: ConfigItem::new(
+        trace_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_TRACE_AGENT_URL,
             Cow::Borrowed(""),
         ),
@@ -1553,7 +1634,7 @@ fn default_config() -> Config {
             Cow::Borrowed("localhost"),
         ),
         dogstatsd_agent_port: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_PORT, 8125),
-        dogstatsd_agent_url: ConfigItem::new(
+        dogstatsd_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_DOGSTATSD_URL,
             Cow::Borrowed(""),
         ),
@@ -1685,21 +1766,23 @@ impl ConfigBuilder {
         let mut config = self.config.clone();
 
         // resolve trace_agent_url
+        // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
             let host = &config.agent_host.value();
             let port = *config.trace_agent_port.value();
             config
                 .trace_agent_url
-                .set_code(Cow::Owned(format!("http://{host}:{port}")));
+                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
         }
 
         // resolve dogstatsd_agent_url
+        // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
             let host = &config.dogstatsd_agent_host.value();
             let port = *config.dogstatsd_agent_port.value();
             config
                 .dogstatsd_agent_url
-                .set_code(Cow::Owned(format!("http://{host}:{port}")));
+                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
         }
 
         config
@@ -2782,7 +2865,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
+            config.trace_sampling_rules.get_config_id(),
             Some("config_id_1".to_string())
         );
 
@@ -2790,17 +2873,14 @@ mod tests {
             .update_sampling_rules_from_remote(&rules_json, Some("config_id_2".to_string()))
             .unwrap();
         assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
+            config.trace_sampling_rules.get_config_id(),
             Some("config_id_2".to_string())
         );
 
         config
             .update_sampling_rules_from_remote("[]", None)
             .unwrap();
-        assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
-            None
-        );
+        assert_eq!(config.trace_sampling_rules.get_config_id(), None);
     }
 
     #[test]
@@ -2865,7 +2945,7 @@ mod tests {
     fn test_dd_agent_url_default() {
         let config = Config::builder().build();
 
-        assert_eq!(config.trace_agent_url(), "http://localhost:8126");
+        assert_eq!(&*config.trace_agent_url(), "http://localhost:8126");
     }
 
     #[test]
@@ -2880,7 +2960,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2896,7 +2976,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "https://test-host");
+        assert_eq!(&*config.trace_agent_url(), "https://test-host");
     }
 
     #[test]
@@ -2904,7 +2984,6 @@ mod tests {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
-                ("DD_TRACE_AGENT_URL", ""),
                 ("DD_AGENT_HOST", "agent-host"),
                 ("DD_TRACE_AGENT_PORT", "4242"),
             ],
@@ -2912,7 +2991,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2922,7 +3001,7 @@ mod tests {
             .set_trace_agent_port(4242)
             .build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2933,14 +3012,14 @@ mod tests {
             .set_trace_agent_url("https://test-host".into())
             .build();
 
-        assert_eq!(config.trace_agent_url(), "https://test-host");
+        assert_eq!(&*config.trace_agent_url(), "https://test-host");
     }
 
     #[test]
     fn test_dogstatsd_agent_url_default() {
         let config = Config::builder().build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://localhost:8125");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://localhost:8125");
     }
 
     #[test]
@@ -2955,7 +3034,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
     }
 
     #[test]
@@ -2965,7 +3044,7 @@ mod tests {
             .set_dogstatsd_agent_port(4242)
             .build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
     }
 
     #[test]
@@ -3044,13 +3123,15 @@ mod tests {
             r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#
         ).unwrap();
 
-        let configuration = &config.trace_sampling_rules.get_configuration();
-        assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
+        let configurations = &config.trace_sampling_rules.get_all_configurations();
+        // active config is the one with highest seq_id
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
 
         // Converting configuration value to json helps with comparison as serialized properties may
         // differ from their original order
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
             expected.clone()
         );
 
@@ -3060,23 +3141,28 @@ mod tests {
             .trace_sampling_rules
             .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);
 
-        let configuration_after_rc = &config.trace_sampling_rules.get_configuration();
+        let configurations_after_rc = &config.trace_sampling_rules.get_all_configurations();
+        let active_configuration_after_rc = configurations_after_rc
+            .iter()
+            .max_by_key(|c| c.seq_id)
+            .unwrap();
         assert_eq!(
-            configuration_after_rc.origin,
+            active_configuration_after_rc.origin,
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration_after_rc.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration_after_rc.value).unwrap(),
             expected_rc
         );
 
         // Reset ConfigItemRc RC previous value
         config.trace_sampling_rules.unset_override_value();
 
-        let configuration = &config.trace_sampling_rules.get_configuration();
-        assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
+        let configurations = &config.trace_sampling_rules.get_all_configurations();
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
             expected
         );
     }
