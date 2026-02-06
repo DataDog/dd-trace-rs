@@ -14,6 +14,7 @@ pub(crate) enum SupportedConfigurations {
     DD_DOGSTATSD_URL,
     DD_ENV,
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
+    DD_LOGS_OTEL_ENABLED,
     DD_LOG_LEVEL,
     DD_METRICS_OTEL_ENABLED,
     DD_REMOTE_CONFIGURATION_ENABLED,
@@ -38,6 +39,10 @@ pub(crate) enum SupportedConfigurations {
     DD_VERSION,
     OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_EXPORTER_OTLP_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
+    OTEL_EXPORTER_OTLP_LOGS_HEADERS,
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL,
+    OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
     OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
     OTEL_EXPORTER_OTLP_METRICS_HEADERS,
     OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
@@ -45,6 +50,7 @@ pub(crate) enum SupportedConfigurations {
     OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TIMEOUT,
+    OTEL_LOGS_EXPORTER,
     OTEL_METRICS_EXPORTER,
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
@@ -76,6 +82,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => {
                 "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
             }
+            SupportedConfigurations::DD_LOGS_OTEL_ENABLED => "DD_LOGS_OTEL_ENABLED",
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED => "DD_METRICS_OTEL_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
@@ -122,6 +129,18 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => {
+                "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => {
+                "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => {
+                "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT => {
+                "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT"
+            }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => {
                 "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
             }
@@ -139,6 +158,7 @@ impl SupportedConfigurations {
             }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
+            SupportedConfigurations::OTEL_LOGS_EXPORTER => "OTEL_LOGS_EXPORTER",
             SupportedConfigurations::OTEL_METRICS_EXPORTER => "OTEL_METRICS_EXPORTER",
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",

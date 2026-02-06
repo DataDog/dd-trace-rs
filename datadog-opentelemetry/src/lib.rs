@@ -184,9 +184,7 @@ pub use core::log;
 // Re-exports for tests (tests are in a separate crate, so these must be public)
 // Marked as doc(hidden) to indicate they're not part of the public API
 #[doc(hidden)]
-pub use metrics_exporter::OtlpProtocol;
-#[doc(hidden)]
-pub use metrics_reader::create_meter_provider_with_protocol;
+pub use otlp_utils::OtlpProtocol;
 
 #[cfg(feature = "test-utils")]
 pub mod core;
@@ -207,12 +205,14 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
-pub(crate) mod metrics_exporter;
+pub(crate) mod logs_reader;
 pub(crate) mod metrics_reader;
+mod otlp_utils;
 mod sampler;
 mod span_exporter;
 mod span_processor;
 mod spans_metrics;
+mod telemetry_logs_exporter;
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
@@ -588,10 +588,56 @@ impl DatadogMetricsBuilder {
 }
 
 /// Initialize a new Datadog Metrics builder with OTLP transport
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub fn metrics() -> DatadogMetricsBuilder {
     DatadogMetricsBuilder {
         config: None,
         resource: None,
         export_interval: None,
+    }
+}
+
+/// Builder for Datadog Logs with OTLP transport
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+pub struct DatadogLogsBuilder {
+    config: Option<Config>,
+    resource: Option<Resource>,
+}
+
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+impl DatadogLogsBuilder {
+    /// Sets the configuration for the logs builder.
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    /// Sets the OpenTelemetry resource for the logs builder.
+    pub fn with_resource(mut self, resource: Resource) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    /// Initializes the logger provider and sets it as the global logger provider.
+    pub fn init(self) -> opentelemetry_sdk::logs::SdkLoggerProvider {
+        let (logger_provider, _) = self.init_local();
+        logger_provider
+    }
+
+    /// Initializes the logger provider without setting it as the global logger provider.
+    pub fn init_local(self) -> (opentelemetry_sdk::logs::SdkLoggerProvider, ()) {
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
+        let logger_provider =
+            crate::logs_reader::create_logger_provider(Arc::new(config), self.resource);
+        (logger_provider, ())
+    }
+}
+
+/// Initialize a new Datadog Logs builder with OTLP transport
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+pub fn logs() -> DatadogLogsBuilder {
+    DatadogLogsBuilder {
+        config: None,
+        resource: None,
     }
 }
