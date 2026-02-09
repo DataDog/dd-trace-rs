@@ -24,9 +24,9 @@ impl RulesSampler {
     }
 
     /// Finds the first matching rule for a span
-    pub fn find_matching_rule<F>(&self, matcher: F) -> Option<SamplingRule>
+    pub fn find_matching_rule<F>(&self, mut matcher: F) -> Option<SamplingRule>
     where
-        F: Fn(&SamplingRule) -> bool,
+        F: FnMut(&SamplingRule) -> bool,
     {
         self.inner
             .read()

@@ -485,6 +485,7 @@ fn bench_otel_span_sampling<M: criterion::measurement::Measurement + Measurement
 }
 
 #[inline(never)]
+#[allow(clippy::too_many_arguments)]
 fn bench_sample(
     sampler: &Sampler,
     parent_context: Option<&opentelemetry::Context>,

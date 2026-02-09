@@ -5,8 +5,9 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use datadog_opentelemetry::core::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
-use datadog_opentelemetry::sampling::DatadogSampler;
+use datadog_opentelemetry::sampling::OtelSamplingData;
 use datadog_opentelemetry::sampling::SamplingRule;
+use datadog_opentelemetry::sampling::{DatadogSampler, SamplingData};
 use opentelemetry::{trace::SpanKind, KeyValue, TraceId};
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -397,6 +398,14 @@ fn bench_datadog_sampling<M: criterion::measurement::Measurement + MeasurementNa
 
     for config in configs {
         let sampler = DatadogSampler::new(config.rules, -1, Arc::new(RwLock::new(config.resource)));
+        let data = OtelSamplingData::new(
+            black_box(config.is_parent_sampled),
+            black_box(&config.trace_id),
+            black_box(config.span_name),
+            black_box(config.span_kind.clone()),
+            black_box(&config.attributes),
+            black_box(sampler.resource()),
+        );
 
         c.bench_function(
             &format!("datadog_sample_span/{}/{}", config.name, M::name()),
@@ -404,15 +413,7 @@ fn bench_datadog_sampling<M: criterion::measurement::Measurement + MeasurementNa
                 b.iter_batched(
                     || (),
                     |_| {
-                        bench_sample(
-                            &sampler,
-                            config.is_parent_sampled,
-                            config.trace_id,
-                            config.span_name,
-                            &config.span_kind,
-                            &config.attributes,
-                            config.should_keep,
-                        );
+                        bench_sample(&sampler, &data, config.should_keep);
                     },
                     criterion::BatchSize::LargeInput,
                 )
@@ -422,24 +423,10 @@ fn bench_datadog_sampling<M: criterion::measurement::Measurement + MeasurementNa
 }
 
 #[inline(never)]
-fn bench_sample(
-    sampler: &DatadogSampler,
-    is_parent_sampled: Option<bool>,
-    trace_id: TraceId,
-    span_name: &str,
-    span_kind: &SpanKind,
-    attributes: &[KeyValue],
-    should_keep: Option<bool>,
-) {
-    let result = black_box(sampler).sample(
-        black_box(is_parent_sampled),
-        black_box(trace_id),
-        black_box(span_name),
-        black_box(span_kind),
-        black_box(attributes),
-    );
+fn bench_sample(sampler: &DatadogSampler, data: &impl SamplingData, should_keep: Option<bool>) {
+    let result = black_box(sampler).sample(black_box(data));
     if let Some(should_keep) = should_keep {
-        assert_eq!(result.is_keep, should_keep);
+        assert_eq!(result.get_priority().is_keep(), should_keep);
         black_box(result);
     } else {
         black_box(result);
