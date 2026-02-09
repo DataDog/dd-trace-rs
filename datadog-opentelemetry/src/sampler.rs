@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Datadog OTel Sampler
+
 use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
@@ -16,18 +18,31 @@ use crate::{
     TraceRegistry,
 };
 
+/// OpenTelemetry sampler implementation for Datadog tracing.
+///
+/// Implements the `ShouldSample` trait to make sampling decisions for traces based on
+/// Datadog's sampling rules, rate limits, and service-based sampling rates.
 #[derive(Debug, Clone)]
 pub struct Sampler {
     sampler: DatadogSampler,
-    trace_registry: TraceRegistry,
+    trace_registry: Option<TraceRegistry>,
     cfg: Arc<Config>,
 }
 
 impl Sampler {
+    /// Creates a new Datadog sampler.
+    ///
+    /// # Arguments
+    ///
+    /// * `cfg` - Configuration containing sampling rules and rate limits
+    /// * `resource` - OpenTelemetry resource with service information
+    /// * `trace_registry` - Optional trace registry for managing in-flight traces (None for
+    ///   benchmarking)
     pub fn new(
         cfg: Arc<Config>,
         resource: Arc<RwLock<Resource>>,
-        trace_registry: TraceRegistry,
+        // This is an Option to allow benchmarking different parts of sampling
+        trace_registry: Option<TraceRegistry>,
     ) -> Self {
         let rules = SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
         let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
@@ -38,6 +53,9 @@ impl Sampler {
         }
     }
 
+    /// Returns a callback for processing agent responses.
+    ///
+    /// The callback updates service-based sampling rates based on the agent's response.
     pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
         self.sampler.on_agent_response()
     }
@@ -140,30 +158,30 @@ impl ShouldSample for Sampler {
             None
         };
         if let Some(trace_propagation_data) = trace_propagation_data {
-            match self
-                .trace_registry
-                .register_local_root_trace_propagation_data(
+            if let Some(trace_registry) = &self.trace_registry {
+                match trace_registry.register_local_root_trace_propagation_data(
                     trace_id.to_bytes(),
                     trace_propagation_data,
                 ) {
-                RegisterTracePropagationResult::Existing(sampling_decision) => {
-                    return opentelemetry::trace::SamplingResult {
-                        // If at this point the sampling decision is still None, we will
-                        // end up sending the span to the agent without a sampling priority, which
-                        // will latter take a decision.
-                        // So the span is marked as RecordAndSample because we treat it as such
-                        decision: if sampling_decision.priority.is_none_or(|p| p.is_keep()) {
-                            opentelemetry::trace::SamplingDecision::RecordAndSample
-                        } else {
-                            opentelemetry::trace::SamplingDecision::RecordOnly
-                        },
-                        attributes: Vec::new(),
-                        trace_state: parent_context
-                            .map(|c| c.span().span_context().trace_state().clone())
-                            .unwrap_or_default(),
-                    };
+                    RegisterTracePropagationResult::Existing(sampling_decision) => {
+                        return opentelemetry::trace::SamplingResult {
+                            // If at this point the sampling decision is still None, we will
+                            // end up sending the span to the agent without a sampling priority,
+                            // which will later take a decision.
+                            // So the span is marked as RecordAndSample because we treat it as such
+                            decision: if sampling_decision.priority.is_none_or(|p| p.is_keep()) {
+                                opentelemetry::trace::SamplingDecision::RecordAndSample
+                            } else {
+                                opentelemetry::trace::SamplingDecision::RecordOnly
+                            },
+                            attributes: Vec::new(),
+                            trace_state: parent_context
+                                .map(|c| c.span().span_context().trace_state().clone())
+                                .unwrap_or_default(),
+                        };
+                    }
+                    RegisterTracePropagationResult::New => {}
                 }
-                RegisterTracePropagationResult::New => {}
             }
         }
 
@@ -205,7 +223,11 @@ mod tests {
         );
 
         let test_resource = Arc::new(RwLock::new(Resource::builder().build()));
-        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
 
         let trace_id_bytes = [1; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -227,7 +249,11 @@ mod tests {
         let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
 
         let trace_id_bytes = [2; 16];
         let trace_id = TraceId::from_bytes(trace_id_bytes);
@@ -246,7 +272,11 @@ mod tests {
         let config = Arc::new(Config::builder().build());
 
         let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
-        let sampler = Sampler::new(config.clone(), test_resource, TraceRegistry::new(config));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
 
         let trace_id = TraceId::from_bytes([2; 16]);
         let span_id = SpanId::from_bytes([3; 8]);
