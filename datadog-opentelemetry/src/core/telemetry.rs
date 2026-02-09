@@ -103,6 +103,14 @@ telemetry_metrics!(
     OtelMetricsExportAttemptsHttp => ("otel.metrics_export_attempts", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
     OtelMetricsExportSuccessesHttp => ("otel.metrics_export_successes", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
     OtelMetricsExportFailuresHttp => ("otel.metrics_export_failures", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelLogsExportAttemptsGrpc => ("otel.logs_export_attempts", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelLogsExportSuccessesGrpc => ("otel.logs_export_successes", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelLogsExportFailuresGrpc => ("otel.logs_export_failures", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelLogsExportAttemptsHttp => ("otel.logs_export_attempts", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelLogsExportSuccessesHttp => ("otel.logs_export_successes", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelLogsExportFailuresHttp => ("otel.logs_export_failures", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
+    OtelLogRecordsGrpc => ("otel.log_records", Tracers, Count, ["protocol" => "grpc", "encoding" => "protobuf"]),
+    OtelLogRecordsHttp => ("otel.log_records", Tracers, Count, ["protocol" => "http", "encoding" => "protobuf"]),
 );
 
 trait TelemetryHandle: Sync + Send + 'static + Any {
