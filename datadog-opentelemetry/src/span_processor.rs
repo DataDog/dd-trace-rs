@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Datadog OTel SpanProcessor
+
 use hashbrown::{hash_map, HashMap as BHashMap};
 use std::{
     collections::HashMap,
@@ -69,7 +71,7 @@ struct InnerTraceRegistry {
     config: Arc<Config>,
 }
 
-pub enum RegisterTracePropagationResult {
+pub(crate) enum RegisterTracePropagationResult {
     Existing(SamplingDecision),
     New,
 }
@@ -262,7 +264,7 @@ struct CachePadded<T>(T);
 /// - The finished spans of the trace
 /// - The number of open spans in the trace
 /// - The sampling decision of the trace
-pub(crate) struct TraceRegistry {
+pub struct TraceRegistry {
     // Example:
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
@@ -271,6 +273,10 @@ pub(crate) struct TraceRegistry {
 }
 
 impl TraceRegistry {
+    /// Creates a new trace registry.
+    ///
+    /// The registry uses sharding to minimize lock contention when multiple threads
+    /// are creating and finishing spans concurrently.
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             inner: Arc::new(std::array::from_fn(|_| {
@@ -297,6 +303,7 @@ impl TraceRegistry {
     ///
     /// If the trace is already registered with a non None sampling decision,
     /// it will return the existing sampling decision instead
+    #[allow(private_interfaces)]
     pub fn register_local_root_trace_propagation_data(
         &self,
         trace_id: [u8; 16],
@@ -321,6 +328,7 @@ impl TraceRegistry {
     }
 
     /// Register a new span with the given trace ID and span ID.
+    #[allow(private_interfaces)]
     pub fn register_span(
         &self,
         trace_id: [u8; 16],
@@ -345,6 +353,10 @@ impl TraceRegistry {
         inner.finish_span(trace_id, span_data)
     }
 
+    /// Retrieves the trace propagation data for a given trace ID.
+    ///
+    /// Returns the sampling decision, origin, and internal tags associated with the trace.
+    #[allow(private_interfaces)]
     pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
         let inner = self
             .get_shard(trace_id)
@@ -354,6 +366,10 @@ impl TraceRegistry {
         inner.get_trace_propagation_data(trace_id).clone()
     }
 
+    /// Aggregates and returns metrics from all registry shards.
+    ///
+    /// Collects counters for spans created/finished, trace segments, and partial flushes
+    /// across all shards in the registry.
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
         let mut stats = TraceRegistryMetrics::default();
         for shard_idx in 0..TRACE_REGISTRY_SHARDS {
@@ -369,12 +385,21 @@ impl TraceRegistry {
     }
 }
 
+/// Metrics collected by the trace registry.
+///
+/// Tracks the lifecycle of spans and traces through the registry, useful for
+/// monitoring and debugging trace collection behavior.
 #[derive(Default, Debug)]
 pub struct TraceRegistryMetrics {
+    /// Number of spans created and registered in the registry.
     pub spans_created: usize,
+    /// Number of spans that have finished processing.
     pub spans_finished: usize,
+    /// Number of trace segments created (complete or partial traces).
     pub trace_segments_created: usize,
+    /// Number of trace segments closed and sent to the exporter.
     pub trace_segments_closed: usize,
+    /// Number of times traces were partially flushed before completion.
     pub trace_partial_flush_count: usize,
 }
 
