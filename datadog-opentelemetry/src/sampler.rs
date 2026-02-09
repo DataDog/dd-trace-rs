@@ -12,7 +12,7 @@ use crate::{
         configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
     },
-    sampling::{DatadogSampler, SamplingRule, SamplingRulesCallback},
+    sampling::{DatadogSampler, OtelSamplingData, SamplingRule, SamplingRulesCallback},
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},
     TraceRegistry,
@@ -99,10 +99,18 @@ impl ShouldSample for Sampler {
             .filter(|c| !is_parent_deferred && c.has_active_span())
             .map(|c| c.span().span_context().trace_flags().is_sampled());
 
-        let result = self
-            .sampler
-            .sample(is_parent_sampled, trace_id, name, span_kind, attributes);
-        let trace_propagation_data = if let Some(trace_root_info) = &result.trace_root_info {
+        let data = OtelSamplingData::new(
+            is_parent_sampled,
+            &trace_id,
+            name,
+            span_kind.clone(),
+            attributes,
+            self.sampler.resource(),
+        );
+        let result = self.sampler.sample(&data);
+        let trace_propagation_data = if let Some(trace_root_info) =
+            result.get_trace_root_sampling_info()
+        {
             // If the parent was deferred, we try to merge propagation tags with what we extracted
             let (mut tags, origin) = if is_parent_deferred {
                 if let Some(DatadogExtractData {
@@ -118,7 +126,7 @@ impl ShouldSample for Sampler {
             } else {
                 (None, None)
             };
-            let mechanism = trace_root_info.mechanism;
+            let mechanism = trace_root_info.mechanism();
             tags.get_or_insert_default().insert(
                 SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
                 mechanism.to_cow().into_owned(),
@@ -126,7 +134,7 @@ impl ShouldSample for Sampler {
 
             Some(TracePropagationData {
                 sampling_decision: SamplingDecision {
-                    priority: Some(trace_root_info.priority),
+                    priority: Some(result.get_priority()),
                     mechanism: Some(mechanism),
                 },
                 origin,
@@ -186,8 +194,12 @@ impl ShouldSample for Sampler {
         }
 
         opentelemetry::trace::SamplingResult {
-            decision: result.to_otel_decision(),
-            attributes: result.to_dd_sampling_tags(),
+            decision: crate::sampling::otel_mappings::priority_to_otel_decision(
+                result.get_priority(),
+            ),
+            attributes: result
+                .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+                .unwrap_or_default(),
             trace_state: parent_context
                 .map(|c| c.span().span_context().trace_state().clone())
                 .unwrap_or_default(),

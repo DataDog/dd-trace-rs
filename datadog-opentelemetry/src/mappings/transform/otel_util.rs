@@ -198,14 +198,9 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
-pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> u32 {
-    if let Some(code) = span.get_attr_num(HTTP_RESPONSE_STATUS_CODE) {
-        return code;
-    }
-    if let Some(code) = span.get_attr_num(HTTP_STATUS_CODE) {
-        return code;
-    }
-    0
+pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<u32> {
+    span.get_attr_num(HTTP_RESPONSE_STATUS_CODE)
+        .or_else(|| span.get_attr_num(HTTP_STATUS_CODE))
 }
 
 const SPAN_TYPE_SQL: &str = "sql";
