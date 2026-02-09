@@ -372,11 +372,11 @@ impl DatadogSampler {
     }
 
     /// Sample an incoming span based on the parent context and attributes
-    pub(crate) fn sample(
+    pub fn sample(
         &self,
         is_parent_sampled: Option<bool>,
         trace_id: TraceId,
-        _name: &str,
+        name: &str,
         span_kind: &opentelemetry::trace::SpanKind,
         attributes: &[KeyValue],
     ) -> DdSamplingResult {
@@ -389,7 +389,7 @@ impl DatadogSampler {
         }
 
         // Apply rules-based sampling
-        self.sample_root(trace_id, _name, span_kind, attributes)
+        self.sample_root(trace_id, name, span_kind, attributes)
     }
 
     /// Sample the root span of a trace
@@ -458,12 +458,12 @@ impl DatadogSampler {
     }
 }
 
-pub(crate) struct DdSamplingResult {
+pub struct DdSamplingResult {
     pub is_keep: bool,
     pub trace_root_info: Option<TraceRootSamplingInfo>,
 }
 
-pub(crate) struct TraceRootSamplingInfo {
+pub struct TraceRootSamplingInfo {
     pub priority: SamplingPriority,
     pub mechanism: SamplingMechanism,
     pub rate: f64,
