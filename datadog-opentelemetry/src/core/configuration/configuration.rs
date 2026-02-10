@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
 use rustc_version_runtime::version;
@@ -928,6 +929,14 @@ pub struct Config {
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
 
+    /// Wether we wait for trace chunk to have been flushed to the agent before returning to
+    /// the critical path of the app
+    trace_writer_synchronous_write: bool,
+    /// How long we wait for the synchronous export to be done
+    trace_writer_synchronous_timeout: Duration,
+    /// The max amount of time a span stays in the writer buffer before we trigger a flush
+    trace_writer_max_flush_time: Duration,
+
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
     wait_agent_info_ready: bool,
@@ -1136,6 +1145,9 @@ impl Config {
             ),
             trace_propagation_extract_first: cisu
                 .update_parsed(default.trace_propagation_extract_first),
+            trace_writer_synchronous_write: default.trace_writer_synchronous_write,
+            trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
+            trace_writer_max_flush_time: default.trace_writer_max_flush_time,
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
@@ -1351,6 +1363,18 @@ impl Config {
     /// Returns whether client-side trace stats computation is enabled.
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
+    }
+
+    pub(crate) fn trace_writer_synchronous_write(&self) -> bool {
+        self.trace_writer_synchronous_write
+    }
+
+    pub(crate) fn trace_writer_synchronous_timeout(&self) -> Duration {
+        self.trace_writer_synchronous_timeout
+    }
+
+    pub(crate) fn trace_writer_max_flush_time(&self) -> Duration {
+        self.trace_writer_max_flush_time
     }
 
     #[cfg(feature = "test-utils")]
@@ -1714,6 +1738,9 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
         ),
+        trace_writer_synchronous_write: false,
+        trace_writer_synchronous_timeout: Duration::from_secs(2),
+        trace_writer_max_flush_time: Duration::from_secs(1),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
@@ -2351,6 +2378,26 @@ impl ConfigBuilder {
     #[allow(missing_docs)]
     pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
         self.config.datadog_tags_max_length.set_code(length);
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_trace_writer_synchronous_write(
+        &mut self,
+        trace_writer_synchronous_write: bool,
+    ) -> &mut Self {
+        self.config.trace_writer_synchronous_write = trace_writer_synchronous_write;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_trace_writer_max_flush_time(
+        &mut self,
+        trace_writer_max_flush_time: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_max_flush_time = trace_writer_max_flush_time;
         self
     }
 

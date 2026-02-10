@@ -1,6 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::time::Duration;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use datadog_opentelemetry::configuration::{Config, SamplingRuleConfig, TracePropagationStyle};
@@ -306,4 +307,29 @@ async fn test_tracing_disabled() {
         assert!(!cx.has_active_span());
     })
     .await
+}
+
+#[tokio::test]
+async fn test_trace_writer_synchronous_mode() {
+    const SESSION_NAME: &str = "opentelemetry_api/test_trace_writer_synchronous_mode";
+    let test_agent = make_test_agent(SESSION_NAME).await;
+
+    let mut cfg = Config::builder();
+    cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string())
+        .set_trace_writer_synchronous_write(true)
+        // set async flush duration to forever...
+        .set_trace_writer_max_flush_time(Duration::from_secs(1000000000))
+        .set_log_level_filter(LevelFilter::Debug);
+    let config = Arc::new(cfg.build());
+
+    let (tracer_provider, _propagator) = make_test_tracer(config.clone());
+    {
+        tracer_provider
+            .tracer("test_trace_writer_synchronous_mode")
+            .build(SpanBuilder {
+                name: "span".into(),
+                ..SpanBuilder::default()
+            });
+    }
+    test_agent.assert_snapshot(SESSION_NAME).await;
 }
