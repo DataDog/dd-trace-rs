@@ -31,9 +31,7 @@ use aws_smithy_types::config_bag::ConfigBag;
 ///     .await?;
 /// ```
 #[derive(Debug, Clone)]
-pub struct DatadogTracePropagationInterceptor {
-    // TODO: Add propagator and configuration fields
-}
+pub struct DatadogTracePropagationInterceptor {}
 
 impl DatadogTracePropagationInterceptor {
     /// Creates a new interceptor.

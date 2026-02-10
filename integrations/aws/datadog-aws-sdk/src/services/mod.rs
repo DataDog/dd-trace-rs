@@ -1,0 +1,17 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+//! Service-specific trace context enrichment.
+
+mod injector;
+
+pub(crate) mod eventbridge;
+pub(crate) mod kinesis;
+pub(crate) mod sns;
+pub(crate) mod sqs;
+
+pub(crate) use eventbridge::EventBridgeInjector;
+pub(crate) use injector::{AwsService, ServiceInjector};
+pub(crate) use kinesis::KinesisInjector;
+pub(crate) use sns::SnsInjector;
+pub(crate) use sqs::SqsInjector;
