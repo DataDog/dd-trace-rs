@@ -1,0 +1,30 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "datadog-aws-sdk"
+rust-version = "1.85.0"  # Requires edition2024 support for AWS SDK dependencies
+edition = "2021"
+version = "0.2.1"
+license = "Apache-2.0"
+repository = "https://github.com/DataDog/dd-trace-rs"
+readme = "README.md"
+description = "Datadog trace context propagation for AWS SDK for Rust"
+authors = ["Datadog Inc. <info@datadoghq.com>"]
+
+[dependencies]
+# Core Datadog tracing
+datadog-opentelemetry = { version = "0.2", path = "../../../datadog-opentelemetry" }
+
+# AWS SDK dependencies
+aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
+aws-smithy-types = "1.4"
+http = "1.0"
+
+# OpenTelemetry for context handling
+opentelemetry = "0.31"
+
+[dev-dependencies]
+tokio = { version = "1.44.1", features = ["rt", "macros"] }
+aws-config = "1.5"
+aws-sdk-sqs = "1.55"
