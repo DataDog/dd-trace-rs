@@ -1,0 +1,26 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "span",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "otel.scope.name": "test_trace_writer_synchronous_mode",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "698b823c00000000698b4f15ff0df4f9",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.version": "0.31.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0
+    },
+    "duration": 4000,
+    "start": 1770750524325733000
+  }]]

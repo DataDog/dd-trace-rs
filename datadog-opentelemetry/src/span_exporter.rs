@@ -28,10 +28,7 @@ const SPAN_FLUSH_THRESHOLD: usize = 3000;
 /// The maximum number of spans that will be buffered before we drop data
 const MAX_BUFFERED_SPANS: usize = 10_000;
 
-/// The maximum amount of time we will wait for a flush to happen  before we flush whatever is in
-/// the buffer
-const MAX_BATCH_TIME: Duration = Duration::from_secs(1);
-
+#[derive(Debug)]
 struct TraceChunk {
     chunk: Vec<SpanData>,
 }
@@ -47,7 +44,8 @@ pub struct BatchFullError {
 
 /// Error that can occur when the mutex was poisoned.
 ///
-/// The only way to handle it is to log and try to exit cleanly
+/// The only way to handle it is to log and try to return an empty but valid state
+#[derive(Debug)]
 struct MutexPoisonedError;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -64,6 +62,7 @@ struct Batch {
     last_flush: std::time::Instant,
     span_count: usize,
     max_buffered_spans: usize,
+    batch_gen: BatchGeneration,
     /// Configuration for service discovery via remote config
     config: Arc<Config>,
 }
@@ -74,10 +73,13 @@ const PRE_ALLOCATE_CHUNKS: usize = 400;
 
 impl Batch {
     fn new(max_buffered_spans: usize, config: Arc<Config>) -> Self {
+        let mut batch_gen = BatchGeneration::default();
+        batch_gen.incr();
         Self {
             chunks: Vec::with_capacity(PRE_ALLOCATE_CHUNKS),
             last_flush: std::time::Instant::now(),
             span_count: 0,
+            batch_gen,
             max_buffered_spans,
             config,
         }
@@ -141,6 +143,9 @@ impl Batch {
         let chunks = std::mem::replace(&mut self.chunks, Vec::with_capacity(PRE_ALLOCATE_CHUNKS));
         self.span_count = 0;
         self.last_flush = std::time::Instant::now();
+        if !chunks.is_empty() {
+            self.batch_gen.incr();
+        }
         chunks
     }
 }
@@ -155,6 +160,14 @@ impl Batch {
 pub struct DatadogExporter {
     trace_exporter: TraceExporterHandle,
     tx: Sender,
+    /// Enables synchronous exports if Some
+    ///
+    /// Each batch in the queue will get a generation associated. Generations are strictly
+    /// incremental and processed in order by the background thread.
+    /// When the background thread processes a batch it will increment it's 'last_flushed_batch'
+    /// and an export can wait until the 'last_flushed_batch' is equal to the batch it added it's
+    /// trace chunks to.
+    synchronous_export: Option<Duration>,
 }
 
 impl DatadogExporter {
@@ -197,14 +210,20 @@ impl DatadogExporter {
                 });
             }
             TraceExporterWorker::spawn(
-                config,
+                config.clone(),
                 builder,
                 rx,
                 Resource::builder_empty().build(),
                 agent_response_handler,
             )
         };
-        Self { trace_exporter, tx }
+        Self {
+            trace_exporter,
+            tx,
+            synchronous_export: config
+                .trace_writer_synchronous_write()
+                .then(|| config.trace_writer_synchronous_timeout()),
+        }
     }
 
     pub fn export_chunk_no_wait(&self, span_data: Vec<SpanData>) -> Result<(), ExporterError> {
@@ -218,8 +237,13 @@ impl DatadogExporter {
                 self.join()?;
                 Err(ExporterError::AlreadyShutdown)
             }
+            Ok(flush_gen) => {
+                if let Some(timeout) = self.synchronous_export {
+                    self.tx.wait_flush_done(flush_gen, timeout)?;
+                }
+                Ok(())
+            }
             Err(e) => Err(e),
-            Ok(()) => Ok(()),
         }
     }
 
@@ -339,9 +363,11 @@ fn channel(
     max_number_of_spans: usize,
     config: Arc<Config>,
 ) -> (Sender, Receiver) {
+    let synchronous_write = config.trace_writer_synchronous_write();
     let waiter = Arc::new(Waiter {
         state: Mutex::new(SharedState {
             flush_needed: false,
+            last_flush_generation: BatchGeneration::default(),
             shutdown_needed: false,
             has_shutdown: false,
             batch: Batch::new(max_number_of_spans, config),
@@ -354,6 +380,7 @@ fn channel(
         Sender {
             waiter: waiter.clone(),
             flush_trigger_number_of_spans,
+            synchronous_write,
         },
         Receiver { waiter },
     )
@@ -362,6 +389,7 @@ fn channel(
 struct Sender {
     waiter: Arc<Waiter>,
     flush_trigger_number_of_spans: usize,
+    synchronous_write: bool,
 }
 
 impl Drop for Sender {
@@ -371,6 +399,28 @@ impl Drop for Sender {
 }
 
 impl Sender {
+    fn wait_flush_done(
+        &self,
+        flush_gen: BatchGeneration,
+        timeout: Duration,
+    ) -> Result<(), ExporterError> {
+        if timeout.is_zero() {
+            return Err(ExporterError::TimedOut(Duration::ZERO));
+        }
+        let state = self.get_state()?;
+        let (_state, res) = self
+            .waiter
+            .notifier
+            .wait_timeout_while(state, timeout, |state| {
+                state.last_flush_generation < flush_gen && !state.has_shutdown
+            })
+            .map_err(|_| ExporterError::MutexPoisoned)?;
+        if res.timed_out() {
+            return Err(ExporterError::TimedOut(timeout));
+        }
+        Ok(())
+    }
+
     fn get_state(&self) -> Result<MutexGuard<'_, SharedState>, ExporterError> {
         self.waiter
             .state
@@ -386,7 +436,7 @@ impl Sender {
         Ok(state)
     }
 
-    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<(), ExporterError> {
+    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<BatchGeneration, ExporterError> {
         let mut state = self.get_running_state()?;
         let chunk_len = chunk.len();
         if let Err(e @ BatchFullError { spans_dropped }) = state.batch.add_trace_chunk(chunk) {
@@ -394,12 +444,12 @@ impl Sender {
             return Err(ExporterError::BatchFull(e));
         }
         state.metrics.spans_queued += chunk_len;
-
-        if state.batch.span_count() > self.flush_trigger_number_of_spans {
+        let gen = state.batch.batch_gen;
+        if state.batch.span_count() > self.flush_trigger_number_of_spans || self.synchronous_write {
             state.flush_needed = true;
             self.waiter.notify_all(state);
         }
-        Ok(())
+        Ok(gen)
     }
 
     /// Set the otel resource to be used for the next trace mapping
@@ -428,22 +478,14 @@ impl Sender {
         if timeout.is_zero() {
             return Err(ExporterError::TimedOut(Duration::ZERO));
         }
-        let mut state = self.get_state()?;
-        let deadline = Instant::now() + timeout;
-        let mut leftover = timeout;
-        while !state.has_shutdown {
-            let res;
-            (state, res) = self
-                .waiter
-                .notifier
-                .wait_timeout(state, leftover)
-                .map_err(|_| ExporterError::TimedOut(timeout))?;
-            if res.timed_out() {
-                return Err(ExporterError::MutexPoisoned);
-            }
-            leftover = deadline
-                .checked_duration_since(Instant::now())
-                .unwrap_or(Duration::ZERO);
+        let state = self.get_state()?;
+        let (_state, res) = self
+            .waiter
+            .notifier
+            .wait_timeout_while(state, timeout, |state| !state.has_shutdown)
+            .map_err(|_| ExporterError::MutexPoisoned)?;
+        if res.timed_out() {
+            return Err(ExporterError::TimedOut(timeout));
         }
         Ok(())
     }
@@ -506,10 +548,27 @@ impl Receiver {
             }
         }
     }
+
+    fn ack_export(&self) -> Result<(), MutexPoisonedError> {
+        let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonedError)?;
+        state.last_flush_generation.incr();
+        self.waiter.notify_all(state);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+struct BatchGeneration(usize);
+
+impl BatchGeneration {
+    fn incr(&mut self) {
+        self.0 = self.0.wrapping_add(1);
+    }
 }
 
 struct SharedState {
     flush_needed: bool,
+    last_flush_generation: BatchGeneration,
     shutdown_needed: bool,
     has_shutdown: bool,
     batch: Batch,
@@ -537,6 +596,7 @@ struct TraceExporterWorker {
     otel_resource: opentelemetry_sdk::Resource,
     #[allow(clippy::type_complexity)]
     agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
+    max_flush_time: Duration,
 }
 
 impl TraceExporterWorker {
@@ -570,6 +630,7 @@ impl TraceExporterWorker {
                     rx,
                     otel_resource,
                     agent_response_handler,
+                    max_flush_time: cfg.trace_writer_max_flush_time(),
                 };
                 task.run()
             }
@@ -588,12 +649,15 @@ impl TraceExporterWorker {
                 .wait_agent_info_ready(Duration::from_secs(5))
                 .unwrap();
         }
-        while let Ok((message, data)) = self.rx.receive(MAX_BATCH_TIME) {
+        while let Ok((message, data)) = self.rx.receive(self.max_flush_time) {
             if !data.is_empty() {
                 match self.export_trace_chunks(data) {
                     Ok(()) => {}
                     Err(e) => log_trace_exporter_error(&e),
                 };
+                if let Err(MutexPoisonedError) = self.rx.ack_export() {
+                    break;
+                }
             }
             match message {
                 TraceExporterMessage::Shutdown => break,
@@ -857,6 +921,21 @@ mod tests {
         let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         drop(rx);
         assert_eq!(tx.trigger_shutdown(), Err(ExporterError::AlreadyShutdown));
+    }
+
+    #[test]
+    fn test_wait_export_synchronously() {
+        let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
+
+        let gen = tx
+            .add_trace_chunk(vec![empty_span_data(), empty_span_data()])
+            .unwrap();
+        match tx.wait_flush_done(gen, Duration::from_nanos(1)) {
+            Err(ExporterError::TimedOut(_)) => {}
+            _ => panic!("wait_flush_done should have timed out"),
+        }
+        assert!(rx.ack_export().is_ok());
+        assert!(tx.wait_flush_done(gen, Duration::from_nanos(1)).is_ok())
     }
 
     #[test]
