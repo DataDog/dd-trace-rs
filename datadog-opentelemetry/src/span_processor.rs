@@ -23,7 +23,7 @@ use crate::{
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
-    span_exporter::DatadogExporter,
+    span_exporter::{DatadogExporter, ExporterError},
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
     text_map_propagator::DatadogExtractData,
 };
@@ -32,8 +32,8 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt, TraceState},
     Key, KeyValue, SpanId, TraceFlags, TraceId,
 };
-use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::{error::OTelSdkError, trace::SpanData};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 #[derive(Debug)]
@@ -559,14 +559,22 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
-            dd_error!(
-                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
-            );
+            match e {
+                ExporterError::Panic(p) => {
+                    dd_error!("DatadogSpanProcessor.on_end message='Failed to export trace chunk' operation='DatadogExporter.export_chunk_no_wait' panic='{}'", p)
+                }
+                _ => dd_debug!(
+                    "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
+                    exporter_error_to_otel(&e, "export_chunk_no_wait")
+                ),
+            }
         }
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        self.span_exporter.force_flush()
+        self.span_exporter
+            .force_flush()
+            .map_err(|e| exporter_error_to_otel(&e, "force_flush"))
     }
 
     fn shutdown_with_timeout(
@@ -587,14 +595,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // Wait fot all tasks to finish, keeping in mind how much time is left
         // since the beginning of the call
         let left = deadline.saturating_duration_since(std::time::Instant::now());
-        self.span_exporter
-            .wait_for_shutdown(left)
-            .map_err(|e| match e {
-                opentelemetry_sdk::error::OTelSdkError::Timeout(_) => {
-                    opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                }
+        self.span_exporter.wait_for_shutdown(left).map_err(|e| {
+            let e = match e {
+                ExporterError::TimedOut(_) => ExporterError::TimedOut(timeout),
                 _ => e,
-            })?;
+            };
+            exporter_error_to_otel(&e, "wait_for_shutdown")
+        })?;
 
         if let Some(rc_client_handle) = &self.rc_client_handle {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
@@ -637,6 +644,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         let dd_resource = create_dd_resource(resource.clone(), &self.config);
         if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
+            let e = exporter_error_to_otel(&e, "set_resource");
             dd_error!(
                 "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
             );
@@ -657,6 +665,22 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             self.config.set_calculated_service_name(service_name);
         }
         init_telemetry(&self.config);
+    }
+}
+
+fn exporter_error_to_otel(e: &ExporterError, operation: &str) -> OTelSdkError {
+    match e {
+        ExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        ExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
+        ExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
+            "DatadogExporter.{operation}: the sender mutex was poisonned"
+        )),
+        ExporterError::BatchFull(_) => {
+            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: unexpected error"))
+        }
+        ExporterError::Panic(_) => {
+            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: a panic happened"))
+        }
     }
 }
 
