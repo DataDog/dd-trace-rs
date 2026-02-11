@@ -929,7 +929,7 @@ pub struct Config {
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
 
-    /// Wether we wait for trace chunk to have been flushed to the agent before returning to
+    /// Whether we wait for trace chunk to have been flushed to the agent before returning to
     /// the critical path of the app
     trace_writer_synchronous_write: bool,
     /// How long we wait for the synchronous export to be done

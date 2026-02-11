@@ -44,7 +44,7 @@ pub struct BatchFullError {
 
 /// Error that can occur when the mutex was poisoned.
 ///
-/// The only way to handle it is to log and try to exit cleanly
+/// The only way to handle it is to log and try to return an empty but valid state
 #[derive(Debug)]
 struct MutexPoisonedError;
 
@@ -62,6 +62,7 @@ struct Batch {
     last_flush: std::time::Instant,
     span_count: usize,
     max_buffered_spans: usize,
+    batch_gen: BatchGeneration,
     /// Configuration for service discovery via remote config
     config: Arc<Config>,
 }
@@ -72,10 +73,13 @@ const PRE_ALLOCATE_CHUNKS: usize = 400;
 
 impl Batch {
     fn new(max_buffered_spans: usize, config: Arc<Config>) -> Self {
+        let mut batch_gen = BatchGeneration::default();
+        batch_gen.incr();
         Self {
             chunks: Vec::with_capacity(PRE_ALLOCATE_CHUNKS),
             last_flush: std::time::Instant::now(),
             span_count: 0,
+            batch_gen,
             max_buffered_spans,
             config,
         }
@@ -139,6 +143,7 @@ impl Batch {
         let chunks = std::mem::replace(&mut self.chunks, Vec::with_capacity(PRE_ALLOCATE_CHUNKS));
         self.span_count = 0;
         self.last_flush = std::time::Instant::now();
+        self.batch_gen.incr();
         chunks
     }
 }
@@ -153,6 +158,13 @@ impl Batch {
 pub struct DatadogExporter {
     trace_exporter: TraceExporterHandle,
     tx: Sender,
+    /// Enables synchronous exports if Some
+    ///
+    /// Each batch in the queue will get a generation associated. Generations are strictly
+    /// incremental and processed in order by the background thread.
+    /// When the background thread processes a batch it will increment it's 'last_flushed_batch'
+    /// and an export can wait until the 'last_flushed_batch' is equal to the batch it added it's
+    /// trace chunks to.
     synchronous_export: Option<Duration>,
 }
 
@@ -353,7 +365,7 @@ fn channel(
     let waiter = Arc::new(Waiter {
         state: Mutex::new(SharedState {
             flush_needed: false,
-            flush_gen: FlushGen::default(),
+            last_flush_generation: BatchGeneration::default(),
             shutdown_needed: false,
             has_shutdown: false,
             batch: Batch::new(max_number_of_spans, config),
@@ -385,7 +397,11 @@ impl Drop for Sender {
 }
 
 impl Sender {
-    fn wait_flush_done(&self, flush_gen: FlushGen, timeout: Duration) -> Result<(), ExporterError> {
+    fn wait_flush_done(
+        &self,
+        flush_gen: BatchGeneration,
+        timeout: Duration,
+    ) -> Result<(), ExporterError> {
         if timeout.is_zero() {
             return Err(ExporterError::TimedOut(Duration::ZERO));
         }
@@ -394,31 +410,13 @@ impl Sender {
             .waiter
             .notifier
             .wait_timeout_while(state, timeout, |state| {
-                state.flush_gen == flush_gen && !state.has_shutdown
+                state.last_flush_generation < flush_gen && !state.has_shutdown
             })
             .map_err(|_| ExporterError::MutexPoisoned)?;
         if res.timed_out() {
             return Err(ExporterError::TimedOut(timeout));
         }
         Ok(())
-
-        // let deadline = Instant::now() + timeout;
-        // let mut leftover = timeout;
-        // while state.flush_gen == flush_gen && !state.has_shutdown {
-        //     let res;
-        //     (state, res) = self
-        //         .waiter
-        //         .notifier
-        //         .wait_timeout(state, leftover)
-        //         .map_err(|_| ExporterError::MutexPoisoned)?;
-        //     if res.timed_out() {
-        //         return Err(ExporterError::TimedOut(timeout));
-        //     }
-        //     leftover = deadline
-        //         .checked_duration_since(Instant::now())
-        //         .unwrap_or(Duration::ZERO);
-        // }
-        // Ok(())
     }
 
     fn get_state(&self) -> Result<MutexGuard<'_, SharedState>, ExporterError> {
@@ -436,7 +434,7 @@ impl Sender {
         Ok(state)
     }
 
-    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<FlushGen, ExporterError> {
+    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<BatchGeneration, ExporterError> {
         let mut state = self.get_running_state()?;
         let chunk_len = chunk.len();
         if let Err(e @ BatchFullError { spans_dropped }) = state.batch.add_trace_chunk(chunk) {
@@ -444,7 +442,7 @@ impl Sender {
             return Err(ExporterError::BatchFull(e));
         }
         state.metrics.spans_queued += chunk_len;
-        let gen = state.flush_gen;
+        let gen = state.batch.batch_gen;
         if state.batch.span_count() > self.flush_trigger_number_of_spans || self.synchronous_write {
             state.flush_needed = true;
             self.waiter.notify_all(state);
@@ -488,23 +486,6 @@ impl Sender {
             return Err(ExporterError::TimedOut(timeout));
         }
         Ok(())
-        // let deadline = Instant::now() + timeout;
-        // let mut leftover = timeout;
-        // while !state.has_shutdown {
-        //     let res;
-        //     (state, res) = self
-        //         .waiter
-        //         .notifier
-        //         .wait_timeout_while(state, leftover)
-        //         .map_err(|_| ExporterError::MutexPoisoned)?;
-        //     if res.timed_out() {
-        //         return Err(ExporterError::TimedOut(timeout));
-        //     }
-        //     leftover = deadline
-        //         .checked_duration_since(Instant::now())
-        //         .unwrap_or(Duration::ZERO);
-        // }
-        // Ok(())
     }
 }
 
@@ -568,16 +549,16 @@ impl Receiver {
 
     fn ack_export(&self) -> Result<(), MutexPoisonedError> {
         let mut state = self.waiter.state.lock().map_err(|_| MutexPoisonedError)?;
-        state.flush_gen.incr();
+        state.last_flush_generation.incr();
         self.waiter.notify_all(state);
         Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct FlushGen(usize);
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+struct BatchGeneration(usize);
 
-impl FlushGen {
+impl BatchGeneration {
     fn incr(&mut self) {
         self.0 = self.0.wrapping_add(1);
     }
@@ -585,7 +566,7 @@ impl FlushGen {
 
 struct SharedState {
     flush_needed: bool,
-    flush_gen: FlushGen,
+    last_flush_generation: BatchGeneration,
     shutdown_needed: bool,
     has_shutdown: bool,
     batch: Batch,
