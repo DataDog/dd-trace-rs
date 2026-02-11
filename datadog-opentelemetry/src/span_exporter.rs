@@ -16,11 +16,7 @@ use libdd_data_pipeline::trace_exporter::{
     error::{self as trace_exporter_error, TraceExporterError},
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
-use opentelemetry_sdk::{
-    error::{OTelSdkError, OTelSdkResult},
-    trace::SpanData,
-    Resource,
-};
+use opentelemetry_sdk::{trace::SpanData, Resource};
 
 /// A reasonable amount of time that shouldn't impact the app while allowing
 /// the leftover data to be almost always flushed
@@ -45,7 +41,7 @@ struct TraceChunk {
 ///
 /// The added spans will be dropped.
 #[derive(Debug, PartialEq, Eq)]
-struct BatchFullError {
+pub struct BatchFullError {
     spans_dropped: usize,
 }
 
@@ -55,11 +51,12 @@ struct BatchFullError {
 struct MutexPoisonedError;
 
 #[derive(Debug, PartialEq, Eq)]
-enum SenderError {
+pub enum ExporterError {
     AlreadyShutdown,
-    TimedOut,
+    TimedOut(std::time::Duration),
     MutexPoisoned,
     BatchFull(BatchFullError),
+    Panic(String),
 }
 
 struct Batch {
@@ -210,62 +207,47 @@ impl DatadogExporter {
         Self { trace_exporter, tx }
     }
 
-    pub fn export_chunk_no_wait(&self, span_data: Vec<SpanData>) -> OTelSdkResult {
+    pub fn export_chunk_no_wait(&self, span_data: Vec<SpanData>) -> Result<(), ExporterError> {
         let chunk_len = span_data.len();
         if chunk_len == 0 {
             return Ok(());
         }
 
         match self.tx.add_trace_chunk(span_data) {
-            Err(SenderError::AlreadyShutdown) => {
+            Err(ExporterError::AlreadyShutdown) => {
                 self.join()?;
-                Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter.export_chunk_no_wait: trace exporter has already shutdown"
-                        .to_string(),
-                ))
+                Err(ExporterError::AlreadyShutdown)
             }
-            Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter.export_chunk_no_wait: failed to add trace chunk: {e:?}",
-            ))),
+            Err(e) => Err(e),
             Ok(()) => Ok(()),
         }
     }
 
-    pub fn set_resource(&self, resource: Resource) -> OTelSdkResult {
+    pub fn set_resource(&self, resource: Resource) -> Result<(), ExporterError> {
         match self.tx.set_resource(resource) {
-            Err(SenderError::AlreadyShutdown) => {
+            Err(ExporterError::AlreadyShutdown) => {
                 self.join()?;
-                Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter.set_resource: trace exporter has already shutdown".to_string(),
-                ))
+                Err(ExporterError::AlreadyShutdown)
             }
-            Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter.set_resource: failed to set resource: {e:?}",
-            ))),
-            Ok(()) => Ok(()),
+            e => e,
         }
     }
 
-    pub fn force_flush(&self) -> OTelSdkResult {
+    pub fn force_flush(&self) -> Result<(), ExporterError> {
         match self.tx.trigger_flush() {
-            Err(SenderError::AlreadyShutdown) => {
+            Err(ExporterError::AlreadyShutdown) => {
                 self.join()?;
-                Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter.force_flush: trace exporter has already shutdown".to_string(),
-                ))
+                Err(ExporterError::AlreadyShutdown)
             }
-            Err(e) => Err(OTelSdkError::InternalFailure(format!(
-                "DatadogExporter.force_flush: failed to trigger flush: {e:?}",
-            ))),
-            Ok(()) => Ok(()),
+            e => e,
         }
     }
 
     pub fn trigger_shutdown(&self) {
-        use SenderError::*;
+        use ExporterError::*;
         match self.tx.trigger_shutdown() {
             Err(AlreadyShutdown | MutexPoisoned) => {}
-            Err(e @ (TimedOut | BatchFull(_))) => {
+            Err(e @ (TimedOut(_) | BatchFull(_) | Panic(_))) => {
                 // This should logically never happen, so log an error and continue
                 dd_error!(
                     "DatadogExporter.trigger_shutdown: unexpected error failed to trigger shutdown: {:?}",
@@ -276,36 +258,27 @@ impl DatadogExporter {
         }
     }
 
-    pub fn wait_for_shutdown(&self, timeout: Duration) -> OTelSdkResult {
-        use SenderError::*;
+    pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), ExporterError> {
+        use ExporterError::*;
         match self.tx.wait_shutdown_done(timeout) {
             Err(AlreadyShutdown) => {
                 self.join()?;
-                Err(OTelSdkError::InternalFailure(
-                    "DatadogExporter.wait_for_shutdown: trace exporter has already shutdown"
-                        .to_string(),
-                ))
+                Err(ExporterError::AlreadyShutdown)
             }
-            Err(TimedOut) => Err(OTelSdkError::Timeout(timeout)),
-            Err(BatchFull(_)) => Err(OTelSdkError::InternalFailure(
-                "DatadogExporter.wait_for_shutdown: unexpected error waiting for shutdown"
-                    .to_string(),
-            )),
             Ok(()) | Err(MutexPoisoned) => self.join(),
+            e => e,
         }
     }
 
-    fn join(&self) -> OTelSdkResult {
-        self.trace_exporter
+    fn join(&self) -> Result<(), ExporterError> {
+        let handle = self
+            .trace_exporter
             .handle
             .lock()
-            .map_err(|_| {
-                OTelSdkError::InternalFailure(
-                    "DatadogExporter.join: can't access worker task join handle".to_string(),
-                )
-            })?
-            .take()
-            .ok_or(OTelSdkError::AlreadyShutdown)?
+            .map_err(|_| ExporterError::MutexPoisoned)?
+            .take();
+        handle
+            .ok_or(ExporterError::AlreadyShutdown)?
             .join()
             .map_err(|p| {
                 if let Some(panic) = p
@@ -313,25 +286,18 @@ impl DatadogExporter {
                     .map(String::as_str)
                     .or_else(|| p.downcast_ref::<&str>().copied())
                 {
-                    OTelSdkError::InternalFailure(format!(
-                        "DatadogExporter.join: worker panicked: {}",
-                        panic
-                    ))
+                    ExporterError::Panic(panic.to_string())
                 } else {
-                    OTelSdkError::InternalFailure(
-                        "DatadogExporter.join: worker panicked: error message unknown".to_string(),
-                    )
+                    ExporterError::Panic("error message unknown".to_string())
                 }
             })?
-            .map_err(|e| {
-                log_trace_exporter_error(&e);
-                match e {
-                    TraceExporterError::Shutdown(
-                        trace_exporter_error::ShutdownError::TimedOut(t),
-                    ) => OTelSdkError::Timeout(t),
-                    _ => OTelSdkError::InternalFailure(format!(
-                        "DatadogExporter.join: worker exited with error: {e}"
-                    )),
+            .or_else(|e| match e {
+                TraceExporterError::Shutdown(trace_exporter_error::ShutdownError::TimedOut(t)) => {
+                    Err(ExporterError::TimedOut(t))
+                }
+                e => {
+                    log_trace_exporter_error(&e);
+                    Ok(())
                 }
             })
     }
@@ -405,27 +371,27 @@ impl Drop for Sender {
 }
 
 impl Sender {
-    fn get_state(&self) -> Result<MutexGuard<'_, SharedState>, SenderError> {
+    fn get_state(&self) -> Result<MutexGuard<'_, SharedState>, ExporterError> {
         self.waiter
             .state
             .lock()
-            .map_err(|_| SenderError::MutexPoisoned)
+            .map_err(|_| ExporterError::MutexPoisoned)
     }
 
-    fn get_running_state(&self) -> Result<MutexGuard<'_, SharedState>, SenderError> {
+    fn get_running_state(&self) -> Result<MutexGuard<'_, SharedState>, ExporterError> {
         let state = self.get_state()?;
         if state.has_shutdown {
-            return Err(SenderError::AlreadyShutdown);
+            return Err(ExporterError::AlreadyShutdown);
         }
         Ok(state)
     }
 
-    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<(), SenderError> {
+    fn add_trace_chunk(&self, chunk: Vec<SpanData>) -> Result<(), ExporterError> {
         let mut state = self.get_running_state()?;
         let chunk_len = chunk.len();
         if let Err(e @ BatchFullError { spans_dropped }) = state.batch.add_trace_chunk(chunk) {
             state.metrics.spans_dropped_full_buffer += spans_dropped;
-            return Err(SenderError::BatchFull(e));
+            return Err(ExporterError::BatchFull(e));
         }
         state.metrics.spans_queued += chunk_len;
 
@@ -437,30 +403,30 @@ impl Sender {
     }
 
     /// Set the otel resource to be used for the next trace mapping
-    fn set_resource(&self, resource: Resource) -> Result<(), SenderError> {
+    fn set_resource(&self, resource: Resource) -> Result<(), ExporterError> {
         let mut state = self.get_running_state()?;
         state.set_resource = Some(resource);
         self.waiter.notify_all(state);
         Ok(())
     }
 
-    fn trigger_flush(&self) -> Result<(), SenderError> {
+    fn trigger_flush(&self) -> Result<(), ExporterError> {
         let mut state = self.get_running_state()?;
         state.flush_needed = true;
         self.waiter.notify_all(state);
         Ok(())
     }
 
-    fn trigger_shutdown(&self) -> Result<(), SenderError> {
+    fn trigger_shutdown(&self) -> Result<(), ExporterError> {
         let mut state = self.get_running_state()?;
         state.shutdown_needed = true;
         self.waiter.notify_all(state);
         Ok(())
     }
 
-    fn wait_shutdown_done(&self, timeout: Duration) -> Result<(), SenderError> {
+    fn wait_shutdown_done(&self, timeout: Duration) -> Result<(), ExporterError> {
         if timeout.is_zero() {
-            return Err(SenderError::TimedOut);
+            return Err(ExporterError::TimedOut(Duration::ZERO));
         }
         let mut state = self.get_state()?;
         let deadline = Instant::now() + timeout;
@@ -471,9 +437,9 @@ impl Sender {
                 .waiter
                 .notifier
                 .wait_timeout(state, leftover)
-                .map_err(|_| SenderError::TimedOut)?;
+                .map_err(|_| ExporterError::TimedOut(timeout))?;
             if res.timed_out() {
-                return Err(SenderError::MutexPoisoned);
+                return Err(ExporterError::MutexPoisoned);
             }
             leftover = deadline
                 .checked_duration_since(Instant::now())
@@ -756,7 +722,7 @@ mod tests {
 
     use crate::{
         configuration::Config,
-        span_exporter::{BatchFullError, SenderError},
+        span_exporter::{BatchFullError, ExporterError},
     };
 
     use super::channel;
@@ -804,7 +770,9 @@ mod tests {
 
         assert_eq!(
             tx.add_trace_chunk(vec![empty_span_data(); 4]),
-            Err(SenderError::BatchFull(BatchFullError { spans_dropped: 4 }))
+            Err(ExporterError::BatchFull(BatchFullError {
+                spans_dropped: 4
+            }))
         );
 
         let (message, chunks) = rx
@@ -888,7 +856,7 @@ mod tests {
     fn test_already_shutdown() {
         let (tx, rx) = channel(2, 4, Arc::new(Config::builder().build()));
         drop(rx);
-        assert_eq!(tx.trigger_shutdown(), Err(SenderError::AlreadyShutdown));
+        assert_eq!(tx.trigger_shutdown(), Err(ExporterError::AlreadyShutdown));
     }
 
     #[test]
