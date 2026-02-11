@@ -143,7 +143,9 @@ impl Batch {
         let chunks = std::mem::replace(&mut self.chunks, Vec::with_capacity(PRE_ALLOCATE_CHUNKS));
         self.span_count = 0;
         self.last_flush = std::time::Instant::now();
-        self.batch_gen.incr();
+        if !chunks.is_empty() {
+            self.batch_gen.incr();
+        }
         chunks
     }
 }
