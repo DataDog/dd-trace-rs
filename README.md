@@ -26,12 +26,20 @@ The `datadog-opentelemetry` crate provides an easy to use override for the rust 
 Add to you Cargo.toml
 
 ```toml
-datadog-opentelemetry = { version = "0.2.1" }
+datadog-opentelemetry = { version = "0.3.0" }
 ```
 
 ### Tracing
 
 To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+
+### Metrics
+
+The library supports OpenTelemetry Metrics API for collecting and exporting metrics. For more details on using metrics, see the [Datadog OpenTelemetry Metrics documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
+
+### Logs
+
+The library supports OpenTelemetry Logs API for collecting and exporting logs. For more details on using logs, see the [Datadog OpenTelemetry Logs documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
 
 ### Initialization
 
@@ -104,7 +112,7 @@ let tracer_provider = datadog_opentelemetry::tracing()
         .init();
 ```
 
-For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.2.1/datadog_opentelemetry/).
+For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.3.0/datadog_opentelemetry/).
 
 * Through env variables
 
