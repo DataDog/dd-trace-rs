@@ -7,8 +7,8 @@ use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::Temporality;
 use std::time::Duration;
 
+use crate::configuration::OtlpProtocol;
 use crate::core::telemetry;
-use crate::otlp_utils::OtlpProtocol;
 
 #[derive(Debug)]
 pub struct TelemetryTrackingExporter<E> {

@@ -9,10 +9,10 @@ use opentelemetry_otlp::{MetricExporter, WithExportConfig};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 
+use crate::configuration::OtlpProtocol;
 use crate::core::configuration::Config;
 use crate::otlp_utils::{
     build_otel_resource, get_otlp_metrics_endpoint, get_otlp_metrics_timeout, get_otlp_protocol,
-    OtlpProtocol,
 };
 use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 
@@ -26,19 +26,6 @@ pub fn create_meter_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,
-) -> SdkMeterProvider {
-    create_meter_provider_with_protocol(config, resource, export_interval, None)
-}
-
-/// Creates a meter provider with the given configuration and protocol override.
-///
-/// Returns a no-op meter provider if metrics are disabled or if initialization fails.
-/// Errors are logged but not returned to ensure metrics functionality is always available.
-pub(crate) fn create_meter_provider_with_protocol(
-    config: Arc<Config>,
-    resource: Option<Resource>,
-    export_interval: Option<Duration>,
-    protocol: Option<OtlpProtocol>,
 ) -> SdkMeterProvider {
     let metrics_enabled = config.metrics_otel_enabled();
     if !metrics_enabled {
@@ -58,7 +45,7 @@ pub(crate) fn create_meter_provider_with_protocol(
 
     #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
     {
-        let protocol = protocol.unwrap_or_else(|| get_otlp_protocol(&config));
+        let protocol = get_otlp_protocol(&config);
 
         if crate::otlp_utils::is_unsupported_protocol(protocol) {
             dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Metrics will not be exported. Use 'grpc' or 'http/protobuf' instead.");
