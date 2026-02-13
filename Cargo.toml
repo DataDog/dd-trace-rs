@@ -6,6 +6,7 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
+    "dd-trace-examples",
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
@@ -41,7 +42,7 @@ opentelemetry-otlp = { version = "0.31.0", features = [
     "metrics",
     "logs",
 ], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.31.0", features = [
+opentelemetry-semantic-conventions = { version = "0.30.0", features = [
     "semconv_experimental",
 ] }
 tokio = { version = "1.44.1" }
