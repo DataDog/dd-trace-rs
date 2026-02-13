@@ -1,11 +1,35 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 use opentelemetry_sdk::Resource;
 
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 use crate::{configuration::OtlpProtocol, core::configuration::Config};
 
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 
 /// Builds the OpenTelemetry Resource by merging Datadog config with provided resource.
@@ -15,6 +39,12 @@ pub(crate) const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 /// 2. Provided resource attributes
 /// 3. Global tags (with DD -> OTel key mapping)
 /// 4. OTel resource attributes from config
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -> Resource {
     let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
 
@@ -86,10 +116,17 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
 /// Validates that the protocol is not HttpJson (which is unsupported).
 ///
 /// Returns `true` if protocol is unsupported (HttpJson), `false` otherwise.
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) fn is_unsupported_protocol(protocol: OtlpProtocol) -> bool {
     matches!(protocol, OtlpProtocol::HttpJson)
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
     config
         .otlp_metrics_protocol()
@@ -97,6 +134,7 @@ pub(crate) fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
         .unwrap_or(OtlpProtocol::Grpc)
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_metrics_endpoint(
     config: &Config,
     protocol: &OtlpProtocol,
@@ -126,6 +164,7 @@ pub(crate) fn get_otlp_metrics_endpoint(
     Ok(format!("http://{host}:{port}"))
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     let timeout = config.otlp_metrics_timeout();
     if timeout != 0 {
@@ -134,6 +173,7 @@ pub(crate) fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     config.otlp_timeout()
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_protocol(config: &Config) -> OtlpProtocol {
     config
         .otlp_logs_protocol()
@@ -141,6 +181,7 @@ pub(crate) fn get_otlp_logs_protocol(config: &Config) -> OtlpProtocol {
         .unwrap_or(OtlpProtocol::Grpc)
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_endpoint(
     config: &Config,
     protocol: &OtlpProtocol,
@@ -170,6 +211,7 @@ pub(crate) fn get_otlp_logs_endpoint(
     Ok(format!("http://{host}:{port}"))
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_timeout(config: &Config) -> u32 {
     let timeout = config.otlp_logs_timeout();
     if timeout != 0 {

@@ -43,11 +43,15 @@ jobs:
           rust_version: ${{ matrix.rust_version }}
       - name: Install ${{ matrix.rust_version }} toolchain and clippy
         run: rustup install ${{ matrix.rust_version }} && rustup default ${{ matrix.rust_version }} && rustup component add clippy
-      - name: Run clippy on ${{ matrix.platform }} ${{ matrix.rust_version }} 
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # v2.49.15
+        with:
+          tool: cargo-hack@0.6.42
+      - name: Run clippy on ${{ matrix.platform }} ${{ matrix.rust_version }}
         shell: bash
         run: |
           # shellcheck disable=SC2046
-          cargo clippy --locked --workspace --all-targets --all-features -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+          cargo hack --each-feature clippy -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
   licensecheck:
     runs-on: ubuntu-latest
     name: "Presence of licence headers"

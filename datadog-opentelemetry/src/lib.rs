@@ -200,14 +200,18 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod logs_reader;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod metrics_reader;
 mod otlp_utils;
 mod sampler;
 mod span_exporter;
 mod span_processor;
 mod spans_metrics;
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod telemetry_logs_exporter;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
@@ -535,15 +539,18 @@ pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, Datad
     )
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 /// Builder for Datadog Metrics with OTLP transport
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub struct DatadogMetricsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
     export_interval: Option<std::time::Duration>,
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 impl DatadogMetricsBuilder {
     /// Sets the configuration for the metrics builder.
     pub fn with_config(mut self, config: Config) -> Self {

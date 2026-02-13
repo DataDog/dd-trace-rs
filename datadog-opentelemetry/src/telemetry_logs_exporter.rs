@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+
 use opentelemetry_otlp::LogExporter;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::LogBatch;
