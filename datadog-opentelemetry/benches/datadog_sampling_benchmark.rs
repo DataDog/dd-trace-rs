@@ -397,14 +397,15 @@ fn bench_datadog_sampling<M: criterion::measurement::Measurement + MeasurementNa
     let configs = create_benchmark_configs();
 
     for config in configs {
-        let sampler = DatadogSampler::new(config.rules, -1, Arc::new(RwLock::new(config.resource)));
+        let sampler = DatadogSampler::new(config.rules, -1);
+        let resource = Arc::new(RwLock::new(config.resource));
         let data = OtelSamplingData::new(
             black_box(config.is_parent_sampled),
             black_box(&config.trace_id),
             black_box(config.span_name),
             black_box(config.span_kind.clone()),
             black_box(&config.attributes),
-            black_box(sampler.resource()),
+            black_box(resource.as_ref()),
         );
 
         c.bench_function(
