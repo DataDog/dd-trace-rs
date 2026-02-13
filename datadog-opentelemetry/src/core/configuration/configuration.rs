@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
+use std::fmt::Display;
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, sync::OnceLock};
 
 use rustc_version_runtime::version;
 
+use crate::core::configuration::sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -83,91 +85,10 @@ impl Default for RemoteConfigCallbacks {
         Self::new()
     }
 }
-
-/// Configuration for a single sampling rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SamplingRuleConfig {
-    /// The sample rate to apply (0.0-1.0)
-    pub sample_rate: f64,
-
-    /// Optional service name pattern to match
-    #[serde(default)]
-    pub service: Option<String>,
-
-    /// Optional span name pattern to match
-    #[serde(default)]
-    pub name: Option<String>,
-
-    /// Optional resource name pattern to match
-    #[serde(default)]
-    pub resource: Option<String>,
-
-    /// Tags that must match (key-value pairs)
-    #[serde(default)]
-    pub tags: HashMap<String, String>,
-
-    /// Where this rule comes from (customer, dynamic, default)
-    // TODO(paullgdc): this value should not be definable by customers
-    #[serde(default = "default_provenance")]
-    pub provenance: String,
-}
-
-impl Display for SamplingRuleConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::json!(self))
-    }
-}
-
-fn default_provenance() -> String {
-    "default".to_string()
-}
-
 pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
-
-#[derive(Debug, Default, Clone, PartialEq)]
-struct ParsedSamplingRules {
-    rules: Vec<SamplingRuleConfig>,
-}
-
-impl Deref for ParsedSamplingRules {
-    type Target = [SamplingRuleConfig];
-
-    fn deref(&self) -> &Self::Target {
-        &self.rules
-    }
-}
-
-impl From<ParsedSamplingRules> for Vec<SamplingRuleConfig> {
-    fn from(parsed: ParsedSamplingRules) -> Self {
-        parsed.rules
-    }
-}
-
-impl FromStr for ParsedSamplingRules {
-    type Err = serde_json::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.trim().is_empty() {
-            return Ok(ParsedSamplingRules::default());
-        }
-        // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
-        let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
-        Ok(ParsedSamplingRules { rules: rules_vec })
-    }
-}
-
-impl Display for ParsedSamplingRules {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string(&self.rules).unwrap_or_default()
-        )
-    }
-}
 
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2459,6 +2380,7 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use libdd_telemetry::data::ConfigurationOrigin;
+    use std::collections::HashMap;
 
     use super::Config;
     use super::*;
