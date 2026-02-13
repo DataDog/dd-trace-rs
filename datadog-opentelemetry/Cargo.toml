@@ -107,3 +107,13 @@ path = "benches/inject_benchmark.rs"
 name = "extract_benchmark"
 harness = false
 path = "benches/extract_benchmark.rs"
+
+[[bench]]
+name = "datadog_sampling_benchmark"
+harness = false
+path = "benches/datadog_sampling_benchmark.rs"
+
+[[bench]]
+name = "otel_sampling_benchmark"
+harness = false
+path = "benches/otel_sampling_benchmark.rs"

@@ -188,7 +188,11 @@ pub mod mappings;
 #[cfg(feature = "test-utils")]
 pub mod propagation;
 #[cfg(feature = "test-utils")]
+pub mod sampler;
+#[cfg(feature = "test-utils")]
 pub mod sampling;
+#[cfg(feature = "test-utils")]
+pub mod span_processor;
 
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod core;
@@ -197,7 +201,11 @@ pub(crate) mod mappings;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod propagation;
 #[cfg(not(feature = "test-utils"))]
+mod sampler;
+#[cfg(not(feature = "test-utils"))]
 pub(crate) mod sampling;
+#[cfg(not(feature = "test-utils"))]
+mod span_processor;
 
 mod ddtrace_transform;
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
@@ -205,9 +213,7 @@ mod logs_reader;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod metrics_reader;
 mod otlp_utils;
-mod sampler;
 mod span_exporter;
-mod span_processor;
 mod spans_metrics;
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod telemetry_logs_exporter;
@@ -418,7 +424,11 @@ fn make_tracer(
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
         // Runtime updates come via config callback, so no need for shared config
-        let sampler = Sampler::new(config.clone(), resource_slot.clone(), registry.clone());
+        let sampler = Sampler::new(
+            config.clone(),
+            resource_slot.clone(),
+            Some(registry.clone()),
+        );
 
         let agent_response_handler = sampler.on_agent_response();
 

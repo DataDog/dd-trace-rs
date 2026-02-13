@@ -11,7 +11,12 @@ pub(crate) mod otel_mappings;
 pub(crate) mod rate_limiter;
 pub(crate) mod rate_sampler;
 pub(crate) mod rules_sampler;
+mod types;
 pub(crate) mod utils;
 
 // Re-export key public types
 pub use datadog_sampler::{DatadogSampler, SamplingRule, SamplingRulesCallback};
+pub use otel_mappings::{OtelAttributeFactory, OtelSamplingData};
+pub use types::{
+    AttributeFactory, AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike,
+};
