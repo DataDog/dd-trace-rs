@@ -25,6 +25,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct Sampler {
     sampler: DatadogSampler,
+    resource: Arc<RwLock<Resource>>,
     trace_registry: Option<TraceRegistry>,
     cfg: Arc<Config>,
 }
@@ -45,10 +46,11 @@ impl Sampler {
         trace_registry: Option<TraceRegistry>,
     ) -> Self {
         let rules = SamplingRule::from_configs(cfg.trace_sampling_rules().to_vec());
-        let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit(), resource);
+        let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit());
         Self {
             cfg,
             sampler,
+            resource,
             trace_registry,
         }
     }
@@ -105,7 +107,7 @@ impl ShouldSample for Sampler {
             name,
             span_kind.clone(),
             attributes,
-            self.sampler.resource(),
+            self.resource.as_ref(),
         );
         let result = self.sampler.sample(&data);
         let trace_propagation_data = if let Some(trace_root_info) =
