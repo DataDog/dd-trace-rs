@@ -25,5 +25,7 @@ pub(crate) mod remote_config;
 mod sources;
 mod supported_configurations;
 
-pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};
+pub use configuration::{
+    Config, ConfigBuilder, OtlpProtocol, SamplingRuleConfig, TracePropagationStyle,
+};
 pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};

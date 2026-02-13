@@ -5,8 +5,8 @@ use opentelemetry_otlp::LogExporter;
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::logs::LogBatch;
 
+use crate::configuration::OtlpProtocol;
 use crate::core::telemetry;
-use crate::otlp_utils::OtlpProtocol;
 
 #[derive(Debug)]
 pub struct TelemetryTrackingLogExporter {

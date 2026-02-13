@@ -9,11 +9,12 @@ use opentelemetry_otlp::{LogExporter, WithExportConfig};
 use opentelemetry_sdk::logs::SdkLoggerProvider;
 use opentelemetry_sdk::Resource;
 
+use crate::configuration::OtlpProtocol;
 use crate::core::configuration::Config;
 use crate::dd_warn;
 use crate::otlp_utils::{
     build_otel_resource, get_otlp_logs_endpoint, get_otlp_logs_protocol, get_otlp_logs_timeout,
-    is_unsupported_protocol, OtlpProtocol,
+    is_unsupported_protocol,
 };
 use crate::telemetry_logs_exporter::TelemetryTrackingLogExporter;
 
@@ -24,18 +25,6 @@ use crate::telemetry_logs_exporter::TelemetryTrackingLogExporter;
 pub fn create_logger_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
-) -> SdkLoggerProvider {
-    create_logger_provider_with_protocol(config, resource, None)
-}
-
-/// Creates a logger provider with the given configuration and protocol override.
-///
-/// Returns a no-op logger provider if logs are disabled or if initialization fails.
-/// Errors are logged but not returned to ensure logs functionality is always available.
-pub(crate) fn create_logger_provider_with_protocol(
-    config: Arc<Config>,
-    resource: Option<Resource>,
-    protocol: Option<OtlpProtocol>,
 ) -> SdkLoggerProvider {
     if !config.logs_otel_enabled() {
         return SdkLoggerProvider::builder().build();
@@ -54,7 +43,7 @@ pub(crate) fn create_logger_provider_with_protocol(
 
     #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
     {
-        let protocol = protocol.unwrap_or_else(|| get_otlp_logs_protocol(&config));
+        let protocol = get_otlp_logs_protocol(&config);
 
         if is_unsupported_protocol(protocol) {
             dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Logs will not be exported. Use 'grpc' or 'http/protobuf' instead.");
