@@ -14,7 +14,6 @@ pub type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [SamplingRuleConfig]) + 
 
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 use super::agent_service_sampler::{AgentRates, ServicesSampler};
 // Import the attr constants
@@ -266,18 +265,11 @@ pub struct DatadogSampler {
 
     /// Rate limiter for limiting the number of spans per second
     rate_limiter: RateLimiter,
-
-    /// Resource with service information, wrapped in Arc<RwLock<>> for sharing
-    resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
 }
 
 impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
-    pub fn new(
-        rules: Vec<SamplingRule>,
-        rate_limit: i32,
-        resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
-    ) -> Self {
+    pub fn new(rules: Vec<SamplingRule>, rate_limit: i32) -> Self {
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit, None);
 
@@ -285,13 +277,7 @@ impl DatadogSampler {
             rules: RulesSampler::new(rules),
             service_samplers: ServicesSampler::default(),
             rate_limiter: limiter,
-            resource,
         }
-    }
-
-    /// Returns a reference to the resource
-    pub fn resource(&self) -> &RwLock<opentelemetry_sdk::Resource> {
-        self.resource.as_ref()
     }
 
     // used for tests
@@ -601,6 +587,7 @@ mod tests {
         resource::SERVICE_NAME,
         trace::{HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME},
     };
+    use std::sync::{Arc, RwLock};
 
     fn create_empty_resource() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder_empty().build()
@@ -774,32 +761,32 @@ mod tests {
     #[test]
     fn test_datadog_sampler_creation() {
         // Create a sampler with default config
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
         assert!(sampler.rules.is_empty());
         assert!(sampler.service_samplers.is_empty());
 
         // Create a sampler with rules
         let rule = SamplingRule::new(0.5, None, None, None, None, None);
-        let sampler_with_rules = DatadogSampler::new(vec![rule], 200, create_empty_resource_arc());
+        let sampler_with_rules = DatadogSampler::new(vec![rule], 200);
         assert_eq!(sampler_with_rules.rules.len(), 1);
     }
 
     #[test]
     fn test_service_key_generation() {
-        // Use create_resource to initialize the sampler with a service name in its resource
+        // Create resource with test service name
         let test_service_name = "test-service".to_string();
-        let sampler_resource = create_resource(test_service_name.clone());
-        let sampler = DatadogSampler::new(vec![], 100, sampler_resource);
+        let resource = create_resource(test_service_name.clone());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Test with service and env
         // The 'service' in create_attributes is not used for the service part of the key,
         // but ENV_TAG is still correctly picked up from attributes.
         let attrs = create_attributes("resource", "production");
-        let res = &sampler.resource.read().unwrap();
+        let res = &resource.read().unwrap();
         let span = PreSampledSpan::new("test-span", SpanKind::Internal, attrs.as_slice(), res);
         assert_eq!(
             sampler.service_key(&span),
-            // Expect the service name from the sampler's resource
+            // Expect the service name from the resource
             format!("service:{test_service_name},env:production")
         );
 
@@ -814,14 +801,14 @@ mod tests {
         );
         assert_eq!(
             sampler.service_key(&span),
-            // Expect the service name from the sampler's resource and an empty env
+            // Expect the service name from the resource and an empty env
             format!("service:{test_service_name},env:")
         );
     }
 
     #[test]
     fn test_update_service_rates() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Update with service rates
         let mut rates = HashMap::new();
@@ -885,18 +872,13 @@ mod tests {
             Some("default".to_string()), // Lowest priority
         );
 
-        // Sampler is mutable to allow resource updates
-        let mut sampler = DatadogSampler::new(
-            vec![rule1.clone(), rule2.clone(), rule3.clone()],
-            100,
-            create_empty_resource_arc(), // Initial resource, will be updated before each check
-        );
+        let sampler = DatadogSampler::new(vec![rule1.clone(), rule2.clone(), rule3.clone()], 100);
 
         // Test with a specific service that should match the first rule (rule1)
         {
-            sampler.resource = create_resource("service1".to_string());
+            let resource = create_resource("service1".to_string());
             let attrs1 = create_attributes("resource_val_for_attr1", "prod");
-            let res = sampler.resource.read().unwrap();
+            let res = resource.read().unwrap();
             let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs1.as_slice(), &res);
             let matching_rule_for_attrs1 = sampler.find_matching_rule(&span);
             assert!(
@@ -910,9 +892,9 @@ mod tests {
 
         // Test with a specific service that should match the second rule (rule2)
         {
-            sampler.resource = create_resource("service2".to_string());
+            let resource = create_resource("service2".to_string());
             let attrs2 = create_attributes("resource_val_for_attr2", "prod");
-            let res = sampler.resource.read().unwrap();
+            let res = resource.read().unwrap();
             let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs2.as_slice(), &res);
             let matching_rule_for_attrs2 = sampler.find_matching_rule(&span);
             assert!(
@@ -926,9 +908,9 @@ mod tests {
 
         // Test with a service that matches the wildcard rule (rule3)
         {
-            sampler.resource = create_resource("service3".to_string());
+            let resource = create_resource("service3".to_string());
             let attrs3 = create_attributes("resource_val_for_attr3", "prod");
-            let res = sampler.resource.read().unwrap();
+            let res = resource.read().unwrap();
             let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs3.as_slice(), &res);
             let matching_rule_for_attrs3 = sampler.find_matching_rule(&span);
             assert!(
@@ -942,9 +924,9 @@ mod tests {
 
         // Test with a service that doesn't match any rule's service pattern
         {
-            sampler.resource = create_resource("other_sampler_service".to_string());
+            let resource = create_resource("other_sampler_service".to_string());
             let attrs4 = create_attributes("resource_val_for_attr4", "prod");
-            let res = sampler.resource.read().unwrap();
+            let res = resource.read().unwrap();
             let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs4.as_slice(), &res);
             let matching_rule_for_attrs4 = sampler.find_matching_rule(&span);
             assert!(
@@ -956,7 +938,7 @@ mod tests {
 
     #[test]
     fn test_get_sampling_mechanism() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Create rules with different provenances
         let rule_customer =
@@ -1198,12 +1180,13 @@ mod tests {
 
     #[test]
     fn test_should_sample_parent_context() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Create empty slices for attributes and links
         let empty_attrs: &[KeyValue] = &[];
         let trace_id = create_trace_id();
         let span_kind = SpanKind::Client;
+        let resource = create_empty_resource_arc();
 
         // Test with sampled parent context
         let data_sampled = create_sampling_data(
@@ -1212,7 +1195,7 @@ mod tests {
             "span",
             span_kind.clone(),
             empty_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result_sampled = sampler.sample(&data_sampled);
 
@@ -1229,7 +1212,7 @@ mod tests {
             "span",
             span_kind,
             empty_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result_not_sampled = sampler.sample(&data_not_sampled);
 
@@ -1252,10 +1235,11 @@ mod tests {
             None,
         );
 
-        let sampler = DatadogSampler::new(vec![rule], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![rule], 100);
 
         let trace_id = create_trace_id();
         let span_kind = SpanKind::Client;
+        let resource = create_empty_resource_arc();
 
         // Test with matching attributes
         let attrs = create_attributes("resource", "prod");
@@ -1265,7 +1249,7 @@ mod tests {
             "span",
             span_kind.clone(),
             attrs.as_slice(),
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1283,7 +1267,7 @@ mod tests {
             "span",
             span_kind,
             attrs_no_match.as_slice(),
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result_no_match = sampler.sample(&data_no_match);
 
@@ -1296,10 +1280,8 @@ mod tests {
 
     #[test]
     fn test_should_sample_with_service_rates() {
-        // Initialize sampler with a default service, e.g., "test-service"
-        // The sampler's own service name will be used for the 'service:' part of the service_key
-        let mut sampler =
-            DatadogSampler::new(vec![], 100, create_resource("test-service".to_string()));
+        // Initialize sampler
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Add service rates for different service+env combinations
         let mut rates = HashMap::new();
@@ -1312,7 +1294,7 @@ mod tests {
         let span_kind = SpanKind::Client;
 
         // Test with attributes that should lead to "service:test-service,env:prod" key
-        // Sampler's resource is already for "test-service"
+        let resource_test_service = create_resource("test-service".to_string());
         let attrs_sample = create_attributes("any_resource_name_matching_env", "prod");
         let data_sample = create_sampling_data(
             None,
@@ -1320,7 +1302,7 @@ mod tests {
             "span_for_test_service",
             span_kind.clone(),
             attrs_sample.as_slice(),
-            sampler.resource.as_ref(),
+            resource_test_service.as_ref(),
         );
         let result_sample = sampler.sample(&data_sample);
         // Expect RecordAndSample because service_key will be "service:test-service,env:prod" ->
@@ -1331,8 +1313,7 @@ mod tests {
         );
 
         // Test with attributes that should lead to "service:other-service,env:prod" key
-        // Update sampler's resource to be "other-service"
-        sampler.resource = create_resource("other-service".to_string());
+        let resource_other_service = create_resource("other-service".to_string());
         let attrs_no_sample = create_attributes("any_resource_name_matching_env", "prod");
         let data_no_sample = create_sampling_data(
             None,
@@ -1340,7 +1321,7 @@ mod tests {
             "span_for_other_service",
             span_kind,
             attrs_no_sample.as_slice(),
-            sampler.resource.as_ref(),
+            resource_other_service.as_ref(),
         );
         let result_no_sample = sampler.sample(&data_no_sample);
         // Expect Drop because service_key will be "service:other-service,env:prod" -> rate 0.0
@@ -1688,14 +1669,11 @@ mod tests {
         );
 
         // Create a sampler with these rules
-        let sampler = DatadogSampler::new(
-            vec![http_rule, db_rule, messaging_rule],
-            100,
-            create_empty_resource_arc(),
-        );
+        let sampler = DatadogSampler::new(vec![http_rule, db_rule, messaging_rule], 100);
 
         // Create a trace ID for testing
         let trace_id = create_trace_id();
+        let resource = create_empty_resource_arc();
 
         // Test cases for different span kinds and attributes
 
@@ -1721,7 +1699,7 @@ mod tests {
             "test-span",
             span_kind_client.clone(),
             &http_client_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1749,7 +1727,7 @@ mod tests {
             "test-span",
             span_kind_server.clone(),
             &http_server_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1776,7 +1754,7 @@ mod tests {
             "test-span",
             span_kind_client, // DB queries use client span kind
             &db_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1810,7 +1788,7 @@ mod tests {
             "test-span",
             span_kind_consumer, // Messaging uses consumer span kind
             &messaging_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1835,7 +1813,7 @@ mod tests {
             "test-span",
             span_kind_internal,
             &internal_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1867,7 +1845,7 @@ mod tests {
             "test-span",
             span_kind_server,
             &server_protocol_attrs,
-            sampler.resource.as_ref(),
+            resource.as_ref(),
         );
         let result = sampler.sample(&data);
 
@@ -1895,7 +1873,7 @@ mod tests {
                 .build(),
         ));
 
-        let sampler = DatadogSampler::new(vec![initial_rule], 100, test_resource);
+        let sampler = DatadogSampler::new(vec![initial_rule], 100);
 
         // Verify initial state
         assert_eq!(sampler.rules.len(), 1);
@@ -1935,7 +1913,7 @@ mod tests {
             KeyValue::new(HTTP_REQUEST_METHOD, "GET"), /* This will make operation name
                                                         * "http.client.request" */
         ];
-        let resource_guard = sampler.resource.read().unwrap();
+        let resource_guard = test_resource.read().unwrap();
         let span = PreSampledSpan::new(
             "test-span",
             SpanKind::Client,
