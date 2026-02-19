@@ -1,13 +1,12 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::configuration::SamplingRuleConfig;
-use crate::sampling::{AttributeLike, SpanProperties, TraceIdLike, ValueLike};
+use crate::constants::pattern::NO_RULE;
+use crate::glob_matcher::GlobMatcher;
+use crate::rate_sampler::RateSampler;
+use crate::sampling_rule_config::SamplingRuleConfig;
+use crate::types::{AttributeLike, SpanProperties, TraceIdLike, ValueLike};
 use std::collections::HashMap;
-
-use super::constants::pattern::NO_RULE;
-use super::glob_matcher::GlobMatcher;
-use super::rate_sampler::RateSampler;
 
 // HTTP status code attribute constants
 const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";

@@ -8,8 +8,68 @@ use crate::mappings::{
     get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
     get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan,
 };
-use crate::sampling::{SamplingData, SpanProperties};
+use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
 use opentelemetry::{Key, KeyValue};
+
+/// Wrapper around OpenTelemetry TraceId for trait implementations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OtelTraceId(opentelemetry::trace::TraceId);
+
+impl TraceIdLike for OtelTraceId {
+    fn to_u128(&self) -> u128 {
+        u128::from_be_bytes(self.0.to_bytes())
+    }
+}
+
+/// Transparent wrapper around OpenTelemetry Value for trait implementations
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct OtelValue(opentelemetry::Value);
+
+impl OtelValue {
+    /// Convert a reference to opentelemetry::Value to a reference to OtelValue
+    /// This is safe because OtelValue is repr(transparent)
+    fn from_ref(value: &opentelemetry::Value) -> &Self {
+        // Safety: OtelValue is repr(transparent) over opentelemetry::Value
+        unsafe { &*(value as *const opentelemetry::Value as *const OtelValue) }
+    }
+}
+
+impl ValueLike for OtelValue {
+    fn extract_float(&self) -> Option<f64> {
+        crate::sampling::utils::extract_float_value(&self.0)
+    }
+
+    fn extract_string(&self) -> Option<Cow<'_, str>> {
+        crate::sampling::utils::extract_string_value(&self.0)
+    }
+}
+
+/// Transparent wrapper around OpenTelemetry KeyValue for trait implementations
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct OtelKeyValue(opentelemetry::KeyValue);
+
+impl OtelKeyValue {
+    /// Convert a reference to opentelemetry::KeyValue to a reference to OtelKeyValue
+    /// This is safe because OtelKeyValue is repr(transparent)
+    fn from_ref(kv: &opentelemetry::KeyValue) -> &Self {
+        // Safety: OtelKeyValue is repr(transparent) over opentelemetry::KeyValue
+        unsafe { &*(kv as *const opentelemetry::KeyValue as *const OtelKeyValue) }
+    }
+}
+
+impl AttributeLike for OtelKeyValue {
+    type Value = OtelValue;
+
+    fn key(&self) -> &str {
+        self.0.key.as_str()
+    }
+
+    fn value(&self) -> &Self::Value {
+        OtelValue::from_ref(&self.0.value)
+    }
+}
 
 pub struct PreSampledSpan<'a> {
     pub name: &'a str,
@@ -80,7 +140,7 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
 }
 
 impl SpanProperties for PreSampledSpan<'_> {
-    type Attribute = opentelemetry::KeyValue;
+    type Attribute = OtelKeyValue;
 
     fn operation_name(&self) -> Cow<'_, str> {
         get_otel_operation_name_v2(self)
@@ -106,7 +166,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     where
         Self: 'a,
     {
-        self.attributes.iter()
+        self.attributes.iter().map(OtelKeyValue::from_ref)
     }
 
     fn get_alternate_key<'b>(&self, key: &'b str) -> Option<Cow<'b, str>> {
@@ -120,28 +180,6 @@ impl SpanProperties for PreSampledSpan<'_> {
     }
 }
 
-impl crate::sampling::AttributeLike for opentelemetry::KeyValue {
-    type Value = opentelemetry::Value;
-
-    fn key(&self) -> &str {
-        self.key.as_str()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.value
-    }
-}
-
-impl crate::sampling::ValueLike for opentelemetry::Value {
-    fn extract_float(&self) -> Option<f64> {
-        crate::sampling::utils::extract_float_value(self)
-    }
-
-    fn extract_string(&self) -> Option<Cow<'_, str>> {
-        crate::sampling::utils::extract_string_value(self)
-    }
-}
-
 /// OpenTelemetry Sampling Data implementation.
 ///
 /// Provides the necessary data for making sampling decisions on OpenTelemetry spans.
@@ -149,7 +187,7 @@ impl crate::sampling::ValueLike for opentelemetry::Value {
 /// span kind, attributes, and resource information.
 pub struct OtelSamplingData<'a> {
     is_parent_sampled: Option<bool>,
-    trace_id: &'a opentelemetry::trace::TraceId,
+    trace_id: OtelTraceId,
     name: &'a str,
     span_kind: opentelemetry::trace::SpanKind,
     attributes: &'a [KeyValue],
@@ -177,7 +215,7 @@ impl<'a> OtelSamplingData<'a> {
     ) -> Self {
         Self {
             is_parent_sampled,
-            trace_id,
+            trace_id: OtelTraceId(*trace_id),
             name,
             span_kind,
             attributes,
@@ -187,7 +225,7 @@ impl<'a> OtelSamplingData<'a> {
 }
 
 impl SamplingData for OtelSamplingData<'_> {
-    type TraceId = opentelemetry::trace::TraceId;
+    type TraceId = OtelTraceId;
     type Properties<'b>
         = PreSampledSpan<'b>
     where
@@ -197,7 +235,7 @@ impl SamplingData for OtelSamplingData<'_> {
         self.is_parent_sampled
     }
     fn trace_id(&self) -> &Self::TraceId {
-        self.trace_id
+        &self.trace_id
     }
 
     fn with_span_properties<S, T, F>(&self, s: &S, f: F) -> T
@@ -212,12 +250,6 @@ impl SamplingData for OtelSamplingData<'_> {
             &resource_guard,
         );
         f(s, &span)
-    }
-}
-
-impl crate::sampling::TraceIdLike for opentelemetry::trace::TraceId {
-    fn to_u128(&self) -> u128 {
-        u128::from_be_bytes(self.to_bytes())
     }
 }
 
@@ -441,8 +473,8 @@ mod tests {
 
         let collected: Vec<_> = span.attributes().collect();
         assert_eq!(collected.len(), 2);
-        assert_eq!(collected[0].key.as_str(), "key1");
-        assert_eq!(collected[1].key.as_str(), "key2");
+        assert_eq!(collected[0].key(), "key1");
+        assert_eq!(collected[1].key(), "key2");
     }
 
     #[test]
@@ -550,12 +582,10 @@ mod tests {
         // Verify the actual attributes can be found by their original keys
         let status_code_attr = attrs
             .iter()
-            .find(|a| a.key.as_str() == "http.response.status_code");
+            .find(|a| a.key() == "http.response.status_code");
         assert!(status_code_attr.is_some());
 
-        let method_attr = attrs
-            .iter()
-            .find(|a| a.key.as_str() == "http.request.method");
+        let method_attr = attrs.iter().find(|a| a.key() == "http.request.method");
         assert!(method_attr.is_some());
     }
 
@@ -586,13 +616,9 @@ mod tests {
         assert_eq!(attrs.len(), 3);
 
         // Verify each attribute can be found by its original OTel key
-        assert!(attrs
-            .iter()
-            .any(|a| a.key.as_str() == "http.response.status_code"));
-        assert!(attrs
-            .iter()
-            .any(|a| a.key.as_str() == "http.request.method"));
-        assert!(attrs.iter().any(|a| a.key.as_str() == "url.full"));
+        assert!(attrs.iter().any(|a| a.key() == "http.response.status_code"));
+        assert!(attrs.iter().any(|a| a.key() == "http.request.method"));
+        assert!(attrs.iter().any(|a| a.key() == "url.full"));
     }
 
     #[test]
@@ -621,10 +647,8 @@ mod tests {
         let attrs: Vec<_> = span.attributes().collect();
         assert_eq!(attrs.len(), 2);
 
-        assert!(attrs
-            .iter()
-            .any(|a| a.key.as_str() == "http.response.status_code"));
-        assert!(attrs.iter().any(|a| a.key.as_str() == "custom.tag"));
+        assert!(attrs.iter().any(|a| a.key() == "http.response.status_code"));
+        assert!(attrs.iter().any(|a| a.key() == "custom.tag"));
 
         // Verify the status code is accessible
         assert_eq!(span.status_code(), Some(503));

@@ -16,7 +16,6 @@ use libdd_library_config::tracer_metadata::TracerMetadata;
 
 use rustc_version_runtime::version;
 
-use crate::core::configuration::sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -24,6 +23,7 @@ use crate::core::configuration::supported_configurations::SupportedConfiguration
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
+use libdd_sampling::{ParsedSamplingRules, SamplingRuleConfig};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
