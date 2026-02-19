@@ -1,0 +1,20 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "datadog-aws-sdk"
+rust-version = "1.85.0"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+authors.workspace = true
+description = "Datadog instrumentation for AWS SDK for Rust"
+
+[dependencies]
+aws-sdk-sqs = "1.93"
+aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
+aws-smithy-types = "1.4"
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
