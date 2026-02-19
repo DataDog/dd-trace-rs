@@ -1,18 +1,18 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::configuration::SamplingRuleConfig;
-use crate::core::constants::{
+use crate::dd_constants::{
     RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
     SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
-use crate::core::sampling::{mechanism, priority, SamplingMechanism, SamplingPriority};
+use crate::dd_sampling::{mechanism, priority, SamplingMechanism, SamplingPriority};
+use crate::sampling_rule_config::SamplingRuleConfig;
 
 /// Type alias for sampling rules update callback
 /// Consolidated callback type used across crates for remote config sampling updates
 pub type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [SamplingRuleConfig]) + Send + Sync>;
 
-use crate::sampling::{SamplingData, SpanProperties};
+use crate::types::{SamplingData, SpanProperties};
 
 use super::agent_service_sampler::{AgentRates, ServicesSampler};
 use super::rate_limiter::RateLimiter;
@@ -51,7 +51,7 @@ impl DatadogSampler {
         self.service_samplers.update_rates(rates);
     }
 
-    pub(crate) fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
+    pub fn on_agent_response(&self) -> Box<dyn for<'a> Fn(&'a str) + Send + Sync> {
         let service_samplers = self.service_samplers.clone();
         Box::new(move |s: &str| {
             let Ok(new_rates) = serde_json::de::from_str::<AgentRates>(s) else {
@@ -239,7 +239,7 @@ impl DdSamplingResult {
     /// An optional vector of attributes to add to the sampling result
     pub fn to_dd_sampling_tags<F>(&self, factory: &F) -> Option<Vec<F::Attribute>>
     where
-        F: crate::sampling::AttributeFactory,
+        F: crate::types::AttributeFactory,
     {
         let Some(root_info) = &self.trace_root_info else {
             return None; // No root info, return empty attributes
@@ -281,11 +281,11 @@ impl DdSamplingResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sampling::constants::{
+    use crate::constants::{
         attr::{ENV_TAG, RESOURCE_TAG},
         pattern,
     };
-    use crate::sampling::{AttributeLike, TraceIdLike, ValueLike};
+    use crate::types::{AttributeLike, TraceIdLike, ValueLike};
     use std::borrow::Cow;
     use std::collections::HashMap;
 
@@ -522,7 +522,7 @@ mod tests {
 
     struct TestAttributeFactory;
 
-    impl crate::sampling::AttributeFactory for TestAttributeFactory {
+    impl crate::types::AttributeFactory for TestAttributeFactory {
         type Attribute = TestAttribute;
 
         fn create_i64(&self, key: &'static str, value: i64) -> Self::Attribute {
@@ -1062,7 +1062,7 @@ mod tests {
         // Should inherit the sampling decision from parent
         assert!(result_sampled.get_priority().is_keep());
         assert!(result_sampled
-            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .to_dd_sampling_tags(&TestAttributeFactory)
             .is_none());
 
         // Test with non-sampled parent context
@@ -1072,7 +1072,7 @@ mod tests {
         // Should inherit the sampling decision from parent
         assert!(!result_not_sampled.get_priority().is_keep());
         assert!(result_not_sampled
-            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .to_dd_sampling_tags(&TestAttributeFactory)
             .is_none());
     }
 
@@ -1099,9 +1099,7 @@ mod tests {
 
         // Should sample and add attributes
         assert!(result.get_priority().is_keep());
-        assert!(result
-            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
-            .is_some());
+        assert!(result.to_dd_sampling_tags(&TestAttributeFactory).is_some());
 
         // Test with non-matching attributes
         let attrs_no_match = create_attributes("other-resource", "prod");
@@ -1112,7 +1110,7 @@ mod tests {
         // Should still sample (default behavior when no rules match) and add attributes
         assert!(result_no_match.get_priority().is_keep());
         assert!(result_no_match
-            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .to_dd_sampling_tags(&TestAttributeFactory)
             .is_some());
     }
 

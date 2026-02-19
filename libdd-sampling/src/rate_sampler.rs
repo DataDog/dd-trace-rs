@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::constants::{numeric, rate};
-use crate::sampling::TraceIdLike;
+use crate::types::TraceIdLike;
 use numeric::{KNUTH_FACTOR, MAX_UINT_64BITS};
 use std::fmt;
 
 /// Keeps (100 * `sample_rate`)% of the traces randomly.
 #[derive(Clone)]
-pub(crate) struct RateSampler {
+pub struct RateSampler {
     sample_rate: f64,
     sampling_id_threshold: u64,
 }

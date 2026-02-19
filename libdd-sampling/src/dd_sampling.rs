@@ -30,11 +30,11 @@ pub struct SamplingPriority {
 }
 
 impl SamplingPriority {
-    pub(crate) const fn from_i8(value: i8) -> Self {
+    pub const fn from_i8(value: i8) -> Self {
         Self { value }
     }
 
-    pub(crate) fn into_i8(self) -> i8 {
+    pub fn into_i8(self) -> i8 {
         self.value
     }
 
@@ -48,7 +48,7 @@ impl SamplingPriority {
     /// # Examples
     ///
     /// ```
-    /// use datadog_opentelemetry::core::sampling::priority;
+    /// use libdd_sampling::priority;
     ///
     /// assert!(priority::AUTO_KEEP.is_keep());
     /// assert!(priority::USER_KEEP.is_keep());
@@ -105,15 +105,15 @@ pub struct SamplingMechanism {
 }
 
 impl SamplingMechanism {
-    pub(crate) const fn from_u8(value: u8) -> Self {
+    pub const fn from_u8(value: u8) -> Self {
         Self { value }
     }
 
-    pub(crate) fn into_u8(self) -> u8 {
+    pub fn into_u8(self) -> u8 {
         self.value
     }
 
-    pub(crate) fn to_priority(self, is_keep: bool) -> SamplingPriority {
+    pub fn to_priority(self, is_keep: bool) -> SamplingPriority {
         const AUTO_PAIR: PriorityPair = PriorityPair {
             keep: priority::AUTO_KEEP,
             reject: priority::AUTO_REJECT,

@@ -3,6 +3,7 @@
 
 [workspace]
 members = [
+    "libdd-sampling",
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",

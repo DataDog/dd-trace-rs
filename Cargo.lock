@@ -477,6 +477,7 @@ dependencies = [
  "hyper-util",
  "libdd-common",
  "libdd-data-pipeline",
+ "libdd-sampling",
  "libdd-telemetry 2.0.0",
  "libdd-trace-utils",
  "lru",
@@ -1228,6 +1229,18 @@ dependencies = [
  "libdd-common",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "libdd-sampling"
+version = "0.2.1"
+dependencies = [
+ "criterion",
+ "foldhash 0.1.5",
+ "hashbrown 0.15.5",
+ "lru",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
