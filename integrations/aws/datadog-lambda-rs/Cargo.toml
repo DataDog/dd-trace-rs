@@ -1,0 +1,37 @@
+[package]
+name = "datadog-lambda-rs"
+rust-version = "1.85.0"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Datadog Lambda tracing for Rust"
+
+[dependencies]
+lambda_runtime = "0.13"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+
+[dev-dependencies]
+aws-config = "1.6"
+aws-sdk-sqs = "1.93"
+datadog-aws-sdk = { version = "0.2", path = "../aws-sdk-rust" }
+datadog-opentelemetry = { version = "0.2", path = "../../../datadog-opentelemetry" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio-test = "0.4"
+tracing = "0.1"
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { version = "0.3", features = ["json"] }
+
+[[example]]
+name = "sqs_lambda"
+path = "examples/SQS-Lambda/sqs_lambda.rs"
+
+[[example]]
+name = "rust_sqs_producer"
+path = "examples/Rust-SQS-Producer/rust_sqs_producer.rs"
