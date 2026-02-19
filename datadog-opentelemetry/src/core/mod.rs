@@ -4,8 +4,9 @@
 //! Core components of the SDK
 
 pub mod configuration;
-pub(crate) mod constants;
-pub mod sampling;
+
+// Re-export from libdd-sampling
+pub use libdd_sampling::{dd_constants as constants, dd_sampling as sampling};
 
 mod error;
 

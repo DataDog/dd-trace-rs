@@ -46,8 +46,8 @@ fn default_provenance() -> String {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(crate) struct ParsedSamplingRules {
-    pub(crate) rules: Vec<SamplingRuleConfig>,
+pub struct ParsedSamplingRules {
+    pub rules: Vec<SamplingRuleConfig>,
 }
 
 impl Deref for ParsedSamplingRules {

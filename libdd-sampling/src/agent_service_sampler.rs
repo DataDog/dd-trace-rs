@@ -6,16 +6,16 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use super::rate_sampler::RateSampler;
+use crate::rate_sampler::RateSampler;
 
 #[derive(Debug, serde::Deserialize)]
-pub(crate) struct AgentRates<'a> {
+pub struct AgentRates<'a> {
     #[serde(borrow)]
     pub rates_by_service: Option<HashMap<&'a str, f64>>,
 }
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct ServicesSampler {
+pub struct ServicesSampler {
     inner: Arc<RwLock<HashMap<String, RateSampler>>>,
 }
 
