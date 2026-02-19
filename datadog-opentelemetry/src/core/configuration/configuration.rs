@@ -1000,6 +1000,8 @@ pub struct Config {
     telemetry_log_collection_enabled: ConfigItem<bool>,
     /// Interval by which telemetry events are flushed (seconds)
     telemetry_heartbeat_interval: ConfigItem<f64>,
+    /// Interval by which app-extended-heartbeat events are sent (seconds)
+    telemetry_extended_heartbeat_interval: ConfigItem<f64>,
 
     /// Partial flush
     trace_partial_flush_enabled: ConfigItem<bool>,
@@ -1183,6 +1185,10 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
+            telemetry_extended_heartbeat_interval: cisu.update_parsed_with_transform(
+                default.telemetry_extended_heartbeat_interval,
+                |interval: f64| interval.abs(),
+            ),
             trace_propagation_style: cisu
                 .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
                     TracePropagationStyle::from_tags(Some(tags))
@@ -1266,6 +1272,7 @@ impl Config {
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_heartbeat_interval,
+            &self.telemetry_extended_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
             &self.trace_propagation_style,
@@ -1447,6 +1454,11 @@ impl Config {
     /// Returns the telemetry heartbeat interval in seconds.
     pub fn telemetry_heartbeat_interval(&self) -> f64 {
         *self.telemetry_heartbeat_interval.value()
+    }
+
+    /// Returns the telemetry extended heartbeat interval in seconds.
+    pub fn telemetry_extended_heartbeat_interval(&self) -> f64 {
+        *self.telemetry_extended_heartbeat_interval.value()
     }
 
     /// Returns whether OpenTelemetry metrics export is enabled.
@@ -1801,6 +1813,10 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
         ),
+        telemetry_extended_heartbeat_interval: ConfigItem::new(
+            SupportedConfigurations::DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL,
+            86400.0,
+        ),
         trace_partial_flush_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
             false,
@@ -2035,6 +2051,18 @@ impl ConfigBuilder {
     pub fn set_telemetry_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
         self.config
             .telemetry_heartbeat_interval
+            .set_code(seconds.abs());
+        self
+    }
+
+    /// Interval in seconds for sending app-extended-heartbeat telemetry messages.
+    ///
+    ///  **Default**: `86400.0` (24 hours)
+    ///
+    /// Env variable: `DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL`
+    pub fn set_telemetry_extended_heartbeat_interval(&mut self, seconds: f64) -> &mut Self {
+        self.config
+            .telemetry_extended_heartbeat_interval
             .set_code(seconds.abs());
         self
     }
@@ -3119,6 +3147,24 @@ mod tests {
     }
 
     #[test]
+    fn test_telemetry_extended_heartbeat_config_from_sources() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL", "3600")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(config.telemetry_extended_heartbeat_interval(), 3600.0);
+    }
+
+    #[test]
+    fn test_telemetry_extended_heartbeat_config_default() {
+        let config = Config::builder().build();
+        assert_eq!(config.telemetry_extended_heartbeat_interval(), 86400.0);
+    }
+
+    #[test]
     fn test_telemetry_config() {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
@@ -3134,13 +3180,15 @@ mod tests {
         builder
             .set_telemetry_enabled(true)
             .set_telemetry_log_collection_enabled(true)
-            .set_telemetry_heartbeat_interval(0.1);
+            .set_telemetry_heartbeat_interval(0.1)
+            .set_telemetry_extended_heartbeat_interval(7200.0);
 
         let config = builder.build();
 
         assert!(config.telemetry_enabled());
         assert!(config.telemetry_log_collection_enabled());
         assert_eq!(config.telemetry_heartbeat_interval(), 0.1);
+        assert_eq!(config.telemetry_extended_heartbeat_interval(), 7200.0);
     }
 
     #[test]

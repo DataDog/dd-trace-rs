@@ -21,6 +21,7 @@ pub(crate) enum SupportedConfigurations {
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
     DD_SERVICE,
     DD_TAGS,
+    DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL,
     DD_TELEMETRY_HEARTBEAT_INTERVAL,
     DD_TELEMETRY_LOG_COLLECTION_ENABLED,
     DD_TRACE_AGENT_PORT,
@@ -93,6 +94,9 @@ impl SupportedConfigurations {
             }
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
+            SupportedConfigurations::DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL => {
+                "DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL"
+            }
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => {
                 "DD_TELEMETRY_HEARTBEAT_INTERVAL"
             }
