@@ -10,6 +10,8 @@ readme.workspace = true
 authors.workspace = true
 
 [dependencies]
+# Internal dependencies
+libdd-sampling = { path = "../libdd-sampling" }
 
 # External dependencies
 foldhash = { workspace = true }
