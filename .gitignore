@@ -1,3 +1,4 @@
 /target
 /.vscode
 /datadog-opentelemetry/target
+integrations/aws/*/target/
