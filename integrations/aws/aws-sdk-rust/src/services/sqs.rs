@@ -96,19 +96,11 @@ fn build_datadog_attribute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::test_helpers::{
+        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        DATADOG_TRACE_ID_KEY,
+    };
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
-
-    const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
-    const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
-    const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
-
-    fn sample_trace_headers() -> HashMap<String, String> {
-        let mut headers = HashMap::new();
-        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "123456789".to_string());
-        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "987654321".to_string());
-        headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "1".to_string());
-        headers
-    }
 
     #[test]
     fn test_send_message_injection() {
