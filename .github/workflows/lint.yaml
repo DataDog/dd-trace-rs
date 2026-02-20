@@ -83,17 +83,11 @@ jobs:
           # cache key contains current version of dd-rust-license-tool
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
-          key: "v1-dd-rust-license-tool"
+          key: "v1-dd-rust-license-tool-1.0.4"
       - name: Cache
         uses: ./.github/actions/cache
       - name: Install dd-rust-license-tool
-        run: which dd-rust-license-tool || cargo install --git https://github.com/DataDog/rust-license-tool.git dd-rust-license-tool
-      # To ensure the dependency tree is identical between the CI runner and the
-      # local license generation script (which also forces the 'git' protocol),
-      # we explicitly set the crates.io protocol. Cargo's default can vary
-      # between 'git' and 'sparse' depending on the environment, which can lead
-      # to different dependency resolutions. This guarantees consistency.
-      - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
+        run: cargo install --list | grep -qF "dd-rust-license-tool v1.0.4" || cargo install --git https://github.com/DataDog/rust-license-tool.git --tag v1.0.4 dd-rust-license-tool
       - name: "Generate new LICENSE-3rdparty.csv and check against the previous"
         run: |
           # The LICENSE-3rdparty.csv file must match the output of the tool in the Linux CI environment.
