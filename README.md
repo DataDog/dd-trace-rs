@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD041 -->
 [![Crates.io][crates-badge]][crates-url]
 [![Documentation][docs-badge]][docs-url]
 [![Documentation (master)][docs-master-badge]][docs-master-url]
@@ -15,7 +16,8 @@
 
 # dd-trace-rs
 
-This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/). It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and optimizations.
+This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/). It provides
+OpenTelemetry API and SDK compatibility with Datadog-specific features and optimizations.
 
 ## Usage
 
@@ -31,12 +33,16 @@ datadog-opentelemetry = { version = "0.2.1" }
 
 ### Tracing
 
-To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+To trace functions, you can either use the `opentelemetry` crate's
+[API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate
+[API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry`
+[bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 
 ### Initialization
 
-The following examples will read datadog and opentelemetry configuration from environment variables and other
-available sources, initialize and set up the tracer provider and the text distributed tracing propagators globally.
+The following examples will read datadog and opentelemetry configuration from environment variables
+and other available sources, initialize and set up the tracer provider and the text distributed
+tracing propagators globally.
 
 #### Tracing API
 
@@ -104,7 +110,8 @@ let tracer_provider = datadog_opentelemetry::tracing()
         .init();
 ```
 
-For advanced usage and configuration information, check out the [library documentation](https://docs.rs/datadog-opentelemetry/0.2.1/datadog_opentelemetry/).
+For advanced usage and configuration information, check out the
+[library documentation](https://docs.rs/datadog-opentelemetry/0.2.1/datadog_opentelemetry/).
 
 * Through env variables
 
@@ -129,4 +136,5 @@ datadog_opentelemetry::tracing()
 
 * MSRV: 1.84
 * [opentelemetry](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/) version: 0.32
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
+  version: 0.32
