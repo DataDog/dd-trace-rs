@@ -52,6 +52,28 @@ jobs:
         run: |
           # shellcheck disable=SC2046
           cargo hack --each-feature clippy -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup shellcheck
+        uses: pollenjp/setup-shellcheck@f2af1fb1b070943d865ac164bd653d706ad8d281 # v1.0.3
+        with:
+          version: v0.11.0
+      - name: Run shellcheck
+        run: find . -name '*.sh' -print0 | xargs -0 shellcheck
+
+  rumdl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run rumdl
+        uses: rvben/rumdl@dea83e1c9817fecba3476633f0631e95e570048e # v0.1.25
+        with:
+          version: "0.1.25"
+
   licensecheck:
     runs-on: ubuntu-latest
     name: "Presence of licence headers"

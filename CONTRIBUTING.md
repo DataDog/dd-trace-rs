@@ -1,13 +1,16 @@
 # Contributing
 
-Contributions are welcomed
-Pull requests for bug fixes are welcome, but before submitting new features or changes to current functionality, please open an issue and discuss your ideas or propose the changes you wish to make first. After a resolution is reached, a PR can be submitted for review.
+Contributions are welcomed Pull requests for bug fixes are welcome, but before submitting new
+features or changes to current functionality, please open an issue and discuss your ideas or propose
+the changes you wish to make first. After a resolution is reached, a PR can be submitted for review.
 
 ## Pull request guidelines
 
 ### Naming
 
-All pull requests must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification. Our CI pipeline automatically checks PR titles and will fail if they don't conform to this format. Examples include
+All pull requests must follow the [Conventional Commits](https://www.conventionalcommits.org/)
+specification. Our CI pipeline automatically checks PR titles and will fail if they don't conform to
+this format. Examples include
 
 - `feat: add span processor for datadog exporter`
 - `fix(sampling): correct rate limiting calculation`
@@ -16,11 +19,13 @@ All pull requests must follow the [Conventional Commits](https://www.conventiona
 
 ### Draft first
 
-When opening a pull request, please open it as a draft to not auto-assign reviewers before the pull request is in a reviewable state.
+When opening a pull request, please open it as a draft to not auto-assign reviewers before the pull
+request is in a reviewable state.
 
 ## Code Formatting and Linting
 
-Before submitting a pull request, ensure your code passes all formatting and linting checks that run in our CI pipeline. This helps maintain code quality and consistency across the project.
+Before submitting a pull request, ensure your code passes all formatting and linting checks that run
+in our CI pipeline. This helps maintain code quality and consistency across the project.
 
 ### Prerequisites
 
@@ -48,7 +53,9 @@ rustup component add clippy --toolchain 1.84
 
 ### Third-party Licenses
 
-When adding or updating dependencies, you must update the `LICENSE-3rdparty.csv` file to reflect these changes. This file is checked by our CI pipeline to ensure all dependencies are properly documented.
+When adding or updating dependencies, you must update the `LICENSE-3rdparty.csv` file to reflect
+these changes. This file is checked by our CI pipeline to ensure all dependencies are properly
+documented.
 
 To update the license file:
 
@@ -56,9 +63,11 @@ To update the license file:
 2. Review the changes to `LICENSE-3rdparty.csv`
 3. Commit the updated file
 
-The script uses Docker to ensure the generated file matches our CI environment, avoiding platform-specific differences.
+The script uses Docker to ensure the generated file matches our CI environment, avoiding
+platform-specific differences.
 
-Otherwise the GH action will generate a correct `LICENSE-3rdparty.csv` file artifact on failure, which you can download and add to your branch.
+Otherwise the GH action will generate a correct `LICENSE-3rdparty.csv` file artifact on failure,
+which you can download and add to your branch.
 
 ### Pre-commit Check
 
