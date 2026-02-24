@@ -80,7 +80,7 @@ impl Intercept for DatadogInterceptor {
         }
 
         let input = context.input_mut();
-
+        // The decision to have ServiceInjector::inject() take ownership of trace_headers is intentional. Avoids cloning key,value pairs in the Eventbridge case.
         // Swallow injection errors — trace propagation must never fail the AWS call.
         let _ = match service {
             AwsService::Sqs => SqsInjector.inject(operation, trace_headers, input),
