@@ -26,18 +26,18 @@ impl ServiceInjector for SqsInjector {
     fn inject(
         &self,
         operation: &str,
-        trace_headers: &HashMap<String, String>,
+        trace_headers: HashMap<String, String>,
         input: &mut Input,
     ) -> Result<(), BoxError> {
         match operation {
             "SendMessage" => {
                 if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
-                    inject_into_send_message(send_input, trace_headers)?;
+                    inject_into_send_message(send_input, &trace_headers)?;
                 }
             }
             "SendMessageBatch" => {
                 if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
-                    inject_into_send_message_batch(batch_input, trace_headers)?;
+                    inject_into_send_message_batch(batch_input, &trace_headers)?;
                 }
             }
             _ => {}
@@ -192,7 +192,7 @@ mod tests {
         let mut input = Input::erase(send_input);
 
         injector
-            .inject("ReceiveMessage", &trace_headers, &mut input)
+            .inject("ReceiveMessage", trace_headers, &mut input)
             .unwrap();
 
         let send_input = input.downcast_ref::<SendMessageInput>().unwrap();
