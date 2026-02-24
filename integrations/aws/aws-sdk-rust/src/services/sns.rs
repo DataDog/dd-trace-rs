@@ -29,18 +29,18 @@ impl ServiceInjector for SnsInjector {
     fn inject(
         &self,
         operation: &str,
-        trace_headers: &HashMap<String, String>,
+        trace_headers: HashMap<String, String>,
         input: &mut Input,
     ) -> Result<(), BoxError> {
         match operation {
             "Publish" => {
                 if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
-                    inject_into_publish(publish_input, trace_headers)?;
+                    inject_into_publish(publish_input, &trace_headers)?;
                 }
             }
             "PublishBatch" => {
                 if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
-                    inject_into_publish_batch(batch_input, trace_headers)?;
+                    inject_into_publish_batch(batch_input, &trace_headers)?;
                 }
             }
             _ => {}
@@ -243,7 +243,7 @@ mod tests {
         let mut input = Input::erase(publish_input);
 
         injector
-            .inject("Subscribe", &trace_headers, &mut input)
+            .inject("Subscribe", trace_headers, &mut input)
             .unwrap();
 
         let publish_input = input.downcast_ref::<PublishInput>().unwrap();
