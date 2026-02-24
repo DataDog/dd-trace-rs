@@ -17,7 +17,7 @@ use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use opentelemetry::Context;
 
-use crate::services::{AwsService, ServiceInjector, SnsInjector, SqsInjector};
+use crate::services::{AwsService, EventBridgeInjector, ServiceInjector, SnsInjector, SqsInjector};
 
 #[derive(Debug, Clone)]
 pub struct DatadogInterceptor {}
@@ -85,8 +85,10 @@ impl Intercept for DatadogInterceptor {
         let _ = match service {
             AwsService::Sqs => SqsInjector.inject(operation, &trace_headers, input),
             AwsService::Sns => SnsInjector.inject(operation, &trace_headers, input),
+            AwsService::EventBridge => {
+                EventBridgeInjector.inject(operation, &trace_headers, input)
+            }
             AwsService::Kinesis => Ok(()),
-            AwsService::EventBridge => Ok(()),
         };
         Ok(())
     }

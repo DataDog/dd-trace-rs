@@ -19,3 +19,4 @@ aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
 aws-smithy-types = "1.4"
 serde_json = { workspace = true }
 opentelemetry = { workspace = true }
+aws-sdk-eventbridge = "1.102"

@@ -10,9 +10,8 @@ pub(crate) mod kinesis;
 pub(crate) mod sns;
 pub(crate) mod sqs;
 
-#[allow(unused_imports)]
 pub(crate) use eventbridge::EventBridgeInjector;
-pub(crate) use injector::{AwsService, ServiceInjector, DATADOG_ATTRIBUTE_KEY};
+pub(crate) use injector::{AwsService, ServiceInjector, DATADOG_ATTRIBUTE_KEY, MAX_MESSAGE_ATTRIBUTES, ONE_MB};
 #[allow(unused_imports)]
 pub(crate) use kinesis::KinesisInjector;
 pub(crate) use sns::SnsInjector;
