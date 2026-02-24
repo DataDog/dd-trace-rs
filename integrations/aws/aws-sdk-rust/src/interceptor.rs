@@ -17,7 +17,7 @@ use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use opentelemetry::Context;
 
-use crate::services::{AwsService, ServiceInjector, SnsInjector, SqsInjector};
+use crate::services::{AwsService, EventBridgeInjector, ServiceInjector, SnsInjector, SqsInjector};
 
 /// AWS SDK interceptor that automatically injects Datadog trace context into requests.
 ///
@@ -28,6 +28,7 @@ use crate::services::{AwsService, ServiceInjector, SnsInjector, SqsInjector};
 /// Currently supported services:
 /// - **SQS**: Injects `_datadog` MessageAttribute (JSON string)
 /// - **SNS**: Injects `_datadog` MessageAttribute (JSON bytes, Binary DataType)
+/// - **EventBridge**: Injects `_datadog` into PutEvents Detail JSON
 ///
 /// # Example
 ///
@@ -109,8 +110,10 @@ impl Intercept for DatadogInterceptor {
         let _ = match service {
             AwsService::Sqs => SqsInjector.inject(operation, &trace_headers, input),
             AwsService::Sns => SnsInjector.inject(operation, &trace_headers, input),
+            AwsService::EventBridge => {
+                EventBridgeInjector.inject(operation, &trace_headers, input)
+            }
             AwsService::Kinesis => Ok(()),
-            AwsService::EventBridge => Ok(()),
         };
         Ok(())
     }
