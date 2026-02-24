@@ -17,9 +17,7 @@ use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 use aws_smithy_types::Blob;
 
-use super::{AwsService, ServiceInjector, DATADOG_ATTRIBUTE_KEY};
-
-const SNS_MAX_ATTRIBUTES: usize = 10;
+use super::{AwsService, ServiceInjector, DATADOG_ATTRIBUTE_KEY, MAX_MESSAGE_ATTRIBUTES};
 
 pub(crate) struct SnsInjector;
 
@@ -56,7 +54,7 @@ fn inject_into_publish(
     trace_headers: &HashMap<String, String>,
 ) -> Result<(), BoxError> {
     let attrs = input.message_attributes.get_or_insert_with(HashMap::new);
-    if attrs.len() >= SNS_MAX_ATTRIBUTES {
+    if attrs.len() >= MAX_MESSAGE_ATTRIBUTES {
         return Ok(());
     }
 
@@ -79,7 +77,7 @@ fn inject_into_publish_batch(
     let dd_attr = build_datadog_attribute(trace_headers)?;
     for entry in entries.iter_mut() {
         let attrs = entry.message_attributes.get_or_insert_with(HashMap::new);
-        if attrs.len() >= SNS_MAX_ATTRIBUTES {
+        if attrs.len() >= MAX_MESSAGE_ATTRIBUTES {
             continue;
         }
         attrs.insert(dd_key.clone(), dd_attr.clone());
