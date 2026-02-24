@@ -60,7 +60,7 @@ jobs:
       - name: Setup shellcheck
         uses: pollenjp/setup-shellcheck@f2af1fb1b070943d865ac164bd653d706ad8d281 # v1.0.3
         with:
-          version: v0.11.0
+          version: "0.11.0"
       - name: Run shellcheck
         run: find . -name '*.sh' -print0 | xargs -0 shellcheck
 
