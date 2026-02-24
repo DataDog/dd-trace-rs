@@ -20,7 +20,7 @@ const RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
 fn inject_into_put_events(
     input: &mut PutEventsInput,
-    trace_headers: &HashMap<String, String>,
+    trace_headers: HashMap<String, String>,
 ) -> Result<(), BoxError> {
     let entries = match input.entries.as_mut() {
         Some(entries) => entries,
@@ -34,7 +34,7 @@ fn inject_into_put_events(
 
     let mut ctx = serde_json::Map::with_capacity(trace_headers.len() + 2);
     for (k, v) in trace_headers {
-        ctx.insert(k.clone(), serde_json::Value::String(v.clone()));
+        ctx.insert(k, serde_json::Value::String(v));
     }
     ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
 
@@ -83,7 +83,7 @@ impl ServiceInjector for EventBridgeInjector {
     fn inject(
         &self,
         operation: &str,
-        trace_headers: &HashMap<String, String>,
+        trace_headers: HashMap<String, String>,
         input: &mut Input,
     ) -> Result<(), BoxError> {
         if operation == "PutEvents" {
@@ -126,7 +126,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -149,7 +149,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -169,7 +169,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -197,7 +197,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         for entry in entries {
@@ -222,7 +222,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some("not json"));
@@ -240,7 +240,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, trace_headers).unwrap();
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some(detail.as_str()));
@@ -259,7 +259,7 @@ mod tests {
         let mut input = Input::erase(put_input);
 
         injector
-            .inject("DescribeRule", &trace_headers, &mut input)
+            .inject("DescribeRule", trace_headers, &mut input)
             .unwrap();
 
         let put_input = input.downcast_ref::<PutEventsInput>().unwrap();

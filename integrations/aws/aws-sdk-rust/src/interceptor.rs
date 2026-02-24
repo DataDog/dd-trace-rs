@@ -83,10 +83,10 @@ impl Intercept for DatadogInterceptor {
 
         // Swallow injection errors — trace propagation must never fail the AWS call.
         let _ = match service {
-            AwsService::Sqs => SqsInjector.inject(operation, &trace_headers, input),
-            AwsService::Sns => SnsInjector.inject(operation, &trace_headers, input),
+            AwsService::Sqs => SqsInjector.inject(operation, trace_headers, input),
+            AwsService::Sns => SnsInjector.inject(operation, trace_headers, input),
             AwsService::EventBridge => {
-                EventBridgeInjector.inject(operation, &trace_headers, input)
+                EventBridgeInjector.inject(operation, trace_headers, input)
             }
             AwsService::Kinesis => Ok(()),
         };

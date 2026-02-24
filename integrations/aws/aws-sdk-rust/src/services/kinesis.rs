@@ -19,7 +19,7 @@ impl ServiceInjector for KinesisInjector {
     fn inject(
         &self,
         operation: &str,
-        trace_headers: &HashMap<String, String>,
+        trace_headers: HashMap<String, String>,
         input: &mut Input,
     ) -> Result<(), BoxError> {
         let _ = (operation, trace_headers, input);
