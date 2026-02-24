@@ -15,7 +15,6 @@ pub(crate) use eventbridge::EventBridgeInjector;
 pub(crate) use injector::{AwsService, ServiceInjector, DATADOG_ATTRIBUTE_KEY};
 #[allow(unused_imports)]
 pub(crate) use kinesis::KinesisInjector;
-#[allow(unused_imports)]
 pub(crate) use sns::SnsInjector;
 pub(crate) use sqs::SqsInjector;
 
