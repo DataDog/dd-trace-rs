@@ -13,6 +13,7 @@ authors.workspace = true
 description = "Datadog instrumentation for AWS SDK for Rust"
 
 [dependencies]
+aws-sdk-sns = "1.96"
 aws-sdk-sqs = "1.93"
 aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
 aws-smithy-types = "1.4"
