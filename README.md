@@ -44,7 +44,8 @@ The library supports OpenTelemetry Metrics API for collecting and exporting metr
 
 ### Logs
 
-The library supports OpenTelemetry Logs API for collecting and exporting logs. For more details on using logs, see the [Datadog OpenTelemetry Logs documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
+The library supports OpenTelemetry Logs API for collecting and exporting logs.
+For more details on using logs, see the [Datadog OpenTelemetry Logs documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
 
 ### Initialization
 
