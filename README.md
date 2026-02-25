@@ -40,12 +40,14 @@ To trace functions, you can either use the `opentelemetry` crate's
 
 ### Metrics
 
-The library supports OpenTelemetry Metrics API for collecting and exporting metrics. For more details on using metrics, see the [Datadog OpenTelemetry Metrics documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
+The library supports OpenTelemetry Metrics API for collecting and exporting metrics. 
+For more details on using metrics, see [OpenTelemetry Metrics docs](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support).
 
 ### Logs
 
 The library supports OpenTelemetry Logs API for collecting and exporting logs.
 For more details on using logs, see the [Datadog OpenTelemetry Logs documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
+see [OpenTelemetry Logs docs](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support).
 
 ### Initialization
 
