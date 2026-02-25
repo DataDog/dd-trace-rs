@@ -169,6 +169,58 @@ impl Display for ParsedSamplingRules {
     }
 }
 
+/// OTLP protocol types for OTLP export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OtlpProtocol {
+    /// gRPC protocol
+    Grpc,
+    /// HTTP with protobuf encoding
+    HttpProtobuf,
+    /// HTTP with JSON encoding
+    HttpJson,
+}
+
+impl FromStr for OtlpProtocol {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("grpc") {
+            Ok(OtlpProtocol::Grpc)
+        } else if s.eq_ignore_ascii_case("http/protobuf") {
+            Ok(OtlpProtocol::HttpProtobuf)
+        } else if s.eq_ignore_ascii_case("http/json") {
+            Ok(OtlpProtocol::HttpJson)
+        } else {
+            Err(format!("Invalid OTLP protocol: {}", s))
+        }
+    }
+}
+
+impl OtlpProtocol {
+    /// Parse a protocol string, returning None for empty strings
+    pub(crate) fn parse_optional(s: String) -> Option<Self> {
+        if s.trim().is_empty() {
+            None
+        } else {
+            s.parse().ok()
+        }
+    }
+}
+
+/// Parse a temporality preference string to Temporality enum
+fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporality> {
+    let s = s.trim().to_lowercase();
+    if s == "cumulative" {
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
+    } else if s == "delta" || s.is_empty() {
+        Some(opentelemetry_sdk::metrics::Temporality::Delta)
+    } else {
+        None
+    }
+}
+
 enum ConfigItemRef<'a, T> {
     Ref(&'a T),
     ArcRef(arc_swap::Guard<Option<Arc<T>>>),
@@ -818,18 +870,18 @@ impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
     }
 }
 
-impl ConfigurationValueProvider for crate::otlp_utils::OtlpProtocol {
+impl ConfigurationValueProvider for OtlpProtocol {
     fn get_configuration_value(&self) -> String {
         match self {
-            crate::otlp_utils::OtlpProtocol::Grpc => "grpc",
-            crate::otlp_utils::OtlpProtocol::HttpProtobuf => "http/protobuf",
-            crate::otlp_utils::OtlpProtocol::HttpJson => "http/json",
+            OtlpProtocol::Grpc => "grpc",
+            OtlpProtocol::HttpProtobuf => "http/protobuf",
+            OtlpProtocol::HttpJson => "http/json",
         }
         .to_string()
     }
 }
 
-impl ConfigurationValueProvider for Option<crate::otlp_utils::OtlpProtocol> {
+impl ConfigurationValueProvider for Option<OtlpProtocol> {
     fn get_configuration_value(&self) -> String {
         self.as_ref()
             .map(|p| p.get_configuration_value())
@@ -988,11 +1040,11 @@ pub struct Config {
     /// OTLP general headers
     otlp_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP metrics protocol (grpc, http/protobuf, http/json)
-    otlp_metrics_protocol: ConfigItem<Option<crate::otlp_utils::OtlpProtocol>>,
+    otlp_metrics_protocol: ConfigItem<Option<OtlpProtocol>>,
     /// OTLP metrics headers
     otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP general protocol (fallback for metrics protocol)
-    otlp_protocol: ConfigItem<Option<crate::otlp_utils::OtlpProtocol>>,
+    otlp_protocol: ConfigItem<Option<OtlpProtocol>>,
     /// OTLP metrics timeout in milliseconds
     otlp_metrics_timeout: ConfigItem<u32>,
     /// OTLP general timeout
@@ -1012,7 +1064,7 @@ pub struct Config {
     /// OTLP logs headers
     otlp_logs_headers: ConfigItem<Cow<'static, str>>,
     /// OTLP logs protocol (grpc, http/protobuf, http/json)
-    otlp_logs_protocol: ConfigItem<Option<crate::otlp_utils::OtlpProtocol>>,
+    otlp_logs_protocol: ConfigItem<Option<OtlpProtocol>>,
     /// OTLP logs timeout in milliseconds
     otlp_logs_timeout: ConfigItem<u32>,
 }
@@ -1103,7 +1155,7 @@ impl Config {
             otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
-                crate::otlp_utils::parse_temporality,
+                parse_temporality,
             ),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
@@ -1165,15 +1217,10 @@ impl Config {
             otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
             otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
             otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
-            otlp_metrics_protocol: cisu.update_string(
-                default.otlp_metrics_protocol,
-                crate::otlp_utils::OtlpProtocol::parse_optional,
-            ),
+            otlp_metrics_protocol: cisu
+                .update_string(default.otlp_metrics_protocol, OtlpProtocol::parse_optional),
             otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
-            otlp_protocol: cisu.update_string(
-                default.otlp_protocol,
-                crate::otlp_utils::OtlpProtocol::parse_optional,
-            ),
+            otlp_protocol: cisu.update_string(default.otlp_protocol, OtlpProtocol::parse_optional),
             otlp_metrics_timeout: cisu.update_parsed(default.otlp_metrics_timeout),
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
@@ -1182,10 +1229,8 @@ impl Config {
             otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
             otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
             otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
-            otlp_logs_protocol: cisu.update_string(
-                default.otlp_logs_protocol,
-                crate::otlp_utils::OtlpProtocol::parse_optional,
-            ),
+            otlp_logs_protocol: cisu
+                .update_string(default.otlp_logs_protocol, OtlpProtocol::parse_optional),
             otlp_logs_timeout: cisu.update_parsed(default.otlp_logs_timeout),
         }
     }
@@ -1425,7 +1470,7 @@ impl Config {
     }
 
     /// Returns the OTLP metrics protocol (gRPC, HTTP/protobuf, or HTTP/JSON).
-    pub fn otlp_metrics_protocol(&self) -> Option<crate::otlp_utils::OtlpProtocol> {
+    pub fn otlp_metrics_protocol(&self) -> Option<OtlpProtocol> {
         *self.otlp_metrics_protocol.value()
     }
 
@@ -1435,7 +1480,7 @@ impl Config {
     }
 
     /// Returns the OTLP protocol (fallback for metrics if metrics protocol is not set).
-    pub fn otlp_protocol(&self) -> Option<crate::otlp_utils::OtlpProtocol> {
+    pub fn otlp_protocol(&self) -> Option<OtlpProtocol> {
         *self.otlp_protocol.value()
     }
 
@@ -1481,7 +1526,7 @@ impl Config {
     }
 
     /// Returns the OTLP logs protocol.
-    pub fn otlp_logs_protocol(&self) -> Option<crate::otlp_utils::OtlpProtocol> {
+    pub fn otlp_logs_protocol(&self) -> Option<OtlpProtocol> {
         *self.otlp_logs_protocol.value()
     }
 
@@ -2069,7 +2114,7 @@ impl ConfigBuilder {
     pub fn set_otlp_metrics_protocol(&mut self, protocol: String) -> &mut Self {
         self.config
             .otlp_metrics_protocol
-            .set_code(crate::otlp_utils::OtlpProtocol::parse_optional(protocol));
+            .set_code(OtlpProtocol::parse_optional(protocol));
         self
     }
 
@@ -2081,7 +2126,7 @@ impl ConfigBuilder {
     pub fn set_otlp_protocol(&mut self, protocol: String) -> &mut Self {
         self.config
             .otlp_protocol
-            .set_code(crate::otlp_utils::OtlpProtocol::parse_optional(protocol));
+            .set_code(OtlpProtocol::parse_optional(protocol));
         self
     }
 
@@ -2135,7 +2180,7 @@ impl ConfigBuilder {
     pub fn set_otlp_logs_protocol(&mut self, protocol: String) -> &mut Self {
         self.config
             .otlp_logs_protocol
-            .set_code(crate::otlp_utils::OtlpProtocol::parse_optional(protocol));
+            .set_code(OtlpProtocol::parse_optional(protocol));
         self
     }
 

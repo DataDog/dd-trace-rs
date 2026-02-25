@@ -49,7 +49,7 @@ pub async fn make_test_agent(session_name: &'static str) -> DatadogTestAgent {
             ("SNAPSHOT_CI", "0"),
             (
                 "SNAPSHOT_IGNORED_ATTRS",
-                "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id,metrics.busy_ns,metrics.idle_ns,metrics.thread.id,metrics.code.line.number,metrics.thread.id",
+                "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id,metrics.busy_ns,metrics.idle_ns,metrics.thread.id,metrics.code.line.number,metrics.thread.id,span_events.time_unix_nano,span_events.attributes.code.line.number",
             ),
         ],
     )

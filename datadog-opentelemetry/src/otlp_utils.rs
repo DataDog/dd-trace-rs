@@ -1,53 +1,36 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::str::FromStr;
-
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 use opentelemetry_sdk::Resource;
 
-use crate::core::configuration::Config;
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
+use crate::{configuration::OtlpProtocol, core::configuration::Config};
 
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) const DEFAULT_OTLP_GRPC_PORT: u16 = 4317;
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
-
-/// OTLP protocol types for OTLP export.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OtlpProtocol {
-    /// gRPC protocol
-    Grpc,
-    /// HTTP with protobuf encoding
-    HttpProtobuf,
-    /// HTTP with JSON encoding
-    HttpJson,
-}
-
-impl FromStr for OtlpProtocol {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        if s.eq_ignore_ascii_case("grpc") {
-            Ok(OtlpProtocol::Grpc)
-        } else if s.eq_ignore_ascii_case("http/protobuf") {
-            Ok(OtlpProtocol::HttpProtobuf)
-        } else if s.eq_ignore_ascii_case("http/json") {
-            Ok(OtlpProtocol::HttpJson)
-        } else {
-            Err(format!("Invalid OTLP protocol: {}", s))
-        }
-    }
-}
-
-impl OtlpProtocol {
-    /// Parse a protocol string, returning None for empty strings
-    pub(crate) fn parse_optional(s: String) -> Option<Self> {
-        if s.trim().is_empty() {
-            None
-        } else {
-            s.parse().ok()
-        }
-    }
-}
 
 /// Builds the OpenTelemetry Resource by merging Datadog config with provided resource.
 ///
@@ -56,6 +39,12 @@ impl OtlpProtocol {
 /// 2. Provided resource attributes
 /// 3. Global tags (with DD -> OTel key mapping)
 /// 4. OTel resource attributes from config
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -> Resource {
     let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
 
@@ -127,10 +116,17 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
 /// Validates that the protocol is not HttpJson (which is unsupported).
 ///
 /// Returns `true` if protocol is unsupported (HttpJson), `false` otherwise.
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
 pub(crate) fn is_unsupported_protocol(protocol: OtlpProtocol) -> bool {
     matches!(protocol, OtlpProtocol::HttpJson)
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
     config
         .otlp_metrics_protocol()
@@ -138,6 +134,7 @@ pub(crate) fn get_otlp_protocol(config: &Config) -> OtlpProtocol {
         .unwrap_or(OtlpProtocol::Grpc)
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_metrics_endpoint(
     config: &Config,
     protocol: &OtlpProtocol,
@@ -167,6 +164,7 @@ pub(crate) fn get_otlp_metrics_endpoint(
     Ok(format!("http://{host}:{port}"))
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub(crate) fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     let timeout = config.otlp_metrics_timeout();
     if timeout != 0 {
@@ -175,6 +173,7 @@ pub(crate) fn get_otlp_metrics_timeout(config: &Config) -> u32 {
     config.otlp_timeout()
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_protocol(config: &Config) -> OtlpProtocol {
     config
         .otlp_logs_protocol()
@@ -182,6 +181,7 @@ pub(crate) fn get_otlp_logs_protocol(config: &Config) -> OtlpProtocol {
         .unwrap_or(OtlpProtocol::Grpc)
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_endpoint(
     config: &Config,
     protocol: &OtlpProtocol,
@@ -211,22 +211,11 @@ pub(crate) fn get_otlp_logs_endpoint(
     Ok(format!("http://{host}:{port}"))
 }
 
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 pub(crate) fn get_otlp_logs_timeout(config: &Config) -> u32 {
     let timeout = config.otlp_logs_timeout();
     if timeout != 0 {
         return timeout;
     }
     config.otlp_timeout()
-}
-
-/// Parse a temporality preference string to Temporality enum
-pub(crate) fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporality> {
-    let s = s.trim().to_lowercase();
-    if s == "cumulative" {
-        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
-    } else if s == "delta" || s.is_empty() {
-        Some(opentelemetry_sdk::metrics::Temporality::Delta)
-    } else {
-        None
-    }
 }

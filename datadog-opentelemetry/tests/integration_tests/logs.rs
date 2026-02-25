@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use datadog_opentelemetry::configuration::Config;
+use datadog_opentelemetry::configuration::OtlpProtocol;
 use datadog_opentelemetry::logs;
-use datadog_opentelemetry::OtlpProtocol;
 use opentelemetry::logs::LoggerProvider;
 
 const TEST_LOGGER_NAME: &str = "test-logger";

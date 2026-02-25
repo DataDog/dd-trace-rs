@@ -1,0 +1,70 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "foo",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.span_events.has_exception": "true",
+      "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
+      "code.module.name": "tests::integration_tests::tracing_api",
+      "error.message": "this is an error",
+      "otel.scope.name": "test",
+      "otel.status_code": "Error",
+      "otel.status_description": "this is an error",
+      "otel.trace_id": "69971c8f0000000072102d828fdacc5c",
+      "span.kind": "internal",
+      "target": "tests::integration_tests::tracing_api",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "opentelemetry",
+      "telemetry.sdk.version": "0.31.0",
+      "thread.name": "integration_tests::tracing_api::test_instrument_error_reporting"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "busy_ns": 48792.0,
+      "code.line.number": 100.0,
+      "idle_ns": 80250.0,
+      "thread.id": 2.0
+    },
+    "span_events": [
+      {
+        "time_unix_nano": 1771510927610045000,
+        "name": "exception",
+        "attributes": {
+          "code.file.path": {
+            "type": 0,
+            "string_value": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs"
+          },
+          "code.line.number": {
+            "type": 2,
+            "int_value": 100
+          },
+          "code.module.name": {
+            "type": 0,
+            "string_value": "tests::integration_tests::tracing_api"
+          },
+          "exception.message": {
+            "type": 0,
+            "string_value": "this is an error"
+          },
+          "level": {
+            "type": 0,
+            "string_value": "ERROR"
+          },
+          "target": {
+            "type": 0,
+            "string_value": "tests::integration_tests::tracing_api"
+          }
+        }
+      }
+    ],
+    "duration": 121000,
+    "start": 1771510927609928000
+  }]]

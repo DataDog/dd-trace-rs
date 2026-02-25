@@ -181,11 +181,6 @@
 pub use core::configuration;
 pub use core::log;
 
-// Re-exports for tests (tests are in a separate crate, so these must be public)
-// Marked as doc(hidden) to indicate they're not part of the public API
-#[doc(hidden)]
-pub use otlp_utils::OtlpProtocol;
-
 #[cfg(feature = "test-utils")]
 pub mod core;
 #[cfg(feature = "test-utils")]
@@ -205,14 +200,18 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
-pub(crate) mod logs_reader;
-pub(crate) mod metrics_reader;
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+mod logs_reader;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+mod metrics_reader;
 mod otlp_utils;
 mod sampler;
 mod span_exporter;
 mod span_processor;
 mod spans_metrics;
+#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod telemetry_logs_exporter;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
@@ -540,15 +539,18 @@ pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, Datad
     )
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 
 /// Builder for Datadog Metrics with OTLP transport
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub struct DatadogMetricsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
     export_interval: Option<std::time::Duration>,
 }
 
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 impl DatadogMetricsBuilder {
     /// Sets the configuration for the metrics builder.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -570,20 +572,15 @@ impl DatadogMetricsBuilder {
 
     /// Initializes the metrics provider and sets it as the global meter provider.
     pub fn init(self) -> SdkMeterProvider {
-        let (meter_provider, _) = self.init_local();
+        let meter_provider = self.init_local();
         opentelemetry::global::set_meter_provider(meter_provider.clone());
         meter_provider
     }
 
     /// Initializes the metrics provider without setting it as the global meter provider.
-    pub fn init_local(self) -> (SdkMeterProvider, ()) {
+    pub fn init_local(self) -> SdkMeterProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        let meter_provider = crate::metrics_reader::create_meter_provider(
-            Arc::new(config),
-            self.resource,
-            self.export_interval,
-        );
-        (meter_provider, ())
+        metrics_reader::create_meter_provider(Arc::new(config), self.resource, self.export_interval)
     }
 }
 
@@ -618,18 +615,15 @@ impl DatadogLogsBuilder {
         self
     }
 
-    /// Initializes the logger provider and sets it as the global logger provider.
+    /// Initializes the logger provider.
     pub fn init(self) -> opentelemetry_sdk::logs::SdkLoggerProvider {
-        let (logger_provider, _) = self.init_local();
-        logger_provider
+        self.init_local()
     }
 
     /// Initializes the logger provider without setting it as the global logger provider.
-    pub fn init_local(self) -> (opentelemetry_sdk::logs::SdkLoggerProvider, ()) {
+    pub fn init_local(self) -> opentelemetry_sdk::logs::SdkLoggerProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        let logger_provider =
-            crate::logs_reader::create_logger_provider(Arc::new(config), self.resource);
-        (logger_provider, ())
+        logs_reader::create_logger_provider(Arc::new(config), self.resource)
     }
 }
 

@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use datadog_opentelemetry::configuration::Config;
+use datadog_opentelemetry::configuration::OtlpProtocol;
 use datadog_opentelemetry::metrics;
-use datadog_opentelemetry::OtlpProtocol;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 
