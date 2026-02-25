@@ -10,7 +10,7 @@
 use aws_config::BehaviorVersion;
 use aws_sdk_sqs::Client as SqsClient;
 use datadog_aws_sdk::DatadogInterceptor;
-use datadog_lambda_rs::{set_tracer_provider, wrap_handler};
+use datadog_lambda_rs::wrap_handler;
 use lambda_runtime::{service_fn, Error, LambdaEvent};
 use serde_json::{json, Value};
 
@@ -58,6 +58,5 @@ async fn main() -> Result<(), Error> {
                 .build(),
         )
         .init();
-    set_tracer_provider(provider);
-    lambda_runtime::run(service_fn(wrap_handler(handler))).await
+    lambda_runtime::run(service_fn(wrap_handler(handler, provider))).await
 }

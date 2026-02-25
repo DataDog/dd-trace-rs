@@ -2,10 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Lightweight internal logger for datadog-lambda-rs.
-//!
-//! Mirrors `datadog-lambda-go/internal/logger` — a standalone JSON logger
-//! to stdout, decoupled from the tracer's diagnostics. Controlled by
-//! `DD_LOG_LEVEL`.
 
 use serde::Serialize;
 use std::sync::atomic::{AtomicU8, Ordering};

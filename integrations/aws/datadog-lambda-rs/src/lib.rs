@@ -9,7 +9,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use datadog_lambda_rs::{set_tracer_provider, wrap_handler};
+//! use datadog_lambda_rs::wrap_handler;
 //! use lambda_runtime::{service_fn, Error, LambdaEvent};
 //! use serde_json::Value;
 //!
@@ -20,20 +20,13 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Error> {
 //!     let provider = /* configure your SdkTracerProvider */;
-//!     set_tracer_provider(provider);
-//!     lambda_runtime::run(service_fn(wrap_handler(handler))).await
+//!     lambda_runtime::run(service_fn(wrap_handler(handler, provider))).await
 //! }
 //! ```
 
-// TODO(libdd-inferrer): When libdd-inferrer replaces the extension,
-// this crate will need to handle root span creation, cold-start spans,
-// synthetic/inferred spans, and trace context extraction locally.
-// See README.md roadmap for the full breakdown.
-
 mod extension;
-#[allow(dead_code, unused_macros, unused_imports)]
 mod logger;
-use logger::{dd_lambda_error, dd_lambda_warn};
+use logger::dd_lambda_error;
 mod trace_headers;
 
 use lambda_runtime::LambdaEvent;
@@ -41,19 +34,11 @@ use opentelemetry::trace::{FutureExt, SpanContext, TraceContextExt, TraceFlags, 
 use opentelemetry::Context;
 use opentelemetry_sdk::trace::{IdGenerator, RandomIdGenerator, SdkTracerProvider};
 use serde::Serialize;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
 const DEFAULT_SAMPLING_PRIORITY: i32 = 1;
-
-static TRACER_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
-
-pub fn set_tracer_provider(provider: SdkTracerProvider) {
-    if TRACER_PROVIDER.set(provider).is_err() {
-        dd_lambda_warn!("tracer provider already set, ignoring");
-    }
-}
 
 #[must_use = "the returned Context must be used to parent child spans"]
 pub async fn create_root_span<E: Serialize>(
@@ -105,17 +90,9 @@ pub async fn end_root_span(request_id: &str, is_error: bool, parent_cx: &Context
     .await;
 }
 
-pub fn flush_all_spans() {
-    let provider = TRACER_PROVIDER
-        .get()
-        .expect("set_tracer_provider must be called before flush_all_spans");
-    if let Err(e) = provider.force_flush() {
-        dd_lambda_error!("flush failed: {e}");
-    }
-}
-
 pub fn wrap_handler<F, Fut, E, R>(
     handler: F,
+    provider: SdkTracerProvider,
 ) -> impl Fn(LambdaEvent<E>) -> BoxFuture<Result<R, lambda_runtime::Error>>
 where
     F: Fn(LambdaEvent<E>) -> Fut + Send + Sync + 'static,
@@ -126,6 +103,7 @@ where
     let handler = Arc::new(handler);
     move |event: LambdaEvent<E>| {
         let handler = handler.clone();
+        let provider = provider.clone();
         Box::pin(async move {
             let request_id = event.context.request_id.clone();
 
@@ -135,7 +113,9 @@ where
 
             end_root_span(&request_id, result.is_err(), &parent_cx, parent_id).await;
 
-            flush_all_spans();
+            if let Err(e) = provider.force_flush() {
+                dd_lambda_error!("flush failed: {e}");
+            }
 
             result
         })
