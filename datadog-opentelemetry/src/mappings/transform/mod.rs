@@ -60,13 +60,13 @@ use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use super::sdk_span::SdkSpan;
 
 pub type SpanStr<'a> = CowStr<'a>;
-pub type DdSpan<'a> = libdd_trace_utils::span::Span<CowStr<'a>>;
-type DdSpanEvent<'a> = libdd_trace_utils::span::SpanEvent<CowStr<'a>>;
-type DdSpanLink<'a> = libdd_trace_utils::span::SpanLink<CowStr<'a>>;
-type DdAnyValue<'a> = libdd_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
-type DdAttributeAnyValue<'a> = libdd_trace_utils::span::AttributeAnyValue<CowStr<'a>>;
-type DdAttributeArrayValue<'a> = libdd_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
-type DdScalarValue<'a> = libdd_trace_utils::span::AttributeArrayValue<CowStr<'a>>;
+pub type DdSpan<'a> = libdd_trace_utils::span::v04::Span<CowStr<'a>>;
+type DdSpanEvent<'a> = libdd_trace_utils::span::v04::SpanEvent<CowStr<'a>>;
+type DdSpanLink<'a> = libdd_trace_utils::span::v04::SpanLink<CowStr<'a>>;
+type DdAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
+type DdAttributeAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
+type DdAttributeArrayValue<'a> = libdd_trace_utils::span::v04::AttributeArrayValue<CowStr<'a>>;
+type DdScalarValue<'a> = libdd_trace_utils::span::v04::AttributeArrayValue<CowStr<'a>>;
 
 fn set_meta_otlp<'a>(k: SpanStr<'a>, v: SpanStr<'a>, dd_span: &mut DdSpan<'a>) {
     match k.borrow() {
@@ -521,6 +521,12 @@ impl SpanText for CowStr<'_> {
     fn from_static_str(value: &'static str) -> Self {
         CowStr(Cow::Borrowed(value))
     }
+}
+
+impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {
+    type Text = CowStr<'a>;
+
+    type Bytes = libdd_tinybytes::Bytes;
 }
 
 /// Converts an OpenTelemetry span to a Datadog span.
