@@ -1,3 +1,9 @@
 .claude
 CLAUDE.md
 rustfmt.toml
+
+# CDK
+cdk/dist/
+cdk/node_modules/
+cdk/cdk.out/
+cdk/rust-binaries/

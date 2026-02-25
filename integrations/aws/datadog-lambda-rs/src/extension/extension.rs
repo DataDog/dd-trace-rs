@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::constants::{EXTENSION_PORT, LAMBDA_REQUEST_ID_HEADER};
-use crate::logger::{dd_lambda_error, dd_lambda_warn};
+use crate::logger::{dd_lambda_debug, dd_lambda_error, dd_lambda_warn};
 use crate::trace_headers::{
     DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY, DATADOG_TAGS_KEY,
     DATADOG_TRACE_ID_KEY,
@@ -33,6 +33,8 @@ pub(crate) async fn start_invocation<E: Serialize>(
     let client = get_http_client();
     let url = format!("http://127.0.0.1:{EXTENSION_PORT}/lambda/start-invocation");
 
+    dd_lambda_debug!("start-invocation request_id={request_id}");
+
     let response = client
         .post(&url)
         .header(LAMBDA_REQUEST_ID_HEADER, request_id)
@@ -44,11 +46,36 @@ pub(crate) async fn start_invocation<E: Serialize>(
         })
         .ok()?;
 
+    let status = response.status();
     let headers = response.headers().clone();
     // Consume the body to release the connection.
     let _ = response.text().await;
 
-    parse_extension_response(&headers)
+    dd_lambda_debug!(
+        "start-invocation response status={status} trace_id={} parent_id={} sampling={} tags={}",
+        headers
+            .get(DATADOG_TRACE_ID_KEY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>"),
+        headers
+            .get(DATADOG_PARENT_ID_KEY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>"),
+        headers
+            .get(DATADOG_SAMPLING_PRIORITY_KEY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>"),
+        headers
+            .get(DATADOG_TAGS_KEY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("<missing>"),
+    );
+
+    let result = parse_extension_response(&headers);
+    if result.is_none() {
+        dd_lambda_warn!("start-invocation returned no usable trace context, falling back to random IDs");
+    }
+    result
 }
 
 fn parse_extension_response(headers: &reqwest::header::HeaderMap) -> Option<(Context, u64)> {
@@ -97,6 +124,10 @@ fn parse_extension_response(headers: &reqwest::header::HeaderMap) -> Option<(Con
 
     let span_context = SpanContext::new(trace_id, span_id, flags, true, TraceState::default());
 
+    dd_lambda_debug!(
+        "parsed trace context: trace_id={trace_id} span_id={span_id} parent_id={parent_id} sampling={sampling}"
+    );
+
     Some((
         Context::current().with_remote_span_context(span_context),
         parent_id,
@@ -113,6 +144,10 @@ pub(crate) async fn end_invocation(
 ) {
     let client = get_http_client();
     let url = format!("http://127.0.0.1:{EXTENSION_PORT}/lambda/end-invocation");
+
+    dd_lambda_debug!(
+        "end-invocation request_id={request_id} trace_id={trace_id} parent_id={parent_id} span_id={span_id} sampling={sampling_priority} is_error={is_error}"
+    );
 
     if let Err(e) = client
         .post(&url)
