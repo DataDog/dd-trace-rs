@@ -19,19 +19,34 @@ opentelemetry_sdk = { workspace = true }
 
 [dev-dependencies]
 aws-config = "1.6"
+aws-sdk-eventbridge = "1.102"
+aws-sdk-sns = "1.96"
 aws-sdk-sqs = "1.93"
 datadog-aws-sdk = { version = "0.2", path = "../aws-sdk-rust" }
 datadog-opentelemetry = { version = "0.2", path = "../../../datadog-opentelemetry" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tokio-test = "0.4"
-tracing = "0.1"
-tracing-opentelemetry = "0.32"
-tracing-subscriber = { version = "0.3", features = ["json"] }
 
 [[example]]
-name = "sqs_lambda"
-path = "examples/SQS-Lambda/sqs_lambda.rs"
+name = "sqs-producer"
+path = "examples/sqs/rust-producer/main.rs"
 
 [[example]]
-name = "rust_sqs_producer"
-path = "examples/Rust-SQS-Producer/rust_sqs_producer.rs"
+name = "sqs-consumer"
+path = "examples/sqs/rust-consumer/main.rs"
+
+[[example]]
+name = "sns-producer"
+path = "examples/sns/rust-producer/main.rs"
+
+[[example]]
+name = "sns-consumer"
+path = "examples/sns/rust-consumer/main.rs"
+
+[[example]]
+name = "eventbridge-producer"
+path = "examples/eventbridge/rust-producer/main.rs"
+
+[[example]]
+name = "eventbridge-consumer"
+path = "examples/eventbridge/rust-consumer/main.rs"
