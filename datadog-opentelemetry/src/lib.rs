@@ -237,12 +237,29 @@
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub(crate) mod core;
+
 // Public re-exports
 pub use core::configuration;
 pub use core::log;
 
 #[cfg(feature = "test-utils")]
-pub mod core;
+#[allow(missing_docs)]
+pub mod core_pub_hack {
+    // Why are we doing this?
+    //
+    // As it turns out having modules exposed publicly or not depending on some features is not
+    // really supported by rustdoc, and it produces weird results...
+    // But we really like exposing code that should be private to benchmarks.
+    // So this ugly hack is there to do exactly this
+    // * We import core with a pub(crate) visibility at the top level
+    // * We re-export core with a public visibility here
+    // * We export this module only with test-utils
+    //
+    // Thus the test-utils feature is not seen by rustdoc
+    pub use crate::core::*;
+}
+
 #[cfg(feature = "test-utils")]
 pub mod mappings;
 #[cfg(feature = "test-utils")]
@@ -250,8 +267,6 @@ pub mod propagation;
 #[cfg(feature = "test-utils")]
 pub mod sampling;
 
-#[cfg(not(feature = "test-utils"))]
-pub(crate) mod core;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
 #[cfg(not(feature = "test-utils"))]

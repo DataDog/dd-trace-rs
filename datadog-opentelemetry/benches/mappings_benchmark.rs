@@ -6,7 +6,7 @@ use std::hint::black_box;
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 use criterion::{criterion_group, criterion_main, Criterion};
-use datadog_opentelemetry::core::test_utils::benchmarks::{
+use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 use datadog_opentelemetry::mappings::transform_tests::test_span_to_sdk_span;

@@ -3,7 +3,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use datadog_opentelemetry::configuration::{Config, TracePropagationStyle};
-use datadog_opentelemetry::core::test_utils::benchmarks::{
+use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 
