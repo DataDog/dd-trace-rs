@@ -9,6 +9,11 @@ license.workspace = true
 readme.workspace = true
 authors.workspace = true
 
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+
+
 [dependencies]
 
 # External dependencies
@@ -63,7 +68,7 @@ libdd-tinybytes = { workspace = true }
 [dev-dependencies]
 assert_unordered = "0.3"
 pretty_assertions = "1.4.1"
-proptest = {version = "1.9", features = ["std"], default-features = false}
+proptest = { version = "1.9", features = ["std"], default-features = false }
 test-case = "3.3.1"
 tokio = { workspace = true }
 
@@ -78,16 +83,37 @@ tracing = { version = "0.1.4" }
 tracing-opentelemetry = { version = "0.32" }
 tracing-subscriber = { version = "0.3" }
 
+# Testing the logging API 
+log = { version = "0.4.21" }
+opentelemetry-appender-log = { version = "0.31.0" }
+
 # Benchmarking
 criterion = "0.5.1"
 
 [features]
-default = ["metrics-grpc", "logs-grpc"]
+default = []
+metrics = ["metrics-grpc"]
 metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
-metrics-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
+metrics-http = [
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/http-proto",
+    "opentelemetry-otlp/reqwest-blocking-client",
+]
+logs = ["logs-grpc"]
 logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
-logs-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
-test-utils = ["libdd-data-pipeline/test-utils", "criterion", "metrics-grpc", "metrics-http"]
+logs-http = [
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/http-proto",
+    "opentelemetry-otlp/reqwest-blocking-client",
+]
+test-utils = [
+    "libdd-data-pipeline/test-utils",
+    "criterion",
+    "metrics-grpc",
+    "metrics-http",
+    "logs-grpc",
+    "logs-http",
+]
 
 [[bench]]
 name = "smoke"

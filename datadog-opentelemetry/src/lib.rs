@@ -3,7 +3,7 @@
 
 //! # Datadog Opentelemetry
 //!
-//! This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/). It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and optimizations.
+//! This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/), metrics and logging. It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and optimizations.
 //!
 //!
 //! ## Usage
@@ -19,24 +19,36 @@
 //! datadog-opentelemetry = { version = "0.2.1" }
 //! ```
 //!
-//! ### Tracing
+//! ### Creating traces, metrics and logs
 //!
-//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.41/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//! #### Tracing
 //!
-//! ### Metrics
+//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//!
+//! #### Metrics
 //!
 //! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html).
-//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 //!
-//! ### Initialization
+//! #### Logging
+//!
+//! * Enable with the `logs` feature of this crate
+//!
+//! To collect logs, you can use the [`log`](https://docs.rs/log/0.4.29/log/) crate with the `opentelemetry_appender_log`.
+//! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
+//!
+//! ### Library initialization
 //!
 //! The following examples will read datadog and opentelemetry configuration from environment
-//! variables and other available sources, initialize and set up the tracer provider and the
-//! distributed tracing propagators globally.
+//! variables and other available sources, initialize and set up the global providers for tracing,
+//! logging or metrics
 //!
 //! #### Tracing API
 //!
-//! * Requires `tracing-subscriber` and `tracing`
+//! Requires
+//! * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
+//! * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 //!
 //! ```no_run
 //! use opentelemetry::trace::TracerProvider;
@@ -58,9 +70,11 @@
 //!     .expect("tracer shutdown error");
 //! ```
 //!
-//! #### Opentelemetry API
+//! #### Opentelemetry trace API
 //!
-//! * requires `opentelemetry`
+//! Requires
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `trace`
+//!   feature enabled
 //!
 //! ```no_run
 //! use std::time::Duration;
@@ -83,38 +97,17 @@
 //!     .expect("tracer shutdown error");
 //! ```
 //!
-//! ### Configuration
+//! #### Opentelemetry metrics API
 //!
-//! Configuration can be passed either:
+//! Requires
+//! * the `metrics` feature of this crate to be enabled
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `metrics`
+//!   feature enabled
+//! * [`tokio`](https://docs.rs/tokio)
 //!
-//! * Programmatically
+//! The metrics provider MUST be initialized within a tokio context
 //!
-//! ```rust
-//! use datadog_opentelemetry::configuration::Config;
-//! let config = datadog_opentelemetry::configuration::Config::builder()
-//!     .set_service("my_service".to_string())
-//!     .set_env("prod".to_string())
-//!     .build();
-//! let tracer_provider = datadog_opentelemetry::tracing()
-//!     .with_config(config)
-//!     // this also accepts options for the Opentelemetry SDK builder
-//!     .with_max_attributes_per_span(64)
-//!     .init();
-//! ```
-//!
-//! For advanced usage and configuration information, check out [`DatadogTracingBuilder`] and
-//! [`configuration::ConfigBuilder`]
-//!
-//! #### Metrics API
-//!
-//! * Requires `opentelemetry` with metrics feature
-//!
-//! ```no_run
-//! use std::time::Duration;
-//!
-//! // Enable metrics via environment variable
-//! std::env::set_var("DD_METRICS_OTEL_ENABLED", "true");
-//!
+//! ```rust ,no_run
 //! // Initialize metrics with default configuration
 //! let meter_provider = datadog_opentelemetry::metrics().init();
 //!
@@ -127,11 +120,65 @@
 //! let counter: Counter<u64> = meter.u64_counter("requests").build();
 //! counter.add(1, &[KeyValue::new("method", "GET")]);
 //!
-//! // Shutdown to flush remaining metrics
+//! // Before ending the program shutdown to flush remaining metrics
 //! meter_provider.shutdown().unwrap();
 //! ```
 //!
+//! #### Log API
+//!
+//! Requires
+//! * the `logs` feature of this crate to be enabled
+//! * [`log`](https://docs.rs/log/0.4.29/log/)
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
+//! * [`tokio`](https://docs.rs/tokio)
+//!
+//! The logger provider MUST be initialized within a tokio context
+//!
+//! ```rust ,no_run
+//! // Initialize logs with default configuration
+//! let logger_provider = datadog_opentelemetry::logs().init();
+//!
+//! let otel_log_appender =
+//!     opentelemetry_appender_log::OpenTelemetryLogBridge::new(&logger_provider);
+//! log::set_boxed_logger(Box::new(otel_log_appender)).unwrap();
+//!
+//! // Before ending the program shutdown to flush remaining logs to the collector
+//! logger_provider.shutdown();
+//! ```
+//!
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+//!
+//! ### Configuration
+//!
+//! Configuration can be passed either:
+//!
+//! * Programmatically
+//!
+//! ```rust ,no_run
+//! use datadog_opentelemetry::configuration::Config;
+//! let config = Config::builder()
+//!     .set_service("my_service".to_string())
+//!     .set_env("prod".to_string())
+//!     .build();
+//!
+//! let tracer_provider = datadog_opentelemetry::tracing()
+//!     .with_config(config.clone())
+//!     // this also accepts options for the Opentelemetry SDK builder
+//!     .with_max_attributes_per_span(64)
+//!     .init();
+//!
+//! let metrics_provider = datadog_opentelemetry::metrics()
+//!     .with_config(config.clone())
+//!     .init();
+//!
+//! let logging_provider = datadog_opentelemetry::logs()
+//!     .with_config(config.clone())
+//!     .init();
+//! ```
+//!
+//! For advanced usage and configuration information, check out [`DatadogTracingBuilder`] and
+//! [`configuration::ConfigBuilder`]
+//!
 //!
 //! * Through env variables
 //!
@@ -139,7 +186,9 @@
 //! DD_SERVICE=my_service DD_ENV=prod cargo run
 //! ```
 //!
-//! Or to pass options to the OpenTelemetry SDK TracerProviderBuilder
+//! Configuration of the OpenTelemetry SDK TracerProviderBuilder can be done when initializing the
+//! library
+//!
 //! ```rust
 //! # #[derive(Debug)]
 //! # struct MySpanProcessor;
@@ -171,18 +220,49 @@
 //! ## Support
 //!
 //! * MSRV: 1.84
-//! * [opentelemetry](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.0/tracing_opentelemetry/)
+//!
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
 //!   version: 0.32
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
+//!   version 0.31
+//! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
+//!
+//! ## Features
+//!
+//! * `metrics` enabled the metrics provider
+//! * `metrics-grpc` enabled the metrics provider, with GRPC OTLP export
+//! * `metrics-http` enabled the metrics provider, with HTTP OTLP export
+//! * `logs` enabled the log provider
+//! * `logs-grpc` enabled the log provider, with GRPC OTLP export
+//! * `logs-http` enabled the log provider, with HTTP OTLP export
 
 #![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+pub(crate) mod core;
 
 // Public re-exports
 pub use core::configuration;
 pub use core::log;
 
 #[cfg(feature = "test-utils")]
-pub mod core;
+#[allow(missing_docs)]
+pub mod core_pub_hack {
+    // Why are we doing this?
+    //
+    // As it turns out having modules exposed publicly or not depending on some features is not
+    // really supported by rustdoc, and it produces weird results...
+    // But we really like exposing code that should be private to benchmarks.
+    // So this ugly hack is there to do exactly this
+    // * We import core with a pub(crate) visibility at the top level
+    // * We re-export core with a public visibility here
+    // * We export this module only with test-utils
+    //
+    // Thus the test-utils feature is not seen by rustdoc
+    pub use crate::core::*;
+}
+
 #[cfg(feature = "test-utils")]
 pub mod mappings;
 #[cfg(feature = "test-utils")]
@@ -190,8 +270,6 @@ pub mod propagation;
 #[cfg(feature = "test-utils")]
 pub mod sampling;
 
-#[cfg(not(feature = "test-utils"))]
-pub(crate) mod core;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
 #[cfg(not(feature = "test-utils"))]
@@ -539,18 +617,17 @@ pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, Datad
     )
 }
 
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-use opentelemetry_sdk::metrics::SdkMeterProvider;
-
 /// Builder for Datadog Metrics with OTLP transport
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub struct DatadogMetricsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
     export_interval: Option<std::time::Duration>,
 }
 
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 impl DatadogMetricsBuilder {
     /// Sets the configuration for the metrics builder.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -571,21 +648,22 @@ impl DatadogMetricsBuilder {
     }
 
     /// Initializes the metrics provider and sets it as the global meter provider.
-    pub fn init(self) -> SdkMeterProvider {
+    pub fn init(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let meter_provider = self.init_local();
         opentelemetry::global::set_meter_provider(meter_provider.clone());
         meter_provider
     }
 
     /// Initializes the metrics provider without setting it as the global meter provider.
-    pub fn init_local(self) -> SdkMeterProvider {
+    pub fn init_local(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
         metrics_reader::create_meter_provider(Arc::new(config), self.resource, self.export_interval)
     }
 }
 
 /// Initialize a new Datadog Metrics builder with OTLP transport
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub fn metrics() -> DatadogMetricsBuilder {
     DatadogMetricsBuilder {
         config: None,
@@ -595,13 +673,15 @@ pub fn metrics() -> DatadogMetricsBuilder {
 }
 
 /// Builder for Datadog Logs with OTLP transport
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "logs")))]
 pub struct DatadogLogsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
 }
 
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "logs")))]
 impl DatadogLogsBuilder {
     /// Sets the configuration for the logs builder.
     pub fn with_config(mut self, config: Config) -> Self {
@@ -628,7 +708,8 @@ impl DatadogLogsBuilder {
 }
 
 /// Initialize a new Datadog Logs builder with OTLP transport
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
+#[cfg_attr(docsrs, doc(cfg(feature = "logs")))]
 pub fn logs() -> DatadogLogsBuilder {
     DatadogLogsBuilder {
         config: None,

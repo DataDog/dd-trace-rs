@@ -912,13 +912,12 @@ impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f6
 impl_config_value_provider!(option: String);
 
 #[derive(Clone)]
-#[non_exhaustive]
 /// Configuration for the Datadog Tracer
 ///
 /// # Usage
+///
 /// ```
 /// use datadog_opentelemetry::configuration::Config;
-///
 ///
 /// let config = Config::builder() // This pulls configuration from the environment and other sources
 ///     .set_service("my-service".to_string()) // Override service name
@@ -1610,7 +1609,7 @@ impl Config {
     /// which is created in `create_dd_resource` function.
     /// The result will depend on which environment variable was set,
     /// or if it returns an `unknown_service` name, which is why it is a calculated source.
-    pub fn set_calculated_service_name(&self, service_name: Option<String>) {
+    pub(crate) fn set_calculated_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
                 ServiceName::Configured(service_name),

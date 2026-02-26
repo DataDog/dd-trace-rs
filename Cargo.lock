@@ -480,8 +480,10 @@ dependencies = [
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-utils",
+ "log",
  "lru",
  "opentelemetry",
+ "opentelemetry-appender-log",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -1466,6 +1468,16 @@ dependencies = [
  "pin-project-lite",
  "thiserror 2.0.14",
  "tracing",
+]
+
+[[package]]
+name = "opentelemetry-appender-log"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e50c59a96bd6a723a4329c5db31eb04fa4488c5f141ae7b9d4fd587439e6ee1"
+dependencies = [
+ "log",
+ "opentelemetry",
 ]
 
 [[package]]
