@@ -58,6 +58,7 @@ libdd-data-pipeline = { workspace = true }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
+libdd-tinybytes = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"

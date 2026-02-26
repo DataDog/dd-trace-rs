@@ -10,7 +10,8 @@ use std::{
     vec,
 };
 
-use libdd_trace_utils::span::{AttributeAnyValue as Any, AttributeArrayValue as Scalar, SpanText};
+use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue as Scalar};
+use libdd_trace_utils::span::SpanText as _;
 
 use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{
@@ -734,9 +735,16 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
-    use crate::mappings::transform::{otel_span_to_dd_span, CowStr};
+    use crate::mappings::{
+        transform::{otel_span_to_dd_span, CowStr},
+        DdSpan,
+    };
 
     use crate::mappings::transform::transform_tests::{test_cases, test_span_to_sdk_span};
+
+    fn downcast_lifetime<'a: 'b, 'b>(span: DdSpan<'a>) -> DdSpan<'b> {
+        unsafe { std::mem::transmute(span) }
+    }
 
     #[test]
     fn test_otel_span_to_dd_span() {
@@ -753,7 +761,12 @@ mod tests {
                 otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
             hashmap_diff(&output.meta, &test.expected_out.meta);
             hashmap_diff(&output.metrics, &test.expected_out.metrics);
-            assert_eq!(output, test.expected_out, "Test {} failed", test.name);
+            assert_eq!(
+                output,
+                downcast_lifetime(test.expected_out),
+                "Test {} failed",
+                test.name
+            );
         }
     }
 
