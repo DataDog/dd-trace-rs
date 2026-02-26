@@ -10,8 +10,6 @@ readme.workspace = true
 authors.workspace = true
 
 [package.metadata.docs.rs]
-# document all features
-feature = ["logs", "metrics"]
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
 
