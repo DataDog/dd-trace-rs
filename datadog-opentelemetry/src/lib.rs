@@ -141,7 +141,7 @@
 //! let otel_log_appender =
 //!     opentelemetry_appender_log::OpenTelemetryLogBridge::new(&logger_provider);
 //! log::set_boxed_logger(Box::new(otel_log_appender)).unwrap();
-//! 
+//!
 //! // Before ending the program shutdown to flush remaining logs to the collector
 //! logger_provider.shutdown();
 //! ```
