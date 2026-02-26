@@ -8,6 +8,10 @@ script (`scripts/local_config_map_generate.py`) reads this JSON file and generat
 that the files are sorted and synchronized, so don't forget to sort `supported-configurations.json`
 and run the `scripts/local_config_map_generate.py` script!
 
+## Prerequisites
+
+- **Python 3.14** — required to run `scripts/local_config_map_generate.py`
+
 ## Configuration Schema
 
 Each configuration entry in `supported-configurations.json` follows this structure:
