@@ -34,7 +34,6 @@
 //!
 //! * Enable with the `logs` feature of this crate
 //!
-//!
 //! To collect logs, you can use the [`log`](https://docs.rs/log/0.4.29/log/) crate with the `opentelemetry_appender_log`.
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=logs&prog_lang=rust).
 //!
@@ -104,7 +103,7 @@
 //! * the `metrics` feature of this crate to be enabled
 //! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `metrics`
 //!   feature enabled
-//! * [`tokio`]
+//! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The metrics provider MUST be initialized within a tokio context
 //!
@@ -131,12 +130,12 @@
 //! * the `logs` feature of this crate to be enabled
 //! * [`log`](https://docs.rs/log/0.4.29/log/)
 //! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
-//! * [`tokio`]
+//! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The logger provider MUST be initialized within a tokio context
 //!
 //! ```rust ,no_run
-//! // Initialize metrics with default configuration
+//! // Initialize logs with default configuration
 //! let logger_provider = datadog_opentelemetry::logs().init();
 //!
 //! let otel_log_appender =
