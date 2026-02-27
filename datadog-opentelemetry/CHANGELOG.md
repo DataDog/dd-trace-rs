@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (Feb 27, 2026)
+
+- Add OTEL metrics support in https://github.com/DataDog/dd-trace-rs/pull/127
+- add OTEL logs support in https://github.com/DataDog/dd-trace-rs/pull/144
+- Remove error logs on transient trace export issues in https://github.com/DataDog/dd-trace-rs/pull/148
+
 ## 0.2.1 (Dec 11, 2025)
 
 - Fix Remote Config path parsing
