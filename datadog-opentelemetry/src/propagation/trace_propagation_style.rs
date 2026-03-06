@@ -1,19 +1,19 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::configuration::{Config, TracePropagationStyle};
+use crate::core::configuration::TracePropagationStyle;
 use serde::{Deserialize, Deserializer};
 
-use super::{
+use crate::propagation::{
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, SpanContext},
-    datadog, tracecontext, Propagator,
+    datadog, tracecontext, PropagationConfig, Propagator,
 };
 
 const NONE_KEYS: [String; 0] = [];
 
-impl Propagator for TracePropagationStyle {
-    fn extract(&self, carrier: &dyn Extractor, config: &Config) -> Option<SpanContext> {
+impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
+    fn extract(&self, carrier: &dyn Extractor, config: &C) -> Option<SpanContext> {
         match self {
             Self::Datadog => datadog::extract(carrier, config),
             Self::TraceContext => tracecontext::extract(carrier),
@@ -21,7 +21,12 @@ impl Propagator for TracePropagationStyle {
         }
     }
 
-    fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config) {
+    fn inject(
+        &self,
+        context: &mut InjectSpanContext,
+        carrier: &mut dyn Injector,
+        config: &C,
+    ) {
         match self {
             Self::Datadog => datadog::inject(context, carrier, config),
             Self::TraceContext => tracecontext::inject(context, carrier),
