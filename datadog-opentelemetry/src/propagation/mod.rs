@@ -51,12 +51,7 @@ pub trait PropagationConfig: Send + Sync {
 
 pub(crate) trait Propagator<C: PropagationConfig + ?Sized> {
     fn extract(&self, carrier: &dyn Extractor, config: &C) -> Option<SpanContext>;
-    fn inject(
-        &self,
-        context: &mut InjectSpanContext,
-        carrier: &mut dyn Injector,
-        config: &C,
-    );
+    fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &C);
     fn keys(&self) -> &[String];
 }
 
