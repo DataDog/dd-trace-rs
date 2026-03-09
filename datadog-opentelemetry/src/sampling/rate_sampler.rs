@@ -71,7 +71,34 @@ impl RateSampler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opentelemetry::trace::TraceId;
+
+    // Test-only TraceId implementation
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TestTraceId {
+        bytes: [u8; 16],
+    }
+
+    impl TestTraceId {
+        fn from_bytes(bytes: [u8; 16]) -> Self {
+            Self { bytes }
+        }
+
+        fn to_bytes(&self) -> [u8; 16] {
+            self.bytes
+        }
+    }
+
+    impl TraceIdLike for TestTraceId {
+        type Item = [u8; 16];
+
+        fn to_u128(&self) -> u128 {
+            u128::from_be_bytes(self.bytes)
+        }
+
+        fn inner(&self) -> &Self::Item {
+            &self.bytes
+        }
+    }
 
     #[test]
     fn check_debug_impl() {
@@ -120,7 +147,7 @@ mod tests {
         let sampler_zero = RateSampler::new(0.0);
         let mut bytes_zero = [0u8; 16];
         bytes_zero[15] = 1; // Example ID
-        let trace_id_zero = TraceId::from_bytes(bytes_zero);
+        let trace_id_zero = TestTraceId::from_bytes(bytes_zero);
         assert!(
             !sampler_zero.sample(&trace_id_zero),
             "sampler_zero should return false"
@@ -130,7 +157,7 @@ mod tests {
         let sampler_one = RateSampler::new(1.0);
         let mut bytes_one = [0u8; 16];
         bytes_one[15] = 2; // Example ID
-        let trace_id_one = TraceId::from_bytes(bytes_one);
+        let trace_id_one = TestTraceId::from_bytes(bytes_one);
         assert!(
             sampler_one.sample(&trace_id_one),
             "sampler_one should return true"
@@ -142,7 +169,7 @@ mod tests {
 
         // Trace ID that should be sampled (hashed value <= threshold)
         let bytes_sample = [0u8; 16]; // Hashes to 0
-        let trace_id_sample = TraceId::from_bytes(bytes_sample);
+        let trace_id_sample = TestTraceId::from_bytes(bytes_sample);
         let sample_u64 = u128::from_be_bytes(trace_id_sample.to_bytes()) as u64;
         let sample_hash = sample_u64.wrapping_mul(KNUTH_FACTOR);
         assert!(sample_hash <= threshold);
@@ -154,7 +181,7 @@ mod tests {
         // Trace ID that should be dropped (hashed value > threshold)
         let mut bytes_drop = [0u8; 16];
         bytes_drop[8..16].copy_from_slice(&u64::MAX.to_be_bytes()); // High lower 64 bits
-        let trace_id_drop = TraceId::from_bytes(bytes_drop);
+        let trace_id_drop = TestTraceId::from_bytes(bytes_drop);
         let drop_u64 = u128::from_be_bytes(trace_id_drop.to_bytes()) as u64;
         let drop_hash = drop_u64.wrapping_mul(KNUTH_FACTOR);
         // For rate 0.5, threshold is MAX/2. Hashing MAX should result in something > MAX/2
@@ -173,7 +200,7 @@ mod tests {
         let sampler_half = RateSampler::new(0.5);
         // Trace ID with all zeros hashes to 0, which is always <= threshold for rate > 0
         let bytes_to_sample = [0u8; 16];
-        let trace_id_to_sample = TraceId::from_bytes(bytes_to_sample);
+        let trace_id_to_sample = TestTraceId::from_bytes(bytes_to_sample);
         assert!(
             sampler_half.sample(&trace_id_to_sample),
             "Sampler with 0.5 rate should sample trace ID 0"
