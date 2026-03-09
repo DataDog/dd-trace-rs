@@ -17,10 +17,12 @@ use tracecontext::TRACESTATE_KEY;
 pub mod carrier;
 pub(crate) mod config;
 pub mod context;
-mod datadog;
+/// Datadog header format propagation (`x-datadog-*` headers).
+pub mod datadog;
 mod error;
 pub(crate) mod trace_propagation_style;
-pub(crate) mod tracecontext;
+/// W3C Trace Context propagation (`traceparent`/`tracestate` headers).
+pub mod tracecontext;
 
 pub use crate::core::configuration::TracePropagationStyle;
 

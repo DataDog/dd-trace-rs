@@ -244,6 +244,7 @@ pub(crate) mod core;
 
 // Public re-exports
 pub use core::configuration;
+pub use core::constants;
 pub use core::log;
 
 #[cfg(feature = "test-utils")]
