@@ -61,7 +61,7 @@ impl DatadogExtractData {
 
 #[derive(Debug)]
 pub struct DatadogPropagator {
-    inner: DatadogCompositePropagator,
+    inner: DatadogCompositePropagator<Config>,
     registry: TraceRegistry,
     cfg: Arc<Config>,
 }

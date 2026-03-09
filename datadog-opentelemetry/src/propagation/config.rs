@@ -1,9 +1,11 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::configuration::{Config, TracePropagationStyle};
+use crate::configuration::TracePropagationStyle;
 
-pub(super) fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
+use crate::propagation::PropagationConfig;
+
+pub(super) fn get_extractors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
     if let Some(extractors) = config.trace_propagation_style_extract() {
         extractors
     } else {
@@ -11,7 +13,7 @@ pub(super) fn get_extractors(config: &Config) -> &[TracePropagationStyle] {
     }
 }
 
-pub(super) fn get_injectors(config: &Config) -> &[TracePropagationStyle] {
+pub(super) fn get_injectors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
     if let Some(injectors) = config.trace_propagation_style_inject() {
         injectors
     } else {

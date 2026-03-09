@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 
-use super::{
+use crate::propagation::{
     carrier::{Extractor, Injector},
     context::{
         combine_trace_id, split_trace_id, InjectSpanContext, Sampling, SpanContext,
@@ -14,11 +14,11 @@ use super::{
 
 use crate::{
     core::{
-        configuration::Config,
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::{SamplingMechanism, SamplingPriority},
     },
     dd_debug, dd_error, dd_warn,
+    propagation::PropagationConfig,
 };
 
 // Datadog Keys
@@ -41,7 +41,11 @@ static DATADOG_HEADER_KEYS: LazyLock<[String; 5]> = LazyLock::new(|| {
     ]
 });
 
-pub fn inject(context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &Config) {
+pub fn inject(
+    context: &mut InjectSpanContext,
+    carrier: &mut dyn Injector,
+    config: &(impl PropagationConfig + ?Sized),
+) {
     let tags = &mut context.tags;
 
     inject_trace_id(context.trace_id, carrier, tags);
@@ -179,7 +183,10 @@ fn validate_tag_value(value: &str) -> bool {
         .all(|c| matches!(c, b' '..=b'+' | b'-'..=b'~'))
 }
 
-pub fn extract(carrier: &dyn Extractor, config: &Config) -> Option<SpanContext> {
+pub fn extract(
+    carrier: &dyn Extractor,
+    config: &(impl PropagationConfig + ?Sized),
+) -> Option<SpanContext> {
     let lower_trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id?,
         Err(e) => {
@@ -368,7 +375,7 @@ pub fn keys() -> &'static [String] {
 #[allow(clippy::unwrap_used)]
 mod test {
     use crate::core::{
-        configuration::TracePropagationStyle,
+        configuration::{Config, TracePropagationStyle},
         sampling::{mechanism, priority},
     };
 
