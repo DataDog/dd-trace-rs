@@ -13,7 +13,7 @@ use std::borrow::Cow;
 /// # Examples
 ///
 /// ```
-/// use datadog_opentelemetry::sampling::TraceIdLike;
+/// use libdd_sampling::TraceIdLike;
 ///
 /// #[derive(Clone, PartialEq, Eq)]
 /// struct MyTraceId(u128);
