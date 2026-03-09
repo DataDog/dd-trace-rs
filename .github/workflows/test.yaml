@@ -79,7 +79,7 @@ jobs:
         if: success() || failure()
         shell: bash
         run: |
-          which xsltproc || apt-get install -y xsltproc
+          which xsltproc || sudo apt-get install -y xsltproc
           xml_file="target/nextest/ci/junit.xml"
           echo "Fixing $xml_file"
           tmp_file="$(mktemp)"
