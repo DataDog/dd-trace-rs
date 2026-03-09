@@ -212,7 +212,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     let code: u32 = if let Some(http_status_code) = span.get_attr_num(DATADOG_HTTP_STATUS_CODE) {
         http_status_code
     } else {
-        get_otel_status_code(span)
+        get_otel_status_code(span).unwrap_or(0)
     };
     if code != 0 {
         dd_span.meta.insert(
