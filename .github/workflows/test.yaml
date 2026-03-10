@@ -175,7 +175,7 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@bafc8bc606d76170d98ce3cdb13c75a1ea9cf924  # main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@93283b322c59ecf7267c28c06648d341be75eded  # main
     secrets:
       TEST_OPTIMIZATION_API_KEY: ${{ secrets.DATADOG_API_KEY }}
     with:
@@ -183,5 +183,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: 8a65f66d74ca77f34e7e5a2f737e963ce9cec563 # main
+      ref: 93283b322c59ecf7267c28c06648d341be75eded # main
       push_to_test_optimization: true
