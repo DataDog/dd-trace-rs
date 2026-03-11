@@ -1112,7 +1112,10 @@ mod tests {
         }
 
         assert!(found_agent_rate, "Missing agent rate tag");
-        assert!(found_ksr, "Missing knuth sampling rate tag for agent mechanism");
+        assert!(
+            found_ksr,
+            "Missing knuth sampling rate tag for agent mechanism"
+        );
 
         // Also check that the SAMPLING_RULE_RATE_TAG_KEY is NOT present for agent mechanism
         for attr in &agent_attrs {
