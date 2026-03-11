@@ -9,6 +9,7 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-11",
+      "_dd.p.ksr": "1",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "68b1de6200000000578668d18e7e6e97",

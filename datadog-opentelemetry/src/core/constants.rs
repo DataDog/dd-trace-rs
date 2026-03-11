@@ -24,3 +24,6 @@ pub const SAMPLING_AGENT_RATE_TAG_KEY: &str = "_dd.agent_psr";
 
 /// Rate limiter effective rate metric key.
 pub const RL_EFFECTIVE_RATE: &str = "_dd.limit_psr";
+
+/// Knuth Sampling Rate propagated tag key.
+pub const SAMPLING_KNUTH_RATE_TAG_KEY: &str = "_dd.p.ksr";

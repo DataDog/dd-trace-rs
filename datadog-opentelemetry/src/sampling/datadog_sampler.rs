@@ -4,7 +4,7 @@
 use crate::core::configuration::SamplingRuleConfig;
 use crate::core::constants::{
     RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
-    SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+    SAMPLING_KNUTH_RATE_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
 use crate::core::sampling::{mechanism, SamplingMechanism, SamplingPriority};
 
@@ -458,6 +458,43 @@ impl DatadogSampler {
     }
 }
 
+/// Formats a sampling rate with up to 6 significant digits, stripping trailing zeros.
+///
+/// This matches the Go behavior of `strconv.FormatFloat(rate, 'g', 6, 64)`.
+///
+/// # Examples
+/// - `1.0` → `"1"`
+/// - `0.5` → `"0.5"`
+/// - `0.7654321` → `"0.765432"`
+/// - `0.100000` → `"0.1"`
+fn format_sampling_rate(rate: f64) -> String {
+    if rate == 0.0 {
+        return "0".to_string();
+    }
+
+    let digits = 6_i32;
+    let magnitude = rate.abs().log10().floor() as i32;
+    let scale = 10f64.powi(digits - 1 - magnitude);
+    let rounded = (rate * scale).round() / scale;
+
+    // Determine decimal places needed for 6 significant digits
+    let decimal_places = if magnitude >= digits - 1 {
+        0
+    } else {
+        (digits - 1 - magnitude) as usize
+    };
+
+    let s = format!("{:.prec$}", rounded, prec = decimal_places);
+    // Strip trailing zeros after decimal point
+    if s.contains('.') {
+        let s = s.trim_end_matches('0');
+        let s = s.trim_end_matches('.');
+        s.to_string()
+    } else {
+        s
+    }
+}
+
 pub(crate) struct DdSamplingResult {
     pub is_keep: bool,
     pub trace_root_info: Option<TraceRootSamplingInfo>,
@@ -503,11 +540,19 @@ impl DdSamplingResult {
         match mechanism {
             mechanism::AGENT_RATE_BY_SERVICE => {
                 result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
+                result.push(KeyValue::new(
+                    SAMPLING_KNUTH_RATE_TAG_KEY,
+                    format_sampling_rate(root_info.rate),
+                ));
             }
             mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE => {
                 result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate));
+                result.push(KeyValue::new(
+                    SAMPLING_KNUTH_RATE_TAG_KEY,
+                    format_sampling_rate(root_info.rate),
+                ));
             }
             _ => {}
         }
@@ -932,13 +977,14 @@ mod tests {
 
         let attrs = sampling_result.to_dd_sampling_tags();
 
-        // Verify the number of attributes
-        assert_eq!(attrs.len(), 3);
+        // Verify the number of attributes (decision_maker + priority + rule_rate + ksr)
+        assert_eq!(attrs.len(), 4);
 
         // Check individual attributes
         let mut found_decision_maker = false;
         let mut found_priority = false;
         let mut found_rule_rate = false;
+        let mut found_ksr = false;
 
         for attr in &attrs {
             match attr.key.as_str() {
@@ -969,6 +1015,14 @@ mod tests {
                     assert_eq!(value_float, sample_rate);
                     found_rule_rate = true;
                 }
+                SAMPLING_KNUTH_RATE_TAG_KEY => {
+                    let value_str = match &attr.value {
+                        opentelemetry::Value::String(s) => s.to_string(),
+                        _ => panic!("Expected string value for ksr tag"),
+                    };
+                    assert_eq!(value_str, "0.5");
+                    found_ksr = true;
+                }
                 _ => {}
             }
         }
@@ -976,6 +1030,7 @@ mod tests {
         assert!(found_decision_maker, "Missing decision maker tag");
         assert!(found_priority, "Missing priority tag");
         assert!(found_rule_rate, "Missing rule rate tag");
+        assert!(found_ksr, "Missing knuth sampling rate tag");
 
         // Test with rate limiting
         let rate_limit = 100;
@@ -993,7 +1048,7 @@ mod tests {
         let attrs_with_limit = sampling_result.to_dd_sampling_tags();
 
         // With rate limiting, there should be one more attribute
-        assert_eq!(attrs_with_limit.len(), 4);
+        assert_eq!(attrs_with_limit.len(), 5);
 
         // Check for rate limit attribute
         let mut found_limit = false;
@@ -1028,24 +1083,36 @@ mod tests {
 
         let agent_attrs = sampling_result.to_dd_sampling_tags();
 
-        // Verify the number of attributes (should be 3)
-        assert_eq!(agent_attrs.len(), 3);
+        // Verify the number of attributes (should be 4: decision_maker + priority + agent_rate + ksr)
+        assert_eq!(agent_attrs.len(), 4);
 
-        // Check for agent rate tag specifically
+        // Check for agent rate tag and ksr tag
         let mut found_agent_rate = false;
+        let mut found_ksr = false;
         for attr in &agent_attrs {
-            if attr.key.as_str() == SAMPLING_AGENT_RATE_TAG_KEY {
-                let value_float = match attr.value {
-                    opentelemetry::Value::F64(f) => f,
-                    _ => panic!("Expected float value for agent rate tag"),
-                };
-                assert_eq!(value_float, agent_rate);
-                found_agent_rate = true;
-                break;
+            match attr.key.as_str() {
+                SAMPLING_AGENT_RATE_TAG_KEY => {
+                    let value_float = match attr.value {
+                        opentelemetry::Value::F64(f) => f,
+                        _ => panic!("Expected float value for agent rate tag"),
+                    };
+                    assert_eq!(value_float, agent_rate);
+                    found_agent_rate = true;
+                }
+                SAMPLING_KNUTH_RATE_TAG_KEY => {
+                    let value_str = match &attr.value {
+                        opentelemetry::Value::String(s) => s.to_string(),
+                        _ => panic!("Expected string value for ksr tag"),
+                    };
+                    assert_eq!(value_str, "0.75");
+                    found_ksr = true;
+                }
+                _ => {}
             }
         }
 
         assert!(found_agent_rate, "Missing agent rate tag");
+        assert!(found_ksr, "Missing knuth sampling rate tag for agent mechanism");
 
         // Also check that the SAMPLING_RULE_RATE_TAG_KEY is NOT present for agent mechanism
         for attr in &agent_attrs {
@@ -1055,6 +1122,28 @@ mod tests {
                 "Rule rate tag should not be present for agent mechanism"
             );
         }
+    }
+
+    #[test]
+    fn test_format_sampling_rate() {
+        // Exact values
+        assert_eq!(format_sampling_rate(1.0), "1");
+        assert_eq!(format_sampling_rate(0.5), "0.5");
+        assert_eq!(format_sampling_rate(0.1), "0.1");
+        assert_eq!(format_sampling_rate(0.0), "0");
+
+        // Trailing zeros should be stripped
+        assert_eq!(format_sampling_rate(0.100000), "0.1");
+        assert_eq!(format_sampling_rate(0.500000), "0.5");
+
+        // Truncation to 6 significant digits
+        assert_eq!(format_sampling_rate(0.7654321), "0.765432");
+        assert_eq!(format_sampling_rate(0.123456789), "0.123457");
+
+        // Small values
+        assert_eq!(format_sampling_rate(0.001), "0.001");
+        assert_eq!(format_sampling_rate(0.75), "0.75");
+        assert_eq!(format_sampling_rate(0.999999), "0.999999");
     }
 
     #[test]
