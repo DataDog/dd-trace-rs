@@ -1083,7 +1083,8 @@ mod tests {
 
         let agent_attrs = sampling_result.to_dd_sampling_tags();
 
-        // Verify the number of attributes (should be 4: decision_maker + priority + agent_rate + ksr)
+        // Verify the number of attributes (should be 4: decision_maker + priority +
+        // agent_rate + ksr)
         assert_eq!(agent_attrs.len(), 4);
 
         // Check for agent rate tag and ksr tag
