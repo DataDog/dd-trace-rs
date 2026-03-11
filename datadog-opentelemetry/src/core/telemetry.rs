@@ -250,6 +250,11 @@ fn make_telemetry_worker(
         builder.config = libdd_telemetry::config::Config::from_env();
         builder.config.telemetry_heartbeat_interval =
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
+        // Note: telemetry_extended_heartbeat_interval is stored in config but libdd_telemetry v2.0.0
+        // does not yet support this field. Once libdd_telemetry is updated to support extended heartbeat,
+        // uncomment the following line:
+        // builder.config.telemetry_extended_heartbeat_interval =
+        //     Duration::from_secs_f64(config.telemetry_extended_heartbeat_interval());
         // builder.config.debug_enabled = true;
 
         builder.run().map(|handle| {

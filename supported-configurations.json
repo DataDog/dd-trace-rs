@@ -107,6 +107,14 @@
         "propertyKeys": ["global_tags"]
       }
     ],
+    "DD_TELEMETRY_EXTENDED_HEARTBEAT_INTERVAL": [
+      {
+        "version": "B",
+        "type": "decimal",
+        "default": "86400.0",
+        "propertyKeys": ["telemetry_extended_heartbeat_interval"]
+      }
+    ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
       {
         "version": "B",
