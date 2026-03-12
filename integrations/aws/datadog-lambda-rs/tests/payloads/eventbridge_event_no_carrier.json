@@ -1,0 +1,8 @@
+{
+  "source": "my.app",
+  "detail-type": "OrderPlaced",
+  "time": "2024-06-15T10:30:00Z",
+  "detail": {
+    "orderId": "abc-123"
+  }
+}

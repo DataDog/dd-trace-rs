@@ -1,0 +1,13 @@
+{
+  "source": "my.app",
+  "detail-type": "OrderPlaced",
+  "time": "2024-06-15T10:30:00Z",
+  "detail": {
+    "_datadog": {
+      "x-datadog-trace-id": "12345",
+      "x-datadog-parent-id": "67890",
+      "x-datadog-sampling-priority": "1"
+    },
+    "orderId": "abc-123"
+  }
+}

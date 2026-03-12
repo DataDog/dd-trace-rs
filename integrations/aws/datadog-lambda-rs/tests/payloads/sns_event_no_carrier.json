@@ -1,0 +1,15 @@
+{
+  "Records": [
+    {
+      "Sns": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789:my-topic",
+        "MessageId": "msg-001",
+        "Type": "Notification",
+        "Subject": "Test Subject",
+        "Timestamp": "2024-06-15T10:30:00Z",
+        "Message": "hello world",
+        "MessageAttributes": {}
+      }
+    }
+  ]
+}

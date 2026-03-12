@@ -1,0 +1,22 @@
+{
+  "Records": [
+    {
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:my-queue",
+      "awsRegion": "us-east-1",
+      "receiptHandle": "handle-001",
+      "body": "{\"source\":\"my.app\",\"detail-type\":\"OrderPlaced\",\"time\":\"2024-06-15T10:30:00Z\",\"detail\":{\"_datadog\":{\"x-datadog-trace-id\":\"77777\",\"x-datadog-parent-id\":\"66666\",\"x-datadog-sampling-priority\":\"1\"}}}",
+      "attributes": {
+        "SentTimestamp": "1718444400000",
+        "ApproximateReceiveCount": "1",
+        "SenderId": "ABCDEF123"
+      },
+      "messageAttributes": {
+        "_datadog": {
+          "stringValue": "{\"x-datadog-trace-id\":\"99999\",\"x-datadog-parent-id\":\"88888\",\"x-datadog-sampling-priority\":\"1\"}",
+          "dataType": "String"
+        }
+      }
+    }
+  ]
+}
