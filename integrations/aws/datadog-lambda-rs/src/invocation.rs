@@ -8,7 +8,7 @@ use lambda_runtime::LambdaEvent;
 use opentelemetry::trace::{FutureExt, SpanKind, TraceContextExt, Tracer, TracerProvider as _};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
-use serde::Serialize;
+use serde_json::Value;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -40,20 +40,16 @@ pub(crate) struct InvocationScope {
     pub invocation_cx: Context,
 }
 
-pub(crate) fn start_invocation<E>(
-    event: &LambdaEvent<E>,
+pub(crate) fn start_invocation(
+    event: &LambdaEvent<Value>,
     provider: &SdkTracerProvider,
     _config: &Config,
-) -> InvocationScope
-where
-    E: Serialize,
-{
+) -> InvocationScope {
     let is_cold = detect_cold_start();
     let tracer = provider.tracer("datadog-lambda-rs");
-    let payload_value = serde_json::to_value(&event.payload).unwrap_or_default();
 
     let inferrer = SpanInferrer::new(&tracer);
-    let result = inferrer.infer(&payload_value);
+    let result = inferrer.infer(&event.payload);
 
     let lambda_span = LambdaSpan {
         function_name: event.context.env_config.function_name.clone(),
