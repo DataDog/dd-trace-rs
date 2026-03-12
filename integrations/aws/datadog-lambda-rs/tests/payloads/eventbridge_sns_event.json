@@ -1,0 +1,20 @@
+{
+  "Records": [
+    {
+      "Sns": {
+        "TopicArn": "arn:aws:sns:us-east-1:123456789:my-topic",
+        "MessageId": "msg-002",
+        "Type": "Notification",
+        "Subject": "",
+        "Timestamp": "2024-06-15T10:30:00Z",
+        "Message": "{\"source\":\"my.app\",\"detail-type\":\"OrderPlaced\",\"time\":\"2024-06-15T10:30:00Z\",\"detail\":{\"_datadog\":{\"x-datadog-trace-id\":\"55555\",\"x-datadog-parent-id\":\"44444\",\"x-datadog-sampling-priority\":\"1\"}}}",
+        "MessageAttributes": {
+          "_datadog": {
+            "Type": "String",
+            "Value": "{\"x-datadog-trace-id\":\"12345\",\"x-datadog-parent-id\":\"67890\",\"x-datadog-sampling-priority\":\"1\"}"
+          }
+        }
+      }
+    }
+  ]
+}

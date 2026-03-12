@@ -1,0 +1,22 @@
+{
+  "Records": [
+    {
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:my-queue",
+      "awsRegion": "us-east-1",
+      "receiptHandle": "handle-001",
+      "body": "hello",
+      "attributes": {
+        "SentTimestamp": "1718444400000",
+        "ApproximateReceiveCount": "1",
+        "SenderId": "ABCDEF123"
+      },
+      "messageAttributes": {
+        "_datadog": {
+          "stringValue": "{\"x-datadog-trace-id\":\"12345\",\"x-datadog-parent-id\":\"67890\",\"x-datadog-sampling-priority\":\"1\"}",
+          "dataType": "String"
+        }
+      }
+    }
+  ]
+}
