@@ -1,6 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+mod sns;
 mod sqs;
 
 use std::collections::HashMap;
@@ -14,12 +15,14 @@ pub(crate) const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum AwsService {
     Sqs,
+    Sns,
 }
 
 impl AwsService {
     pub(crate) fn from_service_id(service_id: &str) -> Option<Self> {
         match service_id {
             "SQS" => Some(Self::Sqs),
+            "SNS" => Some(Self::Sns),
             _ => None,
         }
     }
@@ -32,6 +35,7 @@ impl AwsService {
     ) -> Result<(), BoxError> {
         match self {
             Self::Sqs => sqs::inject(operation, trace_headers, input),
+            Self::Sns => sns::inject(operation, trace_headers, input),
         }
     }
 }
