@@ -2425,8 +2425,9 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Enable synchronous trace export, waiting for each flush to complete
+    /// before returning. This is needed for serverless environments (e.g. AWS
+    /// Lambda) where background tasks can be suspended at any time.
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
@@ -2435,8 +2436,8 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Set the maximum time a span stays in the writer buffer before
+    /// triggering a flush. Defaults to 1 second.
     pub fn set_trace_writer_max_flush_time(
         &mut self,
         trace_writer_max_flush_time: Duration,
