@@ -1,6 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+mod eventbridge;
 mod sns;
 mod sqs;
 
@@ -11,11 +12,15 @@ use aws_smithy_runtime_api::client::interceptors::context::Input;
 
 pub(crate) const DATADOG_ATTRIBUTE_KEY: &str = "_datadog";
 pub(crate) const MAX_MESSAGE_ATTRIBUTES: usize = 10;
+pub(crate) const ONE_MB: usize = 1024 * 1024;
+pub(crate) const START_TIME_KEY: &str = "x-datadog-start-time";
+pub(crate) const RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum AwsService {
     Sqs,
     Sns,
+    EventBridge,
 }
 
 impl AwsService {
@@ -23,6 +28,7 @@ impl AwsService {
         match service_id {
             "SQS" => Some(Self::Sqs),
             "SNS" => Some(Self::Sns),
+            "EventBridge" => Some(Self::EventBridge),
             _ => None,
         }
     }
@@ -36,6 +42,7 @@ impl AwsService {
         match self {
             Self::Sqs => sqs::inject(operation, trace_headers, input),
             Self::Sns => sns::inject(operation, trace_headers, input),
+            Self::EventBridge => eventbridge::inject(operation, trace_headers, input),
         }
     }
 }
