@@ -4,7 +4,8 @@
 //! Core components of the SDK
 
 pub mod configuration;
-pub(crate) mod constants;
+/// Trace propagation and sampling constant keys.
+pub mod constants;
 pub mod sampling;
 
 mod error;
