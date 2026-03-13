@@ -141,10 +141,6 @@ impl<'a> SpanInferrer<'a> {
                 KeyValue::new("service.name", desc.service.clone()),
                 KeyValue::new("resource.name", desc.resource.clone()),
                 KeyValue::new("span.type", desc.span_type),
-                KeyValue::new("operation.name", desc.operation),
-                // "operation.name" is consumed into dd_span.name and stripped from meta.
-                // "operation_name" (no dot) passes through to meta["operation_name"],
-                // which is what Datadog APM reads as the span's operation name.
                 KeyValue::new("operation_name", desc.operation),
                 KeyValue::new("peer.service", desc.service.clone()),
             ];
@@ -266,7 +262,7 @@ mod tests {
             Some(&OtelValue::String("my-queue".into()))
         );
         assert_eq!(
-            find_attr(attrs, "operation.name"),
+            find_attr(attrs, "operation_name"),
             Some(&OtelValue::String("aws.sqs".into()))
         );
     }

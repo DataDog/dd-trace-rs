@@ -118,7 +118,8 @@ fn create_root_span(tracer: &SdkTracer, parent_cx: &Context, span: &LambdaSpan) 
     let mut builder = tracer.span_builder("aws.lambda");
     builder.span_kind = Some(SpanKind::Server);
     let mut attrs = vec![
-        KeyValue::new("operation.name", "aws.lambda"),
+        KeyValue::new("operation_name", "aws.lambda"),
+        KeyValue::new("language", "rust"),
         KeyValue::new("resource.name", span.function_name.clone()),
         KeyValue::new("span.type", "serverless"),
         KeyValue::new("request_id", span.request_id.clone()),
