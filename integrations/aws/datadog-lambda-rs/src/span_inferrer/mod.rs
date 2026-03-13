@@ -150,6 +150,10 @@ impl<'a> SpanInferrer<'a> {
                 KeyValue::new("resource.name", desc.resource.clone()),
                 KeyValue::new("span.type", desc.span_type),
                 KeyValue::new("operation.name", desc.operation),
+                // "operation.name" is consumed into dd_span.name and stripped from meta.
+                // "operation_name" (no dot) passes through to meta["operation_name"],
+                // which is what Datadog APM reads as the span's operation name.
+                KeyValue::new("operation_name", desc.operation),
                 KeyValue::new("peer.service", desc.service.clone()),
             ];
             for (k, v) in &desc.tags {
