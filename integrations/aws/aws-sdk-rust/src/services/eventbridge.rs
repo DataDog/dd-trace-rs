@@ -1,12 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! EventBridge-specific trace context injection.
-//!
-//! Injects trace context into the `Detail` JSON field of PutEvents entries as a `_datadog` key,
-//! matching dd-trace-go's format. Includes `x-datadog-start-time` and per-entry
-//! `x-datadog-resource-name` (set to EventBusName when present).
-
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 

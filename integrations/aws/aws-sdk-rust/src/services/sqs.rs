@@ -1,11 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! SQS-specific trace context injection.
-//!
-//! Injects trace context as a `_datadog` MessageAttribute (JSON-serialized, DataType: String)
-//! into outgoing SendMessage and SendMessageBatch calls, matching dd-trace-go's format.
-
 use std::collections::HashMap;
 
 use aws_sdk_sqs::operation::send_message::SendMessageInput;

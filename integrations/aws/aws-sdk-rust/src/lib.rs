@@ -3,25 +3,8 @@
 
 //! Datadog instrumentation for AWS SDK for Rust.
 //!
-//! Provides automatic trace context injection for AWS SDK requests,
-//! enabling distributed tracing across AWS services.
-//!
-//! # Usage
-//!
-//! Add the interceptor when building your service client so all operations are
-//! automatically traced:
-//!
-//! ```rust,ignore
-//! use datadog_aws_sdk::DatadogAwsInterceptor;
-//!
-//! let sdk_config = aws_config::defaults(BehaviorVersion::latest())
-//!     .load()
-//!     .await;
-//! let sqs_config = aws_sdk_sqs::config::Builder::from(&sdk_config)
-//!     .interceptor(DatadogAwsInterceptor::new())
-//!     .build();
-//! let sqs_client = aws_sdk_sqs::Client::from_conf(sqs_config);
-//! ```
+//! Add [`DatadogAwsInterceptor`] when building a service client to automatically
+//! inject Datadog trace context into SQS, SNS, and EventBridge calls.
 
 mod interceptor;
 mod services;
