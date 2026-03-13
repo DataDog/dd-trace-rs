@@ -46,6 +46,11 @@ pub(crate) struct InferredContext {
     pub event_source: Option<&'static str>,
     /// ARN of the outermost trigger resource.
     pub event_source_arn: Option<String>,
+    /// One context per inferred span, in creation order.
+    /// Spans are left open so `open_span_count > 0` while the root span is created.
+    /// Call `end_with_timestamp` on each after `create_root_span`.
+    pub inferred_span_contexts: Vec<Context>,
+    pub inferred_span_end_time: SystemTime,
 }
 
 /// Owns the entire "event payload → OTel parent context" pipeline.
@@ -76,16 +81,19 @@ impl<'a> SpanInferrer<'a> {
                 let is_async = inferred_spans.last().map(|s| s.is_async).unwrap_or(false);
                 let event_source = inferred_spans.first().map(|s| s.trigger_source);
                 let event_source_arn = inferred_spans.first().and_then(|s| s.trigger_arn.clone());
-                let parent_cx = if inferred_spans.is_empty() {
-                    extracted_cx
-                } else {
-                    self.create_inferred_spans(&extracted_cx, &inferred_spans)
-                };
+                let (parent_cx, inferred_span_contexts, inferred_span_end_time) =
+                    if inferred_spans.is_empty() {
+                        (extracted_cx, Vec::new(), SystemTime::now())
+                    } else {
+                        self.create_inferred_spans(&extracted_cx, &inferred_spans)
+                    };
                 return InferredContext {
                     parent_cx,
                     is_async,
                     event_source,
                     event_source_arn,
+                    inferred_span_contexts,
+                    inferred_span_end_time,
                 };
             }
         }
@@ -102,6 +110,8 @@ impl<'a> SpanInferrer<'a> {
                     is_async: false,
                     event_source: None,
                     event_source_arn: None,
+                    inferred_span_contexts: Vec::new(),
+                    inferred_span_end_time: SystemTime::now(),
                 };
             }
         }
@@ -112,14 +122,21 @@ impl<'a> SpanInferrer<'a> {
             is_async: false,
             event_source: None,
             event_source_arn: None,
+            inferred_span_contexts: Vec::new(),
+            inferred_span_end_time: SystemTime::now(),
         }
     }
 
     // Spans are created outer to inner; the returned context's active span is the
     // innermost (direct parent of the invocation span).
-    fn create_inferred_spans(&self, parent_cx: &Context, inferred: &[InferredSpan]) -> Context {
+    fn create_inferred_spans(
+        &self,
+        parent_cx: &Context,
+        inferred: &[InferredSpan],
+    ) -> (Context, Vec<Context>, SystemTime) {
         let mut current_cx = parent_cx.clone();
         let now = SystemTime::now();
+        let mut span_contexts = Vec::with_capacity(inferred.len());
 
         for desc in inferred {
             let mut builder = self.tracer.span_builder(desc.operation);
@@ -142,10 +159,10 @@ impl<'a> SpanInferrer<'a> {
 
             let span = self.tracer.build_with_context(builder, &current_cx);
             current_cx = current_cx.with_span(span);
-            current_cx.span().end_with_timestamp(now);
+            span_contexts.push(current_cx.clone());
         }
 
-        current_cx
+        (current_cx, span_contexts, now)
     }
 }
 
@@ -166,9 +183,16 @@ fn extract_from_headers(payload: &Value) -> Option<HashMap<String, String>> {
             }
         }
 
+        // Build a lowercase view of the header map so REST v1 events (which preserve
+        // original client casing, e.g. "X-Datadog-Trace-Id") match the lowercase constants.
+        let lower: HashMap<String, &Value> = headers
+            .iter()
+            .map(|(k, v)| (k.to_lowercase(), v))
+            .collect();
+
         let mut carrier = HashMap::new();
         for key in [TRACE_ID_KEY, PARENT_ID_KEY, SAMPLING_PRIORITY_KEY, TAGS_KEY] {
-            if let Some(val) = headers.get(key).and_then(|v| v.as_str()) {
+            if let Some(val) = lower.get(key).and_then(|v| v.as_str()) {
                 carrier.insert(key.to_owned(), val.to_owned());
             }
         }
@@ -225,7 +249,8 @@ mod tests {
         }];
 
         let inferrer = SpanInferrer::new(&tracer);
-        inferrer.create_inferred_spans(&Context::current(), &inferred);
+        let (_, span_contexts, end_time) = inferrer.create_inferred_spans(&Context::current(), &inferred);
+        for cx in span_contexts { cx.span().end_with_timestamp(end_time); }
         provider.force_flush().ok();
 
         let spans = finished_spans(&exporter);
@@ -281,7 +306,8 @@ mod tests {
         ];
 
         let inferrer = SpanInferrer::new(&tracer);
-        let cx = inferrer.create_inferred_spans(&Context::current(), &inferred);
+        let (cx, span_contexts, end_time) = inferrer.create_inferred_spans(&Context::current(), &inferred);
+        for sc in span_contexts { sc.span().end_with_timestamp(end_time); }
         provider.force_flush().ok();
 
         let spans = finished_spans(&exporter);
@@ -321,6 +347,7 @@ mod tests {
 
         let inferrer = SpanInferrer::new(&tracer);
         let result = inferrer.infer(&event);
+        for cx in result.inferred_span_contexts { cx.span().end_with_timestamp(result.inferred_span_end_time); }
         provider.force_flush().ok();
 
         assert!(result.parent_cx.span().span_context().is_valid());
@@ -395,5 +422,41 @@ mod tests {
         let inferrer = SpanInferrer::new(&tracer);
         let result = inferrer.infer(&event);
         assert!(!result.is_async);
+    }
+
+    use crate::span_inferrer::triggers::test_utils::load_payload;
+
+    #[test]
+    fn api_gateway_rest_event_extracts_carrier() {
+        let event = load_payload("api_gateway_rest_event.json");
+        let carrier = extract_from_headers(&event).unwrap();
+        assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");
+        assert_eq!(carrier.get(PARENT_ID_KEY).unwrap(), "67890");
+        assert_eq!(carrier.get(SAMPLING_PRIORITY_KEY).unwrap(), "1");
+    }
+
+    #[test]
+    fn api_gateway_rest_event_capitalized_headers_extracts_carrier() {
+        // REST v1 preserves original client header casing (e.g. "X-Datadog-Trace-Id").
+        // Extraction must be case-insensitive.
+        let event = load_payload("api_gateway_rest_event_capitalized.json");
+        let carrier = extract_from_headers(&event).unwrap();
+        assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");
+        assert_eq!(carrier.get(PARENT_ID_KEY).unwrap(), "67890");
+    }
+
+    #[test]
+    fn api_gateway_http_event_extracts_carrier() {
+        // HTTP API v2 lowercases all headers — standard extraction path.
+        let event = load_payload("api_gateway_http_event.json");
+        let carrier = extract_from_headers(&event).unwrap();
+        assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");
+        assert_eq!(carrier.get(PARENT_ID_KEY).unwrap(), "67890");
+    }
+
+    #[test]
+    fn api_gateway_no_carrier_returns_none() {
+        let event = load_payload("api_gateway_rest_event_no_carrier.json");
+        assert!(extract_from_headers(&event).is_none());
     }
 }

@@ -69,6 +69,10 @@ pub(crate) fn start_invocation(
     );
     let invocation_cx = create_root_span(&tracer, &result.parent_cx, &lambda_span);
 
+    for cx in result.inferred_span_contexts {
+        cx.span().end_with_timestamp(result.inferred_span_end_time);
+    }
+
     InvocationScope {
         request_id: lambda_span.request_id,
         invocation_cx,
@@ -300,5 +304,28 @@ mod tests {
         let attrs = &spans[0].attributes;
         assert!(find_attr(attrs, "error").is_none());
         assert!(find_attr(attrs, "error.message").is_none());
+    }
+
+    #[test]
+    fn start_invocation_extracts_headers_from_raw_event() {
+        // Regression test for the LambdaEvent<Value> fix: even when the user's handler
+        // type would not include headers, start_invocation sees the full raw JSON and
+        // extracts trace context from event.headers.
+        let (provider, _) = test_provider();
+
+        let raw_event = LambdaEvent::new(
+            serde_json::json!({
+                "body": "hello",
+                "headers": {
+                    "x-datadog-trace-id": "99999",
+                    "x-datadog-parent-id": "11111",
+                    "x-datadog-sampling-priority": "1"
+                }
+            }),
+            lambda_runtime::Context::default(),
+        );
+
+        let scope = start_invocation(&raw_event, &provider, &Config::default());
+        assert!(scope.invocation_cx.span().span_context().is_valid());
     }
 }
