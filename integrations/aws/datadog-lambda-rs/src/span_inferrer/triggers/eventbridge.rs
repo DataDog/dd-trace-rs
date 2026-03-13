@@ -132,7 +132,6 @@ mod tests {
 
     #[test]
     fn extract_with_start_time_from_carrier() {
-        // Carrier start time requires a custom value not in the standard fixture.
         let event = json!({
             "source": "my.app",
             "detail-type": "OrderPlaced",
@@ -147,7 +146,6 @@ mod tests {
         });
 
         let (_, spans) = extract(&event).unwrap();
-        // Carrier start time (millis) takes priority over event `time`
         assert_eq!(spans[0].start_time_ns, Some(1718444400000 * 1_000_000));
     }
 

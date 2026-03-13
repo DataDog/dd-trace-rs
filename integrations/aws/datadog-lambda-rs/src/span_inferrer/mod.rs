@@ -22,9 +22,8 @@ use std::time::{Duration, SystemTime};
 pub(crate) struct InferredSpan {
     /// e.g. `"aws.sqs"`, `"aws.sns"`, `"aws.eventbridge"`
     pub operation: &'static str,
-    /// Short trigger source name, e.g. `"sqs"`, `"sns"`, `"eventbridge"`.
+    /// e.g. `"sqs"`, `"sns"`, `"eventbridge"`
     pub trigger_source: &'static str,
-    /// ARN of the trigger resource, if available.
     pub trigger_arn: Option<String>,
     pub service: String,
     pub resource: String,
@@ -39,7 +38,6 @@ pub(crate) struct InferredSpan {
 
 pub(crate) struct InferredContext {
     /// OTel context whose active span is the innermost inferred span.
-    /// Falls back to extracted headers context or `Context::current()`.
     pub parent_cx: Context,
     pub is_async: bool,
     /// Short name of the outermost trigger, e.g. `"sqs"`.
@@ -53,11 +51,7 @@ pub(crate) struct InferredContext {
     pub inferred_span_end_time: SystemTime,
 }
 
-/// Owns the entire "event payload → OTel parent context" pipeline.
-///
-/// Given a raw Lambda event payload, detects the trigger type, extracts
-/// Datadog trace context, creates inferred OTel spans for upstream services,
-/// and returns a context ready to parent the invocation root span.
+/// Extracts trace context and inferred spans from a Lambda event payload.
 pub(crate) struct SpanInferrer<'a> {
     tracer: &'a SdkTracer,
 }
@@ -67,8 +61,6 @@ impl<'a> SpanInferrer<'a> {
         Self { tracer }
     }
 
-    /// Extract trace context from the payload, create inferred OTel spans,
-    /// and return a context ready to parent the invocation root span.
     pub(crate) fn infer(&self, payload: &Value) -> InferredContext {
         if let Some((carrier, inferred_spans)) = triggers::extract(payload) {
             if validate_carrier(&carrier).is_some() {

@@ -25,7 +25,6 @@ pub(crate) struct LambdaSpan {
     /// e.g. `"$LATEST"`
     pub function_version: String,
     pub request_id: String,
-    /// `true` on the first invocation in this execution environment.
     pub cold_start: bool,
     pub is_async: bool,
     /// e.g. `"sqs"`, `"sns"`, `"eventbridge"`
@@ -60,7 +59,7 @@ pub(crate) fn start_invocation(
         is_async: result.is_async,
         event_source: result.event_source,
         event_source_arn: result.event_source_arn,
-        runtime: None, // TODO: read from Config once configuration abstraction supports it
+        runtime: None,
     };
 
     tracing::debug!(
