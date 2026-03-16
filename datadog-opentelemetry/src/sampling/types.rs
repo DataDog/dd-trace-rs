@@ -20,38 +20,18 @@ use std::borrow::Cow;
 /// struct MyTraceId(TraceId);
 ///
 /// impl TraceIdLike for MyTraceId {
-///     type Item = TraceId;
-///
 ///     fn to_u128(&self) -> u128 {
 ///         u128::from_be_bytes(self.0.to_bytes())
 ///     }
-///
-///     fn inner(&self) -> &Self::Item {
-///         &self.0
-///     }
 /// }
 /// ```
-pub trait TraceIdLike {
-    /// The underlying trace ID type.
-    type Item: PartialEq + Eq;
-
+pub trait TraceIdLike: PartialEq + Eq {
     /// Converts the trace ID to a 128-bit unsigned integer.
     ///
     /// The conversion should be deterministic: the same trace ID must always produce
     /// the same `u128` value. Typically implemented by interpreting the trace ID's
     /// bytes as a big-endian integer.
     fn to_u128(&self) -> u128;
-
-    /// Returns a reference to the underlying trace ID.
-    ///
-    /// Used internally for trait object equality comparisons.
-    fn inner(&self) -> &Self::Item;
-}
-
-impl<T: PartialEq + Eq> PartialEq for dyn TraceIdLike<Item = T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner() == other.inner()
-    }
 }
 
 /// A trait for accessing span attribute key-value pairs.
@@ -131,11 +111,6 @@ pub trait SpanProperties {
     /// The type of attribute that implements `AttributeLike`.
     type Attribute: AttributeLike;
 
-    /// The type of iterator over span attributes.
-    type AttributesIter<'a>: Iterator<Item = &'a Self::Attribute>
-    where
-        Self: 'a;
-
     /// Returns the operation name for the span.
     ///
     /// The operation name is derived from span attributes and kind according to
@@ -163,7 +138,9 @@ pub trait SpanProperties {
     fn status_code(&self) -> Option<u32>;
 
     /// Returns an iterator over span attributes.
-    fn attributes(&self) -> Self::AttributesIter<'_>;
+    fn attributes<'a>(&'a self) -> impl Iterator<Item = &'a Self::Attribute>
+    where
+        Self: 'a;
 
     /// Returns an alternate key for the given attribute key.
     ///

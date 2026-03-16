@@ -81,10 +81,6 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
 
 impl SpanProperties for PreSampledSpan<'_> {
     type Attribute = opentelemetry::KeyValue;
-    type AttributesIter<'b>
-        = std::slice::Iter<'b, opentelemetry::KeyValue>
-    where
-        Self: 'b;
 
     fn operation_name(&self) -> Cow<'_, str> {
         get_otel_operation_name_v2(self)
@@ -106,7 +102,10 @@ impl SpanProperties for PreSampledSpan<'_> {
         get_otel_status_code(self)
     }
 
-    fn attributes(&self) -> Self::AttributesIter<'_> {
+    fn attributes<'a>(&'a self) -> impl Iterator<Item = &'a Self::Attribute>
+    where
+        Self: 'a,
+    {
         self.attributes.iter()
     }
 
@@ -195,14 +194,8 @@ impl SamplingData for OtelSamplingData<'_> {
 }
 
 impl crate::sampling::TraceIdLike for opentelemetry::trace::TraceId {
-    type Item = opentelemetry::trace::TraceId;
-
     fn to_u128(&self) -> u128 {
         u128::from_be_bytes(self.to_bytes())
-    }
-
-    fn inner(&self) -> &Self::Item {
-        self
     }
 }
 
