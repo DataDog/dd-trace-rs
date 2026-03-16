@@ -6,6 +6,7 @@
 //! Add [`DatadogAwsInterceptor`] when building a service client to automatically
 //! inject Datadog trace context into SQS, SNS, and EventBridge calls.
 
+mod attribute_keys;
 mod interceptor;
 mod services;
 

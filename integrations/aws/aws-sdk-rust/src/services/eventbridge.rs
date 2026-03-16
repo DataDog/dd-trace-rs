@@ -8,7 +8,9 @@ use aws_sdk_eventbridge::operation::put_events::PutEventsInput;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 
-use super::{DATADOG_ATTRIBUTE_KEY, ONE_MB, RESOURCE_NAME_KEY, START_TIME_KEY};
+use crate::attribute_keys::{DATADOG_ATTRIBUTE_KEY, RESOURCE_NAME_KEY, START_TIME_KEY};
+
+use super::ONE_MB;
 
 pub(super) fn inject(
     operation: &str,

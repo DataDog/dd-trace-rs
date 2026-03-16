@@ -10,11 +10,8 @@ use std::collections::HashMap;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 
-pub(crate) const DATADOG_ATTRIBUTE_KEY: &str = "_datadog";
 pub(crate) const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 pub(crate) const ONE_MB: usize = 1024 * 1024;
-pub(crate) const START_TIME_KEY: &str = "x-datadog-start-time";
-pub(crate) const RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum AwsService {

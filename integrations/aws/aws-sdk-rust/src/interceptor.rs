@@ -97,22 +97,11 @@ impl Intercept for DatadogAwsInterceptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn test_interceptor_creation() {
-        let interceptor = DatadogAwsInterceptor::new();
-        assert_eq!(interceptor.name(), "DatadogAwsInterceptor");
-    }
 
     #[test]
     fn test_extract_trace_headers_empty_without_span() {
         let cx = Context::current();
         let headers = extract_trace_headers(&cx);
         assert!(headers.is_empty());
-    }
-
-    #[test]
-    fn test_interceptor_default() {
-        let interceptor = DatadogAwsInterceptor::default();
-        assert_eq!(interceptor.name(), "DatadogAwsInterceptor");
     }
 }

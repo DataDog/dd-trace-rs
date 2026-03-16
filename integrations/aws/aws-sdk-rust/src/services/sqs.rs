@@ -9,7 +9,9 @@ use aws_sdk_sqs::types::MessageAttributeValue;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 
-use super::{DATADOG_ATTRIBUTE_KEY, MAX_MESSAGE_ATTRIBUTES};
+use crate::attribute_keys::DATADOG_ATTRIBUTE_KEY;
+
+use super::MAX_MESSAGE_ATTRIBUTES;
 
 pub(super) fn inject(
     operation: &str,
