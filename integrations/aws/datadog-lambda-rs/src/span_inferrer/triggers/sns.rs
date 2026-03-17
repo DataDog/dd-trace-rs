@@ -184,8 +184,6 @@ mod tests {
         let encoded = base64::engine::general_purpose::STANDARD
             .encode(serde_json::to_vec(&carrier_json).unwrap());
 
-        // Binary carrier can't easily be expressed in a static JSON file,
-        // so we build this one inline.
         let event = json!({
             "Records": [{
                 "Sns": {
@@ -221,9 +219,7 @@ mod tests {
         let event = load_payload("eventbridge_sns_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
-        // Uses the inner EventBridge carrier
         assert_eq!(carrier.get("x-datadog-trace-id").unwrap(), "55555");
-        // EventBridge span first, then SNS
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].operation, "aws.eventbridge");
         assert_eq!(spans[1].operation, "aws.sns");

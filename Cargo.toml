@@ -7,6 +7,7 @@ members = [
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
     "integrations/aws/aws-sdk-rust",
+    "integrations/aws/datadog-lambda-rs",
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2

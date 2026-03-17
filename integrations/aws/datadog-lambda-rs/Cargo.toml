@@ -1,0 +1,24 @@
+[package]
+name = "datadog-lambda-rs"
+rust-version = "1.85.0"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+authors.workspace = true
+description = "Datadog Lambda tracing for Rust"
+
+[dependencies]
+base64 = "0.22"
+datadog-opentelemetry = { version = "0.3", path = "../../../datadog-opentelemetry" }
+lambda_runtime = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
