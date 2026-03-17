@@ -12,11 +12,11 @@ Datadog trace context propagation for the [AWS SDK for Rust](https://github.com/
 
 ## Usage
 
-Add as a git dependency:
+> **Pre-release:** This crate is not yet published to crates.io. Once published, replace the git dependency below with a versioned one (`datadog-aws-sdk = "0.x"`).
 
 ```toml
 [dependencies]
-datadog-aws-sdk = { git = "https://github.com/DataDog/dd-trace-rs", branch = "david.ogbureke/aws-sdk-rust" }
+datadog-aws-sdk = { git = "https://github.com/DataDog/dd-trace-rs", branch = "main" }
 ```
 
 Requires a Datadog propagator registered via `datadog-opentelemetry`. Register the interceptor when building any AWS service client:
