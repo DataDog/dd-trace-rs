@@ -12,17 +12,24 @@ Datadog trace context propagation for the [AWS SDK for Rust](https://github.com/
 
 ## Usage
 
-Requires a Datadog propagator registered via [`datadog-opentelemetry`](https://docs.rs/datadog-opentelemetry).
+Add as a git dependency:
+
+```toml
+[dependencies]
+datadog-aws-sdk = { git = "https://github.com/DataDog/dd-trace-rs", branch = "david.ogbureke/aws-sdk-rust" }
+```
+
+Requires a Datadog propagator registered via `datadog-opentelemetry`. Register the interceptor when building any AWS service client:
 
 ```rust
+use aws_config::BehaviorVersion;
+use aws_sdk_sqs::Client as SqsClient;
 use datadog_aws_sdk::DatadogAwsInterceptor;
 
-// Initialize Datadog tracing
-let _tracer_provider = datadog_opentelemetry::tracing().init();
-
-// Add the interceptor to any AWS service client
+let sdk_config = aws_config::defaults(BehaviorVersion::latest()).load().await;
 let sqs_config = aws_sdk_sqs::config::Builder::from(&sdk_config)
     .interceptor(DatadogAwsInterceptor::new())
     .build();
-let sqs_client = aws_sdk_sqs::Client::from_conf(sqs_config);
+let client = SqsClient::from_conf(sqs_config);
 ```
+
