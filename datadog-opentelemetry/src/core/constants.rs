@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /// Higher-order trace ID bits propagation tag.
+#[allow(unused)]
 pub const HIGHER_ORDER_TRACE_ID_BITS_TAG: &str = "_dd.p.tid";
 
 /// Span kind meta tag.
+#[allow(unused)]
 pub const SPAN_KIND_TAG: &str = "span.kind";
 
 /// Event extraction sampling rate metric key.
