@@ -244,7 +244,6 @@ pub(crate) mod core;
 
 // Public re-exports
 pub use core::configuration;
-pub use core::constants;
 pub use core::log;
 
 #[cfg(feature = "test-utils")]
@@ -264,20 +263,17 @@ pub mod core_pub_hack {
     pub use crate::core::*;
 }
 
-/// Distributed trace propagation logic.
-///
-/// This module provides types and traits for extracting and injecting trace
-/// context across service boundaries using multiple propagation formats
-/// (Datadog, W3C Trace Context).
-pub mod propagation;
-
 #[cfg(feature = "test-utils")]
 pub mod mappings;
+#[cfg(feature = "test-utils")]
+pub mod propagation;
 #[cfg(feature = "test-utils")]
 pub mod sampling;
 
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
+#[cfg(not(feature = "test-utils"))]
+pub(crate) mod propagation;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod sampling;
 
