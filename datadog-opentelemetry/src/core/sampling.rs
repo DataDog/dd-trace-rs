@@ -110,9 +110,9 @@ impl SamplingMechanism {
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
-            | mechanism::APPSEC
             | mechanism::SPAN_SAMPLING_RULE
             | mechanism::DATA_JOBS_MONITORING => USER_PAIR,
+            mechanism::APPSEC => AUTO_PAIR,
 
             _ => AUTO_PAIR,
         };
