@@ -1,13 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! SNS-specific trace context injection.
-//!
-//! Injects trace context as a `_datadog` MessageAttribute (Binary DataType, JSON bytes)
-//! into outgoing Publish and PublishBatch calls, matching dd-trace-go's format.
-//! Binary format is used because SNS subscription filter policies fail silently
-//! with JSON string values.
-
 use std::collections::HashMap;
 
 use aws_sdk_sns::operation::publish::PublishInput;
@@ -80,6 +73,7 @@ fn build_datadog_attribute(
 ) -> Result<MessageAttributeValue, BoxError> {
     let json_bytes = serde_json::to_vec(trace_headers)?;
     Ok(MessageAttributeValue::builder()
+        // Binary: String-typed JSON attrs fail silently in SNS subscription filter policies.
         .data_type("Binary")
         .binary_value(Blob::new(json_bytes))
         .build()?)
