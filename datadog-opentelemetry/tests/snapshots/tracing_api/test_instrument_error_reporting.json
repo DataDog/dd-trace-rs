@@ -17,9 +17,11 @@
       "otel.scope.name": "test",
       "otel.status_code": "Error",
       "otel.status_description": "this is an error",
-      "otel.trace_id": "69971c8f0000000072102d828fdacc5c",
+      "otel.trace_id": "69b9879600000000034b8127ce1e4dad",
       "span.kind": "internal",
       "target": "tests::integration_tests::tracing_api",
+      "telemetry.distro.name": "datadog",
+      "telemetry.distro.version": "0.3.0",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
       "telemetry.sdk.version": "0.31.0",
@@ -28,14 +30,14 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "busy_ns": 48792.0,
+      "busy_ns": 54458.0,
       "code.line.number": 100.0,
-      "idle_ns": 80250.0,
+      "idle_ns": 99292.0,
       "thread.id": 2.0
     },
     "span_events": [
       {
-        "time_unix_nano": 1771510927610045000,
+        "time_unix_nano": 1773766550788126000,
         "name": "exception",
         "attributes": {
           "code.file.path": {
@@ -65,6 +67,6 @@
         }
       }
     ],
-    "duration": 121000,
-    "start": 1771510927609928000
+    "duration": 144000,
+    "start": 1773766550787987000
   }]]

@@ -10,8 +10,10 @@
     "meta": {
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
-      "otel.trace_id": "00d056b3f029e865f1d74b6959eb3fa6",
+      "otel.trace_id": "69b987960000000076b816bfa5f386cf",
       "span.kind": "client",
+      "telemetry.distro.name": "datadog",
+      "telemetry.distro.version": "0.3.0",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "opentelemetry",
       "telemetry.sdk.version": "0.31.0"
@@ -22,5 +24,5 @@
       "_top_level": 1.0
     },
     "duration": 1000,
-    "start": 1746015595471712000
+    "start": 1773766550861045000
   }]]
