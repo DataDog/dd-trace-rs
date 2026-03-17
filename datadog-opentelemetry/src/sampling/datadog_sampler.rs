@@ -403,7 +403,7 @@ impl DatadogSampler {
         let mut is_keep = true;
         let mut used_agent_sampler = false;
         let sample_rate;
-        let mut rl_effective_rate: Option<i32> = None;
+        let mut rl_effective_rate: Option<f64> = None;
 
         let resource_guard = self.resource.read().unwrap();
         let span = PreSampledSpan::new(name, span_kind.clone(), attributes, &resource_guard);
@@ -422,7 +422,7 @@ impl DatadogSampler {
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
                 is_keep = false;
-                rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
+                rl_effective_rate = Some(self.rate_limiter.effective_rate());
             }
         } else {
             // Try service-based sampling from Agent
@@ -467,7 +467,7 @@ pub(crate) struct TraceRootSamplingInfo {
     pub priority: SamplingPriority,
     pub mechanism: SamplingMechanism,
     pub rate: f64,
-    pub rl_effective_rate: Option<i32>,
+    pub rl_effective_rate: Option<f64>,
 }
 
 impl DdSamplingResult {
@@ -489,7 +489,7 @@ impl DdSamplingResult {
 
         // Add rate limiting tag if applicable
         if let Some(limit) = root_info.rl_effective_rate {
-            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit as i64));
+            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit));
         }
 
         // Add the sampling decision trace tag with the mechanism
@@ -978,7 +978,7 @@ mod tests {
         assert!(found_rule_rate, "Missing rule rate tag");
 
         // Test with rate limiting
-        let rate_limit = 100;
+        let rate_limit = 0.5;
         let is_sampled = false;
         let mechanism = mechanism::LOCAL_USER_TRACE_SAMPLING_RULE;
         let sampling_result = DdSamplingResult {
@@ -999,11 +999,11 @@ mod tests {
         let mut found_limit = false;
         for attr in &attrs_with_limit {
             if attr.key.as_str() == RL_EFFECTIVE_RATE {
-                let value_int = match attr.value {
-                    opentelemetry::Value::I64(i) => i,
-                    _ => panic!("Expected integer value for rate limit tag"),
+                let value_float = match attr.value {
+                    opentelemetry::Value::F64(f) => f,
+                    _ => panic!("Expected float value for rate limit tag"),
                 };
-                assert_eq!(value_int, rate_limit as i64);
+                assert_eq!(value_float, rate_limit);
                 found_limit = true;
                 break;
             }
