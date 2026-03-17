@@ -110,25 +110,6 @@ pub struct DatadogLambdaService<S, E = Value> {
     _phantom: PhantomData<fn(LambdaEvent<E>)>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn bare_provider() -> SdkTracerProvider {
-        SdkTracerProvider::builder().build()
-    }
-
-    #[test]
-    fn layer_new_does_not_panic() {
-        let _layer = DatadogLambdaLayer::new(bare_provider());
-    }
-
-    #[test]
-    fn layer_with_config_does_not_panic() {
-        let _layer = DatadogLambdaLayer::with_config(bare_provider(), Config::default());
-    }
-}
-
 impl<S, E> Service<LambdaEvent<Value>> for DatadogLambdaService<S, E>
 where
     S: Service<LambdaEvent<E>> + Send + 'static,

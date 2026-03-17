@@ -20,7 +20,6 @@ pub(crate) const RESOURCE_NAMES: &str = "resource_names";
 pub(crate) const DD_ORIGIN: &str = "_dd.origin";
 pub(crate) const FUNCTION_TRIGGER_EVENT_SOURCE: &str = "function_trigger.event_source";
 pub(crate) const FUNCTION_TRIGGER_EVENT_SOURCE_ARN: &str = "function_trigger.event_source_arn";
-pub(crate) const RUNTIME: &str = "runtime";
 
 // OpenTelemetry semantic convention keys
 pub(crate) use opentelemetry_semantic_conventions::attribute::{PEER_SERVICE, SERVICE_NAME};

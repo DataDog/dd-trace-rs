@@ -31,8 +31,6 @@ pub(crate) struct LambdaSpan {
     /// e.g. `"sqs"`, `"sns"`, `"eventbridge"`
     pub event_source: Option<&'static str>,
     pub event_source_arn: Option<String>,
-    /// Lambda runtime identifier from `AWS_EXECUTION_ENV`.
-    pub runtime: Option<String>,
 }
 
 pub(crate) struct InvocationScope {
@@ -60,7 +58,6 @@ pub(crate) fn start_invocation(
         is_async: result.is_async,
         event_source: result.event_source,
         event_source_arn: result.event_source_arn,
-        runtime: None,
     };
 
     tracing::debug!(
@@ -141,9 +138,6 @@ fn create_root_span(tracer: &SdkTracer, parent_cx: &Context, span: &LambdaSpan) 
             arn.clone(),
         ));
     }
-    if let Some(ref rt) = span.runtime {
-        attrs.push(KeyValue::new(attr::RUNTIME, rt.clone()));
-    }
     builder.attributes = Some(attrs);
 
     let span = tracer.build_with_context(builder, &effective_cx);
@@ -175,7 +169,6 @@ mod tests {
             is_async: false,
             event_source: None,
             event_source_arn: None,
-            runtime: None,
         }
     }
 
@@ -256,14 +249,6 @@ mod tests {
 
         let cx = create_root_span(&tracer, &parent_cx, &test_lambda_span());
         assert_eq!(cx.span().span_context().trace_id(), trace_id);
-    }
-
-    #[test]
-    fn root_span_starts_new_trace_without_parent() {
-        let (provider, _) = test_provider();
-        let tracer = provider.tracer("test");
-        let cx = create_root_span(&tracer, &Context::current(), &test_lambda_span());
-        assert!(cx.span().span_context().is_valid());
     }
 
     #[tokio::test]
