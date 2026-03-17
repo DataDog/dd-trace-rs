@@ -3,7 +3,12 @@
 
 use super::eventbridge::{self, EventBridgeEvent};
 use super::InferredSpan;
-use crate::span_inferrer::carrier::{carrier_from_json_object, CARRIER_KEY};
+use crate::span_inferrer::carrier::{carrier_from_json_object, DATADOG_ATTRIBUTE_KEY};
+
+const TOPIC_ARN: &str = "topic_arn";
+const MESSAGE_ID: &str = "message_id";
+const SNS_TYPE: &str = "type";
+const SUBJECT: &str = "subject";
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -61,11 +66,11 @@ impl SnsEntity {
         let start_time_ns = eventbridge::parse_iso_time(&self.timestamp);
 
         let mut tags = HashMap::new();
-        tags.insert("topic_arn".to_owned(), self.topic_arn.clone());
-        tags.insert("message_id".to_owned(), self.message_id.clone());
-        tags.insert("type".to_owned(), self.sns_type.clone());
+        tags.insert(TOPIC_ARN.to_owned(), self.topic_arn.clone());
+        tags.insert(MESSAGE_ID.to_owned(), self.message_id.clone());
+        tags.insert(SNS_TYPE.to_owned(), self.sns_type.clone());
         if !subject.is_empty() {
-            tags.insert("subject".to_owned(), subject.to_owned());
+            tags.insert(SUBJECT.to_owned(), subject.to_owned());
         }
 
         let sns_span = InferredSpan {
@@ -95,7 +100,7 @@ impl SnsEntity {
     }
 
     fn extract_carrier(&self) -> Option<HashMap<String, String>> {
-        let dd_attr = self.message_attributes.get(CARRIER_KEY)?;
+        let dd_attr = self.message_attributes.get(DATADOG_ATTRIBUTE_KEY)?;
         if dd_attr.attr_type == "Binary" {
             let decoded =
                 base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &dd_attr.value)

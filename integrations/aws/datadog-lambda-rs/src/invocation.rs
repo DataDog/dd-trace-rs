@@ -1,6 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::attribute_keys as attr;
 use crate::span_inferrer::SpanInferrer;
 use crate::Config;
 
@@ -96,8 +97,8 @@ where
         span.set_status(opentelemetry::trace::Status::Error {
             description: err_msg.clone().into(),
         });
-        span.set_attribute(KeyValue::new("error", true));
-        span.set_attribute(KeyValue::new("error.message", err_msg));
+        span.set_attribute(KeyValue::new(attr::ERROR, true));
+        span.set_attribute(KeyValue::new(attr::ERROR_MESSAGE, err_msg));
     }
     span.end();
 
@@ -118,30 +119,30 @@ fn create_root_span(tracer: &SdkTracer, parent_cx: &Context, span: &LambdaSpan) 
     let mut builder = tracer.span_builder("aws.lambda");
     builder.span_kind = Some(SpanKind::Server);
     let mut attrs = vec![
-        KeyValue::new("operation_name", "aws.lambda"),
-        KeyValue::new("language", "rust"),
-        KeyValue::new("resource.name", span.function_name.clone()),
-        KeyValue::new("span.type", "serverless"),
-        KeyValue::new("request_id", span.request_id.clone()),
-        KeyValue::new("cold_start", span.cold_start),
-        KeyValue::new("async_invocation", span.is_async),
-        KeyValue::new("function_arn", span.function_arn.clone()),
-        KeyValue::new("function_version", span.function_version.clone()),
-        KeyValue::new("functionname", span.function_name.to_lowercase()),
-        KeyValue::new("resource_names", span.function_name.clone()),
-        KeyValue::new("_dd.origin", "lambda"),
+        KeyValue::new(attr::OPERATION_NAME, "aws.lambda"),
+        KeyValue::new(attr::LANGUAGE, "rust"),
+        KeyValue::new(attr::RESOURCE_NAME, span.function_name.clone()),
+        KeyValue::new(attr::SPAN_TYPE, "serverless"),
+        KeyValue::new(attr::REQUEST_ID, span.request_id.clone()),
+        KeyValue::new(attr::COLD_START, span.cold_start),
+        KeyValue::new(attr::ASYNC_INVOCATION, span.is_async),
+        KeyValue::new(attr::FUNCTION_ARN, span.function_arn.clone()),
+        KeyValue::new(attr::FUNCTION_VERSION, span.function_version.clone()),
+        KeyValue::new(attr::FUNCTION_NAME, span.function_name.to_lowercase()),
+        KeyValue::new(attr::RESOURCE_NAMES, span.function_name.clone()),
+        KeyValue::new(attr::DD_ORIGIN, "lambda"),
     ];
     if let Some(source) = span.event_source {
-        attrs.push(KeyValue::new("function_trigger.event_source", source));
+        attrs.push(KeyValue::new(attr::FUNCTION_TRIGGER_EVENT_SOURCE, source));
     }
     if let Some(ref arn) = span.event_source_arn {
         attrs.push(KeyValue::new(
-            "function_trigger.event_source_arn",
+            attr::FUNCTION_TRIGGER_EVENT_SOURCE_ARN,
             arn.clone(),
         ));
     }
     if let Some(ref rt) = span.runtime {
-        attrs.push(KeyValue::new("runtime", rt.clone()));
+        attrs.push(KeyValue::new(attr::RUNTIME, rt.clone()));
     }
     builder.attributes = Some(attrs);
 

@@ -4,7 +4,13 @@
 use super::eventbridge::{self, EventBridgeEvent};
 use super::sns;
 use super::InferredSpan;
-use crate::span_inferrer::carrier::{carrier_from_json_object, CARRIER_KEY};
+use crate::span_inferrer::carrier::{carrier_from_json_object, DATADOG_ATTRIBUTE_KEY};
+
+const SOURCE_ARN: &str = "source_arn";
+const AWS_REGION: &str = "aws_region";
+const RETRY_COUNT: &str = "retry_count";
+const RECEIPT_HANDLE: &str = "receipt_handle";
+const SENDER_ID: &str = "sender_id";
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -75,19 +81,19 @@ impl SqsRecord {
             .map(|ms| ms * 1_000_000);
 
         let mut tags = HashMap::new();
-        tags.insert("source_arn".to_owned(), self.event_source_arn.clone());
-        tags.insert("aws_region".to_owned(), self.aws_region.clone());
+        tags.insert(SOURCE_ARN.to_owned(), self.event_source_arn.clone());
+        tags.insert(AWS_REGION.to_owned(), self.aws_region.clone());
         let retry_count = if self.attributes.approximate_receive_count.is_empty() {
             "1"
         } else {
             &self.attributes.approximate_receive_count
         };
-        tags.insert("retry_count".to_owned(), retry_count.to_owned());
+        tags.insert(RETRY_COUNT.to_owned(), retry_count.to_owned());
         if !self.receipt_handle.is_empty() {
-            tags.insert("receipt_handle".to_owned(), self.receipt_handle.clone());
+            tags.insert(RECEIPT_HANDLE.to_owned(), self.receipt_handle.clone());
         }
         if !self.attributes.sender_id.is_empty() {
-            tags.insert("sender_id".to_owned(), self.attributes.sender_id.clone());
+            tags.insert(SENDER_ID.to_owned(), self.attributes.sender_id.clone());
         }
 
         let sqs_span = InferredSpan {
@@ -124,7 +130,7 @@ impl SqsRecord {
     }
 
     fn extract_carrier(&self) -> Option<HashMap<String, String>> {
-        let dd_attr = self.message_attributes.get(CARRIER_KEY)?;
+        let dd_attr = self.message_attributes.get(DATADOG_ATTRIBUTE_KEY)?;
         let value = dd_attr.string_value.as_deref()?;
         let json: Value = serde_json::from_str(value).ok()?;
         carrier_from_json_object(&json)

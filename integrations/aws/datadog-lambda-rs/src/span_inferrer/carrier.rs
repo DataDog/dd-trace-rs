@@ -8,7 +8,7 @@ pub(crate) use datadog_opentelemetry::propagation::datadog::{
     DATADOG_TAGS_KEY as TAGS_KEY, DATADOG_TRACE_ID_KEY as TRACE_ID_KEY,
 };
 
-pub(crate) const CARRIER_KEY: &str = "_datadog";
+pub(crate) const DATADOG_ATTRIBUTE_KEY: &str = "_datadog";
 
 pub(crate) fn validate_carrier(
     carrier: &HashMap<String, String>,

@@ -4,8 +4,9 @@
 pub(crate) mod carrier;
 mod triggers;
 
+use crate::attribute_keys as attr;
 use carrier::{
-    carrier_from_json_object, validate_carrier, CARRIER_KEY, PARENT_ID_KEY, SAMPLING_PRIORITY_KEY,
+    carrier_from_json_object, validate_carrier, DATADOG_ATTRIBUTE_KEY, PARENT_ID_KEY, SAMPLING_PRIORITY_KEY,
     TAGS_KEY, TRACE_ID_KEY,
 };
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
@@ -138,11 +139,11 @@ impl<'a> SpanInferrer<'a> {
                 builder.start_time = Some(SystemTime::UNIX_EPOCH + Duration::from_nanos(start_ns));
             }
             let mut attrs = vec![
-                KeyValue::new("service.name", desc.service.clone()),
-                KeyValue::new("resource.name", desc.resource.clone()),
-                KeyValue::new("span.type", desc.span_type),
-                KeyValue::new("operation_name", desc.operation),
-                KeyValue::new("peer.service", desc.service.clone()),
+                KeyValue::new(attr::SERVICE_NAME, desc.service.clone()),
+                KeyValue::new(attr::RESOURCE_NAME, desc.resource.clone()),
+                KeyValue::new(attr::SPAN_TYPE, desc.span_type),
+                KeyValue::new(attr::OPERATION_NAME, desc.operation),
+                KeyValue::new(attr::PEER_SERVICE, desc.service.clone()),
             ];
             for (k, v) in &desc.tags {
                 attrs.push(KeyValue::new(k.clone(), v.clone()));
@@ -169,7 +170,7 @@ fn extract_from_headers(payload: &Value) -> Option<HashMap<String, String>> {
             continue;
         };
 
-        if let Some(dd) = headers.get(CARRIER_KEY) {
+        if let Some(dd) = headers.get(DATADOG_ATTRIBUTE_KEY) {
             if let Some(carrier) = carrier_from_json_object(dd) {
                 return Some(carrier);
             }

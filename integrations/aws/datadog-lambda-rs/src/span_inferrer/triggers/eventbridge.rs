@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::InferredSpan;
-use crate::span_inferrer::carrier::{carrier_from_json_object, CARRIER_KEY};
+use crate::span_inferrer::carrier::{carrier_from_json_object, DATADOG_ATTRIBUTE_KEY};
+
+const DETAIL_TYPE: &str = "detail_type";
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -18,7 +20,7 @@ pub(crate) struct EventBridgeEvent {
 
 impl EventBridgeEvent {
     pub(crate) fn extract(&self) -> Option<(HashMap<String, String>, Vec<InferredSpan>)> {
-        let carrier = carrier_from_json_object(self.detail.get(CARRIER_KEY)?)?;
+        let carrier = carrier_from_json_object(self.detail.get(DATADOG_ATTRIBUTE_KEY)?)?;
 
         let start_time_ns = carrier
             .get("x-datadog-start-time")
@@ -27,7 +29,7 @@ impl EventBridgeEvent {
             .or_else(|| parse_iso_time(self.time.as_deref()?));
 
         let mut tags = HashMap::new();
-        tags.insert("detail_type".to_owned(), self.detail_type.clone());
+        tags.insert(DETAIL_TYPE.to_owned(), self.detail_type.clone());
 
         let span = InferredSpan {
             operation: "aws.eventbridge",
