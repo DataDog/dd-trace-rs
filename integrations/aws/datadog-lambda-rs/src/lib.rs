@@ -10,7 +10,9 @@ use lambda_runtime::{
     LambdaEvent,
 };
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 
@@ -25,11 +27,11 @@ pub struct Config {}
 pub fn wrap_handler<F, Fut, E, R>(
     handler: F,
     provider: SdkTracerProvider,
-) -> impl Fn(LambdaEvent<E>) -> BoxFuture<Result<R, HandlerError>>
+) -> impl Fn(LambdaEvent<Value>) -> BoxFuture<Result<R, HandlerError>>
 where
     F: Fn(LambdaEvent<E>) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<R, HandlerError>> + Send + 'static,
-    E: Serialize + Send + Sync + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
     R: Send + 'static,
 {
     wrap_handler_with_config(handler, provider, Config::default())
@@ -40,21 +42,26 @@ pub fn wrap_handler_with_config<F, Fut, E, R>(
     handler: F,
     provider: SdkTracerProvider,
     config: Config,
-) -> impl Fn(LambdaEvent<E>) -> BoxFuture<Result<R, HandlerError>>
+) -> impl Fn(LambdaEvent<Value>) -> BoxFuture<Result<R, HandlerError>>
 where
     F: Fn(LambdaEvent<E>) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Result<R, HandlerError>> + Send + 'static,
-    E: Serialize + Send + Sync + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
     R: Send + 'static,
 {
     let handler = Arc::new(handler);
     let config = Arc::new(config);
-    move |event: LambdaEvent<E>| {
+    move |event: LambdaEvent<Value>| {
         let handler = Arc::clone(&handler);
         let provider = provider.clone();
         let config = Arc::clone(&config);
         let scope = start_invocation(&event, &provider, &config);
-        let fut = handler(event);
+        let typed_payload = match serde_json::from_value::<E>(event.payload) {
+            Ok(p) => p,
+            Err(e) => return Box::pin(async move { Err(e.into()) }),
+        };
+        let typed_event = LambdaEvent::new(typed_payload, event.context);
+        let fut = handler(typed_event);
         Box::pin(async move { run_in_invocation_scope(scope, provider, fut).await })
     }
 }
@@ -89,15 +96,17 @@ impl<S> Layer<S> for DatadogLambdaLayer {
             inner,
             provider: self.provider.clone(),
             config: Arc::clone(&self.config),
+            _phantom: PhantomData,
         }
     }
 }
 
 #[doc(hidden)]
-pub struct DatadogLambdaService<S> {
+pub struct DatadogLambdaService<S, E = Value> {
     inner: S,
     provider: SdkTracerProvider,
     config: Arc<Config>,
+    _phantom: PhantomData<fn(LambdaEvent<E>)>,
 }
 
 #[cfg(test)]
@@ -119,27 +128,32 @@ mod tests {
     }
 }
 
-impl<S, E, R, Err> Service<LambdaEvent<E>> for DatadogLambdaService<S>
+impl<S, E> Service<LambdaEvent<Value>> for DatadogLambdaService<S, E>
 where
-    S: Service<LambdaEvent<E>, Response = R, Error = Err> + Send + 'static,
+    S: Service<LambdaEvent<E>> + Send + 'static,
     S::Future: Send + 'static,
-    E: Serialize + Send + Sync + 'static,
-    R: Send + 'static,
-    Err: std::fmt::Display + Send + 'static,
+    S::Response: Send + 'static,
+    S::Error: From<serde_json::Error> + std::fmt::Display + Send + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
 {
-    type Response = R;
-    type Error = Err;
-    type Future = BoxFuture<Result<R, Err>>;
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = BoxFuture<Result<S::Response, S::Error>>;
 
     fn poll_ready(&mut self, cx: &mut TaskContext<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, event: LambdaEvent<E>) -> Self::Future {
+    fn call(&mut self, event: LambdaEvent<Value>) -> Self::Future {
         let provider = self.provider.clone();
         let config = Arc::clone(&self.config);
         let scope = start_invocation(&event, &provider, &config);
-        let fut = self.inner.call(event);
+        let typed_payload = match serde_json::from_value::<E>(event.payload) {
+            Ok(p) => p,
+            Err(e) => return Box::pin(async move { Err(e.into()) }),
+        };
+        let typed_event = LambdaEvent::new(typed_payload, event.context);
+        let fut = self.inner.call(typed_event);
         Box::pin(async move { run_in_invocation_scope(scope, provider, fut).await })
     }
 }
