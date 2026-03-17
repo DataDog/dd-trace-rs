@@ -11,16 +11,18 @@
       "_dd.p.dm": "-0",
       "otel.scope.name": "test_trace_writer_synchronous_mode",
       "otel.status_code": "Unset",
-      "otel.trace_id": "698b823c00000000698b4f15ff0df4f9",
+      "otel.trace_id": "69b9879600000000b6685c281043fd5b",
       "span.kind": "internal",
+
+
       "telemetry.sdk.language": "rust",
-      "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.31.0"
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.3.1"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0
     },
-    "duration": 4000,
-    "start": 1770750524325733000
+    "duration": 6000,
+    "start": 1773766550945479000
   }]]
