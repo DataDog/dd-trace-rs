@@ -59,7 +59,11 @@ where
         let scope = start_invocation(&event, &provider, &config);
         let typed_payload = match serde_json::from_value::<E>(event.payload) {
             Ok(p) => p,
-            Err(e) => return Box::pin(async move { Err(e.into()) }),
+            Err(e) => {
+                return Box::pin(async move {
+                    run_in_invocation_scope(scope, provider, async move { Err(e.into()) }).await
+                })
+            }
         };
         let typed_event = LambdaEvent::new(typed_payload, event.context);
         let fut = handler(typed_event);
@@ -132,7 +136,11 @@ where
         let scope = start_invocation(&event, &provider, &config);
         let typed_payload = match serde_json::from_value::<E>(event.payload) {
             Ok(p) => p,
-            Err(e) => return Box::pin(async move { Err(e.into()) }),
+            Err(e) => {
+                return Box::pin(async move {
+                    run_in_invocation_scope(scope, provider, async move { Err(e.into()) }).await
+                })
+            }
         };
         let typed_event = LambdaEvent::new(typed_payload, event.context);
         let fut = self.inner.call(typed_event);
