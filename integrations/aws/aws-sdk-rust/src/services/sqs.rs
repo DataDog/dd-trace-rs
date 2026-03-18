@@ -39,7 +39,7 @@ fn inject_into_send_message(
     trace_headers: &HashMap<String, String>,
 ) -> Result<(), BoxError> {
     let attrs = input.message_attributes.get_or_insert_with(HashMap::new);
-    if attrs.len() >= MAX_MESSAGE_ATTRIBUTES {
+    if should_skip_injection(attrs) {
         return Ok(());
     }
 
@@ -61,12 +61,16 @@ fn inject_into_send_message_batch(
     let dd_attr = build_datadog_attribute(trace_headers)?;
     for entry in entries.iter_mut() {
         let attrs = entry.message_attributes.get_or_insert_with(HashMap::new);
-        if attrs.len() >= MAX_MESSAGE_ATTRIBUTES {
+        if should_skip_injection(attrs) {
             continue;
         }
         attrs.insert(dd_key.clone(), dd_attr.clone());
     }
     Ok(())
+}
+
+fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
+    attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
 
 fn build_datadog_attribute(
@@ -165,6 +169,87 @@ mod tests {
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         assert!(!attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
+    }
+
+    #[test]
+    fn test_max_attributes_overwrites_existing_datadog_attribute() {
+        let trace_headers = sample_trace_headers();
+        let mut builder = SendMessageInput::builder()
+            .queue_url("https://example.com/test-queue")
+            .message_body("test body");
+        for i in 0..9 {
+            let attr = MessageAttributeValue::builder()
+                .data_type("String")
+                .string_value(format!("value{}", i))
+                .build()
+                .unwrap();
+            builder = builder.message_attributes(format!("attr{}", i), attr);
+        }
+        let stale = MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value("stale")
+            .build()
+            .unwrap();
+        builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
+        let mut input = builder.build().unwrap();
+
+        inject_into_send_message(&mut input, &trace_headers).unwrap();
+
+        let attrs = input.message_attributes.as_ref().unwrap();
+        assert_eq!(attrs.len(), 10);
+        let dd_attr = &attrs[DATADOG_ATTRIBUTE_KEY];
+        let json_str = dd_attr.string_value().unwrap();
+        let parsed: HashMap<String, String> = serde_json::from_str(json_str).unwrap();
+        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
+        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+    }
+
+    #[test]
+    fn test_batch_max_attributes_overwrites_existing_datadog_attribute() {
+        let trace_headers = sample_trace_headers();
+        let mut full_attrs = HashMap::new();
+        for i in 0..9 {
+            full_attrs.insert(
+                format!("attr{i}"),
+                MessageAttributeValue::builder()
+                    .data_type("String")
+                    .string_value(format!("value{i}"))
+                    .build()
+                    .unwrap(),
+            );
+        }
+        full_attrs.insert(
+            DATADOG_ATTRIBUTE_KEY.to_string(),
+            MessageAttributeValue::builder()
+                .data_type("String")
+                .string_value("stale")
+                .build()
+                .unwrap(),
+        );
+        let entry = SendMessageBatchRequestEntry::builder()
+            .id("full")
+            .message_body("body")
+            .set_message_attributes(Some(full_attrs))
+            .build()
+            .unwrap();
+        let mut input = SendMessageBatchInput::builder()
+            .queue_url("https://example.com/test-queue")
+            .entries(entry)
+            .build()
+            .unwrap();
+
+        inject_into_send_message_batch(&mut input, &trace_headers).unwrap();
+
+        let entries = input.entries.as_ref().unwrap();
+        let attrs = entries[0].message_attributes.as_ref().unwrap();
+        assert_eq!(attrs.len(), 10);
+        let dd_attr = &attrs[DATADOG_ATTRIBUTE_KEY];
+        let json_str = dd_attr.string_value().unwrap();
+        let parsed: HashMap<String, String> = serde_json::from_str(json_str).unwrap();
+        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
+        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
     }
 
     #[test]
