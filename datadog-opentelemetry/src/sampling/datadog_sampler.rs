@@ -1159,10 +1159,7 @@ mod tests {
 
         // Boundary values
         assert_eq!(format_sampling_rate(0.75), Some("0.75".to_string()));
-        assert_eq!(
-            format_sampling_rate(0.999999),
-            Some("0.999999".to_string())
-        );
+        assert_eq!(format_sampling_rate(0.999999), Some("0.999999".to_string()));
 
         // Invalid rates
         assert_eq!(format_sampling_rate(-0.1), None);
