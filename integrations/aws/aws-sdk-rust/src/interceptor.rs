@@ -11,7 +11,7 @@ use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use opentelemetry::Context;
 
-use crate::services::AwsService;
+use crate::services::{AwsServiceHandler, EventBridgeService, SnsService, SqsService};
 
 /// AWS SDK interceptor that injects Datadog trace context into messaging payloads.
 ///
@@ -68,12 +68,10 @@ impl Intercept for DatadogAwsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        let Some((service, operation)) = cfg.load::<Metadata>().and_then(|m| {
-            let op = m.name();
-            AwsService::from_service_id(m.service()).map(|s| (s, op))
-        }) else {
+        let Some(metadata) = cfg.load::<Metadata>() else {
             return Ok(());
         };
+        let operation = metadata.name();
 
         let cx = Context::current();
         let trace_headers = extract_trace_headers(&cx);
@@ -82,10 +80,19 @@ impl Intercept for DatadogAwsInterceptor {
         }
 
         // Swallow injection errors -- trace propagation must never fail the AWS call.
-        if let Err(err) = service.inject(operation, trace_headers, context.input_mut()) {
+        let inject_result = match metadata.service() {
+            "SQS" => SqsService.inject(operation, trace_headers, context.input_mut()),
+            "SNS" => SnsService.inject(operation, trace_headers, context.input_mut()),
+            "EventBridge" => {
+                EventBridgeService.inject(operation, trace_headers, context.input_mut())
+            }
+            _ => return Ok(()),
+        };
+
+        if let Err(err) = inject_result {
             tracing::debug!(
                 error = %err,
-                service = ?service,
+                service = metadata.service(),
                 operation,
                 "failed to inject Datadog trace context"
             );

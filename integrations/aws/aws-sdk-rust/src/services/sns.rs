@@ -12,7 +12,21 @@ use aws_smithy_types::Blob;
 
 use crate::attribute_keys::DATADOG_ATTRIBUTE_KEY;
 
-use super::MAX_MESSAGE_ATTRIBUTES;
+use super::{AwsServiceHandler, MAX_MESSAGE_ATTRIBUTES};
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SnsService;
+
+impl AwsServiceHandler for SnsService {
+    fn inject(
+        &self,
+        operation: &str,
+        trace_headers: HashMap<String, String>,
+        input: &mut Input,
+    ) -> Result<(), BoxError> {
+        inject(operation, trace_headers, input)
+    }
+}
 
 pub(super) fn inject(
     operation: &str,

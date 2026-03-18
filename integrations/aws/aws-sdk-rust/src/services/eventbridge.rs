@@ -10,7 +10,21 @@ use aws_smithy_runtime_api::client::interceptors::context::Input;
 
 use crate::attribute_keys::{DATADOG_ATTRIBUTE_KEY, RESOURCE_NAME_KEY, START_TIME_KEY};
 
-use super::ONE_MB;
+use super::{AwsServiceHandler, ONE_MB};
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct EventBridgeService;
+
+impl AwsServiceHandler for EventBridgeService {
+    fn inject(
+        &self,
+        operation: &str,
+        trace_headers: HashMap<String, String>,
+        input: &mut Input,
+    ) -> Result<(), BoxError> {
+        inject(operation, trace_headers, input)
+    }
+}
 
 pub(super) fn inject(
     operation: &str,

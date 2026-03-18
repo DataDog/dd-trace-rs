@@ -10,38 +10,20 @@ use std::collections::HashMap;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 
+pub(crate) use eventbridge::EventBridgeService;
+pub(crate) use sns::SnsService;
+pub(crate) use sqs::SqsService;
+
 pub(crate) const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 pub(crate) const ONE_MB: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum AwsService {
-    Sqs,
-    Sns,
-    EventBridge,
-}
-
-impl AwsService {
-    pub(crate) fn from_service_id(service_id: &str) -> Option<Self> {
-        match service_id {
-            "SQS" => Some(Self::Sqs),
-            "SNS" => Some(Self::Sns),
-            "EventBridge" => Some(Self::EventBridge),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn inject(
+pub(crate) trait AwsServiceHandler {
+    fn inject(
         &self,
         operation: &str,
         trace_headers: HashMap<String, String>,
         input: &mut Input,
-    ) -> Result<(), BoxError> {
-        match self {
-            Self::Sqs => sqs::inject(operation, trace_headers, input),
-            Self::Sns => sns::inject(operation, trace_headers, input),
-            Self::EventBridge => eventbridge::inject(operation, trace_headers, input),
-        }
-    }
+    ) -> Result<(), BoxError>;
 }
 
 #[cfg(test)]
