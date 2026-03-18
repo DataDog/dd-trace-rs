@@ -31,7 +31,7 @@ opentelemetry-sdk.
 Add to you Cargo.toml
 
 ```toml
-datadog-opentelemetry = { version = "0.3.0" }
+datadog-opentelemetry = { version = "0.3.1" }
 ```
 
 ### Creating traces, metrics and logs
@@ -203,7 +203,7 @@ let logging_provider = datadog_opentelemetry::logs()
 
 For advanced usage and configuration information, check out [`DatadogTracingBuilder`],
 [`configuration::ConfigBuilder`] and the
-[library documentation](https://docs.rs/datadog-opentelemetry/0.3.0/datadog_opentelemetry/).
+[library documentation](https://docs.rs/datadog-opentelemetry/0.3.1/datadog_opentelemetry/).
 
 * Through env variables
 
