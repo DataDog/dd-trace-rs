@@ -463,13 +463,19 @@ impl DatadogSampler {
 /// This matches the Go behavior of `strconv.FormatFloat(rate, 'g', 6, 64)`.
 ///
 /// # Examples
-/// - `1.0` → `"1"`
-/// - `0.5` → `"0.5"`
-/// - `0.7654321` → `"0.765432"`
-/// - `0.100000` → `"0.1"`
-fn format_sampling_rate(rate: f64) -> String {
+/// - `1.0` → `Some("1")`
+/// - `0.5` → `Some("0.5")`
+/// - `0.7654321` → `Some("0.765432")`
+/// - `0.100000` → `Some("0.1")`
+/// - `-0.1` → `None`
+/// - `1.1` → `None`
+fn format_sampling_rate(rate: f64) -> Option<String> {
+    if rate.is_nan() || rate < 0.0 || rate > 1.0 {
+        return None;
+    }
+
     if rate == 0.0 {
-        return "0".to_string();
+        return Some("0".to_string());
     }
 
     let digits = 6_i32;
@@ -486,13 +492,13 @@ fn format_sampling_rate(rate: f64) -> String {
 
     let s = format!("{:.prec$}", rounded, prec = decimal_places);
     // Strip trailing zeros after decimal point
-    if s.contains('.') {
+    Some(if s.contains('.') {
         let s = s.trim_end_matches('0');
         let s = s.trim_end_matches('.');
         s.to_string()
     } else {
         s
-    }
+    })
 }
 
 pub(crate) struct DdSamplingResult {
@@ -540,19 +546,17 @@ impl DdSamplingResult {
         match mechanism {
             mechanism::AGENT_RATE_BY_SERVICE => {
                 result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
-                result.push(KeyValue::new(
-                    SAMPLING_KNUTH_RATE_TAG_KEY,
-                    format_sampling_rate(root_info.rate),
-                ));
+                if let Some(rate_str) = format_sampling_rate(root_info.rate) {
+                    result.push(KeyValue::new(SAMPLING_KNUTH_RATE_TAG_KEY, rate_str));
+                }
             }
             mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE => {
                 result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate));
-                result.push(KeyValue::new(
-                    SAMPLING_KNUTH_RATE_TAG_KEY,
-                    format_sampling_rate(root_info.rate),
-                ));
+                if let Some(rate_str) = format_sampling_rate(root_info.rate) {
+                    result.push(KeyValue::new(SAMPLING_KNUTH_RATE_TAG_KEY, rate_str));
+                }
             }
             _ => {}
         }
@@ -1131,23 +1135,41 @@ mod tests {
     #[test]
     fn test_format_sampling_rate() {
         // Exact values
-        assert_eq!(format_sampling_rate(1.0), "1");
-        assert_eq!(format_sampling_rate(0.5), "0.5");
-        assert_eq!(format_sampling_rate(0.1), "0.1");
-        assert_eq!(format_sampling_rate(0.0), "0");
+        assert_eq!(format_sampling_rate(1.0), Some("1".to_string()));
+        assert_eq!(format_sampling_rate(0.5), Some("0.5".to_string()));
+        assert_eq!(format_sampling_rate(0.1), Some("0.1".to_string()));
+        assert_eq!(format_sampling_rate(0.0), Some("0".to_string()));
 
         // Trailing zeros should be stripped
-        assert_eq!(format_sampling_rate(0.100000), "0.1");
-        assert_eq!(format_sampling_rate(0.500000), "0.5");
+        assert_eq!(format_sampling_rate(0.100000), Some("0.1".to_string()));
+        assert_eq!(format_sampling_rate(0.500000), Some("0.5".to_string()));
 
         // Truncation to 6 significant digits
-        assert_eq!(format_sampling_rate(0.7654321), "0.765432");
-        assert_eq!(format_sampling_rate(0.123456789), "0.123457");
+        assert_eq!(
+            format_sampling_rate(0.7654321),
+            Some("0.765432".to_string())
+        );
+        assert_eq!(
+            format_sampling_rate(0.123456789),
+            Some("0.123457".to_string())
+        );
 
         // Small values
-        assert_eq!(format_sampling_rate(0.001), "0.001");
-        assert_eq!(format_sampling_rate(0.75), "0.75");
-        assert_eq!(format_sampling_rate(0.999999), "0.999999");
+        assert_eq!(format_sampling_rate(0.001), Some("0.001".to_string()));
+
+        // Boundary values
+        assert_eq!(format_sampling_rate(0.75), Some("0.75".to_string()));
+        assert_eq!(
+            format_sampling_rate(0.999999),
+            Some("0.999999".to_string())
+        );
+
+        // Invalid rates
+        assert_eq!(format_sampling_rate(-0.1), None);
+        assert_eq!(format_sampling_rate(1.1), None);
+        assert_eq!(format_sampling_rate(f64::NAN), None);
+        assert_eq!(format_sampling_rate(f64::INFINITY), None);
+        assert_eq!(format_sampling_rate(f64::NEG_INFINITY), None);
     }
 
     #[test]
