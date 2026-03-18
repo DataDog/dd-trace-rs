@@ -470,7 +470,7 @@ impl DatadogSampler {
 /// - `-0.1` → `None`
 /// - `1.1` → `None`
 fn format_sampling_rate(rate: f64) -> Option<String> {
-    if rate.is_nan() || rate < 0.0 || rate > 1.0 {
+    if rate.is_nan() || !(0.0..=1.0).contains(&rate) {
         return None;
     }
 
