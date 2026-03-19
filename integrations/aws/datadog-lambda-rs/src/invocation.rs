@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn cold_start_true_on_first_call_then_false() {
+    fn detects_cold_start_on_first_call_only() {
         IS_COLD_START.store(true, Ordering::SeqCst);
         assert!(detect_cold_start());
         assert!(!detect_cold_start());
@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn root_span_sets_expected_attributes() {
+    fn sets_expected_attributes_on_root_span() {
         let (provider, exporter) = test_provider();
         let tracer = provider.tracer("test");
         let lambda_span = LambdaSpan {
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn root_span_inherits_parent_trace_id() {
+    fn inherits_parent_trace_id_for_root_span() {
         let (provider, _) = test_provider();
         let tracer = provider.tracer("test");
 
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn start_invocation_extracts_headers_from_raw_event() {
+    fn extracts_headers_from_raw_invocation_event() {
         // Regression test for the LambdaEvent<Value> fix: even when the user's handler
         // type would not include headers, start_invocation sees the full raw JSON and
         // extracts trace context from event.headers.

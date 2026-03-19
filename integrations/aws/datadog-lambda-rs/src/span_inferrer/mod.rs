@@ -6,8 +6,8 @@ mod triggers;
 
 use crate::attribute_keys as attr;
 use carrier::{
-    carrier_from_json_object, validate_carrier, DATADOG_ATTRIBUTE_KEY, PARENT_ID_KEY, SAMPLING_PRIORITY_KEY,
-    TAGS_KEY, TRACE_ID_KEY,
+    carrier_from_json_object, validate_carrier, DATADOG_ATTRIBUTE_KEY, PARENT_ID_KEY,
+    SAMPLING_PRIORITY_KEY, TAGS_KEY, TRACE_ID_KEY,
 };
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
@@ -178,10 +178,8 @@ fn extract_from_headers(payload: &Value) -> Option<HashMap<String, String>> {
 
         // Build a lowercase view of the header map so REST v1 events (which preserve
         // original client casing, e.g. "X-Datadog-Trace-Id") match the lowercase constants.
-        let lower: HashMap<String, &Value> = headers
-            .iter()
-            .map(|(k, v)| (k.to_lowercase(), v))
-            .collect();
+        let lower: HashMap<String, &Value> =
+            headers.iter().map(|(k, v)| (k.to_lowercase(), v)).collect();
 
         let mut carrier = HashMap::new();
         for key in [TRACE_ID_KEY, PARENT_ID_KEY, SAMPLING_PRIORITY_KEY, TAGS_KEY] {
@@ -225,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn inferred_spans_set_expected_attributes() {
+    fn sets_expected_attributes_on_inferred_spans() {
         let (provider, exporter) = test_provider();
         let tracer = provider.tracer("test");
 
@@ -242,8 +240,11 @@ mod tests {
         }];
 
         let inferrer = SpanInferrer::new(&tracer);
-        let (_, span_contexts, end_time) = inferrer.create_inferred_spans(&Context::current(), &inferred);
-        for cx in span_contexts { cx.span().end_with_timestamp(end_time); }
+        let (_, span_contexts, end_time) =
+            inferrer.create_inferred_spans(&Context::current(), &inferred);
+        for cx in span_contexts {
+            cx.span().end_with_timestamp(end_time);
+        }
         provider.force_flush().ok();
 
         let spans = finished_spans(&exporter);
@@ -269,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn inferred_spans_are_chained() {
+    fn chains_inferred_spans() {
         let (provider, exporter) = test_provider();
         let tracer = provider.tracer("test");
 
@@ -299,8 +300,11 @@ mod tests {
         ];
 
         let inferrer = SpanInferrer::new(&tracer);
-        let (cx, span_contexts, end_time) = inferrer.create_inferred_spans(&Context::current(), &inferred);
-        for sc in span_contexts { sc.span().end_with_timestamp(end_time); }
+        let (cx, span_contexts, end_time) =
+            inferrer.create_inferred_spans(&Context::current(), &inferred);
+        for sc in span_contexts {
+            sc.span().end_with_timestamp(end_time);
+        }
         provider.force_flush().ok();
 
         let spans = finished_spans(&exporter);
@@ -313,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn infer_from_sqs_event() {
+    fn infers_spans_from_sqs_event() {
         let (provider, exporter) = test_provider();
         let tracer = provider.tracer("test");
 
@@ -340,7 +344,9 @@ mod tests {
 
         let inferrer = SpanInferrer::new(&tracer);
         let result = inferrer.infer(&event);
-        for cx in result.inferred_span_contexts { cx.span().end_with_timestamp(result.inferred_span_end_time); }
+        for cx in result.inferred_span_contexts {
+            cx.span().end_with_timestamp(result.inferred_span_end_time);
+        }
         provider.force_flush().ok();
 
         assert!(result.parent_cx.span().span_context().is_valid());
@@ -354,7 +360,7 @@ mod tests {
     use crate::span_inferrer::triggers::test_utils::load_payload;
 
     #[test]
-    fn api_gateway_rest_event_extracts_carrier() {
+    fn extracts_carrier_from_api_gateway_rest_event() {
         let event = load_payload("api_gateway_rest_event.json");
         let carrier = extract_from_headers(&event).unwrap();
         assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");
@@ -363,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn api_gateway_rest_event_capitalized_headers_extracts_carrier() {
+    fn extracts_carrier_from_api_gateway_rest_event_with_capitalized_headers() {
         // REST v1 preserves original client header casing (e.g. "X-Datadog-Trace-Id").
         // Extraction must be case-insensitive.
         let event = load_payload("api_gateway_rest_event_capitalized.json");
@@ -373,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn api_gateway_http_event_extracts_carrier() {
+    fn extracts_carrier_from_api_gateway_http_event() {
         // HTTP API v2 lowercases all headers — standard extraction path.
         let event = load_payload("api_gateway_http_event.json");
         let carrier = extract_from_headers(&event).unwrap();

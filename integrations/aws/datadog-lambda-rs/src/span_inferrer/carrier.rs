@@ -33,7 +33,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid_carrier() {
+    fn accepts_valid_carrier() {
         let mut carrier = HashMap::new();
         carrier.insert(TRACE_ID_KEY.to_owned(), "12345".to_owned());
         carrier.insert(PARENT_ID_KEY.to_owned(), "67890".to_owned());
@@ -41,34 +41,34 @@ mod tests {
     }
 
     #[test]
-    fn missing_trace_id() {
+    fn rejects_carrier_without_trace_id() {
         let carrier = HashMap::new();
         assert!(validate_carrier(&carrier).is_none());
     }
 
     #[test]
-    fn zero_trace_id() {
+    fn rejects_carrier_with_zero_trace_id() {
         let mut carrier = HashMap::new();
         carrier.insert(TRACE_ID_KEY.to_owned(), "0".to_owned());
         assert!(validate_carrier(&carrier).is_none());
     }
 
     #[test]
-    fn empty_trace_id() {
+    fn rejects_carrier_with_empty_trace_id() {
         let mut carrier = HashMap::new();
         carrier.insert(TRACE_ID_KEY.to_owned(), String::new());
         assert!(validate_carrier(&carrier).is_none());
     }
 
     #[test]
-    fn non_numeric_trace_id() {
+    fn rejects_carrier_with_non_numeric_trace_id() {
         let mut carrier = HashMap::new();
         carrier.insert(TRACE_ID_KEY.to_owned(), "not-a-number".to_owned());
         assert!(validate_carrier(&carrier).is_none());
     }
 
     #[test]
-    fn carrier_from_json() {
+    fn extracts_carrier_from_json_object() {
         let json = serde_json::json!({
             "x-datadog-trace-id": "12345",
             "x-datadog-parent-id": "67890",
@@ -80,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn carrier_from_non_object() {
+    fn returns_none_for_non_object_json() {
         let json = serde_json::json!("not an object");
         assert!(carrier_from_json_object(&json).is_none());
     }

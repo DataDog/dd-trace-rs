@@ -172,7 +172,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_carrier_and_span() {
+    fn extracts_carrier_and_inferred_span() {
         let event = load_payload("sqs_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
@@ -189,13 +189,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_without_carrier() {
+    fn returns_none_without_datadog_carrier() {
         let event = load_payload("sqs_event_no_carrier.json");
         assert!(extract(&event).is_none());
     }
 
     #[test]
-    fn nested_sns_in_sqs() {
+    fn extracts_nested_sns_spans_from_sqs() {
         let event = load_payload("sns_sqs_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
@@ -206,7 +206,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_eventbridge_in_sqs() {
+    fn extracts_nested_eventbridge_spans_from_sqs() {
         let event = load_payload("eventbridge_sqs_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();

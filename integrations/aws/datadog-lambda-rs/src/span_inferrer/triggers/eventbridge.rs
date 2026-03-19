@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_carrier_and_span() {
+    fn extracts_carrier_and_inferred_span() {
         let event = load_payload("eventbridge_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_with_start_time_from_carrier() {
+    fn extracts_start_time_from_datadog_carrier() {
         let event = json!({
             "source": "my.app",
             "detail-type": "OrderPlaced",
@@ -152,13 +152,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_without_datadog_key() {
+    fn returns_none_without_datadog_key() {
         let event = load_payload("eventbridge_event_no_carrier.json");
         assert!(extract(&event).is_none());
     }
 
     #[test]
-    fn parse_iso_time_basic() {
+    fn parses_basic_iso_timestamp() {
         // 2024-01-01T00:00:00Z = 1704067200 seconds
         let ns = parse_iso_time("2024-01-01T00:00:00Z").unwrap();
         assert_eq!(ns, 1704067200 * 1_000_000_000);

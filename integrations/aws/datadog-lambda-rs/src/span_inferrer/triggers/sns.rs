@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_string_carrier() {
+    fn extracts_string_datadog_carrier() {
         let event = load_payload("sns_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_binary_carrier() {
+    fn extracts_binary_datadog_carrier() {
         use base64::Engine;
 
         let carrier_json = json!({
@@ -214,13 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn extract_without_carrier() {
+    fn returns_none_without_datadog_carrier() {
         let event = load_payload("sns_event_no_carrier.json");
         assert!(extract(&event).is_none());
     }
 
     #[test]
-    fn nested_eventbridge_in_sns() {
+    fn extracts_nested_eventbridge_spans_from_sns() {
         let event = load_payload("eventbridge_sns_event.json");
 
         let (carrier, spans) = extract(&event).unwrap();
