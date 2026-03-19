@@ -143,6 +143,7 @@ impl<'a> SpanInferrer<'a> {
                 KeyValue::new(attr::RESOURCE_NAME, desc.resource.clone()),
                 KeyValue::new(attr::SPAN_TYPE, desc.span_type),
                 KeyValue::new(attr::OPERATION_NAME, desc.operation),
+                KeyValue::new(attr::OPERATION_NAME_CUSTOM, desc.operation),
                 KeyValue::new(attr::PEER_SERVICE, desc.service.clone()),
             ];
             for (k, v) in &desc.tags {
@@ -265,6 +266,10 @@ mod tests {
         );
         assert_eq!(
             find_attr(attrs, "operation.name"),
+            Some(&OtelValue::String("aws.sqs".into()))
+        );
+        assert_eq!(
+            find_attr(attrs, "operation_name"),
             Some(&OtelValue::String("aws.sqs".into()))
         );
     }

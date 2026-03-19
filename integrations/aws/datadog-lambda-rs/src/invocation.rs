@@ -117,6 +117,7 @@ fn create_root_span(tracer: &SdkTracer, parent_cx: &Context, span: &LambdaSpan) 
     builder.span_kind = Some(SpanKind::Server);
     let mut attrs = vec![
         KeyValue::new(attr::OPERATION_NAME, "aws.lambda"),
+        KeyValue::new(attr::OPERATION_NAME_CUSTOM, "aws.lambda"),
         KeyValue::new(attr::LANGUAGE, "rust"),
         KeyValue::new(attr::RESOURCE_NAME, span.function_name.clone()),
         KeyValue::new(attr::SPAN_TYPE, "serverless"),
@@ -220,6 +221,14 @@ mod tests {
         assert_eq!(
             find_attr(attrs, "resource.name"),
             Some(&Value::String("My-Function".into()))
+        );
+        assert_eq!(
+            find_attr(attrs, "operation.name"),
+            Some(&Value::String("aws.lambda".into()))
+        );
+        assert_eq!(
+            find_attr(attrs, "operation_name"),
+            Some(&Value::String("aws.lambda".into()))
         );
         assert_eq!(
             find_attr(attrs, "functionname"),

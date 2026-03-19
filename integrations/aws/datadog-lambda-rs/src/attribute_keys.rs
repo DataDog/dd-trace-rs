@@ -3,6 +3,12 @@
 
 // OTLP attribute keys used to drive Datadog span field mapping.
 pub(crate) const OPERATION_NAME: &str = "operation.name";
+// - `operation.name` is the canonical OTel->Datadog operation attribute and is
+//   required for Datadog to classify the span correctly (for example, as `aws.lambda`).
+// - `operation_name` is duplicated as a custom attribute because the current
+//   serverless-e2e trace-propagation harness reads raw spans from the API and
+//   looks for `attributes.custom.operation_name` when reconstructing paths.
+pub(crate) const OPERATION_NAME_CUSTOM: &str = "operation_name";
 pub(crate) const RESOURCE_NAME: &str = "resource.name";
 pub(crate) const SPAN_TYPE: &str = "span.type";
 pub(crate) const ERROR: &str = "error";
