@@ -318,7 +318,7 @@ async fn test_trace_writer_synchronous_mode() {
     cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string())
         .set_trace_writer_synchronous_write(true)
         // set async flush duration to forever...
-        .set_trace_writer_max_flush_time(Duration::from_secs(1000000000))
+        .set_trace_writer_max_flush_interval(Duration::from_secs(1000000000))
         .set_log_level_filter(LevelFilter::Debug);
     let config = Arc::new(cfg.build());
 

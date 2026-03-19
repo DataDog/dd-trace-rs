@@ -278,6 +278,7 @@ pub(crate) mod propagation;
 pub(crate) mod sampling;
 
 mod ddtrace_transform;
+mod exporter;
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod logs_reader;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]

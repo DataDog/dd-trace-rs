@@ -700,30 +700,35 @@ impl ExtraServicesTracker {
         }
     }
 
-    fn add_extra_service(&self, service_name: &str, main_service: &str) {
-        if service_name == main_service {
+    fn add_extra_services(
+        &self,
+        services: impl Iterator<Item = impl Deref<Target = str>>,
+        main_service: &str,
+    ) {
+        // first consume all base services before locking. This is likely everything
+        let mut services = services.filter(|s| s.deref() != main_service).peekable();
+        if services.peek().is_none() {
             return;
         }
-
         let mut sent = match self.extra_services_sent.lock() {
             Ok(s) => s,
             Err(_) => return,
         };
-
-        if sent.contains(service_name) {
-            return;
-        }
-
         let mut queue = match self.extra_services_queue.lock() {
             Ok(q) => q,
             Err(_) => return,
         };
-
-        // Add to queue and mark as sent
-        if let Some(ref mut q) = *queue {
-            q.push_back(service_name.to_string());
+        for service_name in services {
+            let service_name = service_name.deref();
+            if sent.contains(service_name) {
+                continue;
+            }
+            // Add to queue and mark as sent
+            if let Some(ref mut q) = *queue {
+                q.push_back(service_name.to_string());
+            }
+            sent.insert(service_name.to_string());
         }
-        sent.insert(service_name.to_string());
     }
 
     /// Get all extra services, updating from the queue
@@ -986,7 +991,7 @@ pub struct Config {
     /// How long we wait for the synchronous export to be done
     trace_writer_synchronous_timeout: Duration,
     /// The max amount of time a span stays in the writer buffer before we trigger a flush
-    trace_writer_max_flush_time: Duration,
+    trace_writer_max_flush_interval: Duration,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -1198,7 +1203,7 @@ impl Config {
                 .update_parsed(default.trace_propagation_extract_first),
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
-            trace_writer_max_flush_time: default.trace_writer_max_flush_time,
+            trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
@@ -1417,8 +1422,8 @@ impl Config {
         self.trace_writer_synchronous_timeout
     }
 
-    pub(crate) fn trace_writer_max_flush_time(&self) -> Duration {
-        self.trace_writer_max_flush_time
+    pub(crate) fn trace_writer_max_flush_interval(&self) -> Duration {
+        self.trace_writer_max_flush_interval
     }
 
     #[cfg(feature = "test-utils")]
@@ -1647,12 +1652,15 @@ impl Config {
 
     /// Add an extra service discovered at runtime
     /// This is used for remote configuration
-    pub(crate) fn add_extra_service(&self, service_name: &str) {
+    pub(crate) fn add_extra_services(
+        &self,
+        service_names: impl Iterator<Item = impl Deref<Target = str>>,
+    ) {
         if !self.remote_config_enabled() {
             return;
         }
         self.extra_services_tracker
-            .add_extra_service(service_name, &self.service());
+            .add_extra_services(service_names, self.service().deref());
     }
 
     /// Get all extra services discovered at runtime
@@ -1784,7 +1792,7 @@ fn default_config() -> Config {
         ),
         trace_writer_synchronous_write: false,
         trace_writer_synchronous_timeout: Duration::from_secs(2),
-        trace_writer_max_flush_time: Duration::from_secs(1),
+        trace_writer_max_flush_interval: Duration::from_secs(1),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
@@ -2437,11 +2445,11 @@ impl ConfigBuilder {
 
     #[cfg(feature = "test-utils")]
     #[allow(missing_docs)]
-    pub fn set_trace_writer_max_flush_time(
+    pub fn set_trace_writer_max_flush_interval(
         &mut self,
-        trace_writer_max_flush_time: Duration,
+        trace_writer_max_flush_interval: Duration,
     ) -> &mut Self {
-        self.config.trace_writer_max_flush_time = trace_writer_max_flush_time;
+        self.config.trace_writer_max_flush_interval = trace_writer_max_flush_interval;
         self
     }
 
@@ -2770,16 +2778,19 @@ mod tests {
         // Initially empty
         assert_eq!(config.get_extra_services().len(), 0);
 
-        // Add some extra services
-        config.add_extra_service("service-1");
-        config.add_extra_service("service-2");
-        config.add_extra_service("service-3");
-
-        // Should not add the main service
-        config.add_extra_service("main-service");
-
-        // Should not add duplicates
-        config.add_extra_service("service-1");
+        config.add_extra_services(
+            [
+                // Add some extra services
+                "service-1",
+                "service-2",
+                "service-3",
+                // Should not add the main service
+                "main-service",
+                // Should not add duplicates
+                "service-1",
+            ]
+            .into_iter(),
+        );
 
         let services = config.get_extra_services();
         assert_eq!(services.len(), 3);
@@ -2802,8 +2813,7 @@ mod tests {
             .build();
 
         // Add services when remote config is disabled
-        config.add_extra_service("service-1");
-        config.add_extra_service("service-2");
+        config.add_extra_services(["service-1", "service-2"].into_iter());
 
         // Should return empty since remote config is disabled
         let services = config.get_extra_services();
@@ -2816,10 +2826,7 @@ mod tests {
             .set_service("main-service".to_string())
             .build();
 
-        // Add more than 64 services
-        for i in 0..70 {
-            config.add_extra_service(&format!("service-{i}"));
-        }
+        config.add_extra_services((0..70).map(|i| format!("service-{i}")));
 
         // Should be limited to 64
         let services = config.get_extra_services();
