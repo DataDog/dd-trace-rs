@@ -233,11 +233,17 @@ fn otel_span_to_dd_span_minimal<'a>(
             .metrics
             .insert(SpanStr::from_static_str("_dd.measured"), 1.0);
     }
-    // TODO(paullgdc):
-    // The go code does the following thing, because the affect stats computation
-    // * sets peer tags
+    // NOTE: The Go agent explicitly copies peer tags onto the minimal span because its stats
+    // concentrator reads them from the span meta. In our Rust pipeline the full
+    // `otel_span_to_dd_span` is called before stats computation, so all OTel span attributes
+    // (including peer-tag-eligible keys like `db.system`, `peer.service`, etc.) are already
+    // present in dd_span.meta by the time `SpanConcentrator::add_span` is invoked.
     //
-    // In our case, this is hard because tags need to be fetched from the agent /info endpoint
+    // The peer tag *keys* are fetched from the agent /info endpoint and forwarded to the
+    // SpanConcentrator by libdatadog (see `handle_stats_disabled_by_agent` and
+    // `handle_stats_enabled` in `libdd-data-pipeline`'s `trace_exporter/stats.rs`).
+    // The concentrator then looks up those keys in the span's meta map to build its
+    // aggregation key, so no additional work is needed here.
 
     dd_span
 }
@@ -733,8 +739,14 @@ pub fn otel_span_to_dd_span<'a>(
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry::{SpanId, TraceId};
+    use std::time::SystemTime;
 
+    use opentelemetry::trace::{SpanContext, SpanKind, Status, TraceFlags, TraceState};
+    use opentelemetry::{InstrumentationScope, KeyValue, SpanId, TraceId};
+    use opentelemetry_sdk::Resource;
+
+    use super::otel_span_to_dd_span;
+    use crate::mappings::sdk_span::SdkSpan;
     use crate::mappings::transform::otel_span_id_to_dd_id;
 
     use super::otel_trace_id_to_dd_id;
@@ -750,5 +762,137 @@ mod tests {
     fn span_id_conversion() {
         let id = otel_span_id_to_dd_id(SpanId::from_bytes([2; 8]));
         assert_eq!(id, 0x0202020202020202);
+    }
+
+    /// Validates that common peer-tag-eligible OTel attributes are preserved in the DD span's
+    /// meta map under their original key. The SpanConcentrator looks up these keys when building
+    /// aggregation keys for client/producer spans, so they must be present in meta for stats
+    /// computation to work correctly.
+    ///
+    /// Note: some OTel semconv keys (e.g. `server.address`) are remapped by
+    /// `get_dd_key_for_otlp_attribute` and therefore do not appear under their original key.
+    /// The agent `/info` peer_tags list uses the remapped DD keys, so this is not a problem
+    /// for keys that have a 1:1 mapping. Keys listed here are those that pass through without
+    /// remapping.
+    #[test]
+    fn peer_tag_attributes_in_dd_span_meta() {
+        // These are common peer-tag keys from the agent /info response that are NOT
+        // remapped by get_dd_key_for_otlp_attribute (i.e. they pass through as-is).
+        let peer_tag_keys = [
+            "peer.service",
+            "db.system",
+            "db.instance",
+            "db.name",
+            "messaging.system",
+            "messaging.destination.name",
+            "net.peer.name",
+            "aws.s3.bucket",
+        ];
+
+        let attributes: Vec<KeyValue> = peer_tag_keys
+            .iter()
+            .map(|k| KeyValue::new(*k, format!("test-{k}")))
+            .collect();
+
+        let now = SystemTime::now();
+        let span_context = SpanContext::new(
+            TraceId::from_bytes([1; 16]),
+            opentelemetry::SpanId::from_bytes([2; 8]),
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::default(),
+        );
+        let sdk_span = SdkSpan {
+            span_context: &span_context,
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: "test.op",
+            start_time: now,
+            end_time: now,
+            attributes: &attributes,
+            dropped_attributes_count: 0,
+            events: &[],
+            dropped_event_count: 0,
+            links: &[],
+            dropped_links_count: 0,
+            status: &Status::Unset,
+            instrumentation_scope: &InstrumentationScope::default(),
+        };
+        let resource = Resource::builder_empty().build();
+        let dd_span = otel_span_to_dd_span(&sdk_span, &resource);
+
+        for key in &peer_tag_keys {
+            let expected_value = format!("test-{key}");
+            let actual = dd_span
+                .meta
+                .iter()
+                .find(|(k, _)| k.as_str() == *key)
+                .map(|(_, v)| v.as_str());
+            assert_eq!(
+                actual,
+                Some(expected_value.as_str()),
+                "peer tag key '{key}' should be present in dd_span.meta with value \
+                 '{expected_value}'"
+            );
+        }
+    }
+
+    /// Validates that OTel attributes which are remapped by the semconv mapping layer end up
+    /// under their DD key, not the original OTel key. For example `server.address` becomes
+    /// `http.server_name`. The agent's peer_tags list uses the DD key form, so the
+    /// SpanConcentrator can still find these values.
+    #[test]
+    fn remapped_peer_tag_attributes_use_dd_key() {
+        let attributes = vec![KeyValue::new("server.address", "my-host.example.com")];
+
+        let now = SystemTime::now();
+        let span_context = SpanContext::new(
+            TraceId::from_bytes([1; 16]),
+            opentelemetry::SpanId::from_bytes([2; 8]),
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::default(),
+        );
+        let sdk_span = SdkSpan {
+            span_context: &span_context,
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: "test.op",
+            start_time: now,
+            end_time: now,
+            attributes: &attributes,
+            dropped_attributes_count: 0,
+            events: &[],
+            dropped_event_count: 0,
+            links: &[],
+            dropped_links_count: 0,
+            status: &Status::Unset,
+            instrumentation_scope: &InstrumentationScope::default(),
+        };
+        let resource = Resource::builder_empty().build();
+        let dd_span = otel_span_to_dd_span(&sdk_span, &resource);
+
+        // server.address is remapped to http.server_name
+        let remapped = dd_span
+            .meta
+            .iter()
+            .find(|(k, _)| k.as_str() == "http.server_name")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            remapped,
+            Some("my-host.example.com"),
+            "server.address should be stored under the DD key http.server_name"
+        );
+
+        // The original OTel key should NOT be present
+        let original = dd_span
+            .meta
+            .iter()
+            .find(|(k, _)| k.as_str() == "server.address")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(
+            original, None,
+            "server.address should not be present under its original key"
+        );
     }
 }
