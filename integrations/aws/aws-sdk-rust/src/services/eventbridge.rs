@@ -8,14 +8,38 @@ use aws_sdk_eventbridge::operation::put_events::PutEventsInput;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 
-use crate::attribute_keys::{DATADOG_ATTRIBUTE_KEY, RESOURCE_NAME_KEY, START_TIME_KEY};
+use crate::attribute_keys::{DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, START_TIME_KEY};
 
-use super::{AwsServiceHandler, ONE_MB};
+use super::{base_request_metadata, AwsServiceHandler, RequestMetadata, ONE_MB};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct EventBridgeService;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventBridgeOperation {
+    PutEvents,
+}
+
+impl EventBridgeOperation {
+    fn from_name(operation: &str) -> Option<Self> {
+        match operation {
+            "PutEvents" => Some(Self::PutEvents),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::PutEvents => "PutEvents",
+        }
+    }
+}
+
 impl AwsServiceHandler for EventBridgeService {
+    fn service_id(&self) -> &'static str {
+        "EventBridge"
+    }
+
     fn inject(
         &self,
         operation: &str,
@@ -24,6 +48,26 @@ impl AwsServiceHandler for EventBridgeService {
     ) -> Result<(), BoxError> {
         inject(operation, trace_headers, input)
     }
+
+    fn extract_request_metadata(
+        &self,
+        operation: &str,
+        input: &Input,
+        region: &str,
+        partition: &str,
+    ) -> Option<RequestMetadata> {
+        let operation = EventBridgeOperation::from_name(operation)?;
+        if input.downcast_ref::<PutEventsInput>().is_none() {
+            return None;
+        }
+
+        Some(base_request_metadata(
+            self.service_id(),
+            operation.name(),
+            region,
+            partition,
+        ))
+    }
 }
 
 pub(super) fn inject(
@@ -31,7 +75,7 @@ pub(super) fn inject(
     trace_headers: HashMap<String, String>,
     input: &mut Input,
 ) -> Result<(), BoxError> {
-    if operation == "PutEvents" {
+    if let Some(EventBridgeOperation::PutEvents) = EventBridgeOperation::from_name(operation) {
         if let Some(put_input) = input.downcast_mut::<PutEventsInput>() {
             inject_into_put_events(put_input, trace_headers)?;
         }
@@ -62,13 +106,13 @@ fn inject_into_put_events(
     for entry in entries.iter_mut() {
         if let Some(name) = entry.event_bus_name.as_deref() {
             ctx.insert(
-                RESOURCE_NAME_KEY.into(),
+                DATADOG_RESOURCE_NAME_KEY.into(),
                 serde_json::Value::String(name.into()),
             );
         }
 
         let trace_ctx = serde_json::Value::Object(ctx.clone());
-        ctx.remove(RESOURCE_NAME_KEY);
+        ctx.remove(DATADOG_RESOURCE_NAME_KEY);
 
         let detail = entry.detail.as_deref().unwrap_or("{}");
         let mut detail_map: serde_json::Map<String, serde_json::Value> =
@@ -101,6 +145,7 @@ mod tests {
         DATADOG_TRACE_ID_KEY,
     };
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
+    use aws_smithy_runtime_api::client::interceptors::context::Input;
 
     fn parse_detail_datadog(detail: &str) -> HashMap<String, String> {
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();
@@ -153,7 +198,7 @@ mod tests {
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
         assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
-        assert!(!dd.contains_key(RESOURCE_NAME_KEY));
+        assert!(!dd.contains_key(DATADOG_RESOURCE_NAME_KEY));
     }
 
     #[test]
@@ -172,7 +217,7 @@ mod tests {
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
-        assert_eq!(dd[RESOURCE_NAME_KEY], "my-bus");
+        assert_eq!(dd[DATADOG_RESOURCE_NAME_KEY], "my-bus");
     }
 
     #[test]
@@ -205,9 +250,9 @@ mod tests {
             assert!(dd.contains_key(START_TIME_KEY));
         }
         let dd0 = parse_detail_datadog(entries[0].detail.as_ref().unwrap());
-        assert_eq!(dd0[RESOURCE_NAME_KEY], "bus-1");
+        assert_eq!(dd0[DATADOG_RESOURCE_NAME_KEY], "bus-1");
         let dd1 = parse_detail_datadog(entries[1].detail.as_ref().unwrap());
-        assert!(!dd1.contains_key(RESOURCE_NAME_KEY));
+        assert!(!dd1.contains_key(DATADOG_RESOURCE_NAME_KEY));
     }
 
     #[test]
@@ -284,5 +329,23 @@ mod tests {
             .as_deref()
             .unwrap();
         assert!(!detail.contains(DATADOG_ATTRIBUTE_KEY));
+    }
+
+    #[test]
+    fn extracts_put_events_request_metadata() {
+        let input = Input::erase(PutEventsInput::builder().build().unwrap());
+
+        let metadata = EventBridgeService
+            .extract_request_metadata("PutEvents", &input, "eu-west-1", "aws")
+            .unwrap();
+
+        assert_eq!(metadata.service_name, "aws.EventBridge");
+        assert_eq!(metadata.resource_name, "EventBridge.PutEvents");
+        assert_eq!(metadata.tags["aws.service"], "EventBridge");
+        assert_eq!(metadata.tags["aws.operation"], "PutEvents");
+        assert_eq!(metadata.tags["region"], "eu-west-1");
+        assert_eq!(metadata.tags["aws.partition"], "aws");
+        assert_eq!(metadata.tags["service.name"], "aws.EventBridge");
+        assert_eq!(metadata.tags["resource.name"], "EventBridge.PutEvents");
     }
 }

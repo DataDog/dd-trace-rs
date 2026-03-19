@@ -10,14 +10,60 @@ use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::Input;
 use aws_smithy_types::Blob;
 
-use crate::attribute_keys::DATADOG_ATTRIBUTE_KEY;
+use crate::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
 
-use super::{AwsServiceHandler, MAX_MESSAGE_ATTRIBUTES};
+use super::{base_request_metadata, AwsServiceHandler, RequestMetadata, MAX_MESSAGE_ATTRIBUTES};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct SnsService;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnsOperation {
+    Publish,
+    PublishBatch,
+}
+
+impl SnsOperation {
+    fn from_name(operation: &str) -> Option<Self> {
+        match operation {
+            "Publish" => Some(Self::Publish),
+            "PublishBatch" => Some(Self::PublishBatch),
+            _ => None,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Publish => "Publish",
+            Self::PublishBatch => "PublishBatch",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SnsDestinationMetadata {
+    TopicName(String),
+    TargetName(String),
+}
+
+impl SnsDestinationMetadata {
+    fn insert_into(self, tags: &mut HashMap<&'static str, String>) {
+        match self {
+            Self::TopicName(name) => {
+                tags.insert(TOPIC_NAME, name);
+            }
+            Self::TargetName(name) => {
+                tags.insert(TARGET_NAME, name);
+            }
+        }
+    }
+}
+
 impl AwsServiceHandler for SnsService {
+    fn service_id(&self) -> &'static str {
+        "SNS"
+    }
+
     fn inject(
         &self,
         operation: &str,
@@ -26,6 +72,21 @@ impl AwsServiceHandler for SnsService {
     ) -> Result<(), BoxError> {
         inject(operation, trace_headers, input)
     }
+
+    fn extract_request_metadata(
+        &self,
+        operation: &str,
+        input: &Input,
+        region: &str,
+        partition: &str,
+    ) -> Option<RequestMetadata> {
+        let operation = SnsOperation::from_name(operation)?;
+        let mut request_metadata =
+            base_request_metadata(self.service_id(), operation.name(), region, partition);
+        let destination = extract_sns_destination_metadata(operation, input)?;
+        destination.insert_into(&mut request_metadata.tags);
+        Some(request_metadata)
+    }
 }
 
 pub(super) fn inject(
@@ -33,18 +94,18 @@ pub(super) fn inject(
     trace_headers: HashMap<String, String>,
     input: &mut Input,
 ) -> Result<(), BoxError> {
-    match operation {
-        "Publish" => {
+    match SnsOperation::from_name(operation) {
+        Some(SnsOperation::Publish) => {
             if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
                 inject_into_publish(publish_input, &trace_headers)?;
             }
         }
-        "PublishBatch" => {
+        Some(SnsOperation::PublishBatch) => {
             if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
                 inject_into_publish_batch(batch_input, &trace_headers)?;
             }
         }
-        _ => {}
+        None => {}
     }
     Ok(())
 }
@@ -88,6 +149,40 @@ fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
 
+fn extract_sns_destination_metadata(
+    operation: SnsOperation,
+    input: &Input,
+) -> Option<SnsDestinationMetadata> {
+    match operation {
+        SnsOperation::Publish => {
+            let input = input.downcast_ref::<PublishInput>()?;
+            if let Some(topic_arn) = input.topic_arn.as_deref() {
+                Some(SnsDestinationMetadata::TopicName(arn_resource_name(
+                    topic_arn,
+                )))
+            } else {
+                let target_arn = input.target_arn.as_deref()?;
+                Some(SnsDestinationMetadata::TargetName(arn_resource_name(
+                    target_arn,
+                )))
+            }
+        }
+        SnsOperation::PublishBatch => {
+            let topic_arn = input
+                .downcast_ref::<PublishBatchInput>()?
+                .topic_arn
+                .as_deref()?;
+            Some(SnsDestinationMetadata::TopicName(arn_resource_name(
+                topic_arn,
+            )))
+        }
+    }
+}
+
+fn arn_resource_name(arn: &str) -> String {
+    arn.rsplit(':').next().unwrap_or(arn).to_string()
+}
+
 fn build_datadog_attribute(
     trace_headers: &HashMap<String, String>,
 ) -> Result<MessageAttributeValue, BoxError> {
@@ -107,6 +202,7 @@ mod tests {
         DATADOG_TRACE_ID_KEY,
     };
     use aws_sdk_sns::types::PublishBatchRequestEntry;
+    use aws_smithy_runtime_api::client::interceptors::context::Input;
 
     fn parse_binary_attr(attr: &MessageAttributeValue) -> HashMap<String, String> {
         assert_eq!(attr.data_type(), "Binary");
@@ -351,5 +447,60 @@ mod tests {
         let attrs = input.message_attributes.as_ref().unwrap();
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
         assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
+    }
+
+    #[test]
+    fn extracts_publish_topic_request_metadata() {
+        let input = PublishInput::builder()
+            .topic_arn("arn:aws:sns:us-east-1:111111111111:MyTopicName")
+            .message("Hello")
+            .build()
+            .unwrap();
+        let input = Input::erase(input);
+
+        let metadata = SnsService
+            .extract_request_metadata("Publish", &input, "eu-west-1", "aws")
+            .unwrap();
+
+        assert_eq!(metadata.service_name, "aws.SNS");
+        assert_eq!(metadata.resource_name, "SNS.Publish");
+        assert_eq!(metadata.tags[TOPIC_NAME], "MyTopicName");
+        assert_eq!(metadata.tags["aws.service"], "SNS");
+        assert_eq!(metadata.tags["aws.operation"], "Publish");
+        assert_eq!(metadata.tags["region"], "eu-west-1");
+        assert_eq!(metadata.tags["aws.partition"], "aws");
+        assert_eq!(metadata.tags["service.name"], "aws.SNS");
+        assert_eq!(metadata.tags["resource.name"], "SNS.Publish");
+    }
+
+    #[test]
+    fn extracts_publish_target_request_metadata() {
+        let input = PublishInput::builder()
+            .target_arn("arn:aws:sns:us-east-1:111111111111:MyTargetName")
+            .message("Hello")
+            .build()
+            .unwrap();
+        let input = Input::erase(input);
+
+        let metadata = SnsService
+            .extract_request_metadata("Publish", &input, "eu-west-1", "aws")
+            .unwrap();
+
+        assert_eq!(metadata.tags[TARGET_NAME], "MyTargetName");
+    }
+
+    #[test]
+    fn extracts_publish_batch_request_metadata() {
+        let input = PublishBatchInput::builder()
+            .topic_arn("arn:aws:sns:us-east-1:111111111111:MyTopicName")
+            .build()
+            .unwrap();
+        let input = Input::erase(input);
+
+        let metadata = SnsService
+            .extract_request_metadata("PublishBatch", &input, "eu-west-1", "aws")
+            .unwrap();
+
+        assert_eq!(metadata.tags[TOPIC_NAME], "MyTopicName");
     }
 }
