@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_injection() {
+    fn injects_trace_context_into_put_events() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_empty_detail() {
+    fn injects_trace_context_into_empty_put_events_detail() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_with_event_bus_name() {
+    fn includes_event_bus_name_in_put_events_trace_context() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_multiple_entries() {
+    fn injects_trace_context_into_all_put_events_entries() {
         let trace_headers = sample_trace_headers();
         let entry1 = PutEventsRequestEntry::builder()
             .source("src1")
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_invalid_detail_skipped() {
+    fn skips_injection_for_invalid_put_events_detail() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -227,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_oversized_detail_skipped() {
+    fn skips_injection_when_put_events_detail_would_exceed_size_limit() {
         let trace_headers = sample_trace_headers();
         let large_value = "x".repeat(ONE_MB);
         let detail = format!("{{\"big\":\"{large_value}\"}}");
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn test_put_events_overwrites_existing_datadog_key() {
+    fn overwrites_existing_datadog_key_in_put_events_detail() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_operation_noop() {
+    fn does_not_inject_for_unsupported_eventbridge_operations() {
         let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")

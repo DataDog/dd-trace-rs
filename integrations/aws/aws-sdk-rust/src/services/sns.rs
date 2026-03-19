@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn test_publish_injection() {
+    fn injects_trace_context_into_publish() {
         let trace_headers = sample_trace_headers();
         let mut input = PublishInput::builder()
             .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn test_publish_batch_injection() {
+    fn injects_trace_context_into_publish_batch() {
         let trace_headers = sample_trace_headers();
         let entry1 = PublishBatchRequestEntry::builder()
             .id("1")
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn test_max_attributes_skips_injection() {
+    fn skips_injection_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut builder = PublishInput::builder()
             .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn test_max_attributes_overwrites_existing_datadog_attribute() {
+    fn overwrites_existing_datadog_attribute_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut builder = PublishInput::builder()
             .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_max_attributes_skips_per_entry() {
+    fn skips_injection_per_batch_entry_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut full_attrs = HashMap::new();
         for i in 0..10 {
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_max_attributes_overwrites_existing_datadog_attribute() {
+    fn overwrites_existing_datadog_attribute_in_batch_entries_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut full_attrs = HashMap::new();
         for i in 0..9 {
@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_operation_noop() {
+    fn does_not_inject_for_unsupported_sns_operations() {
         let trace_headers = sample_trace_headers();
         let publish_input = PublishInput::builder()
             .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
@@ -332,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn test_overwrites_existing_datadog_attribute() {
+    fn overwrites_existing_datadog_attribute() {
         let trace_headers = sample_trace_headers();
         let existing = MessageAttributeValue::builder()
             .data_type("Binary")

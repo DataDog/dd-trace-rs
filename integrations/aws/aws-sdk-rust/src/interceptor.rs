@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_trace_headers_empty_without_span() {
+    fn returns_no_trace_headers_without_active_span() {
         let cx = Context::current();
         let headers = extract_trace_headers(&cx);
         assert!(headers.is_empty());

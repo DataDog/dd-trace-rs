@@ -107,7 +107,7 @@ mod tests {
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
 
     #[test]
-    fn test_send_message_injection() {
+    fn injects_trace_context_into_send_message() {
         let trace_headers = sample_trace_headers();
         let mut input = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_send_message_batch_injection() {
+    fn injects_trace_context_into_send_message_batch() {
         let trace_headers = sample_trace_headers();
         let entry1 = SendMessageBatchRequestEntry::builder()
             .id("1")
@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_max_attributes_skips_injection() {
+    fn skips_injection_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut builder = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
@@ -186,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn test_max_attributes_overwrites_existing_datadog_attribute() {
+    fn overwrites_existing_datadog_attribute_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut builder = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_max_attributes_overwrites_existing_datadog_attribute() {
+    fn overwrites_existing_datadog_attribute_in_batch_entries_when_message_attributes_are_full() {
         let trace_headers = sample_trace_headers();
         let mut full_attrs = HashMap::new();
         for i in 0..9 {
@@ -267,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_operation_noop() {
+    fn does_not_inject_for_unsupported_sqs_operations() {
         let trace_headers = sample_trace_headers();
         let send_input = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
