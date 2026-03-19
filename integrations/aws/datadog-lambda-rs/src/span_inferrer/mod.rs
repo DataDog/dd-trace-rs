@@ -264,7 +264,7 @@ mod tests {
             Some(&OtelValue::String("my-queue".into()))
         );
         assert_eq!(
-            find_attr(attrs, "operation_name"),
+            find_attr(attrs, "operation.name"),
             Some(&OtelValue::String("aws.sqs".into()))
         );
     }

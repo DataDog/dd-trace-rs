@@ -1,8 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-// Datadog-native span attribute keys
-pub(crate) const OPERATION_NAME: &str = "operation_name";
+// OTLP attribute keys used to drive Datadog span field mapping.
+pub(crate) const OPERATION_NAME: &str = "operation.name";
 pub(crate) const RESOURCE_NAME: &str = "resource.name";
 pub(crate) const SPAN_TYPE: &str = "span.type";
 pub(crate) const ERROR: &str = "error";
