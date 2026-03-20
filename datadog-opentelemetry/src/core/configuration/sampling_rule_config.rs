@@ -7,7 +7,12 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::str::FromStr;
 
-/// Configuration for a single sampling rule
+/// Configuration for a single sampling rule.
+//
+// This is the public-facing type. The `provenance` field from
+// [`libdd_sampling::SamplingRuleConfig`] is intentionally omitted —
+// it is set automatically when the rule reaches the sampler.
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SamplingRuleConfig {
     /// The sample rate to apply (0.0-1.0)
@@ -28,12 +33,6 @@ pub struct SamplingRuleConfig {
     /// Tags that must match (key-value pairs)
     #[serde(default)]
     pub tags: HashMap<String, String>,
-
-    /// Where this rule comes from (customer, dynamic, default).
-    /// Not exposed in the public `datadog-opentelemetry` API — set automatically
-    /// during conversion from the public `SamplingRuleConfig` type.
-    #[serde(default = "default_provenance")]
-    pub provenance: String,
 }
 
 impl Display for SamplingRuleConfig {
@@ -42,12 +41,10 @@ impl Display for SamplingRuleConfig {
     }
 }
 
-fn default_provenance() -> String {
-    "default".to_string()
-}
-
+/// Wrapper for parsed sampling rules (from JSON env var or API).
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ParsedSamplingRules {
+    /// The individual sampling rules.
     pub rules: Vec<SamplingRuleConfig>,
 }
 
@@ -85,5 +82,34 @@ impl Display for ParsedSamplingRules {
             "{}",
             serde_json::to_string(&self.rules).unwrap_or_default()
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Conversions to/from internal libdd_sampling types
+// ---------------------------------------------------------------------------
+
+impl From<SamplingRuleConfig> for libdd_sampling::SamplingRuleConfig {
+    fn from(public: SamplingRuleConfig) -> Self {
+        Self {
+            sample_rate: public.sample_rate,
+            service: public.service,
+            name: public.name,
+            resource: public.resource,
+            tags: public.tags,
+            provenance: "local".to_string(),
+        }
+    }
+}
+
+impl From<libdd_sampling::SamplingRuleConfig> for SamplingRuleConfig {
+    fn from(internal: libdd_sampling::SamplingRuleConfig) -> Self {
+        Self {
+            sample_rate: internal.sample_rate,
+            service: internal.service,
+            name: internal.name,
+            resource: internal.resource,
+            tags: internal.tags,
+        }
     }
 }

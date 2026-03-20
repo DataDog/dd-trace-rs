@@ -13,18 +13,18 @@
 //! - Agent-provided sampling rates
 //! - Complete Datadog sampler implementation
 
-pub mod agent_service_sampler;
-pub mod constants;
-pub mod datadog_sampler;
+pub(crate) mod agent_service_sampler;
+pub(crate) mod constants;
+pub(crate) mod datadog_sampler;
 pub mod dd_constants;
 pub mod dd_sampling;
-pub mod glob_matcher;
-pub mod rate_limiter;
-pub mod rate_sampler;
-pub mod rules_sampler;
-pub mod sampling_rule;
-pub mod sampling_rule_config;
-pub mod types;
+pub(crate) mod glob_matcher;
+pub(crate) mod rate_limiter;
+pub(crate) mod rate_sampler;
+pub(crate) mod rules_sampler;
+pub(crate) mod sampling_rule;
+pub(crate) mod sampling_rule_config;
+pub(crate) mod types;
 
 // Re-export key types for convenience
 pub use agent_service_sampler::ServicesSampler;

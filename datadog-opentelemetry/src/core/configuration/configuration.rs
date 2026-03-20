@@ -16,6 +16,7 @@ use libdd_library_config::tracer_metadata::TracerMetadata;
 
 use rustc_version_runtime::version;
 
+use super::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -23,13 +24,13 @@ use crate::core::configuration::supported_configurations::SupportedConfiguration
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
-use libdd_sampling::{ParsedSamplingRules, SamplingRuleConfig};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
 pub enum RemoteConfigUpdate {
-    /// Sampling rules were updated from remote configuration
-    SamplingRules(Vec<SamplingRuleConfig>),
+    /// Sampling rules were updated from remote configuration.
+    /// Uses the internal type to preserve provenance from remote config.
+    SamplingRules(Vec<libdd_sampling::SamplingRuleConfig>),
     // Future remote config update types should be added here as new variants.
     // E.g.
     // - FeatureFlags(HashMap<String, bool>)
@@ -1529,24 +1530,29 @@ impl Config {
         rules_json: &str,
         config_id: Option<String>,
     ) -> Result<(), String> {
-        // Parse the JSON into SamplingRuleConfig objects
-        let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
-            .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
+        // Parse the JSON into the internal type to preserve provenance from remote config.
+        let internal_rules: Vec<libdd_sampling::SamplingRuleConfig> =
+            serde_json::from_str(rules_json)
+                .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
 
         // If remote config sends empty rules, clear remote config to fall back to local rules
-        if rules.is_empty() {
+        if internal_rules.is_empty() {
             self.clear_remote_sampling_rules(config_id);
         } else {
+            // Convert to public type for storage (provenance is dropped).
+            let rules: Vec<SamplingRuleConfig> =
+                internal_rules.iter().cloned().map(Into::into).collect();
             self.trace_sampling_rules.set_override_value(
                 ParsedSamplingRules { rules },
                 ConfigSourceOrigin::RemoteConfig,
             );
             self.trace_sampling_rules.set_config_id(config_id);
 
-            // Notify callbacks about the sampling rules update
-            self.remote_config_callbacks.lock().unwrap().notify_update(
-                &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
-            );
+            // Notify callbacks with the internal rules (preserves provenance)
+            self.remote_config_callbacks
+                .lock()
+                .unwrap()
+                .notify_update(&RemoteConfigUpdate::SamplingRules(internal_rules));
 
             telemetry::notify_configuration_update(&self.trace_sampling_rules);
         }
@@ -1582,9 +1588,17 @@ impl Config {
         self.trace_sampling_rules.unset_override_value();
         self.trace_sampling_rules.set_config_id(config_id);
 
-        self.remote_config_callbacks.lock().unwrap().notify_update(
-            &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
-        );
+        // Fallback rules are locally defined, so "local" provenance is correct
+        let internal: Vec<libdd_sampling::SamplingRuleConfig> = self
+            .trace_sampling_rules()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect();
+        self.remote_config_callbacks
+            .lock()
+            .unwrap()
+            .notify_update(&RemoteConfigUpdate::SamplingRules(internal));
 
         telemetry::notify_configuration_update(&self.trace_sampling_rules);
     }
@@ -2538,7 +2552,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.5,
                 service: Some("web-api".to_string()),
-                provenance: "customer".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2565,7 +2578,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.5,
                 service: Some("test-service".to_string()),
-                provenance: "customer".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2588,7 +2600,6 @@ mod tests {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "manual".to_string(),
             }])
             .set_trace_rate_limit(200)
             .set_service("manual-service".to_string())
@@ -2604,7 +2615,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.8,
                 service: Some("manual-service".to_string()),
-                provenance: "manual".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2953,16 +2963,15 @@ mod tests {
     fn test_sampling_rules_update_callbacks() {
         let config = Config::builder().build();
 
-        // Track callback invocations
+        // Track callback invocations — uses internal type to verify provenance preservation
         let callback_called = Arc::new(Mutex::new(false));
-        let callback_rules = Arc::new(Mutex::new(Vec::<SamplingRuleConfig>::new()));
+        let callback_rules = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
 
         let callback_called_clone = callback_called.clone();
         let callback_rules_clone = callback_rules.clone();
 
         config.set_sampling_rules_callback(move |update| {
             *callback_called_clone.lock().unwrap() = true;
-            // Store the rules - for now we only have SamplingRules variant
             let RemoteConfigUpdate::SamplingRules(rules) = update;
             *callback_rules_clone.lock().unwrap() = rules.clone();
         });
@@ -2971,22 +2980,20 @@ mod tests {
         assert!(!*callback_called.lock().unwrap());
         assert!(callback_rules.lock().unwrap().is_empty());
 
-        // Update rules from remote config
-        let new_rules = vec![SamplingRuleConfig {
-            sample_rate: 0.5,
-            service: Some("test-service".to_string()),
-            provenance: "remote".to_string(),
-            ..SamplingRuleConfig::default()
-        }];
-
-        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        // Update rules from remote config with provenance "dynamic"
+        let rules_json = r#"[{"sample_rate":0.5,"service":"test-service","provenance":"dynamic"}]"#;
         config
-            .update_sampling_rules_from_remote(&rules_json, None)
+            .update_sampling_rules_from_remote(rules_json, None)
             .unwrap();
 
-        // Callback should be called with the new rules
+        // Callback should be called with the new rules, provenance preserved
         assert!(*callback_called.lock().unwrap());
-        assert_eq!(*callback_rules.lock().unwrap(), new_rules);
+        let received = callback_rules.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].sample_rate, 0.5);
+        assert_eq!(received[0].service, Some("test-service".to_string()));
+        assert_eq!(received[0].provenance, "dynamic");
+        drop(received);
 
         // Test clearing rules
         *callback_called.lock().unwrap() = false;
@@ -2998,6 +3005,55 @@ mod tests {
         // set)
         assert!(*callback_called.lock().unwrap());
         assert!(callback_rules.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_clear_remote_rules_callback_has_local_provenance() {
+        let config = Config::builder()
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("local-svc".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+
+        let callback_rules = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = callback_rules.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        // Push remote rules then clear to trigger fallback
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"provenance":"dynamic"}]"#,
+                None,
+            )
+            .unwrap();
+        config.clear_remote_sampling_rules(None);
+
+        // Fallback rules should have "local" provenance
+        let received = callback_rules.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].sample_rate, 0.5);
+        assert_eq!(received[0].provenance, "local");
+    }
+
+    #[test]
+    fn test_public_sampling_rule_config_ignores_provenance_in_json() {
+        // The public SamplingRuleConfig should silently ignore a "provenance" field in JSON,
+        // since serde skips unknown fields by default.
+        let json = r#"[{"sample_rate":0.5,"service":"svc","provenance":"dynamic"}]"#;
+        let parsed: ParsedSamplingRules = json.parse().unwrap();
+        assert_eq!(parsed.rules.len(), 1);
+        assert_eq!(parsed.rules[0].sample_rate, 0.5);
+        assert_eq!(parsed.rules[0].service, Some("svc".to_string()));
+        // No provenance field on the public type — it was silently dropped.
+
+        // Round-trip: serialized output should NOT contain provenance
+        let serialized = parsed.to_string();
+        assert!(!serialized.contains("provenance"));
     }
 
     #[test]
@@ -3095,7 +3151,6 @@ mod tests {
             rules: vec![SamplingRuleConfig {
                 sample_rate: 0.3,
                 service: Some("local-service".to_string()),
-                provenance: "local".to_string(),
                 ..SamplingRuleConfig::default()
             }],
         };
@@ -3160,7 +3215,6 @@ mod tests {
         let new_rules = vec![SamplingRuleConfig {
             sample_rate: 0.5,
             service: Some("test-service".to_string()),
-            provenance: "remote".to_string(),
             ..SamplingRuleConfig::default()
         }];
 
@@ -3444,8 +3498,9 @@ mod tests {
         let config = Config::builder_with_sources(&sources).build();
 
         let expected = ParsedSamplingRules::from_str(
-            r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#
-        ).unwrap();
+            r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
+        )
+        .unwrap();
 
         let configurations = &config.trace_sampling_rules.get_all_configurations();
         // active config is the one with highest seq_id
@@ -3460,7 +3515,10 @@ mod tests {
         );
 
         // Update ConfigItemRc via RC
-        let expected_rc = ParsedSamplingRules::from_str(r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#).unwrap();
+        let expected_rc = ParsedSamplingRules::from_str(
+            r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
+        )
+        .unwrap();
         config
             .trace_sampling_rules
             .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);

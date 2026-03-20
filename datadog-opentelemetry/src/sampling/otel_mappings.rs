@@ -21,10 +21,16 @@ impl TraceIdLike for OtelTraceId {
     }
 }
 
-/// Transparent wrapper around OpenTelemetry Value for trait implementations
+/// Transparent wrapper around OpenTelemetry Value for trait implementations.
+///
+/// `#[repr(transparent)]` guarantees the same memory layout as the inner type,
+/// which makes the `from_ref` pointer cast sound. The compile-time assertion
+/// below ensures this invariant is never accidentally broken.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct OtelValue(opentelemetry::Value);
+const _: () =
+    assert!(std::mem::size_of::<OtelValue>() == std::mem::size_of::<opentelemetry::Value>());
 
 impl OtelValue {
     /// Convert a reference to opentelemetry::Value to a reference to OtelValue
@@ -45,10 +51,14 @@ impl ValueLike for OtelValue {
     }
 }
 
-/// Transparent wrapper around OpenTelemetry KeyValue for trait implementations
+/// Transparent wrapper around OpenTelemetry KeyValue for trait implementations.
+///
+/// See `OtelValue` for the safety rationale behind `#[repr(transparent)]`.
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct OtelKeyValue(opentelemetry::KeyValue);
+const _: () =
+    assert!(std::mem::size_of::<OtelKeyValue>() == std::mem::size_of::<opentelemetry::KeyValue>());
 
 impl OtelKeyValue {
     /// Convert a reference to opentelemetry::KeyValue to a reference to OtelKeyValue

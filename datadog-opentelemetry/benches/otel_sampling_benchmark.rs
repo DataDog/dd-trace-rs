@@ -60,7 +60,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -79,7 +78,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("test-service")
@@ -100,7 +98,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("other-service")
@@ -121,7 +118,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: Some("http.*".to_string()),
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -140,7 +136,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: Some("http.*".to_string()),
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -159,7 +154,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: Some("/api/*".to_string()),
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -181,7 +175,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: Some("/api/*".to_string()),
                 tags: HashMap::new(),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -203,7 +196,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::from([("environment".to_string(), "production".to_string())]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -225,7 +217,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::from([("environment".to_string(), "production".to_string())]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -247,7 +238,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: Some("http.*".to_string()),
                 resource: Some("/api/v1/*".to_string()),
                 tags: HashMap::from([("environment".to_string(), "production".to_string())]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("api-service")
@@ -272,7 +262,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: Some("http.*".to_string()),
                 resource: Some("/api/v1/*".to_string()),
                 tags: HashMap::from([("environment".to_string(), "production".to_string())]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("api-service")
@@ -298,7 +287,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
                 SamplingRuleConfig {
                     sample_rate: 0.5,
@@ -306,7 +294,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
                 SamplingRuleConfig {
                     sample_rate: 1.0,
@@ -314,7 +301,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
             ],
             resource: opentelemetry_sdk::Resource::builder()
@@ -337,7 +323,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
                 SamplingRuleConfig {
                     sample_rate: 0.5,
@@ -345,7 +330,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
                 SamplingRuleConfig {
                     sample_rate: 1.0,
@@ -353,7 +337,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     name: None,
                     resource: None,
                     tags: HashMap::new(),
-                    provenance: "".to_string(),
                 },
             ],
             resource: opentelemetry_sdk::Resource::builder()
@@ -375,7 +358,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                 name: None,
                 resource: None,
                 tags: HashMap::from([("key10".to_string(), "value10".to_string())]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder_empty().build(),
             trace_id,
@@ -400,7 +382,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     ("region".to_string(), "us-east-1".to_string()),
                     ("version".to_string(), "v1.2.3".to_string()),
                 ]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("test-service")
@@ -414,7 +395,35 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
             parent_context: Some(create_parent_context(true)),
             expected_decision: Some(SamplingDecision::RecordAndSample),
         },
-        // 16. Parent not sampled - short circuit with many attributes and complex rules
+        // 16. Unicode patterns - matching service, name, resource and tag values
+        BenchmarkConfig {
+            name: "unicode_rule_matching",
+            rules: vec![SamplingRuleConfig {
+                sample_rate: 1.0,
+                service: Some("日本語-サービス".to_string()),
+                name: Some("トレース.*".to_string()),
+                resource: Some("/π/*/δοκιμή".to_string()),
+                tags: HashMap::from([
+                    ("environnement".to_string(), "prodüktion".to_string()),
+                    ("emoji".to_string(), "🚀*".to_string()),
+                ]),
+            }],
+            resource: opentelemetry_sdk::Resource::builder()
+                .with_service_name("日本語-サービス")
+                .build(),
+            trace_id,
+            span_name: "トレース.リクエスト",
+            span_kind: SpanKind::Server,
+            attributes: vec![
+                KeyValue::new("http.route", "/π/v1/δοκιμή"),
+                KeyValue::new("environnement", "prodüktion"),
+                KeyValue::new("emoji", "🚀launch"),
+                KeyValue::new("description", "αβγδ ☃ 漢字 emoji 🎉"),
+            ],
+            parent_context: None,
+            expected_decision: Some(SamplingDecision::RecordAndSample),
+        },
+        // 17. Parent not sampled - short circuit with many attributes and complex rules
         BenchmarkConfig {
             name: "parent_not_sampled_short_circuit",
             rules: vec![SamplingRuleConfig {
@@ -427,7 +436,6 @@ fn create_benchmark_configs() -> Vec<BenchmarkConfig> {
                     ("region".to_string(), "us-east-1".to_string()),
                     ("version".to_string(), "v1.2.3".to_string()),
                 ]),
-                provenance: "".to_string(),
             }],
             resource: opentelemetry_sdk::Resource::builder()
                 .with_service_name("test-service")

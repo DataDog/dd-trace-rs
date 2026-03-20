@@ -28,5 +28,5 @@ mod supported_configurations;
 pub use configuration::{Config, ConfigBuilder, OtlpProtocol, TracePropagationStyle};
 pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};
 
-// Re-export from libdd-sampling
-pub use libdd_sampling::SamplingRuleConfig;
+mod sampling_rule_config;
+pub use sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
