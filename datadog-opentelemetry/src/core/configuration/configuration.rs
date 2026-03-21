@@ -2425,8 +2425,11 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Sets whether trace writes are performed synchronously.
+    ///
+    /// When `true`, `force_flush()` blocks until all span data has been delivered to the agent.
+    /// This is recommended for short-lived processes (e.g. AWS Lambda functions) where the
+    /// process may freeze or terminate before an asynchronous write completes.
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
