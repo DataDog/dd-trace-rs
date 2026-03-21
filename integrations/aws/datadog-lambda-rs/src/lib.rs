@@ -98,9 +98,9 @@ where
     let service = config.service;
     let env = config.env;
     let version = config.version;
-    let (provider, _propagator) = tracing
+    let provider = tracing
         .unwrap_or_else(|| build_tracing(service, env, version))
-        .init_local();
+        .init();
 
     let handler = Arc::new(handler);
     let lambda_config = Arc::new(Config::default());
