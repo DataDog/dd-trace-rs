@@ -11,7 +11,7 @@ use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use opentelemetry::Context;
 
-use crate::services::{AwsServiceHandler, EventBridgeService, SnsService, SqsService};
+use crate::services::{AwsServiceHandler, EventBridgeService, LambdaService, SnsService, SqsService};
 
 /// AWS SDK interceptor that injects Datadog trace context into messaging payloads.
 ///
@@ -86,6 +86,7 @@ impl Intercept for DatadogAwsInterceptor {
             "EventBridge" => {
                 EventBridgeService.inject(operation, trace_headers, context.input_mut())
             }
+            "Lambda" => LambdaService.inject(operation, trace_headers, context.input_mut()),
             _ => return Ok(()),
         };
 

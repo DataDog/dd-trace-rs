@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod eventbridge;
+mod lambda;
 mod sns;
 mod sqs;
 
@@ -15,6 +16,7 @@ use crate::attribute_keys::{
 };
 
 pub(crate) use eventbridge::EventBridgeService;
+pub(crate) use lambda::LambdaService;
 pub(crate) use sns::SnsService;
 pub(crate) use sqs::SqsService;
 

@@ -14,10 +14,12 @@ description = "Datadog instrumentation for AWS SDK for Rust"
 
 [dependencies]
 aws-sdk-eventbridge = "1.102"
+aws-sdk-lambda = "1"
 aws-sdk-sns = "1.96"
 aws-sdk-sqs = "1.93"
 aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
 aws-smithy-types = "1.4"
+base64 = "0.22"
 serde_json = { workspace = true }
 opentelemetry = { workspace = true }
 tracing = { version = "0.1", default-features = false }

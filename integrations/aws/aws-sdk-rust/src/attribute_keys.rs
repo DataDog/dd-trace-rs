@@ -28,3 +28,6 @@ pub(crate) const QUEUE_NAME: &str = "queuename";
 // SNS aws.sdk span attributes.
 pub(crate) const TOPIC_NAME: &str = "topicname";
 pub(crate) const TARGET_NAME: &str = "targetname";
+
+// Lambda aws.sdk span attributes.
+pub(crate) const FUNCTION_NAME: &str = "functionname";
