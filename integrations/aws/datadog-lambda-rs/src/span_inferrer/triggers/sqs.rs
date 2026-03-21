@@ -137,7 +137,6 @@ impl SqsRecord {
     }
 }
 
-/// Match SQS events: `Records[0].eventSource == "aws:sqs"`.
 pub(crate) fn is_match(payload: &Value) -> bool {
     payload
         .get("Records")

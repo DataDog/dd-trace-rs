@@ -114,7 +114,6 @@ impl SnsEntity {
     }
 }
 
-/// Match SNS events: `Records[0].Sns` exists.
 pub(crate) fn is_match(payload: &Value) -> bool {
     payload
         .get("Records")

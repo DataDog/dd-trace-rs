@@ -52,7 +52,6 @@ pub(crate) struct InferredContext {
     pub inferred_span_end_time: SystemTime,
 }
 
-/// Extracts trace context and inferred spans from a Lambda event payload.
 pub(crate) struct SpanInferrer<'a> {
     tracer: &'a SdkTracer,
 }
@@ -385,7 +384,7 @@ mod tests {
 
     #[test]
     fn extracts_carrier_from_api_gateway_http_event() {
-        // HTTP API v2 lowercases all headers — standard extraction path.
+        // HTTP API v2 lowercases all headers; standard extraction path.
         let event = load_payload("api_gateway_http_event.json");
         let carrier = extract_from_headers(&event).unwrap();
         assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");

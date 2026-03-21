@@ -14,7 +14,6 @@ use std::sync::Arc;
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 type HandlerError = lambda_runtime::Error;
 
-/// Configuration for `datadog-lambda-rs` instrumentation.
 #[derive(Default)]
 pub struct Config {
     /// Service name. Overrides `DD_SERVICE`. Ignored when [`tracing`](Self::tracing) is `Some`.
@@ -43,7 +42,7 @@ fn build_tracing(
     // Stats are computed server-side by the extension; client-side computation is redundant.
     builder.set_trace_stats_computation_enabled(false);
     // Synchronous writes make force_flush() block until data reaches the agent,
-    // preventing span loss when the Lambda process freezes after the handler returns.
+    // this helps reduce span loss when the Lambda process freezes after the handler returns.
     builder.set_trace_writer_synchronous_write(true);
     if let Some(s) = service {
         builder.set_service(s);
@@ -75,7 +74,7 @@ fn build_tracing(
 ///     ..Default::default()
 /// }))).await
 ///
-/// // Power user: full tracer control
+/// // Full tracer control
 /// lambda_runtime::run(service_fn(wrap_handler(my_handler, Config {
 ///     tracing: Some(
 ///         datadog_opentelemetry::tracing()
