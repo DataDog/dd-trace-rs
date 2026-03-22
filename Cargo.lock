@@ -893,6 +893,7 @@ dependencies = [
  "datadog-opentelemetry",
  "lambda_runtime",
  "opentelemetry",
+ "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "serde",
  "serde_json",

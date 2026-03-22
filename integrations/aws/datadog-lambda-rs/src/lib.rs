@@ -18,20 +18,20 @@ type HandlerError = lambda_runtime::Error;
 pub struct Config {
     /// Service name. Overrides `DD_SERVICE`. Ignored when [`tracing`](Self::tracing) is `Some`.
     pub service: Option<String>,
-    /// Deployment environment. Overrides `DD_ENV`. Ignored when [`tracing`](Self::tracing) is `Some`.
+    /// Deployment environment. Overrides `DD_ENV`. Ignored when [`tracing`](Self::tracing) is
+    /// `Some`.
     pub env: Option<String>,
     /// Service version. Overrides `DD_VERSION`. Ignored when [`tracing`](Self::tracing) is `Some`.
     pub version: Option<String>,
     /// Full control over the OTel SDK and Datadog tracer config. Power-user escape hatch.
     ///
-    /// When `None` (default), Lambda-appropriate defaults are applied and `service`/`env`/`version`
-    /// above are forwarded. When `Some`, the builder is used as-is; `service`/`env`/`version` are
-    /// ignored and you are responsible for setting:
+    /// When `None` (default), Lambda-appropriate defaults are applied and
+    /// `service`/`env`/`version` above are forwarded. When `Some`, the builder is used as-is;
+    /// `service`/`env`/`version` are ignored and you are responsible for setting:
     /// - `trace_stats_computation_enabled = false` (extension handles stats server-side)
     /// - `trace_writer_synchronous_write = true` (so `force_flush()` blocks)
     pub tracing: Option<datadog_opentelemetry::DatadogTracingBuilder>,
 }
-
 
 fn build_tracing(
     service: Option<String>,
