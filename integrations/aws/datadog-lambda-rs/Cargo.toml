@@ -1,0 +1,30 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+
+[package]
+name = "datadog-lambda-rs"
+rust-version = "1.85.0"
+edition = "2021"
+version = "0.3.1"
+publish = false
+license = "Apache-2.0"
+repository = "https://github.com/DataDog/dd-trace-rs"
+authors = ["Datadog Inc. <info@datadoghq.com>"]
+description = "Datadog Lambda tracing for Rust"
+
+[dependencies]
+base64 = "0.22"
+datadog-opentelemetry = { version = "0.3", path = "../../../datadog-opentelemetry" }
+lambda_runtime = "0.13"
+serde = "1.0.194"
+serde_json = "1.0.140"
+opentelemetry = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }
+opentelemetry-semantic-conventions = { version = "0.31.0", features = ["semconv_experimental"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }
+tracing = "0.1"
+
+[dev-dependencies]
+opentelemetry_sdk = { version = "0.31.0", features = ["trace", "metrics", "logs", "testing"], default-features = false }
+tokio = { version = "1.44.1", features = ["macros", "rt-multi-thread", "time"] }
