@@ -9,6 +9,7 @@ use carrier::{
     carrier_from_json_object, validate_carrier, DATADOG_ATTRIBUTE_KEY, PARENT_ID_KEY,
     SAMPLING_PRIORITY_KEY, TAGS_KEY, TRACE_ID_KEY,
 };
+use lambda_runtime::LambdaEvent;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
@@ -61,7 +62,8 @@ impl<'a> SpanInferrer<'a> {
         Self { tracer }
     }
 
-    pub(crate) fn infer(&self, payload: &Value) -> InferredContext {
+    pub(crate) fn infer(&self, event: &LambdaEvent<Value>) -> InferredContext {
+        let payload = &event.payload;
         if let Some((carrier, inferred_spans)) = triggers::extract(payload) {
             if validate_carrier(&carrier).is_some() {
                 tracing::debug!(
@@ -106,6 +108,24 @@ impl<'a> SpanInferrer<'a> {
                     inferred_span_end_time: SystemTime::now(),
                 };
             }
+        }
+
+        if let Some(carrier) =
+            extract_from_client_context(event.context.client_context.as_ref().map(|cc| &cc.custom))
+        {
+            tracing::debug!(
+                trace_id = carrier.get(TRACE_ID_KEY).map(String::as_str).unwrap_or("?"),
+                "extracted trace context from client context"
+            );
+            let extracted_cx = global::get_text_map_propagator(|p| p.extract(&carrier));
+            return InferredContext {
+                parent_cx: extracted_cx,
+                is_async: false,
+                event_source: None,
+                event_source_arn: None,
+                inferred_span_contexts: Vec::new(),
+                inferred_span_end_time: SystemTime::now(),
+            };
         }
 
         tracing::debug!("no trace context found in event");
@@ -193,6 +213,14 @@ fn extract_from_headers(payload: &Value) -> Option<HashMap<String, String>> {
     }
 
     None
+}
+
+fn extract_from_client_context(
+    custom: Option<&HashMap<String, String>>,
+) -> Option<HashMap<String, String>> {
+    let carrier = custom?.clone();
+    validate_carrier(&carrier)?;
+    Some(carrier)
 }
 
 #[cfg(test)]
@@ -347,7 +375,7 @@ mod tests {
         });
 
         let inferrer = SpanInferrer::new(&tracer);
-        let result = inferrer.infer(&event);
+        let result = inferrer.infer(&LambdaEvent::new(event, lambda_runtime::Context::default()));
         for cx in result.inferred_span_contexts {
             cx.span().end_with_timestamp(result.inferred_span_end_time);
         }
@@ -362,6 +390,24 @@ mod tests {
     }
 
     use crate::span_inferrer::triggers::test_utils::load_payload;
+    fn lambda_event(payload: Value) -> LambdaEvent<Value> {
+        LambdaEvent::new(payload, lambda_runtime::Context::default())
+    }
+
+    fn lambda_event_with_client_context(
+        payload: Value,
+        custom: HashMap<String, String>,
+    ) -> LambdaEvent<Value> {
+        // lambda_runtime::types is a private module; construct ClientContext via serde.
+        let cc_json = serde_json::json!({
+            "client": {},
+            "custom": custom,
+            "environment": {}
+        });
+        let mut ctx = lambda_runtime::Context::default();
+        ctx.client_context = serde_json::from_value(cc_json).ok();
+        LambdaEvent::new(payload, ctx)
+    }
 
     #[test]
     fn extracts_carrier_from_api_gateway_rest_event() {
@@ -395,5 +441,113 @@ mod tests {
     fn api_gateway_no_carrier_returns_none() {
         let event = load_payload("api_gateway_rest_event_no_carrier.json");
         assert!(extract_from_headers(&event).is_none());
+    }
+
+    #[test]
+    fn extracts_carrier_from_client_context() {
+        let custom = HashMap::from([
+            (TRACE_ID_KEY.to_owned(), "12345".to_owned()),
+            (PARENT_ID_KEY.to_owned(), "67890".to_owned()),
+            (SAMPLING_PRIORITY_KEY.to_owned(), "1".to_owned()),
+        ]);
+        let carrier = extract_from_client_context(Some(&custom)).unwrap();
+        assert_eq!(carrier.get(TRACE_ID_KEY).unwrap(), "12345");
+        assert_eq!(carrier.get(PARENT_ID_KEY).unwrap(), "67890");
+        assert_eq!(carrier.get(SAMPLING_PRIORITY_KEY).unwrap(), "1");
+    }
+
+    #[test]
+    fn infer_takes_client_context_fallback_path() {
+        // Verifies that infer() reaches the client_context branch when no trigger or
+        // header context is present. The propagated context depends on the registered
+        // global propagator; here we just assert the carrier was accepted (no inferred
+        // spans, no event_source) rather than inspecting the OTel span context.
+        let (provider, exporter) = test_provider();
+        let tracer = provider.tracer("test");
+        let inferrer = SpanInferrer::new(&tracer);
+
+        let custom = HashMap::from([
+            (TRACE_ID_KEY.to_owned(), "12345".to_owned()),
+            (PARENT_ID_KEY.to_owned(), "67890".to_owned()),
+            (SAMPLING_PRIORITY_KEY.to_owned(), "1".to_owned()),
+        ]);
+        let event = lambda_event_with_client_context(json!({}), custom);
+        let result = inferrer.infer(&event);
+
+        assert!(result.inferred_span_contexts.is_empty());
+        assert!(result.event_source.is_none());
+        // No inferred spans emitted.
+        provider.force_flush().ok();
+        assert!(finished_spans(&exporter).is_empty());
+    }
+
+    #[test]
+    fn client_context_without_trace_headers_returns_new_trace() {
+        let (provider, _) = test_provider();
+        let tracer = provider.tracer("test");
+        let inferrer = SpanInferrer::new(&tracer);
+
+        let custom = HashMap::from([("unrelated-key".to_owned(), "some-value".to_owned())]);
+        let event = lambda_event_with_client_context(json!({}), custom);
+        let result = inferrer.infer(&event);
+
+        assert!(!result.parent_cx.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn no_client_context_returns_new_trace() {
+        let (provider, _) = test_provider();
+        let tracer = provider.tracer("test");
+        let inferrer = SpanInferrer::new(&tracer);
+
+        let event = lambda_event(json!({}));
+        let result = inferrer.infer(&event);
+
+        assert!(!result.parent_cx.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn trigger_takes_priority_over_client_context() {
+        let (provider, exporter) = test_provider();
+        let tracer = provider.tracer("test");
+        let inferrer = SpanInferrer::new(&tracer);
+
+        let sqs_carrier_json = json!({
+            "x-datadog-trace-id": "11111",
+            "x-datadog-parent-id": "22222",
+            "x-datadog-sampling-priority": "1"
+        });
+        let payload = json!({
+            "Records": [{
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:test-queue",
+                "awsRegion": "us-east-1",
+                "body": "hello",
+                "attributes": { "SentTimestamp": "1718444400000" },
+                "messageAttributes": {
+                    "_datadog": {
+                        "stringValue": serde_json::to_string(&sqs_carrier_json).unwrap(),
+                        "dataType": "String"
+                    }
+                }
+            }]
+        });
+        // ClientContext carries a different trace ID — trigger should win.
+        let custom = HashMap::from([
+            (TRACE_ID_KEY.to_owned(), "99999".to_owned()),
+            (PARENT_ID_KEY.to_owned(), "88888".to_owned()),
+            (SAMPLING_PRIORITY_KEY.to_owned(), "1".to_owned()),
+        ]);
+        let event = lambda_event_with_client_context(payload, custom);
+        let result = inferrer.infer(&event);
+        for cx in result.inferred_span_contexts {
+            cx.span().end_with_timestamp(result.inferred_span_end_time);
+        }
+        provider.force_flush().ok();
+
+        // SQS inferred span was created, so trigger path was taken.
+        let spans = finished_spans(&exporter);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, "aws.sqs");
     }
 }

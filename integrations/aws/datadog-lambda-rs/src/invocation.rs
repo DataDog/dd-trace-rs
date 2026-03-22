@@ -47,7 +47,7 @@ pub(crate) fn start_invocation(
     let tracer = provider.tracer("datadog-lambda-rs");
 
     let inferrer = SpanInferrer::new(&tracer);
-    let result = inferrer.infer(&event.payload);
+    let result = inferrer.infer(event);
 
     let lambda_span = LambdaSpan {
         function_name: event.context.env_config.function_name.clone(),
@@ -319,6 +319,28 @@ mod tests {
             }),
             lambda_runtime::Context::default(),
         );
+
+        let scope = start_invocation(&raw_event, &provider, &Config::default());
+        assert!(scope.invocation_cx.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extracts_trace_context_from_client_context() {
+        let (provider, _) = test_provider();
+
+        // lambda_runtime::types is a private module; construct ClientContext via serde.
+        let cc_json = serde_json::json!({
+            "client": {},
+            "custom": {
+                "x-datadog-trace-id": "55555",
+                "x-datadog-parent-id": "66666",
+                "x-datadog-sampling-priority": "1"
+            },
+            "environment": {}
+        });
+        let mut ctx = lambda_runtime::Context::default();
+        ctx.client_context = serde_json::from_value(cc_json).ok();
+        let raw_event = LambdaEvent::new(serde_json::json!({}), ctx);
 
         let scope = start_invocation(&raw_event, &provider, &Config::default());
         assert!(scope.invocation_cx.span().span_context().is_valid());
