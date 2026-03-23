@@ -247,6 +247,7 @@ fn make_telemetry_worker(
             config.tracer_version().to_string(),
         );
         builder.runtime_id = Some(config.runtime_id().to_string());
+        builder.root_session_id = Some(config.root_session_id().to_string());
         builder.config = libdd_telemetry::config::Config::from_env();
         builder.config.telemetry_heartbeat_interval =
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());

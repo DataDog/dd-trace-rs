@@ -927,6 +927,7 @@ impl_config_value_provider!(option: String);
 pub struct Config {
     // # Global
     runtime_id: &'static str,
+    root_session_id: &'static str,
 
     // # Tracer
     tracer_version: &'static str,
@@ -1138,6 +1139,7 @@ impl Config {
 
         Self {
             runtime_id: default.runtime_id,
+            root_session_id: default.root_session_id,
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
@@ -1298,6 +1300,12 @@ impl Config {
         self.runtime_id
     }
 
+    /// Returns the root session ID for this process tree.
+    /// Equals `runtime_id` for the root process; inherited from the parent for child processes.
+    pub fn root_session_id(&self) -> &str {
+        self.root_session_id
+    }
+
     /// Returns the version of the Datadog tracer.
     pub fn tracer_version(&self) -> &str {
         self.tracer_version
@@ -1431,6 +1439,19 @@ impl Config {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+    }
+
+    /// Root session ID for this process tree.
+    /// Reads `DD_ROOT_RS_SESSION_ID` if set (child process inheriting from parent),
+    /// otherwise falls back to `process_runtime_id()` (this process is the root).
+    fn process_root_session_id() -> &'static str {
+        static ROOT_SESSION_ID: OnceLock<String> = OnceLock::new();
+        ROOT_SESSION_ID.get_or_init(|| {
+            std::env::var("DD_ROOT_RS_SESSION_ID")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| Config::process_runtime_id().to_owned())
+        })
     }
 
     /// Returns whether telemetry collection is enabled.
@@ -1726,6 +1747,7 @@ impl std::fmt::Debug for Config {
 fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
+        root_session_id: Config::process_root_session_id(),
         env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItemWithOverride::new_calculated(
