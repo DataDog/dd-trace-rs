@@ -22,12 +22,13 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "2.0.1", default-features = false }
-libdd-trace-utils = { version = "2.0.2", default-features = false }
-libdd-telemetry = { version = "3.0.0", default-features = false }
-libdd-common = { version = "2.0.1", default-features = false }
-libdd-tinybytes = { version = "1.1.0", default-features = false }
+# Libdatadog dependencies - pinned to branch with stable session identifier support.
+# TODO: revert to crates.io versions once DataDog/libdatadog#1782 is merged and published.
+libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", branch = "ayan.khan/stable-session-identifier-headers", default-features = false }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", branch = "ayan.khan/stable-session-identifier-headers", default-features = false }
+libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "ayan.khan/stable-session-identifier-headers", default-features = false }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "ayan.khan/stable-session-identifier-headers", default-features = false }
+libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", branch = "ayan.khan/stable-session-identifier-headers", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",

@@ -1150,9 +1150,8 @@ checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
 
 [[package]]
 name = "libdd-common"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e5593b91f61eee38cddc9fdcbc99c9fad697b5d925e226bd500d86b4295380b"
+version = "3.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1182,8 +1181,7 @@ dependencies = [
 [[package]]
 name = "libdd-data-pipeline"
 version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe2704d0fcc9281cc844a63d15188aecc84d45725b77e489cc04ad30959b2000"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1212,8 +1210,7 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b31b2435e2e8eaba0e35a96df3e1407b68f8ef76055383ceb2ba5a09e5a1bb5"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "prost",
 ]
@@ -1221,8 +1218,7 @@ dependencies = [
 [[package]]
 name = "libdd-dogstatsd-client"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a457381568835e7c3646f3f2d44ff4f3ebcda44d87332e2fdaeb20e6a8365dcd"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "cadence",
@@ -1235,8 +1231,7 @@ dependencies = [
 [[package]]
 name = "libdd-telemetry"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e7bb67a865fe7e8a16aacc7bc43a805fb3b907c713e0b212e7a7abe6e0735cb"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1260,8 +1255,7 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e47838e12ae2665250b4cdba4e3119230b79e3c522bb9f48dd0c87346f5a8f44"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "serde",
 ]
@@ -1269,8 +1263,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a737b43f01d6a0cbd1399c5b89863a5d2663fe7b19bf1d3ea28048abab396353"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
@@ -1279,8 +1272,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-protobuf"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "prost",
  "serde",
@@ -1290,8 +1282,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "1.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea447dc8a5d84c6b5eb6ea877c4fea4149fd29f6b45fcfc5cfd7edf82a18e056"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
@@ -1302,8 +1293,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-utils"
 version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a59e9a0a41bb17d06fb85a70db3be04e53ddfb8f61a593939bb9677729214db"
+source = "git+https://github.com/DataDog/libdatadog?branch=ayan.khan%2Fstable-session-identifier-headers#fe2f6c72fd610eda69852c98721fdb7651300406"
 dependencies = [
  "anyhow",
  "bytes",
