@@ -705,7 +705,8 @@ impl ExtraServicesTracker {
         services: impl Iterator<Item = impl Deref<Target = str>>,
         main_service: &str,
     ) {
-        // first consume all base services before locking. This is likely everything
+        // first consume services with the same name as the service set in the config, as it is
+        // already tracked by default before locking
         let mut services = services.filter(|s| s.deref() != main_service).peekable();
         if services.peek().is_none() {
             return;

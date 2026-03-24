@@ -17,7 +17,7 @@ use libdd_data_pipeline::trace_exporter::{
 
 #[derive(Clone, Copy)]
 pub struct AsyncExporterConfig {
-    /// Wether the async exporter waits for the trace chunks to be exported before returning from
+    /// Whether the async exporter waits for the trace chunks to be exported before returning from
     /// export_chunk
     pub synchronous_writes: bool,
     /// The maximum amount of time the export_chunk waits for a flush if synchronous_writes is
@@ -53,7 +53,7 @@ pub struct TraceChunk<T> {
     pub chunk: Vec<T>,
 }
 
-/// Error that can occur when the batch has reached it's maximum size
+/// Error that can occur when the batch has reached its maximum size
 /// and we can't add more spans to it.
 ///
 /// The added spans will be dropped.
@@ -498,7 +498,7 @@ impl<T> Receiver<T> {
                     .notifier
                     .wait_timeout(state, leftover)
                     .map(|(s, t)| (s, t.timed_out()))
-                    .unwrap()
+                    .map_err(|_| MutexPoisonedError)?
             };
             if timed_out {
                 // If we hit timeout, flush whatever is in the batch
