@@ -74,11 +74,20 @@ impl TimelineUploader {
         let attachments_json: Vec<String> =
             attachments.iter().map(|a| format!("\"{}\"", a)).collect();
 
-        // Detect if this is a Go trace upload (for timeline visualization)
+        // Detect format based on attachments
         let has_go_trace = attachments.iter().any(|a| *a == "go.trace");
+        let has_pprof = attachments.iter().any(|a| a.ends_with(".pprof"));
 
-        // Use "go" family for Go trace format - this enables timeline visualization
-        let family = if has_go_trace { "go" } else { "native" };
+        // Set family and language based on format
+        // - Go trace: use "go" family for timeline visualization
+        // - pprof: use "native" family with Rust language
+        let (family, language, runtime) = if has_go_trace {
+            ("go", "go", "go1.22.0")
+        } else if has_pprof {
+            ("native", "rust", "tokio")
+        } else {
+            ("native", "rust", "tokio")
+        };
 
         // Build tags string - service is required first
         let mut tags = Vec::new();
@@ -106,10 +115,9 @@ impl TimelineUploader {
 
         tags.push(format!("runtime-id:{}", self.config.runtime_id()));
         tags.push(format!("process_id:{}", std::process::id()));
-        tags.push("language:go".to_string()); // Use "go" to match the family
-        tags.push("runtime:go1.22.0".to_string());
-        tags.push("runtime_version:go1.22.0".to_string());
-        tags.push("runtime_compiler:gc".to_string());
+        tags.push(format!("language:{language}"));
+        tags.push(format!("runtime:{runtime}"));
+        tags.push(format!("runtime_version:{runtime}"));
         tags.push(format!("runtime_arch:{}", std::env::consts::ARCH));
         tags.push(format!("runtime_os:{}", std::env::consts::OS));
         tags.push("profiler_version:1.67.0".to_string());

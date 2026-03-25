@@ -286,12 +286,11 @@ impl TimelineWorker {
             return;
         }
 
-        // Debug: save trace to file for analysis
+        // Debug: save trace/profile to file for analysis
         for timeline in &timelines {
-            if timeline.filename == "go.trace" {
-                let _ = std::fs::write("/tmp/generated_go.trace", &timeline.data);
-                eprintln!("[debug] Saved {} bytes to /tmp/generated_go.trace", timeline.data.len());
-            }
+            let path = format!("/tmp/generated_{}", timeline.filename);
+            let _ = std::fs::write(&path, &timeline.data);
+            eprintln!("[debug] Saved {} bytes to {}", timeline.data.len(), path);
         }
 
         // Upload

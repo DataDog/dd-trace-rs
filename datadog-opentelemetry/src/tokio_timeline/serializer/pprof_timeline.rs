@@ -19,45 +19,53 @@ use super::{SerializeError, SerializedTimeline, TimelineSerializer};
 use crate::tokio_timeline::buffer::OwnedEvent;
 
 /// pprof protobuf message definitions.
+/// Field numbers match the official pprof proto:
+/// https://github.com/google/pprof/blob/main/proto/profile.proto
 mod proto {
     /// A complete profile, the format used by pprof.
     #[derive(Clone, PartialEq, prost::Message)]
     pub struct Profile {
-        /// List of strings used in the profile.
-        #[prost(bytes = "vec", repeated, tag = "1")]
-        pub string_table: Vec<Vec<u8>>,
-        /// Sample value types.
-        #[prost(message, repeated, tag = "2")]
+        /// Sample value types (e.g., "wall-time", "nanoseconds").
+        #[prost(message, repeated, tag = "1")]
         pub sample_type: Vec<ValueType>,
         /// Samples in this profile.
-        #[prost(message, repeated, tag = "3")]
+        #[prost(message, repeated, tag = "2")]
         pub sample: Vec<Sample>,
         /// Mappings from address to source.
-        #[prost(message, repeated, tag = "4")]
+        #[prost(message, repeated, tag = "3")]
         pub mapping: Vec<Mapping>,
+        /// Locations referenced by samples.
+        #[prost(message, repeated, tag = "4")]
+        pub location: Vec<Location>,
         /// Functions referenced by locations.
         #[prost(message, repeated, tag = "5")]
         pub function: Vec<Function>,
-        /// Locations referenced by samples.
-        #[prost(message, repeated, tag = "6")]
-        pub location: Vec<Location>,
-        /// Time of profile collection.
+        /// List of strings used in the profile (index 0 is always empty string).
+        #[prost(bytes = "vec", repeated, tag = "6")]
+        pub string_table: Vec<Vec<u8>>,
+        /// Index into string_table for frames to drop.
         #[prost(int64, tag = "7")]
-        pub time_nanos: i64,
-        /// Duration of profile collection.
+        pub drop_frames: i64,
+        /// Index into string_table for frames to keep.
         #[prost(int64, tag = "8")]
+        pub keep_frames: i64,
+        /// Time of profile collection (nanoseconds since epoch).
+        #[prost(int64, tag = "9")]
+        pub time_nanos: i64,
+        /// Duration of profile collection (nanoseconds).
+        #[prost(int64, tag = "10")]
         pub duration_nanos: i64,
         /// Profile period type.
-        #[prost(message, optional, tag = "9")]
+        #[prost(message, optional, tag = "11")]
         pub period_type: Option<ValueType>,
         /// Profile period.
-        #[prost(int64, tag = "10")]
+        #[prost(int64, tag = "12")]
         pub period: i64,
-        /// Comment strings.
-        #[prost(int64, repeated, tag = "11")]
+        /// Comment strings (indices into string_table).
+        #[prost(int64, repeated, tag = "13")]
         pub comment: Vec<i64>,
         /// Default sample type index.
-        #[prost(int64, tag = "12")]
+        #[prost(int64, tag = "14")]
         pub default_sample_type: i64,
     }
 
@@ -312,15 +320,17 @@ impl PprofTimelineSerializer {
         let functions = std::mem::take(&mut self.functions);
 
         proto::Profile {
-            string_table,
             sample_type: vec![proto::ValueType {
                 type_: wall_time_id,
                 unit: nanoseconds_id,
             }],
             sample: samples,
             mapping: vec![],
-            function: functions,
             location: locations,
+            function: functions,
+            string_table,
+            drop_frames: 0,
+            keep_frames: 0,
             time_nanos,
             duration_nanos,
             period_type: Some(proto::ValueType {
