@@ -57,7 +57,7 @@ fn main() {
     let timeline_config = TimelineConfig::builder()
         .upload_interval(Duration::from_secs(5)) // Upload every 5 seconds for testing
         .max_buffered_events(50_000)
-        .format(TimelineFormat::Pprof) // Use pprof format (recommended for non-Go languages)
+        .format(TimelineFormat::GoTrace) // Use Go trace format for timeline visualization
         .build();
 
     // Step 3: Build the timeline writer and handle
