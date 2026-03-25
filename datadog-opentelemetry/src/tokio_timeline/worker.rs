@@ -295,10 +295,10 @@ impl TimelineWorker {
 
         // Upload
         if let Err(e) = self.uploader.upload(&timelines, batch_start, batch_end) {
-            dd_error!("Timeline upload failed: {}", e);
+            eprintln!("[error] Timeline upload failed: {}", e);
         } else {
-            dd_debug!(
-                "Timeline uploaded: {} events, {} bytes",
+            eprintln!(
+                "[debug] Timeline uploaded: {} events, {} bytes",
                 events.len(),
                 timelines.iter().map(|t| t.data.len()).sum::<usize>()
             );

@@ -55,9 +55,9 @@ fn main() {
     // - `max_buffered_events`: Maximum events to buffer before forcing a flush (default: 100k)
     // - `format`: Output format - GoTrace (default), Pprof, or Both
     let timeline_config = TimelineConfig::builder()
-        .upload_interval(Duration::from_secs(5)) // Upload every 5 seconds for testing
-        .max_buffered_events(50_000)
-        .format(TimelineFormat::Both) // Send both pprof and go.trace (Datadog expects bundled profiles)
+        .upload_interval(Duration::from_secs(60)) // Upload every 60 seconds (standard profiling interval)
+        .max_buffered_events(500_000) // Hold 60 seconds worth of events
+        .format(TimelineFormat::GoTrace) // Send only go.trace
         .build();
 
     // Step 3: Build the timeline writer and handle
@@ -105,10 +105,11 @@ fn main() {
         for i in 0..50 {
             let task_handle = handle.spawn(async move {
                 // Simulate some async work with many polls
-                for j in 0..50 {
-                    tokio::time::sleep(Duration::from_millis(1)).await;
+                // Run for ~60 seconds total (50 tasks * 600 iterations * 2ms = 60s)
+                for j in 0..600 {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
                     tokio::task::yield_now().await;
-                    if j % 10 == 0 {
+                    if j % 100 == 0 {
                         println!("Task {} completed iteration {}", i, j);
                     }
                 }

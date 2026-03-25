@@ -425,7 +425,7 @@ impl GoTraceSerializer {
             string_table: HashMap::new(),
             next_string_id: 1, // 0 is reserved for empty string
             task_id_map: HashMap::new(),
-            next_goroutine_id: 1, // Goroutine IDs start at 1 (0 is invalid in Go)
+            next_goroutine_id: 2, // Start at 2 since G=1 is reserved for "main" goroutine via GoStatus
         }
     }
 
@@ -626,21 +626,16 @@ impl TimelineSerializer for GoTraceSerializer {
         self.string_table.clear();
         self.next_string_id = 1;
         self.task_id_map.clear();
-        self.next_goroutine_id = 1;
+        self.next_goroutine_id = 2; // G=1 reserved for main goroutine
 
         let mut output = Vec::new();
 
         // Write header "go 1.22 trace"
         output.extend_from_slice(GO_TRACE_HEADER);
 
-        // Convert monotonic timestamps to wall-clock timestamps.
-        // batch_start is the wall-clock time when we started collecting events.
-        // Event timestamps are monotonic (time since boot).
-        // We offset all event timestamps to align with wall-clock time.
-        let wall_clock_base = batch_start
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
+        // Use monotonic timestamps directly (like real Go traces).
+        // Go trace uses ~15.6MHz frequency, so we divide nanoseconds by 64 to convert.
+        const NS_TO_TICKS: u64 = 64; // 1GHz / 15.625MHz ≈ 64
 
         let min_event_timestamp = events
             .iter()
@@ -648,9 +643,9 @@ impl TimelineSerializer for GoTraceSerializer {
             .min()
             .unwrap_or(0);
 
-        // Calculate offset: wall_clock_base corresponds to min_event_timestamp
-        // For any event timestamp T, wall_clock_T = wall_clock_base + (T - min_event_timestamp)
-        let base_timestamp = wall_clock_base;
+        // Use the monotonic timestamp directly (divided by 64 for tick conversion)
+        // This gives timestamps similar to real Go traces (~47 days of ticks)
+        let base_timestamp = min_event_timestamp / NS_TO_TICKS;
 
         // First pass: collect all task IDs, strings, and unique worker IDs
         let mut worker_ids = std::collections::BTreeSet::new();
@@ -698,7 +693,7 @@ impl TimelineSerializer for GoTraceSerializer {
         // === First batch: Frequency only (M=-1) ===
         let mut freq_data = Vec::new();
         freq_data.push(event_type::EV_FREQUENCY);
-        write_varint(&mut freq_data, 1_000_000_000); // 1GHz = timestamps in nanoseconds
+        write_varint(&mut freq_data, 15_625_000); // ~15.6MHz matches Go's trace frequency
 
         output.push(event_type::EV_EVENT_BATCH);
         write_varint(&mut output, 1); // generation = 1
@@ -761,17 +756,44 @@ impl TimelineSerializer for GoTraceSerializer {
             }
 
             // Emit ProcStatus for this M's P if not yet done
+            // Use Running status (like real Go traces) so we don't need ProcStart
             if !batch.proc_initialized {
+                // ProcStatus: P is running
                 batch.data.push(event_type::EV_PROC_STATUS);
                 write_varint(&mut batch.data, 0); // dt = 0
                 write_varint(&mut batch.data, m_id); // P = m_id (1:1 mapping)
-                write_varint(&mut batch.data, ProcStatus::Idle as u64);
+                write_varint(&mut batch.data, ProcStatus::Running as u64);
+
+                // GoStatus: Establish a "main" goroutine (G=1) as Running on this M
+                // This matches how real Go traces work - G1 exists from trace start
+                if m_id == 0 {
+                    batch.data.push(event_type::EV_GO_STATUS);
+                    write_varint(&mut batch.data, 1); // dt = 1
+                    write_varint(&mut batch.data, 1); // g = 1 (main goroutine)
+                    write_varint(&mut batch.data, m_id); // m = this thread
+                    write_varint(&mut batch.data, GoStatus::Running as u64);
+
+                    // Tell state machine G1 exists and is running
+                    let g_state = state_machine.g_states.entry(1).or_insert_with(GoroutineState::new);
+                    g_state.status = GoStatus::Running;
+                    state_machine.m_states.entry(m_id).or_default().g = Some(1);
+                }
+
                 batch.proc_initialized = true;
+
+                // Tell state machine this P is already running
+                state_machine.p_states.entry(m_id).or_insert_with(|| {
+                    let mut p = ProcState::new_idle();
+                    p.status = ProcStatus::Running;
+                    p
+                });
+                // Bind P to M
+                state_machine.m_states.entry(m_id).or_default().p = Some(m_id);
             }
 
-            // Convert monotonic timestamp to wall-clock timestamp
+            // Convert monotonic timestamp to ticks
             let event_monotonic = event.timestamp_nanos();
-            let timestamp = wall_clock_base + event_monotonic.saturating_sub(min_event_timestamp);
+            let timestamp = event_monotonic / NS_TO_TICKS;
             let dt = timestamp.saturating_sub(batch.last_timestamp);
             batch.last_timestamp = timestamp;
 
