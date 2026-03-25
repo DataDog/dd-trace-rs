@@ -38,8 +38,8 @@ use std::time::SystemTime;
 use super::{SerializeError, SerializedTimeline, TimelineSerializer};
 use crate::tokio_timeline::buffer::OwnedEvent;
 
-/// Go trace header for version 1.22 format.
-const GO_TRACE_HEADER: &[u8; 16] = b"go 1.22 trace\x00\x00\x00";
+/// Go trace header for version 1.23 format.
+const GO_TRACE_HEADER: &[u8; 16] = b"go 1.23 trace\x00\x00\x00";
 
 /// Go trace event types (v2 format for Go 1.22+).
 /// From go/src/internal/trace/event/go122/event.go
@@ -591,11 +591,35 @@ impl GoTraceSerializer {
     }
 }
 
+/// Per-M (thread) batch state for multi-worker trace generation.
+#[derive(Debug)]
+struct MBatchState {
+    /// Event data buffer for this M.
+    data: Vec<u8>,
+    /// Last timestamp for delta calculation.
+    last_timestamp: u64,
+    /// Base timestamp for the current batch.
+    batch_base_timestamp: u64,
+    /// Whether ProcStatus has been emitted for this M's P.
+    proc_initialized: bool,
+}
+
+impl MBatchState {
+    fn new(base_timestamp: u64) -> Self {
+        Self {
+            data: Vec::new(),
+            last_timestamp: base_timestamp,
+            batch_base_timestamp: base_timestamp,
+            proc_initialized: false,
+        }
+    }
+}
+
 impl TimelineSerializer for GoTraceSerializer {
     fn serialize(
         &mut self,
         events: &[OwnedEvent],
-        _batch_start: SystemTime,
+        batch_start: SystemTime,
         _batch_end: SystemTime,
     ) -> Result<SerializedTimeline, SerializeError> {
         // Reset state for each batch
@@ -606,23 +630,32 @@ impl TimelineSerializer for GoTraceSerializer {
 
         let mut output = Vec::new();
 
-        // Write header
+        // Write header "go 1.22 trace"
         output.extend_from_slice(GO_TRACE_HEADER);
 
-        // Go trace uses monotonic timestamps (relative to trace start), not Unix time.
-        // We use the minimum event timestamp as the base (start of trace).
+        // Convert monotonic timestamps to wall-clock timestamps.
+        // batch_start is the wall-clock time when we started collecting events.
+        // Event timestamps are monotonic (time since boot).
+        // We offset all event timestamps to align with wall-clock time.
+        let wall_clock_base = batch_start
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+
         let min_event_timestamp = events
             .iter()
             .map(|e| e.timestamp_nanos())
             .min()
             .unwrap_or(0);
 
-        // Base timestamp for the first batch - use a reasonable starting value
-        // The events have relative timestamps, so we use them directly
-        let base_timestamp = min_event_timestamp;
+        // Calculate offset: wall_clock_base corresponds to min_event_timestamp
+        // For any event timestamp T, wall_clock_T = wall_clock_base + (T - min_event_timestamp)
+        let base_timestamp = wall_clock_base;
 
-        // First pass: collect all task IDs and map them to small sequential IDs
-        // Also collect strings
+        // First pass: collect all task IDs, strings, and unique worker IDs
+        let mut worker_ids = std::collections::BTreeSet::new();
+        worker_ids.insert(0u8); // Always have M=0 for events without worker_id
+
         for event in events {
             match event {
                 OwnedEvent::TaskSpawn {
@@ -632,10 +665,17 @@ impl TimelineSerializer for GoTraceSerializer {
                     self.get_or_create_string_id(location);
                 }
                 OwnedEvent::PollStart {
-                    task_id, location, ..
+                    task_id,
+                    location,
+                    worker_id,
+                    ..
                 } => {
                     self.map_task_id(*task_id);
                     self.get_or_create_string_id(location);
+                    worker_ids.insert(*worker_id);
+                }
+                OwnedEvent::PollEnd { worker_id, .. } => {
+                    worker_ids.insert(*worker_id);
                 }
                 OwnedEvent::TaskTerminate { task_id, .. } => {
                     self.map_task_id(*task_id);
@@ -648,12 +688,14 @@ impl TimelineSerializer for GoTraceSerializer {
                     self.map_task_id(*waker_task_id);
                     self.map_task_id(*woken_task_id);
                 }
-                _ => {}
+                OwnedEvent::WorkerPark { worker_id, .. }
+                | OwnedEvent::WorkerUnpark { worker_id, .. } => {
+                    worker_ids.insert(*worker_id);
+                }
             }
         }
 
         // === First batch: Frequency only (M=-1) ===
-        // This special batch provides the timestamp frequency
         let mut freq_data = Vec::new();
         freq_data.push(event_type::EV_FREQUENCY);
         write_varint(&mut freq_data, 1_000_000_000); // 1GHz = timestamps in nanoseconds
@@ -665,91 +707,113 @@ impl TimelineSerializer for GoTraceSerializer {
         write_varint(&mut output, freq_data.len() as u64);
         output.extend_from_slice(&freq_data);
 
-        // === Second batch: Initial status + events through state machine (M=0) ===
+        // === Process events through state machine, routing to per-M batches ===
         // Sort all events by timestamp for proper ordering
         let mut all_events: Vec<&OwnedEvent> = events.iter().collect();
         all_events.sort_by_key(|e| e.timestamp_nanos());
 
-        // Initialize state machine and process events
+        // Initialize state machine and per-M batch buffers
         let mut state_machine = TraceStateMachine::new();
-        let mut batch_data = Vec::new();
-        let mut last_timestamp = base_timestamp;
+        let mut m_batches: HashMap<u64, MBatchState> = HashMap::new();
 
-        // Emit ProcStatus to establish P0 exists in idle state at trace start.
-        // This is required by Go trace format before any ProcStart/GoStart events.
-        batch_data.push(event_type::EV_PROC_STATUS);
-        write_varint(&mut batch_data, 0); // dt = 0
-        write_varint(&mut batch_data, 0); // P = 0
-        write_varint(&mut batch_data, ProcStatus::Idle as u64); // status = idle
+        // Initialize batch state for each worker
+        for &worker_id in &worker_ids {
+            m_batches.insert(worker_id as u64, MBatchState::new(base_timestamp));
+        }
 
         // Maximum batch size to stay under Go's 65536 byte limit
         const MAX_BATCH_SIZE: usize = 60000;
-        let mut batch_base_timestamp = base_timestamp;
+
+        // Helper to flush an M's batch to output
+        let flush_m_batch = |output: &mut Vec<u8>, m_id: u64, batch: &mut MBatchState| {
+            if batch.data.is_empty() {
+                return;
+            }
+            output.push(event_type::EV_EVENT_BATCH);
+            write_varint(output, 1); // generation = 1
+            write_varint(output, m_id);
+            write_varint(output, batch.batch_base_timestamp);
+            write_varint(output, batch.data.len() as u64);
+            output.extend_from_slice(&batch.data);
+            batch.data.clear();
+            batch.batch_base_timestamp = batch.last_timestamp;
+        };
 
         // Process each event through the state machine
         for event in &all_events {
+            // Determine which M this event belongs to
+            let m_id: u64 = match event {
+                OwnedEvent::PollStart { worker_id, .. }
+                | OwnedEvent::PollEnd { worker_id, .. }
+                | OwnedEvent::WorkerPark { worker_id, .. }
+                | OwnedEvent::WorkerUnpark { worker_id, .. } => *worker_id as u64,
+                // Events without worker_id go to M=0
+                OwnedEvent::TaskSpawn { .. }
+                | OwnedEvent::TaskTerminate { .. }
+                | OwnedEvent::WakeEvent { .. } => 0,
+            };
+
+            let batch = m_batches.entry(m_id).or_insert_with(|| MBatchState::new(base_timestamp));
+
             // Check if we need to flush before adding more events
-            if batch_data.len() > MAX_BATCH_SIZE {
-                output.push(event_type::EV_EVENT_BATCH);
-                write_varint(&mut output, 1); // generation = 1
-                write_varint(&mut output, 0); // M = 0
-                write_varint(&mut output, batch_base_timestamp);
-                write_varint(&mut output, batch_data.len() as u64);
-                output.extend_from_slice(&batch_data);
-                batch_data.clear();
-                batch_base_timestamp = last_timestamp;
+            if batch.data.len() > MAX_BATCH_SIZE {
+                flush_m_batch(&mut output, m_id, batch);
             }
 
-            let timestamp = event.timestamp_nanos();
-            let dt = timestamp.saturating_sub(last_timestamp);
-            last_timestamp = timestamp;
+            // Emit ProcStatus for this M's P if not yet done
+            if !batch.proc_initialized {
+                batch.data.push(event_type::EV_PROC_STATUS);
+                write_varint(&mut batch.data, 0); // dt = 0
+                write_varint(&mut batch.data, m_id); // P = m_id (1:1 mapping)
+                write_varint(&mut batch.data, ProcStatus::Idle as u64);
+                batch.proc_initialized = true;
+            }
 
-            // Use single M=0 for all events. Go trace format requires each M to have
-            // its own batch, and multi-M support would require significant complexity.
-            // For timeline visualization, single-M is sufficient to show task execution.
-            let m_id: u64 = 0;
+            // Convert monotonic timestamp to wall-clock timestamp
+            let event_monotonic = event.timestamp_nanos();
+            let timestamp = wall_clock_base + event_monotonic.saturating_sub(min_event_timestamp);
+            let dt = timestamp.saturating_sub(batch.last_timestamp);
+            batch.last_timestamp = timestamp;
 
             match event {
                 OwnedEvent::TaskSpawn { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_create(m_id, g_id, &mut batch_data, dt);
+                    state_machine.go_create(m_id, g_id, &mut batch.data, dt);
                 }
                 OwnedEvent::PollStart { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_start(m_id, g_id, &mut batch_data, dt);
+                    state_machine.go_start(m_id, g_id, &mut batch.data, dt);
                 }
                 OwnedEvent::PollEnd { .. } => {
-                    state_machine.go_block(m_id, &mut batch_data, dt);
+                    state_machine.go_block(m_id, &mut batch.data, dt);
                 }
                 OwnedEvent::WakeEvent { woken_task_id, .. } => {
                     let g_id = self.task_id_map.get(woken_task_id).copied().unwrap_or(1);
-                    state_machine.go_unblock(g_id, &mut batch_data, dt);
+                    state_machine.go_unblock(g_id, &mut batch.data, dt);
                 }
                 OwnedEvent::TaskTerminate { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_destroy(m_id, g_id, &mut batch_data, dt);
+                    state_machine.go_destroy(m_id, g_id, &mut batch.data, dt);
                 }
                 OwnedEvent::WorkerPark { .. } | OwnedEvent::WorkerUnpark { .. } => {
-                    // Skip P start/stop for now - can add ProcStop/ProcStart later
+                    // Could emit ProcStop/ProcStart here for worker park/unpark
                 }
             }
         }
 
-        // Flush any remaining events
-        if !batch_data.is_empty() {
-            output.push(event_type::EV_EVENT_BATCH);
-            write_varint(&mut output, 1); // generation = 1
-            write_varint(&mut output, 0); // M = 0
-            write_varint(&mut output, batch_base_timestamp);
-            write_varint(&mut output, batch_data.len() as u64);
-            output.extend_from_slice(&batch_data);
+        // Flush all remaining M batches
+        // Sort by M ID for deterministic output
+        let mut m_ids: Vec<u64> = m_batches.keys().copied().collect();
+        m_ids.sort();
+        for m_id in m_ids {
+            if let Some(batch) = m_batches.get_mut(&m_id) {
+                flush_m_batch(&mut output, m_id, batch);
+            }
         }
-
-        // Note: String table not written as it causes "expected batch event" warnings.
-        // Stack traces would require string table, but we're not using them yet.
 
         Ok(SerializedTimeline {
             data: output,
+            name: "execution-trace",
             filename: "go.trace",
             content_type: "application/octet-stream",
         })

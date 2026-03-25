@@ -15,6 +15,8 @@ use crate::tokio_timeline::buffer::OwnedEvent;
 pub struct SerializedTimeline {
     /// The serialized data.
     pub data: Vec<u8>,
+    /// Profile type name for multipart form field (e.g., "execution-trace").
+    pub name: &'static str,
     /// Filename for the attachment (e.g., "go.trace" or "timeline.pprof").
     pub filename: &'static str,
     /// MIME type for the attachment.

@@ -459,6 +459,7 @@ impl TimelineSerializer for PprofTimelineSerializer {
 
         Ok(SerializedTimeline {
             data: compressed,
+            name: "timeline.pprof",
             filename: "timeline.pprof",
             content_type: "application/octet-stream",
         })

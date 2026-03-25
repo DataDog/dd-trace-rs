@@ -129,8 +129,9 @@ impl TimelineUploader {
         }
 
         // Build the event JSON with all required fields
+        // The "info" field is required by Datadog's profiling backend
         format!(
-            r#"{{"version":"4","family":"{}","start":"{}","end":"{}","tags_profiler":"{}","attachments":[{}]}}"#,
+            r#"{{"version":"4","family":"{}","start":"{}","end":"{}","tags_profiler":"{}","attachments":[{}],"info":{{"profiler":{{"activation":"manual","ssi":{{}},"settings":{{}}}}}}}}"#,
             family,
             start_iso,
             end_iso,
@@ -158,7 +159,7 @@ impl TimelineUploader {
             body.extend_from_slice(
                 format!(
                     "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n",
-                    timeline.filename, timeline.filename
+                    timeline.name, timeline.filename
                 )
                 .as_bytes(),
             );
@@ -414,10 +415,11 @@ mod tests {
         );
 
         assert!(json.contains("\"version\":\"4\""));
-        assert!(json.contains("\"family\":\"rust\""));
+        assert!(json.contains("\"family\":\"go\"")); // go.trace uses go family for timeline visualization
         assert!(json.contains("service:test-service"));
         assert!(json.contains("env:test"));
         assert!(json.contains("\"go.trace\""));
+        assert!(json.contains("go_execution_traced:yes"));
     }
 
     #[test]
@@ -427,6 +429,7 @@ mod tests {
 
         let timeline = SerializedTimeline {
             data: vec![1, 2, 3, 4],
+            name: "execution-trace",
             filename: "test.trace",
             content_type: "application/octet-stream",
         };
