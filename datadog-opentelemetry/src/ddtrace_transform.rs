@@ -68,17 +68,26 @@ fn add_config_metadata<'a>(
     cached_config: &'a CachedConfig,
     otel_resource: &'a Resource,
 ) {
+    dd_span.meta.insert(
+        SpanStr::from_static_str("telemetry.sdk.name"),
+        SpanStr::from_static_str("datadog"),
+    );
+    dd_span.meta.insert(
+        SpanStr::from_static_str("telemetry.sdk.version"),
+        SpanStr::from_str(&cached_config.tracer_version),
+    );
+
     if dd_span.service.as_str() == DEFAULT_OTLP_SERVICE_NAME {
-        dd_span.service = SpanStr::from_str(cached_config.service());
+        dd_span.service = SpanStr::from_str(&cached_config.service);
     }
 
-    for (key, value) in cached_config.global_tags() {
+    for (key, value) in &cached_config.global_tags {
         dd_span
             .meta
             .insert(SpanStr::from_str(key), SpanStr::from_str(value));
     }
 
-    if let Some(version) = cached_config.version() {
+    if let Some(version) = &cached_config.version {
         if let Some(service_name) = otel_resource.get(&SERVICE_NAME_KEY) {
             if dd_span.service.as_str() == service_name.as_str() {
                 dd_span.meta.insert(

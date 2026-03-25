@@ -7,9 +7,10 @@ pub(crate) const VERSION_KEY: &str = "version";
 
 #[derive(Debug, Clone)]
 pub(crate) struct CachedConfig {
-    service: String,
-    global_tags: Vec<(String, String)>,
-    version: Option<String>,
+    pub tracer_version: String,
+    pub service: String,
+    pub global_tags: Vec<(String, String)>,
+    pub version: Option<String>,
 }
 
 impl CachedConfig {
@@ -24,23 +25,10 @@ impl CachedConfig {
         let version = cfg.version().map(String::from);
 
         Self {
+            tracer_version: cfg.tracer_version().to_string(),
             service,
             global_tags,
             version,
         }
-    }
-
-    pub fn service(&self) -> &str {
-        &self.service
-    }
-
-    pub fn global_tags(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
-        self.global_tags
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-    }
-
-    pub fn version(&self) -> Option<&str> {
-        self.version.as_deref()
     }
 }
