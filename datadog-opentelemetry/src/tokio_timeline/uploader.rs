@@ -154,12 +154,13 @@ impl TimelineUploader {
         body.extend_from_slice(b"\r\n");
 
         // Timeline data parts
+        // Note: Datadog expects the form field name to match the filename (e.g., "go.trace" for both)
         for timeline in timelines {
             body.extend_from_slice(format!("--{}\r\n", self.boundary).as_bytes());
             body.extend_from_slice(
                 format!(
                     "Content-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\n",
-                    timeline.name, timeline.filename
+                    timeline.filename, timeline.filename
                 )
                 .as_bytes(),
             );
