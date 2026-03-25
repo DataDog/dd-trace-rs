@@ -33,6 +33,13 @@ serde_json = { workspace = true }
 lru = "0.16.3"
 serde = { workspace = true, features = ["derive"] }
 
+# tokio-timeline feature deps (optional)
+dial9-tokio-telemetry = { version = "0.2", optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
+prost = { version = "0.13", optional = true }
+flate2 = { version = "1.0", optional = true }
+gethostname = { version = "1.0", optional = true }
+
 # propagation
 thiserror = { version = "1.0", default-features = false }
 
@@ -105,6 +112,13 @@ logs-http = [
     "opentelemetry-otlp",
     "opentelemetry-otlp/http-proto",
     "opentelemetry-otlp/reqwest-blocking-client",
+]
+tokio-timeline = [
+    "dep:dial9-tokio-telemetry",
+    "dep:crossbeam-channel",
+    "dep:prost",
+    "dep:flate2",
+    "dep:gethostname",
 ]
 test-utils = [
     "libdd-data-pipeline/test-utils",

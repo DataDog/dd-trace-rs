@@ -294,6 +294,10 @@ mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
 
+#[cfg(feature = "tokio-timeline")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio-timeline")))]
+pub mod tokio_timeline;
+
 use std::sync::{Arc, RwLock};
 
 use opentelemetry::{Key, KeyValue, Value};
