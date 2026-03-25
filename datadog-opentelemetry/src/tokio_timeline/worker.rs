@@ -16,7 +16,6 @@ use crate::tokio_timeline::serializer::go_trace::GoTraceSerializer;
 use crate::tokio_timeline::serializer::pprof_timeline::PprofTimelineSerializer;
 use crate::tokio_timeline::serializer::{SerializedTimeline, TimelineSerializer};
 use crate::tokio_timeline::uploader::TimelineUploader;
-use crate::{dd_debug, dd_error};
 
 /// Shared state between the sender and worker thread.
 struct SharedState {

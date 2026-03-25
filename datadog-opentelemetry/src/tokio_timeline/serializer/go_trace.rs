@@ -50,7 +50,8 @@ mod event_type {
     pub const EV_EVENT_BATCH: u8 = 1;
     /// Stack table batch.
     pub const EV_STACKS: u8 = 2;
-    // EvStack = 3
+    /// Individual stack entry [id, frame_count, ...{pc, func_id, file_id, line}].
+    pub const EV_STACK: u8 = 3;
     /// String table batch.
     pub const EV_STRINGS: u8 = 4;
     /// Individual string entry [id, len, data].
@@ -182,6 +183,30 @@ struct MState {
     p: Option<u64>,
 }
 
+/// A single frame in a stack trace.
+#[derive(Debug, Clone)]
+struct StackFrame {
+    /// Program counter (fake but unique).
+    pc: u64,
+    /// Function name string ID.
+    func_id: u64,
+    /// File path string ID.
+    file_id: u64,
+    /// Line number.
+    line: u64,
+}
+
+/// Pre-defined reason strings for GoBlock events.
+/// These match common Go runtime block reasons.
+#[allow(dead_code)]
+mod block_reason {
+    pub const WAIT: &str = "wait";
+    pub const SLEEP: &str = "sleep";
+    pub const CHAN_RECV: &str = "chan receive";
+    pub const SELECT: &str = "select";
+    pub const IO_WAIT: &str = "IO wait";
+}
+
 /// Go trace state machine that validates and emits proper event sequences.
 ///
 /// This state machine tracks goroutine, processor, and thread states to ensure
@@ -253,7 +278,15 @@ impl TraceStateMachine {
 
     /// Creates a goroutine (GoCreate event).
     /// Requires: M+P bound. Does nothing if G already exists.
-    fn go_create(&mut self, m_id: u64, g_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_create(
+        &mut self,
+        m_id: u64,
+        g_id: u64,
+        output: &mut Vec<u8>,
+        dt: u64,
+        new_stack: u64,
+        stack: u64,
+    ) {
         self.ensure_proc_running(m_id, output, dt);
 
         // Don't recreate if already exists
@@ -267,13 +300,22 @@ impl TraceStateMachine {
         output.push(event_type::EV_GO_CREATE);
         write_varint(output, dt);
         write_varint(output, g_id);
-        write_varint(output, 0); // new_stack
-        write_varint(output, 0); // stack
+        write_varint(output, new_stack); // stack where new goroutine will start
+        write_varint(output, stack); // stack of the creator
     }
 
     /// Starts a goroutine (GoStart event).
     /// Handles edge cases: auto-creates unknown G, blocks running G, unblocks waiting G.
-    fn go_start(&mut self, m_id: u64, g_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_start(
+        &mut self,
+        m_id: u64,
+        g_id: u64,
+        output: &mut Vec<u8>,
+        dt: u64,
+        block_stack: u64,
+        wake_stack: u64,
+        create_stack: u64,
+    ) {
         self.ensure_proc_running(m_id, output, dt);
 
         // Check if there's a different G running on this M that we need to block first
@@ -294,12 +336,12 @@ impl TraceStateMachine {
 
         // Block the currently running G if needed
         if let Some(running_g) = running_g_to_block {
-            self.go_block_internal(running_g, output, dt);
+            self.go_block_internal(running_g, output, dt, 0, block_stack); // reason=0 (wait)
         }
 
         // Ensure the goroutine exists (auto-create if unknown)
         if !self.g_states.contains_key(&g_id) {
-            self.go_create(m_id, g_id, output, dt);
+            self.go_create(m_id, g_id, output, dt, create_stack, create_stack);
         }
 
         let g_state = self.g_states.get_mut(&g_id).expect("just created");
@@ -311,7 +353,7 @@ impl TraceStateMachine {
             write_varint(output, dt);
             write_varint(output, g_id);
             write_varint(output, g_seq);
-            write_varint(output, 0); // stack
+            write_varint(output, wake_stack);
             g_state.status = GoStatus::Runnable;
         }
 
@@ -330,7 +372,14 @@ impl TraceStateMachine {
     }
 
     /// Internal helper to emit GoBlock for a goroutine.
-    fn go_block_internal(&mut self, g_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_block_internal(
+        &mut self,
+        g_id: u64,
+        output: &mut Vec<u8>,
+        dt: u64,
+        reason: u64,
+        stack: u64,
+    ) {
         let Some(g_state) = self.g_states.get_mut(&g_id) else {
             return;
         };
@@ -340,23 +389,23 @@ impl TraceStateMachine {
         // GoBlock: dt, reason, stack
         output.push(event_type::EV_GO_BLOCK);
         write_varint(output, dt);
-        write_varint(output, 0); // reason
-        write_varint(output, 0); // stack
+        write_varint(output, reason);
+        write_varint(output, stack);
         g_state.status = GoStatus::Waiting;
     }
 
     /// Blocks the currently running goroutine on an M (GoBlock event).
-    fn go_block(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_block(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64, reason: u64, stack: u64) {
         let m_state = self.m_states.entry(m_id).or_default();
         let Some(g_id) = m_state.g.take() else {
             return;
         };
-        self.go_block_internal(g_id, output, dt);
+        self.go_block_internal(g_id, output, dt, reason, stack);
     }
 
     /// Unblocks a goroutine (GoUnblock event).
     /// No-op if G doesn't exist or is already Runnable.
-    fn go_unblock(&mut self, g_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_unblock(&mut self, g_id: u64, output: &mut Vec<u8>, dt: u64, stack: u64) {
         let Some(g_state) = self.g_states.get_mut(&g_id) else {
             return;
         };
@@ -368,13 +417,22 @@ impl TraceStateMachine {
         write_varint(output, dt);
         write_varint(output, g_id);
         write_varint(output, g_seq);
-        write_varint(output, 0); // stack
+        write_varint(output, stack);
         g_state.status = GoStatus::Runnable;
     }
 
     /// Destroys a goroutine (GoDestroy event).
     /// Ensures G is running first (starts it if needed).
-    fn go_destroy(&mut self, m_id: u64, g_id: u64, output: &mut Vec<u8>, dt: u64) {
+    fn go_destroy(
+        &mut self,
+        m_id: u64,
+        g_id: u64,
+        output: &mut Vec<u8>,
+        dt: u64,
+        block_stack: u64,
+        wake_stack: u64,
+        create_stack: u64,
+    ) {
         // If G doesn't exist, nothing to destroy
         if !self.g_states.contains_key(&g_id) {
             return;
@@ -384,7 +442,7 @@ impl TraceStateMachine {
         {
             let m_state = self.m_states.entry(m_id).or_default();
             if m_state.g != Some(g_id) {
-                self.go_start(m_id, g_id, output, dt);
+                self.go_start(m_id, g_id, output, dt, block_stack, wake_stack, create_stack);
             }
         }
 
@@ -416,6 +474,33 @@ pub struct GoTraceSerializer {
     task_id_map: HashMap<u64, u64>,
     /// Next goroutine ID to assign.
     next_goroutine_id: u64,
+    /// Stack table: stack_id -> frames.
+    stack_table: HashMap<u64, Vec<StackFrame>>,
+    /// Next stack ID to assign.
+    next_stack_id: u64,
+    /// Next fake program counter.
+    next_pc: u64,
+    /// Pre-computed stack IDs for different event types.
+    stack_ids: StackIds,
+    /// Per-task stack IDs (task_id -> stack_id for that task's entry point).
+    /// The bottom frame of each task's stack is its spawn location, which becomes
+    /// the goroutine's display name in the timeline.
+    task_stack_map: HashMap<u64, u64>,
+}
+
+/// Pre-computed stack IDs for different event types.
+#[derive(Debug, Default)]
+struct StackIds {
+    /// Stack for task creation (GoCreate) - used as creator's stack.
+    create_stack: u64,
+    /// Stack for poll start (GoStart) - generic runtime stack.
+    start_stack: u64,
+    /// Stack for poll end / block (GoBlock).
+    block_stack: u64,
+    /// Stack for wake (GoUnblock).
+    wake_stack: u64,
+    /// Stack for terminate (GoDestroy).
+    destroy_stack: u64,
 }
 
 impl GoTraceSerializer {
@@ -426,6 +511,11 @@ impl GoTraceSerializer {
             next_string_id: 1, // 0 is reserved for empty string
             task_id_map: HashMap::new(),
             next_goroutine_id: 2, // Start at 2 since G=1 is reserved for "main" goroutine via GoStatus
+            stack_table: HashMap::new(),
+            next_stack_id: 1, // 0 is reserved for "no stack"
+            next_pc: 0x1000, // Start fake PCs at reasonable address
+            stack_ids: StackIds::default(),
+            task_stack_map: HashMap::new(),
         }
     }
 
@@ -454,8 +544,179 @@ impl GoTraceSerializer {
         id
     }
 
-    /// Writes the string table batch to the output.
-    fn write_string_table(&self, output: &mut Vec<u8>) {
+    /// Creates a stack frame with the given function, file, and line.
+    fn create_frame(&mut self, func: &str, file: &str, line: u64) -> StackFrame {
+        let pc = self.next_pc;
+        self.next_pc += 0x10; // Each "function" gets 16 bytes of fake address space
+        StackFrame {
+            pc,
+            func_id: self.get_or_create_string_id(func),
+            file_id: self.get_or_create_string_id(file),
+            line,
+        }
+    }
+
+    /// Creates a new stack and returns its ID.
+    fn create_stack(&mut self, frames: Vec<StackFrame>) -> u64 {
+        let id = self.next_stack_id;
+        self.next_stack_id += 1;
+        self.stack_table.insert(id, frames);
+        id
+    }
+
+    /// Creates a per-task stack using the spawn location as the entry point.
+    /// The spawn location becomes the bottom frame, which determines the
+    /// goroutine's display name in Datadog's timeline.
+    fn create_task_stack(&mut self, task_id: u64, location: &str) -> u64 {
+        // Check if we already have a stack for this task
+        if let Some(&stack_id) = self.task_stack_map.get(&task_id) {
+            return stack_id;
+        }
+
+        // Parse location like "src/main.rs:42" into file and line
+        let (file, line, func_name) = parse_location(location);
+
+        // Create a stack with the spawn location as the bottom frame
+        // This makes the goroutine's name be the spawn location
+        let frames = vec![
+            // Top frame: tokio runtime (most recent call)
+            self.create_frame(
+                "tokio::runtime::task::harness::poll",
+                "tokio/src/runtime/task/harness.rs",
+                156,
+            ),
+            // Bottom frame: the spawn location (this becomes the goroutine name)
+            self.create_frame(&func_name, &file, line),
+        ];
+
+        let stack_id = self.create_stack(frames);
+        self.task_stack_map.insert(task_id, stack_id);
+        stack_id
+    }
+
+    /// Gets the stack ID for a task, or returns the default start_stack if not found.
+    fn get_task_stack(&self, task_id: u64) -> u64 {
+        self.task_stack_map
+            .get(&task_id)
+            .copied()
+            .unwrap_or(self.stack_ids.start_stack)
+    }
+
+    /// Initializes pre-defined stacks for Tokio events.
+    /// These represent a plausible Tokio runtime call stack.
+    fn init_stacks(&mut self) {
+        // Create realistic-looking Tokio runtime stacks
+        // Stack for task creation (spawning a new task)
+        let create_frames = vec![
+            self.create_frame("tokio::runtime::spawn", "tokio/src/runtime/spawn.rs", 42),
+            self.create_frame(
+                "tokio::task::JoinHandle::new",
+                "tokio/src/task/join.rs",
+                87,
+            ),
+            self.create_frame("main", "src/main.rs", 15),
+        ];
+        self.stack_ids.create_stack = self.create_stack(create_frames);
+
+        // Stack for poll start (task begins executing)
+        let start_frames = vec![
+            self.create_frame(
+                "tokio::runtime::task::harness::poll",
+                "tokio/src/runtime/task/harness.rs",
+                156,
+            ),
+            self.create_frame(
+                "tokio::runtime::scheduler::multi_thread::worker::run",
+                "tokio/src/runtime/scheduler/multi_thread/worker.rs",
+                423,
+            ),
+        ];
+        self.stack_ids.start_stack = self.create_stack(start_frames);
+
+        // Stack for poll end / block (task yields)
+        let block_frames = vec![
+            self.create_frame(
+                "tokio::sync::oneshot::Receiver::poll",
+                "tokio/src/sync/oneshot.rs",
+                312,
+            ),
+            self.create_frame(
+                "tokio::runtime::task::harness::poll",
+                "tokio/src/runtime/task/harness.rs",
+                189,
+            ),
+        ];
+        self.stack_ids.block_stack = self.create_stack(block_frames);
+
+        // Stack for wake (task is woken)
+        let wake_frames = vec![
+            self.create_frame(
+                "tokio::sync::oneshot::Sender::send",
+                "tokio/src/sync/oneshot.rs",
+                198,
+            ),
+            self.create_frame(
+                "tokio::runtime::task::waker::wake",
+                "tokio/src/runtime/task/waker.rs",
+                67,
+            ),
+        ];
+        self.stack_ids.wake_stack = self.create_stack(wake_frames);
+
+        // Stack for task termination
+        let destroy_frames = vec![
+            self.create_frame(
+                "tokio::runtime::task::harness::complete",
+                "tokio/src/runtime/task/harness.rs",
+                245,
+            ),
+            self.create_frame(
+                "tokio::runtime::scheduler::multi_thread::worker::run",
+                "tokio/src/runtime/scheduler/multi_thread/worker.rs",
+                467,
+            ),
+        ];
+        self.stack_ids.destroy_stack = self.create_stack(destroy_frames);
+    }
+
+    /// Writes the stack table inside an EventBatch (M=-1).
+    fn write_stack_table(&self, output: &mut Vec<u8>, base_timestamp: u64) {
+        if self.stack_table.is_empty() {
+            return;
+        }
+
+        // Collect stacks sorted by ID
+        let mut stacks: Vec<(&u64, &Vec<StackFrame>)> = self.stack_table.iter().collect();
+        stacks.sort_by_key(|(id, _)| *id);
+
+        // Build the batch data:
+        // - EvStacks marker (no gen/size - just a marker)
+        // - EvStack entries: type, id, frame_count, frames
+        let mut batch_data = Vec::new();
+        batch_data.push(event_type::EV_STACKS);
+        for (id, frames) in stacks {
+            batch_data.push(event_type::EV_STACK);
+            write_varint(&mut batch_data, *id);
+            write_varint(&mut batch_data, frames.len() as u64);
+            for frame in frames {
+                write_varint(&mut batch_data, frame.pc);
+                write_varint(&mut batch_data, frame.func_id);
+                write_varint(&mut batch_data, frame.file_id);
+                write_varint(&mut batch_data, frame.line);
+            }
+        }
+
+        // Wrap in EventBatch with M=-1
+        output.push(event_type::EV_EVENT_BATCH);
+        write_varint(output, 1); // generation = 1
+        write_varint(output, u64::MAX); // M = -1
+        write_varint(output, base_timestamp);
+        write_varint(output, batch_data.len() as u64);
+        output.extend_from_slice(&batch_data);
+    }
+
+    /// Writes the string table inside an EventBatch (M=-1).
+    fn write_string_table(&self, output: &mut Vec<u8>, base_timestamp: u64) {
         if self.string_table.is_empty() {
             return;
         }
@@ -464,17 +725,23 @@ impl GoTraceSerializer {
         let mut strings: Vec<(&String, &u64)> = self.string_table.iter().collect();
         strings.sort_by_key(|(_, id)| *id);
 
-        // Build string batch data
+        // Build the batch data:
+        // - EvStrings marker (no gen/size - just a marker)
+        // - EvString entries: type, id, len, data
         let mut batch_data = Vec::new();
+        batch_data.push(event_type::EV_STRINGS);
         for (s, id) in strings {
+            batch_data.push(event_type::EV_STRING);
             write_varint(&mut batch_data, *id);
             write_varint(&mut batch_data, s.len() as u64);
             batch_data.extend_from_slice(s.as_bytes());
         }
 
-        // Write string batch header: type, gen, size, data
-        output.push(event_type::EV_STRINGS);
+        // Wrap in EventBatch with M=-1
+        output.push(event_type::EV_EVENT_BATCH);
         write_varint(output, 1); // generation = 1
+        write_varint(output, u64::MAX); // M = -1
+        write_varint(output, base_timestamp);
         write_varint(output, batch_data.len() as u64);
         output.extend_from_slice(&batch_data);
     }
@@ -619,7 +886,7 @@ impl TimelineSerializer for GoTraceSerializer {
     fn serialize(
         &mut self,
         events: &[OwnedEvent],
-        batch_start: SystemTime,
+        _batch_start: SystemTime,
         _batch_end: SystemTime,
     ) -> Result<SerializedTimeline, SerializeError> {
         // Reset state for each batch
@@ -627,6 +894,15 @@ impl TimelineSerializer for GoTraceSerializer {
         self.next_string_id = 1;
         self.task_id_map.clear();
         self.next_goroutine_id = 2; // G=1 reserved for main goroutine
+        self.stack_table.clear();
+        self.next_stack_id = 1;
+        self.next_pc = 0x1000;
+        self.stack_ids = StackIds::default();
+        self.task_stack_map.clear();
+
+        // Initialize stacks and reason strings
+        self.init_stacks();
+        let wait_reason_id = self.get_or_create_string_id(block_reason::WAIT);
 
         let mut output = Vec::new();
 
@@ -658,6 +934,9 @@ impl TimelineSerializer for GoTraceSerializer {
                 } => {
                     self.map_task_id(*task_id);
                     self.get_or_create_string_id(location);
+                    // Create a per-task stack with the spawn location as the entry point
+                    // This gives each goroutine a unique name in the timeline
+                    self.create_task_stack(*task_id, location);
                 }
                 OwnedEvent::PollStart {
                     task_id,
@@ -701,6 +980,20 @@ impl TimelineSerializer for GoTraceSerializer {
         write_varint(&mut output, base_timestamp);
         write_varint(&mut output, freq_data.len() as u64);
         output.extend_from_slice(&freq_data);
+
+        // === Write string table (must come before stacks since stacks reference strings) ===
+        self.write_string_table(&mut output, base_timestamp);
+
+        // === Write stack table ===
+        self.write_stack_table(&mut output, base_timestamp);
+
+        // Copy stack IDs for use in the loop (avoids borrow issues with self)
+        let create_stack = self.stack_ids.create_stack;
+        let _start_stack = self.stack_ids.start_stack;
+        let block_stack = self.stack_ids.block_stack;
+        let wake_stack = self.stack_ids.wake_stack;
+        // Note: destroy_stack exists but isn't used because GoDestroy event
+        // in Go trace format doesn't include a stack argument (only dt)
 
         // === Process events through state machine, routing to per-M batches ===
         // Sort all events by timestamp for proper ordering
@@ -800,22 +1093,54 @@ impl TimelineSerializer for GoTraceSerializer {
             match event {
                 OwnedEvent::TaskSpawn { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_create(m_id, g_id, &mut batch.data, dt);
+                    // Use the per-task stack (based on spawn location) as the new goroutine's entry point
+                    // This gives each goroutine a unique name in the timeline
+                    let task_stack = self.get_task_stack(*task_id);
+                    state_machine.go_create(
+                        m_id,
+                        g_id,
+                        &mut batch.data,
+                        dt,
+                        task_stack, // new_stack: where the goroutine starts (determines its name)
+                        create_stack, // stack: the creator's stack
+                    );
                 }
                 OwnedEvent::PollStart { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_start(m_id, g_id, &mut batch.data, dt);
+                    state_machine.go_start(
+                        m_id,
+                        g_id,
+                        &mut batch.data,
+                        dt,
+                        block_stack,
+                        wake_stack,
+                        create_stack,
+                    );
                 }
                 OwnedEvent::PollEnd { .. } => {
-                    state_machine.go_block(m_id, &mut batch.data, dt);
+                    state_machine.go_block(
+                        m_id,
+                        &mut batch.data,
+                        dt,
+                        wait_reason_id,
+                        block_stack,
+                    );
                 }
                 OwnedEvent::WakeEvent { woken_task_id, .. } => {
                     let g_id = self.task_id_map.get(woken_task_id).copied().unwrap_or(1);
-                    state_machine.go_unblock(g_id, &mut batch.data, dt);
+                    state_machine.go_unblock(g_id, &mut batch.data, dt, wake_stack);
                 }
                 OwnedEvent::TaskTerminate { task_id, .. } => {
                     let g_id = self.task_id_map.get(task_id).copied().unwrap_or(1);
-                    state_machine.go_destroy(m_id, g_id, &mut batch.data, dt);
+                    state_machine.go_destroy(
+                        m_id,
+                        g_id,
+                        &mut batch.data,
+                        dt,
+                        block_stack,
+                        wake_stack,
+                        create_stack,
+                    );
                 }
                 OwnedEvent::WorkerPark { .. } | OwnedEvent::WorkerUnpark { .. } => {
                     // Could emit ProcStop/ProcStart here for worker park/unpark
@@ -840,6 +1165,30 @@ impl TimelineSerializer for GoTraceSerializer {
             content_type: "application/octet-stream",
         })
     }
+}
+
+/// Parses a location string like "src/main.rs:42" into (file, line, func_name).
+/// The func_name is derived from the file path to create a meaningful goroutine name.
+fn parse_location(location: &str) -> (String, u64, String) {
+    // Split on ':' to get file and line
+    let (file, line) = if let Some(colon_pos) = location.rfind(':') {
+        let file = &location[..colon_pos];
+        let line_str = &location[colon_pos + 1..];
+        let line = line_str.parse().unwrap_or(1);
+        (file.to_string(), line)
+    } else {
+        (location.to_string(), 1)
+    };
+
+    // Create a function name from the location
+    // e.g., "src/main.rs:42" -> "main.rs:42" (use basename + line as the name)
+    let func_name = if let Some(slash_pos) = location.rfind('/') {
+        location[slash_pos + 1..].to_string()
+    } else {
+        location.to_string()
+    };
+
+    (file, line, func_name)
 }
 
 /// Writes a variable-length integer (LEB128 unsigned) to the output.
@@ -1026,31 +1375,34 @@ mod tests {
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
 
+        // Use dummy stack IDs for testing (0 = no stack)
+        let stack = 1u64;
+
         // TaskSpawn → GoCreate
-        state_machine.go_create(0, 1, &mut output, 0);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
         assert!(state_machine.g_states.contains_key(&1));
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
 
         // PollStart → GoStart
-        state_machine.go_start(0, 1, &mut output, 100);
+        state_machine.go_start(0, 1, &mut output, 100, stack, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
         assert_eq!(state_machine.m_states[&0].g, Some(1));
 
         // PollEnd → GoBlock
-        state_machine.go_block(0, &mut output, 200);
+        state_machine.go_block(0, &mut output, 200, 0, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Waiting);
         assert_eq!(state_machine.m_states[&0].g, None);
 
         // WakeEvent → GoUnblock
-        state_machine.go_unblock(1, &mut output, 300);
+        state_machine.go_unblock(1, &mut output, 300, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
 
         // PollStart → GoStart (again)
-        state_machine.go_start(0, 1, &mut output, 400);
+        state_machine.go_start(0, 1, &mut output, 400, stack, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
 
         // TaskTerminate → GoDestroy
-        state_machine.go_destroy(0, 1, &mut output, 500);
+        state_machine.go_destroy(0, 1, &mut output, 500, stack, stack, stack);
         assert!(!state_machine.g_states.contains_key(&1));
         assert_eq!(state_machine.m_states[&0].g, None);
     }
@@ -1060,16 +1412,17 @@ mod tests {
         // Test: G1 running, start G2 → G1 gets blocked automatically
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create and start G1
-        state_machine.go_create(0, 1, &mut output, 0);
-        state_machine.go_start(0, 1, &mut output, 100);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
+        state_machine.go_start(0, 1, &mut output, 100, stack, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
         assert_eq!(state_machine.m_states[&0].g, Some(1));
 
         // Create G2 and start it - this should block G1 first
-        state_machine.go_create(0, 2, &mut output, 200);
-        state_machine.go_start(0, 2, &mut output, 300);
+        state_machine.go_create(0, 2, &mut output, 200, stack, stack);
+        state_machine.go_start(0, 2, &mut output, 300, stack, stack, stack);
 
         // G1 should now be blocked (Waiting)
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Waiting);
@@ -1083,26 +1436,27 @@ mod tests {
         // Test: sequence numbers increment correctly
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create and start G1
-        state_machine.go_create(0, 1, &mut output, 0);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
         let seq_before = state_machine.g_states[&1].seq;
-        state_machine.go_start(0, 1, &mut output, 100);
+        state_machine.go_start(0, 1, &mut output, 100, stack, stack, stack);
         let seq_after_start = state_machine.g_states[&1].seq;
 
         // Sequence should have incremented
         assert!(seq_after_start > seq_before);
 
         // Block and unblock
-        state_machine.go_block(0, &mut output, 200);
-        state_machine.go_unblock(1, &mut output, 300);
+        state_machine.go_block(0, &mut output, 200, 0, stack);
+        state_machine.go_unblock(1, &mut output, 300, stack);
         let seq_after_unblock = state_machine.g_states[&1].seq;
 
         // Sequence should have incremented again
         assert!(seq_after_unblock > seq_after_start);
 
         // Start again
-        state_machine.go_start(0, 1, &mut output, 400);
+        state_machine.go_start(0, 1, &mut output, 400, stack, stack, stack);
         let seq_after_restart = state_machine.g_states[&1].seq;
 
         // Sequence should have incremented again
@@ -1114,10 +1468,11 @@ mod tests {
         // Test: PollStart for unknown task auto-creates the goroutine
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Start a goroutine that was never created
         assert!(!state_machine.g_states.contains_key(&1));
-        state_machine.go_start(0, 1, &mut output, 100);
+        state_machine.go_start(0, 1, &mut output, 100, stack, stack, stack);
 
         // Goroutine should have been auto-created and started
         assert!(state_machine.g_states.contains_key(&1));
@@ -1129,15 +1484,16 @@ mod tests {
         // Test: PollStart on a waiting goroutine unblocks it first
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create, start, and block G1
-        state_machine.go_create(0, 1, &mut output, 0);
-        state_machine.go_start(0, 1, &mut output, 100);
-        state_machine.go_block(0, &mut output, 200);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
+        state_machine.go_start(0, 1, &mut output, 100, stack, stack, stack);
+        state_machine.go_block(0, &mut output, 200, 0, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Waiting);
 
         // Start G1 again - it should auto-unblock first
-        state_machine.go_start(0, 1, &mut output, 300);
+        state_machine.go_start(0, 1, &mut output, 300, stack, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
     }
 
@@ -1146,15 +1502,16 @@ mod tests {
         // Test: WakeEvent for already-runnable G is a no-op
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create G1 (starts in Runnable state)
-        state_machine.go_create(0, 1, &mut output, 0);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
 
         let output_len_before = output.len();
 
         // Wake G1 - should be no-op since already runnable
-        state_machine.go_unblock(1, &mut output, 100);
+        state_machine.go_unblock(1, &mut output, 100, stack);
 
         // No new output should have been generated
         assert_eq!(output.len(), output_len_before);
@@ -1166,13 +1523,14 @@ mod tests {
         // Test: TaskTerminate for non-running G starts it first
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create G1 but don't start it
-        state_machine.go_create(0, 1, &mut output, 0);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
 
         // Destroy G1 - should start it first
-        state_machine.go_destroy(0, 1, &mut output, 100);
+        state_machine.go_destroy(0, 1, &mut output, 100, stack, stack, stack);
 
         // G1 should be gone
         assert!(!state_machine.g_states.contains_key(&1));
@@ -1183,12 +1541,122 @@ mod tests {
         // Test: Processor starts automatically when needed
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
+        let stack = 1u64;
 
         // Create a goroutine - this should auto-start the processor
-        state_machine.go_create(0, 1, &mut output, 0);
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
 
         // Processor should be running
         assert_eq!(state_machine.p_states[&0].status, ProcStatus::Running);
         assert_eq!(state_machine.m_states[&0].p, Some(0));
+    }
+
+    /// Generate a realistic trace and write to file for validation with `go tool trace`.
+    /// Run with: cargo test -p datadog-opentelemetry --features tokio-timeline -- test_write_trace_file --ignored
+    /// Then validate with: go tool trace /tmp/test_tokio.trace
+    #[test]
+    #[ignore] // Only run manually for debugging
+    fn test_write_trace_file() {
+        use std::fs::File;
+        use std::io::Write;
+
+        let mut serializer = GoTraceSerializer::new();
+
+        // Use realistic timestamps (monotonic nanoseconds)
+        let base = 1_000_000_000_000_000u64; // ~11.5 days in nanoseconds
+
+        let events = vec![
+            // Task 1 spawned
+            OwnedEvent::TaskSpawn {
+                timestamp_nanos: base,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            // Task 2 spawned
+            OwnedEvent::TaskSpawn {
+                timestamp_nanos: base + 1_000,
+                task_id: 200,
+                location: "src/main.rs:43".to_string(),
+            },
+            // Task 1 starts on worker 0
+            OwnedEvent::PollStart {
+                timestamp_nanos: base + 10_000,
+                worker_id: 0,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            // Task 2 starts on worker 1
+            OwnedEvent::PollStart {
+                timestamp_nanos: base + 15_000,
+                worker_id: 1,
+                task_id: 200,
+                location: "src/main.rs:43".to_string(),
+            },
+            // Task 1 blocks
+            OwnedEvent::PollEnd {
+                timestamp_nanos: base + 100_000,
+                worker_id: 0,
+            },
+            // Task 2 blocks
+            OwnedEvent::PollEnd {
+                timestamp_nanos: base + 150_000,
+                worker_id: 1,
+            },
+            // Task 1 woken
+            OwnedEvent::WakeEvent {
+                timestamp_nanos: base + 200_000,
+                waker_task_id: 200,
+                woken_task_id: 100,
+            },
+            // Task 1 resumes
+            OwnedEvent::PollStart {
+                timestamp_nanos: base + 210_000,
+                worker_id: 0,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            // Task 1 completes
+            OwnedEvent::PollEnd {
+                timestamp_nanos: base + 300_000,
+                worker_id: 0,
+            },
+            OwnedEvent::TaskTerminate {
+                timestamp_nanos: base + 300_001,
+                task_id: 100,
+            },
+            // Task 2 woken
+            OwnedEvent::WakeEvent {
+                timestamp_nanos: base + 400_000,
+                waker_task_id: 100,
+                woken_task_id: 200,
+            },
+            // Task 2 resumes
+            OwnedEvent::PollStart {
+                timestamp_nanos: base + 410_000,
+                worker_id: 1,
+                task_id: 200,
+                location: "src/main.rs:43".to_string(),
+            },
+            // Task 2 completes
+            OwnedEvent::PollEnd {
+                timestamp_nanos: base + 500_000,
+                worker_id: 1,
+            },
+            OwnedEvent::TaskTerminate {
+                timestamp_nanos: base + 500_001,
+                task_id: 200,
+            },
+        ];
+
+        let result = serializer
+            .serialize(&events, SystemTime::now(), SystemTime::now())
+            .unwrap();
+
+        // Write to file
+        let path = "/tmp/test_tokio.trace";
+        let mut file = File::create(path).expect("Failed to create trace file");
+        file.write_all(&result.data).expect("Failed to write trace");
+        println!("Wrote {} bytes to {}", result.data.len(), path);
+        println!("Validate with: go tool trace {}", path);
     }
 }

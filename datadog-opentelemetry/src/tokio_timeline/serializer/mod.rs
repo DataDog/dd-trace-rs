@@ -16,6 +16,7 @@ pub struct SerializedTimeline {
     /// The serialized data.
     pub data: Vec<u8>,
     /// Profile type name for multipart form field (e.g., "execution-trace").
+    #[allow(dead_code)]
     pub name: &'static str,
     /// Filename for the attachment (e.g., "go.trace" or "timeline.pprof").
     pub filename: &'static str,
