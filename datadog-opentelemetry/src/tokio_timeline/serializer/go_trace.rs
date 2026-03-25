@@ -16,35 +16,51 @@ use crate::tokio_timeline::buffer::OwnedEvent;
 const GO_TRACE_HEADER: &[u8; 16] = b"go 1.23 trace\x00\x00\x00";
 
 /// Go trace event types (v2 format for Go 1.22+).
-/// From go/src/internal/trace/v2/event/go122/event.go
+/// From go/src/internal/trace/event/go122/event.go
 mod event_type {
-    /// Event batch header.
+    // Structural events (iota starts at 0, EvNone=0 is unused)
+    /// Event batch header [gen, m, time, size].
     pub const EV_EVENT_BATCH: u8 = 1;
     /// Stack table batch.
     pub const EV_STACKS: u8 = 2;
+    // EvStack = 3
     /// String table batch.
     pub const EV_STRINGS: u8 = 4;
-    /// Frequency event - provides timestamp calibration.
+    // EvString = 5
+    // EvCPUSamples = 6
+    // EvCPUSample = 7
+    /// Frequency event - provides timestamp units per sec [freq].
     pub const EV_FREQUENCY: u8 = 8;
-    /// Number of Ps changed.
-    pub const EV_PROCS_CHANGE: u8 = 10;
-    /// Processor (P) started.
-    pub const EV_PROC_START: u8 = 11;
-    /// Processor (P) stopped.
-    pub const EV_PROC_STOP: u8 = 12;
-    /// Initial P status (for establishing state).
-    pub const EV_PROC_STATUS: u8 = 14;
-    /// Goroutine created.
-    pub const EV_GO_CREATE: u8 = 15;
-    /// Goroutine started running.
-    pub const EV_GO_START: u8 = 17;
-    /// Goroutine destroyed.
-    pub const EV_GO_DESTROY: u8 = 18;
-    /// Goroutine stopped (yielded/preempted).
+
+    // Procs (starting at 9)
+    /// GOMAXPROCS change [timestamp, GOMAXPROCS, stack ID].
+    pub const EV_PROCS_CHANGE: u8 = 9;
+    /// P started [timestamp, P ID, P seq].
+    pub const EV_PROC_START: u8 = 10;
+    /// P stopped [timestamp].
+    pub const EV_PROC_STOP: u8 = 11;
+    // EvProcSteal = 12
+    /// P status at generation start [timestamp, P ID, status].
+    pub const EV_PROC_STATUS: u8 = 13;
+
+    // Goroutines (starting at 14)
+    /// Goroutine creation [timestamp, new goroutine ID, new stack ID, stack ID].
+    pub const EV_GO_CREATE: u8 = 14;
+    // EvGoCreateSyscall = 15
+    /// Goroutine starts running [timestamp, goroutine ID, goroutine seq].
+    pub const EV_GO_START: u8 = 16;
+    /// Goroutine ends [timestamp].
+    pub const EV_GO_DESTROY: u8 = 17;
+    // EvGoDestroySyscall = 18
+    /// Goroutine yields its time, but is runnable [timestamp, reason, stack ID].
     pub const EV_GO_STOP: u8 = 19;
-    /// Goroutine unblocked.
+    // EvGoBlock = 20
+    /// Goroutine is unblocked [timestamp, goroutine ID, goroutine seq, stack ID].
     pub const EV_GO_UNBLOCK: u8 = 21;
-    /// Initial goroutine status (for establishing state).
+    // EvGoSyscallBegin = 22
+    // EvGoSyscallEnd = 23
+    // EvGoSyscallEndBlocked = 24
+    /// Goroutine status at generation start [timestamp, goroutine ID, thread ID, status].
     pub const EV_GO_STATUS: u8 = 25;
 }
 
@@ -55,6 +71,10 @@ pub struct GoTraceSerializer {
     string_table: HashMap<String, u64>,
     /// Next string ID.
     next_string_id: u64,
+    /// Task ID mapping (dial9 task ID -> small sequential goroutine ID).
+    task_id_map: HashMap<u64, u64>,
+    /// Next goroutine ID to assign.
+    next_goroutine_id: u64,
 }
 
 impl GoTraceSerializer {
@@ -63,7 +83,20 @@ impl GoTraceSerializer {
         Self {
             string_table: HashMap::new(),
             next_string_id: 1, // 0 is reserved for empty string
+            task_id_map: HashMap::new(),
+            next_goroutine_id: 1, // Goroutine IDs start at 1 (0 is invalid in Go)
         }
+    }
+
+    /// Maps a dial9 task ID to a small sequential goroutine ID.
+    fn map_task_id(&mut self, task_id: u64) -> u64 {
+        if let Some(&g_id) = self.task_id_map.get(&task_id) {
+            return g_id;
+        }
+        let g_id = self.next_goroutine_id;
+        self.next_goroutine_id += 1;
+        self.task_id_map.insert(task_id, g_id);
+        g_id
     }
 
     /// Gets or creates a string ID for the given string.
@@ -130,20 +163,17 @@ impl GoTraceSerializer {
                 OwnedEvent::TaskSpawn {
                     task_id, location, ..
                 } => {
-                    // EvGoCreate: dt, new_g, new_stack, stack
-                    batch_data.push(event_type::EV_GO_CREATE);
-                    write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, *task_id); // new goroutine ID
-                    write_varint(&mut batch_data, 0); // new_stack (no stack info)
-                    write_varint(&mut batch_data, 0); // creator stack (no stack info)
-                    // Store location in string table for potential future use
+                    // Skip - GoCreate events are emitted upfront for all goroutines
+                    // Just ensure the task is mapped and location is in string table
+                    let _ = self.map_task_id(*task_id);
                     let _ = self.get_or_create_string_id(location);
                 }
                 OwnedEvent::PollStart { task_id, .. } => {
                     // EvGoStart: dt, g, g_seq
+                    let g_id = self.map_task_id(*task_id);
                     batch_data.push(event_type::EV_GO_START);
                     write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, *task_id); // goroutine ID
+                    write_varint(&mut batch_data, g_id); // goroutine ID (mapped)
                     write_varint(&mut batch_data, 0); // sequence number
                 }
                 OwnedEvent::PollEnd { .. } => {
@@ -153,31 +183,26 @@ impl GoTraceSerializer {
                     write_varint(&mut batch_data, 0); // reason string ID (empty)
                     write_varint(&mut batch_data, 0); // stack ID (no stack info)
                 }
-                OwnedEvent::TaskTerminate { .. } => {
+                OwnedEvent::TaskTerminate { task_id, .. } => {
                     // EvGoDestroy: dt (just timestamp delta)
+                    // Note: We don't need to map the ID here, just emit the event
+                    let _ = self.map_task_id(*task_id); // ensure it's mapped for consistency
                     batch_data.push(event_type::EV_GO_DESTROY);
                     write_varint(&mut batch_data, delta);
                 }
-                OwnedEvent::WorkerPark { .. } => {
-                    // EvProcStop: dt (just timestamp delta)
-                    batch_data.push(event_type::EV_PROC_STOP);
-                    write_varint(&mut batch_data, delta);
-                }
-                OwnedEvent::WorkerUnpark { .. } => {
-                    // EvProcStart: dt, p, p_seq
-                    batch_data.push(event_type::EV_PROC_START);
-                    write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, worker_id as u64); // P ID
-                    write_varint(&mut batch_data, 0); // P sequence
+                OwnedEvent::WorkerPark { .. } | OwnedEvent::WorkerUnpark { .. } => {
+                    // Skip P start/stop events when all events are on a single M
+                    // These would require multi-M support to work correctly
                 }
                 OwnedEvent::WakeEvent {
                     woken_task_id,
                     ..
                 } => {
                     // EvGoUnblock: dt, g, g_seq, stack
+                    let g_id = self.map_task_id(*woken_task_id);
                     batch_data.push(event_type::EV_GO_UNBLOCK);
                     write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, *woken_task_id); // goroutine being unblocked
+                    write_varint(&mut batch_data, g_id); // goroutine being unblocked (mapped)
                     write_varint(&mut batch_data, 0); // sequence number
                     write_varint(&mut batch_data, 0); // stack ID (no stack info)
                 }
@@ -194,10 +219,11 @@ impl GoTraceSerializer {
         output.extend_from_slice(&batch_data);
     }
 
-    /// Groups events by worker ID.
+    /// Groups events by worker ID, sorted by timestamp within each group.
     fn group_by_worker(events: &[OwnedEvent]) -> HashMap<u8, Vec<&OwnedEvent>> {
         let mut groups: HashMap<u8, Vec<&OwnedEvent>> = HashMap::new();
 
+        // First, collect events into groups
         for event in events {
             let worker_id = match event {
                 OwnedEvent::PollStart { worker_id, .. }
@@ -213,6 +239,11 @@ impl GoTraceSerializer {
             groups.entry(worker_id).or_default().push(event);
         }
 
+        // Sort each group by timestamp
+        for (_worker_id, group) in groups.iter_mut() {
+            group.sort_by_key(|e| e.timestamp_nanos());
+        }
+
         groups
     }
 }
@@ -224,9 +255,11 @@ impl TimelineSerializer for GoTraceSerializer {
         batch_start: SystemTime,
         _batch_end: SystemTime,
     ) -> Result<SerializedTimeline, SerializeError> {
-        // Reset string table for each batch
+        // Reset state for each batch
         self.string_table.clear();
         self.next_string_id = 1;
+        self.task_id_map.clear();
+        self.next_goroutine_id = 1;
 
         let mut output = Vec::new();
 
@@ -245,66 +278,147 @@ impl TimelineSerializer for GoTraceSerializer {
         // The events have relative timestamps, so we use them directly
         let base_timestamp = min_event_timestamp;
 
-        // First pass: collect all strings and build events grouped by worker
-        let grouped = Self::group_by_worker(events);
-
-        // Pre-populate string table by scanning all events
+        // First pass: collect all task IDs and map them to small sequential IDs
+        // Also collect strings
         for event in events {
-            if let OwnedEvent::TaskSpawn { location, .. } | OwnedEvent::PollStart { location, .. } =
-                event
-            {
-                self.get_or_create_string_id(location);
+            match event {
+                OwnedEvent::TaskSpawn {
+                    task_id, location, ..
+                } => {
+                    self.map_task_id(*task_id);
+                    self.get_or_create_string_id(location);
+                }
+                OwnedEvent::PollStart {
+                    task_id, location, ..
+                } => {
+                    self.map_task_id(*task_id);
+                    self.get_or_create_string_id(location);
+                }
+                OwnedEvent::TaskTerminate { task_id, .. } => {
+                    self.map_task_id(*task_id);
+                }
+                OwnedEvent::WakeEvent {
+                    waker_task_id,
+                    woken_task_id,
+                    ..
+                } => {
+                    self.map_task_id(*waker_task_id);
+                    self.map_task_id(*woken_task_id);
+                }
+                _ => {}
             }
         }
 
-        // Go trace v2 format: First EventBatch contains Frequency and initial state
+        // Group events by worker for later processing
+        let grouped = Self::group_by_worker(events);
+
+        // Go trace v2 format structure (based on real Go traces):
+        // 1. First EventBatch (M=-1): ONLY Frequency event
+        // 2. Second EventBatch: ProcsChange
+        // 3. Third EventBatch: ProcStatus for each P
+        // 4. Fourth EventBatch: GoStatus for each goroutine (to establish initial state)
+        // 5. Event batches per worker with actual events
 
         // Collect unique worker IDs for initial status
-        let worker_ids: Vec<u8> = grouped.keys().copied().collect();
+        let mut worker_ids: Vec<u8> = grouped.keys().copied().collect();
+        worker_ids.sort();
         let num_workers = worker_ids.len().max(1) as u64;
 
-        // Build initial batch data with Frequency and setup events
-        let mut init_data = Vec::new();
+        // === First batch: Frequency only (M=-1) ===
+        let mut freq_data = Vec::new();
+        freq_data.push(event_type::EV_FREQUENCY);
+        write_varint(&mut freq_data, 1_000_000_000); // 1GHz = timestamps in nanoseconds
 
-        // Frequency event
-        init_data.push(event_type::EV_FREQUENCY);
-        write_varint(&mut init_data, 1_000_000_000); // 1GHz = timestamps in nanoseconds
-
-        // ProcsChange: dt, procs - establish number of processors
-        init_data.push(event_type::EV_PROCS_CHANGE);
-        write_varint(&mut init_data, 0); // dt = 0
-        write_varint(&mut init_data, num_workers); // number of Ps
-
-        // ProcStatus for each P: dt, p, status (status: 0=idle, 1=running)
-        for &worker_id in &worker_ids {
-            init_data.push(event_type::EV_PROC_STATUS);
-            write_varint(&mut init_data, 0); // dt = 0
-            write_varint(&mut init_data, worker_id as u64); // P ID
-            write_varint(&mut init_data, 1); // status = running
-        }
-
-        // Write first EventBatch with initialization
         output.push(event_type::EV_EVENT_BATCH);
         write_varint(&mut output, 1); // generation = 1
-        write_varint(&mut output, u64::MAX); // M = -1 (no thread, special)
+        write_varint(&mut output, u64::MAX); // M = -1 (special)
         write_varint(&mut output, base_timestamp); // base timestamp
-        write_varint(&mut output, init_data.len() as u64);
-        output.extend_from_slice(&init_data);
+        write_varint(&mut output, freq_data.len() as u64);
+        output.extend_from_slice(&freq_data);
+
+        // === Second batch: ProcsChange (M=0) ===
+        // This sets GOMAXPROCS - must be on a real M, not M=-1
+        let mut procs_data = Vec::new();
+        procs_data.push(event_type::EV_PROCS_CHANGE);
+        write_varint(&mut procs_data, 0); // dt = 0
+        write_varint(&mut procs_data, num_workers); // number of Ps
+        write_varint(&mut procs_data, 0); // stack ID
+
+        output.push(event_type::EV_EVENT_BATCH);
+        write_varint(&mut output, 1); // generation = 1
+        write_varint(&mut output, 0); // M = 0 (not -1)
+        write_varint(&mut output, base_timestamp); // base timestamp
+        write_varint(&mut output, procs_data.len() as u64);
+        output.extend_from_slice(&procs_data);
+
+        // === For each worker M, emit a batch with ProcStart to associate P with M ===
+        // ProcStart: dt, P ID, P seq - this puts P on the current M
+        for &worker_id in &worker_ids {
+            let mut start_data = Vec::new();
+            start_data.push(event_type::EV_PROC_START);
+            write_varint(&mut start_data, 0); // dt = 0
+            write_varint(&mut start_data, worker_id as u64); // P ID = worker_id
+            write_varint(&mut start_data, 0); // P seq = 0
+
+            output.push(event_type::EV_EVENT_BATCH);
+            write_varint(&mut output, 1); // generation = 1
+            write_varint(&mut output, worker_id as u64); // M = worker_id
+            write_varint(&mut output, base_timestamp); // base timestamp
+            write_varint(&mut output, start_data.len() as u64);
+            output.extend_from_slice(&start_data);
+        }
+
+        // Since we may not have TaskSpawn events for all goroutines (dial9 might only
+        // send PollStart), we need to emit GoCreate for each unique goroutine we've seen
+        // before writing the main event batch.
+        let mut create_data = Vec::new();
+        let mut sorted_tasks: Vec<_> = self.task_id_map.iter().collect();
+        sorted_tasks.sort_by_key(|(_, &g_id)| g_id);
+        for (_, &g_id) in sorted_tasks {
+            // GoCreate: dt, new_g, new_stack, stack
+            create_data.push(event_type::EV_GO_CREATE);
+            write_varint(&mut create_data, 0); // dt = 0
+            write_varint(&mut create_data, g_id); // goroutine ID
+            write_varint(&mut create_data, 0); // new_stack (no stack info)
+            write_varint(&mut create_data, 0); // creator stack (no stack info)
+        }
+
+        if !create_data.is_empty() {
+            output.push(event_type::EV_EVENT_BATCH);
+            write_varint(&mut output, 1); // generation = 1
+            write_varint(&mut output, 0); // M = 0
+            write_varint(&mut output, base_timestamp); // base timestamp
+            write_varint(&mut output, create_data.len() as u64);
+            output.extend_from_slice(&create_data);
+        }
 
         // Write string table
         self.write_string_table(&mut output);
 
-        // Write event batches for each worker
-        for (worker_id, worker_events) in grouped {
-            let owned_events: Vec<OwnedEvent> = worker_events.into_iter().cloned().collect();
-            self.write_event_batch(
-                &mut output,
-                worker_id,
-                &owned_events,
-                base_timestamp,
-                min_event_timestamp,
-            );
-        }
+        // Write all events in a single batch on M=0 to ensure causal ordering
+        // Sort events with custom ordering:
+        // 1. TaskSpawn events first (GoCreate must come before GoStart for same goroutine)
+        // 2. Then other events by timestamp
+        let mut all_events: Vec<&OwnedEvent> = events.iter().collect();
+        all_events.sort_by(|a, b| {
+            // TaskSpawn events come first
+            let a_is_spawn = matches!(a, OwnedEvent::TaskSpawn { .. });
+            let b_is_spawn = matches!(b, OwnedEvent::TaskSpawn { .. });
+            match (a_is_spawn, b_is_spawn) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.timestamp_nanos().cmp(&b.timestamp_nanos()),
+            }
+        });
+        let owned_events: Vec<OwnedEvent> = all_events.into_iter().cloned().collect();
+
+        self.write_event_batch(
+            &mut output,
+            0, // Use M=0 for all events
+            &owned_events,
+            base_timestamp,
+            min_event_timestamp,
+        );
 
         Ok(SerializedTimeline {
             data: output,
