@@ -57,7 +57,7 @@ fn main() {
     let timeline_config = TimelineConfig::builder()
         .upload_interval(Duration::from_secs(5)) // Upload every 5 seconds for testing
         .max_buffered_events(50_000)
-        .format(TimelineFormat::GoTrace) // Use Go trace format for timeline visualization
+        .format(TimelineFormat::Both) // Send both pprof and go.trace (Datadog expects bundled profiles)
         .build();
 
     // Step 3: Build the timeline writer and handle

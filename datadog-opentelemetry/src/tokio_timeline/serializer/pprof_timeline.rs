@@ -459,8 +459,8 @@ impl TimelineSerializer for PprofTimelineSerializer {
 
         Ok(SerializedTimeline {
             data: compressed,
-            name: "timeline.pprof",
-            filename: "timeline.pprof",
+            name: "cpu.pprof",
+            filename: "cpu.pprof",
             content_type: "application/octet-stream",
         })
     }
@@ -491,7 +491,7 @@ mod tests {
             .unwrap();
 
         assert!(!result.data.is_empty());
-        assert_eq!(result.filename, "timeline.pprof");
+        assert_eq!(result.filename, "cpu.pprof");
         assert_eq!(result.content_type, "application/octet-stream");
     }
 
