@@ -1,11 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use opentelemetry::trace::TraceId;
-use std::fmt;
-
 use super::constants::{numeric, rate};
+use crate::sampling::TraceIdLike;
 use numeric::{KNUTH_FACTOR, MAX_UINT_64BITS};
+use std::fmt;
 
 /// Keeps (100 * `sample_rate`)% of the traces randomly.
 #[derive(Clone)]
@@ -50,7 +49,7 @@ impl RateSampler {
 
     /// Determines if a trace should be sampled based on its trace_id and the configured rate.
     /// Returns true if the trace should be kept, false otherwise.
-    pub fn sample(&self, trace_id: TraceId) -> bool {
+    pub fn sample<T: TraceIdLike>(&self, trace_id: &T) -> bool {
         // Fast-path for sample rate of 0.0 (always drop) or 1.0 (always sample)
         if self.sample_rate <= rate::MIN_SAMPLE_RATE {
             return false;
@@ -60,8 +59,7 @@ impl RateSampler {
         }
 
         // Convert trace_id to u128 and then cast to u64 to get the lower 64 bits
-        let trace_id_u128 = u128::from_be_bytes(trace_id.to_bytes());
-        let trace_id_64bits = trace_id_u128 as u64;
+        let trace_id_64bits = trace_id.to_u128() as u64;
 
         let hashed_id = trace_id_64bits.wrapping_mul(KNUTH_FACTOR);
 
@@ -124,7 +122,7 @@ mod tests {
         bytes_zero[15] = 1; // Example ID
         let trace_id_zero = TraceId::from_bytes(bytes_zero);
         assert!(
-            !sampler_zero.sample(trace_id_zero),
+            !sampler_zero.sample(&trace_id_zero),
             "sampler_zero should return false"
         );
 
@@ -134,7 +132,7 @@ mod tests {
         bytes_one[15] = 2; // Example ID
         let trace_id_one = TraceId::from_bytes(bytes_one);
         assert!(
-            sampler_one.sample(trace_id_one),
+            sampler_one.sample(&trace_id_one),
             "sampler_one should return true"
         );
 
@@ -149,7 +147,7 @@ mod tests {
         let sample_hash = sample_u64.wrapping_mul(KNUTH_FACTOR);
         assert!(sample_hash <= threshold);
         assert!(
-            sampler_half.sample(trace_id_sample),
+            sampler_half.sample(&trace_id_sample),
             "sampler_half should sample trace_id_sample"
         );
 
@@ -165,7 +163,7 @@ mod tests {
             "Drop hash {drop_hash} should be > threshold {threshold}",
         );
         assert!(
-            !sampler_half.sample(trace_id_drop),
+            !sampler_half.sample(&trace_id_drop),
             "sampler_half should drop trace_id_drop"
         );
     }
@@ -177,7 +175,7 @@ mod tests {
         let bytes_to_sample = [0u8; 16];
         let trace_id_to_sample = TraceId::from_bytes(bytes_to_sample);
         assert!(
-            sampler_half.sample(trace_id_to_sample),
+            sampler_half.sample(&trace_id_to_sample),
             "Sampler with 0.5 rate should sample trace ID 0"
         );
     }
