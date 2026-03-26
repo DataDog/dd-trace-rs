@@ -28,7 +28,7 @@
 //!
 //! - `TaskSpawn` -> `GoCreate` (creates goroutine)
 //! - `PollStart` -> `GoStart` (goroutine starts running)
-//! - `PollEnd` -> `GoBlock` (goroutine yields and waits)
+//! - `PollEnd` -> `GoStop` (goroutine yields voluntarily, stays runnable)
 //! - `WakeEvent` -> `GoUnblock` (wakes waiting goroutine)
 //! - `TaskTerminate` -> `GoDestroy` (goroutine exits)
 
@@ -196,8 +196,8 @@ struct StackFrame {
     line: u64,
 }
 
-/// Pre-defined reason strings for GoBlock events.
-/// These match common Go runtime block reasons.
+/// Pre-defined reason strings for GoBlock/GoStop events.
+/// These match common Go runtime block/stop reasons.
 #[allow(dead_code)]
 mod block_reason {
     pub const WAIT: &str = "wait";
@@ -205,6 +205,7 @@ mod block_reason {
     pub const CHAN_RECV: &str = "chan receive";
     pub const SELECT: &str = "select";
     pub const IO_WAIT: &str = "IO wait";
+    pub const YIELD: &str = "preempted"; // GoStop reason for voluntary yield
 }
 
 /// Go trace state machine that validates and emits proper event sequences.
@@ -334,9 +335,9 @@ impl TraceStateMachine {
             }
         };
 
-        // Block the currently running G if needed
+        // Stop the currently running G if needed (context switch is voluntary yield, not block)
         if let Some(running_g) = running_g_to_block {
-            self.go_block_internal(running_g, output, dt, 0, block_stack); // reason=0 (wait)
+            self.go_stop_internal(running_g, output, dt, 0, block_stack); // reason=0 (preempted)
         }
 
         // Ensure the goroutine exists (auto-create if unknown)
@@ -395,12 +396,50 @@ impl TraceStateMachine {
     }
 
     /// Blocks the currently running goroutine on an M (GoBlock event).
+    /// Use this for actual blocking operations (mutexes, channels, I/O).
+    #[allow(dead_code)]
     fn go_block(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64, reason: u64, stack: u64) {
         let m_state = self.m_states.entry(m_id).or_default();
         let Some(g_id) = m_state.g.take() else {
             return;
         };
         self.go_block_internal(g_id, output, dt, reason, stack);
+    }
+
+    /// Internal helper to emit GoStop for a goroutine (voluntary yield, stays runnable).
+    fn go_stop_internal(
+        &mut self,
+        g_id: u64,
+        output: &mut Vec<u8>,
+        dt: u64,
+        reason: u64,
+        stack: u64,
+    ) {
+        let Some(g_state) = self.g_states.get_mut(&g_id) else {
+            return;
+        };
+        if g_state.status != GoStatus::Running {
+            return;
+        }
+        // GoStop: dt, reason, stack
+        // Unlike GoBlock, the goroutine stays Runnable (not Waiting)
+        output.push(event_type::EV_GO_STOP);
+        write_varint(output, dt);
+        write_varint(output, reason);
+        write_varint(output, stack);
+        g_state.status = GoStatus::Runnable; // Key difference from GoBlock
+    }
+
+    /// Stops the currently running goroutine on an M (GoStop event).
+    /// Use this for voluntary yields (e.g., Tokio poll returning Pending).
+    /// Unlike go_block, the goroutine stays Runnable and can be started again
+    /// without needing a GoUnblock event.
+    fn go_stop(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64, reason: u64, stack: u64) {
+        let m_state = self.m_states.entry(m_id).or_default();
+        let Some(g_id) = m_state.g.take() else {
+            return;
+        };
+        self.go_stop_internal(g_id, output, dt, reason, stack);
     }
 
     /// Unblocks a goroutine (GoUnblock event).
@@ -419,6 +458,49 @@ impl TraceStateMachine {
         write_varint(output, g_seq);
         write_varint(output, stack);
         g_state.status = GoStatus::Runnable;
+    }
+
+    /// Stops the processor on an M (ProcStop event).
+    /// This represents a worker thread parking (going idle).
+    fn proc_stop(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64) {
+        let m_state = self.m_states.entry(m_id).or_default();
+        let p_id = m_state.p.unwrap_or(m_id); // Use 1:1 mapping if not bound
+
+        let Some(p_state) = self.p_states.get_mut(&p_id) else {
+            return;
+        };
+        if p_state.status != ProcStatus::Running {
+            return;
+        }
+
+        // ProcStop: dt
+        output.push(event_type::EV_PROC_STOP);
+        write_varint(output, dt);
+        p_state.status = ProcStatus::Idle;
+        m_state.p = None;
+    }
+
+    /// Starts the processor on an M (ProcStart event).
+    /// This represents a worker thread unparking (becoming active).
+    fn proc_start(&mut self, m_id: u64, output: &mut Vec<u8>, dt: u64) {
+        let p_id = m_id; // 1:1 mapping
+
+        let p_state = self.p_states.entry(p_id).or_insert_with(ProcState::new_idle);
+
+        if p_state.status == ProcStatus::Running {
+            return; // Already running
+        }
+
+        let p_seq = p_state.next_seq();
+        // ProcStart: dt, P ID, P seq
+        output.push(event_type::EV_PROC_START);
+        write_varint(output, dt);
+        write_varint(output, p_id);
+        write_varint(output, p_seq);
+        p_state.status = ProcStatus::Running;
+
+        let m_state = self.m_states.entry(m_id).or_default();
+        m_state.p = Some(p_id);
     }
 
     /// Destroys a goroutine (GoDestroy event).
@@ -495,7 +577,9 @@ struct StackIds {
     create_stack: u64,
     /// Stack for poll start (GoStart) - generic runtime stack.
     start_stack: u64,
-    /// Stack for poll end / block (GoBlock).
+    /// Stack for poll end / voluntary yield (GoStop).
+    yield_stack: u64,
+    /// Stack for blocking operations (GoBlock).
     block_stack: u64,
     /// Stack for wake (GoUnblock).
     wake_stack: u64,
@@ -633,7 +717,22 @@ impl GoTraceSerializer {
         ];
         self.stack_ids.start_stack = self.create_stack(start_frames);
 
-        // Stack for poll end / block (task yields)
+        // Stack for poll end / voluntary yield (task returns Pending)
+        let yield_frames = vec![
+            self.create_frame(
+                "tokio::runtime::task::harness::poll",
+                "tokio/src/runtime/task/harness.rs",
+                167,
+            ),
+            self.create_frame(
+                "tokio::runtime::scheduler::multi_thread::worker::run",
+                "tokio/src/runtime/scheduler/multi_thread/worker.rs",
+                445,
+            ),
+        ];
+        self.stack_ids.yield_stack = self.create_stack(yield_frames);
+
+        // Stack for blocking operations (task blocks on I/O, mutex, etc.)
         let block_frames = vec![
             self.create_frame(
                 "tokio::sync::oneshot::Receiver::poll",
@@ -902,7 +1001,8 @@ impl TimelineSerializer for GoTraceSerializer {
 
         // Initialize stacks and reason strings
         self.init_stacks();
-        let wait_reason_id = self.get_or_create_string_id(block_reason::WAIT);
+        let _wait_reason_id = self.get_or_create_string_id(block_reason::WAIT);
+        let yield_reason_id = self.get_or_create_string_id(block_reason::YIELD);
 
         let mut output = Vec::new();
 
@@ -990,6 +1090,7 @@ impl TimelineSerializer for GoTraceSerializer {
         // Copy stack IDs for use in the loop (avoids borrow issues with self)
         let create_stack = self.stack_ids.create_stack;
         let _start_stack = self.stack_ids.start_stack;
+        let yield_stack = self.stack_ids.yield_stack;
         let block_stack = self.stack_ids.block_stack;
         let wake_stack = self.stack_ids.wake_stack;
         // Note: destroy_stack exists but isn't used because GoDestroy event
@@ -1118,12 +1219,14 @@ impl TimelineSerializer for GoTraceSerializer {
                     );
                 }
                 OwnedEvent::PollEnd { .. } => {
-                    state_machine.go_block(
+                    // GoStop: voluntary yield, goroutine stays runnable
+                    // (Unlike GoBlock which would make it Waiting)
+                    state_machine.go_stop(
                         m_id,
                         &mut batch.data,
                         dt,
-                        wait_reason_id,
-                        block_stack,
+                        yield_reason_id,
+                        yield_stack,
                     );
                 }
                 OwnedEvent::WakeEvent { woken_task_id, .. } => {
@@ -1142,8 +1245,15 @@ impl TimelineSerializer for GoTraceSerializer {
                         create_stack,
                     );
                 }
-                OwnedEvent::WorkerPark { .. } | OwnedEvent::WorkerUnpark { .. } => {
-                    // Could emit ProcStop/ProcStart here for worker park/unpark
+                OwnedEvent::WorkerPark { .. } => {
+                    // Worker thread is parking (going idle)
+                    // Stop the processor to show it's idle
+                    state_machine.proc_stop(m_id, &mut batch.data, dt);
+                }
+                OwnedEvent::WorkerUnpark { .. } => {
+                    // Worker thread is unparking (becoming active)
+                    // Start the processor to show it's active
+                    state_machine.proc_start(m_id, &mut batch.data, dt);
                 }
             }
         }
@@ -1388,16 +1498,16 @@ mod tests {
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
         assert_eq!(state_machine.m_states[&0].g, Some(1));
 
-        // PollEnd → GoBlock
-        state_machine.go_block(0, &mut output, 200, 0, stack);
-        assert_eq!(state_machine.g_states[&1].status, GoStatus::Waiting);
+        // PollEnd → GoStop (voluntary yield, stays runnable)
+        state_machine.go_stop(0, &mut output, 200, 0, stack);
+        assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
         assert_eq!(state_machine.m_states[&0].g, None);
 
-        // WakeEvent → GoUnblock
+        // WakeEvent → GoUnblock (no-op since goroutine is already Runnable from GoStop)
         state_machine.go_unblock(1, &mut output, 300, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
 
-        // PollStart → GoStart (again)
+        // PollStart → GoStart (can start directly since already Runnable from GoStop)
         state_machine.go_start(0, 1, &mut output, 400, stack, stack, stack);
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
 
@@ -1409,7 +1519,7 @@ mod tests {
 
     #[test]
     fn test_state_machine_context_switch() {
-        // Test: G1 running, start G2 → G1 gets blocked automatically
+        // Test: G1 running, start G2 → G1 gets stopped (yields) automatically
         let mut state_machine = TraceStateMachine::new();
         let mut output = Vec::new();
         let stack = 1u64;
@@ -1420,12 +1530,12 @@ mod tests {
         assert_eq!(state_machine.g_states[&1].status, GoStatus::Running);
         assert_eq!(state_machine.m_states[&0].g, Some(1));
 
-        // Create G2 and start it - this should block G1 first
+        // Create G2 and start it - this should stop (yield) G1 first
         state_machine.go_create(0, 2, &mut output, 200, stack, stack);
         state_machine.go_start(0, 2, &mut output, 300, stack, stack, stack);
 
-        // G1 should now be blocked (Waiting)
-        assert_eq!(state_machine.g_states[&1].status, GoStatus::Waiting);
+        // G1 should now be yielded (Runnable) - context switch is a voluntary yield, not a block
+        assert_eq!(state_machine.g_states[&1].status, GoStatus::Runnable);
         // G2 should be running
         assert_eq!(state_machine.g_states[&2].status, GoStatus::Running);
         assert_eq!(state_machine.m_states[&0].g, Some(2));
@@ -1549,6 +1659,48 @@ mod tests {
         // Processor should be running
         assert_eq!(state_machine.p_states[&0].status, ProcStatus::Running);
         assert_eq!(state_machine.m_states[&0].p, Some(0));
+    }
+
+    #[test]
+    fn test_proc_stop_and_start() {
+        // Test: WorkerPark → ProcStop, WorkerUnpark → ProcStart
+        let mut state_machine = TraceStateMachine::new();
+        let mut output = Vec::new();
+        let stack = 1u64;
+
+        // Start by creating a goroutine (which auto-starts the processor)
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
+        assert_eq!(state_machine.p_states[&0].status, ProcStatus::Running);
+
+        // Simulate WorkerPark: stop the processor
+        state_machine.proc_stop(0, &mut output, 100);
+        assert_eq!(state_machine.p_states[&0].status, ProcStatus::Idle);
+        assert_eq!(state_machine.m_states[&0].p, None);
+
+        // Simulate WorkerUnpark: start the processor
+        state_machine.proc_start(0, &mut output, 200);
+        assert_eq!(state_machine.p_states[&0].status, ProcStatus::Running);
+        assert_eq!(state_machine.m_states[&0].p, Some(0));
+    }
+
+    #[test]
+    fn test_proc_stop_idempotent() {
+        // Test: Multiple proc_stop calls are safe
+        let mut state_machine = TraceStateMachine::new();
+        let mut output = Vec::new();
+        let stack = 1u64;
+
+        state_machine.go_create(0, 1, &mut output, 0, stack, stack);
+        let output_len_before = output.len();
+
+        // First stop
+        state_machine.proc_stop(0, &mut output, 100);
+        let output_len_after_first = output.len();
+        assert!(output_len_after_first > output_len_before);
+
+        // Second stop (should be no-op)
+        state_machine.proc_stop(0, &mut output, 200);
+        assert_eq!(output.len(), output_len_after_first);
     }
 
     /// Generate a realistic trace and write to file for validation with `go tool trace`.

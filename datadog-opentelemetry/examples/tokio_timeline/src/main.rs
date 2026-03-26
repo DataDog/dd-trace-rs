@@ -36,7 +36,7 @@ fn main() {
 
     // Configure timeline - shorter interval for demo
     let timeline_config = TimelineConfig::builder()
-        .upload_interval(Duration::from_secs(15)) // Upload every 15 seconds for faster feedback
+        .upload_interval(Duration::from_secs(10)) // Upload every 10 seconds for faster feedback
         .max_buffered_events(100_000)
         .format(TimelineFormat::GoTrace)
         .build();
@@ -61,7 +61,8 @@ fn main() {
     let handle = guard.handle();
 
     runtime.block_on(async {
-        println!("=== Tokio Timeline Demo ===\n");
+        println!("=== Tokio Timeline Demo (30+ second run) ===\n");
+        println!("This demo runs for ~35 seconds to demonstrate proper timeline behavior.\n");
 
         // Run all demos concurrently
         let h = handle.clone();
@@ -79,8 +80,12 @@ fn main() {
         let h = handle.clone();
         let demo5 = handle.spawn(semaphore_pool_demo(h.clone()));
 
+        // Add a continuous workload that runs for the full duration
+        let h = handle.clone();
+        let demo6 = handle.spawn(continuous_workload_demo(h.clone()));
+
         // Wait for all demos
-        let _ = tokio::join!(demo1, demo2, demo3, demo4, demo5);
+        let _ = tokio::join!(demo1, demo2, demo3, demo4, demo5, demo6);
 
         println!("\n=== All demos completed! ===");
     });
@@ -342,4 +347,47 @@ async fn semaphore_pool_demo(handle: dial9_tokio_telemetry::telemetry::Telemetry
     }
 
     println!("[Semaphore Pool] Done!");
+}
+
+/// Demo 6: Continuous workload that runs for 30+ seconds
+/// This ensures the example runs long enough for multiple timeline uploads
+async fn continuous_workload_demo(handle: dial9_tokio_telemetry::telemetry::TelemetryHandle) {
+    println!("[Continuous Workload] Starting (will run for ~30 seconds)...");
+
+    let start = std::time::Instant::now();
+    let duration = Duration::from_secs(30);
+    let mut batch = 0;
+
+    while start.elapsed() < duration {
+        batch += 1;
+        let elapsed = start.elapsed().as_secs();
+        println!("[Continuous Workload] Batch {} ({}s elapsed)", batch, elapsed);
+
+        // Spawn a batch of parallel tasks that do varying amounts of work
+        let mut tasks = Vec::new();
+        for task_id in 0..5 {
+            let task = handle.spawn(async move {
+                // Simulate CPU work with polling
+                for _ in 0..3 {
+                    tokio::task::yield_now().await;
+                    tokio::time::sleep(Duration::from_millis(10 + task_id * 5)).await;
+                }
+            });
+            tasks.push(task);
+        }
+
+        // Wait for batch to complete
+        for task in tasks {
+            task.await.ok();
+        }
+
+        // Small delay between batches
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    println!(
+        "[Continuous Workload] Done! Ran {} batches over {:.1}s",
+        batch,
+        start.elapsed().as_secs_f64()
+    );
 }
