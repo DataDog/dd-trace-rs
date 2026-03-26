@@ -845,88 +845,6 @@ impl GoTraceSerializer {
         output.extend_from_slice(&batch_data);
     }
 
-    /// Writes an event batch for a worker.
-    #[allow(dead_code)]
-    fn write_event_batch(
-        &mut self,
-        output: &mut Vec<u8>,
-        worker_id: u8,
-        events: &[OwnedEvent],
-        absolute_base_timestamp: u64,
-        min_event_timestamp: u64,
-    ) {
-        if events.is_empty() {
-            return;
-        }
-
-        let mut batch_data = Vec::new();
-        let mut last_timestamp = min_event_timestamp;
-
-        for event in events {
-            let timestamp = event.timestamp_nanos();
-            let delta = timestamp.saturating_sub(last_timestamp);
-            last_timestamp = timestamp;
-
-            match event {
-                OwnedEvent::TaskSpawn {
-                    task_id, location, ..
-                } => {
-                    // Skip - GoCreate events are emitted upfront for all goroutines
-                    // Just ensure the task is mapped and location is in string table
-                    let _ = self.map_task_id(*task_id);
-                    let _ = self.get_or_create_string_id(location);
-                }
-                OwnedEvent::PollStart { task_id, .. } => {
-                    // EvGoStart: dt, g, g_seq
-                    let g_id = self.map_task_id(*task_id);
-                    batch_data.push(event_type::EV_GO_START);
-                    write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, g_id); // goroutine ID (mapped)
-                    write_varint(&mut batch_data, 0); // sequence number
-                }
-                OwnedEvent::PollEnd { .. } => {
-                    // EvGoStop: dt, reason_string, stack
-                    batch_data.push(event_type::EV_GO_STOP);
-                    write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, 0); // reason string ID (empty)
-                    write_varint(&mut batch_data, 0); // stack ID (no stack info)
-                }
-                OwnedEvent::TaskTerminate { task_id, .. } => {
-                    // EvGoDestroy: dt (just timestamp delta)
-                    // Note: We don't need to map the ID here, just emit the event
-                    let _ = self.map_task_id(*task_id); // ensure it's mapped for consistency
-                    batch_data.push(event_type::EV_GO_DESTROY);
-                    write_varint(&mut batch_data, delta);
-                }
-                OwnedEvent::WorkerPark { .. } | OwnedEvent::WorkerUnpark { .. } => {
-                    // Skip P start/stop events when all events are on a single M
-                    // These would require multi-M support to work correctly
-                }
-                OwnedEvent::WakeEvent {
-                    woken_task_id,
-                    ..
-                } => {
-                    // EvGoUnblock: dt, g, g_seq, stack
-                    let g_id = self.map_task_id(*woken_task_id);
-                    batch_data.push(event_type::EV_GO_UNBLOCK);
-                    write_varint(&mut batch_data, delta);
-                    write_varint(&mut batch_data, g_id); // goroutine being unblocked (mapped)
-                    write_varint(&mut batch_data, 0); // sequence number
-                    write_varint(&mut batch_data, 0); // stack ID (no stack info)
-                }
-            }
-        }
-
-        // Write event batch header: type, gen, M, timestamp, byte count, data
-        // Go trace v2 format: EventBatch has generation after type
-        output.push(event_type::EV_EVENT_BATCH);
-        write_varint(output, 1); // generation = 1
-        write_varint(output, worker_id as u64); // M ID
-        write_varint(output, absolute_base_timestamp); // base timestamp
-        write_varint(output, batch_data.len() as u64); // byte count
-        output.extend_from_slice(&batch_data);
-    }
-
     /// Groups events by worker ID, sorted by timestamp within each group.
     #[cfg(test)]
     fn group_by_worker(events: &[OwnedEvent]) -> HashMap<u8, Vec<&OwnedEvent>> {
@@ -1701,6 +1619,104 @@ mod tests {
         // Second stop (should be no-op)
         state_machine.proc_stop(0, &mut output, 200);
         assert_eq!(output.len(), output_len_after_first);
+    }
+
+    #[test]
+    fn test_serialization_determinism() {
+        // Test: Same events produce identical output across multiple serializations
+        // This is critical for trace validation and caching.
+        let events = vec![
+            OwnedEvent::TaskSpawn {
+                timestamp_nanos: 1_000_000,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            OwnedEvent::TaskSpawn {
+                timestamp_nanos: 1_001_000,
+                task_id: 200,
+                location: "src/main.rs:43".to_string(),
+            },
+            OwnedEvent::PollStart {
+                timestamp_nanos: 1_010_000,
+                worker_id: 0,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            OwnedEvent::PollStart {
+                timestamp_nanos: 1_015_000,
+                worker_id: 1,
+                task_id: 200,
+                location: "src/main.rs:43".to_string(),
+            },
+            OwnedEvent::PollEnd {
+                timestamp_nanos: 1_100_000,
+                worker_id: 0,
+            },
+            OwnedEvent::PollEnd {
+                timestamp_nanos: 1_150_000,
+                worker_id: 1,
+            },
+            OwnedEvent::WakeEvent {
+                timestamp_nanos: 1_200_000,
+                waker_task_id: 200,
+                woken_task_id: 100,
+            },
+            OwnedEvent::PollStart {
+                timestamp_nanos: 1_210_000,
+                worker_id: 0,
+                task_id: 100,
+                location: "src/main.rs:42".to_string(),
+            },
+            OwnedEvent::PollEnd {
+                timestamp_nanos: 1_300_000,
+                worker_id: 0,
+            },
+            OwnedEvent::TaskTerminate {
+                timestamp_nanos: 1_300_001,
+                task_id: 100,
+            },
+            OwnedEvent::TaskTerminate {
+                timestamp_nanos: 1_500_001,
+                task_id: 200,
+            },
+        ];
+
+        // Fixed timestamps for consistency
+        let batch_start = SystemTime::UNIX_EPOCH;
+        let batch_end = SystemTime::UNIX_EPOCH;
+
+        // Serialize multiple times and compare
+        let mut serializer1 = GoTraceSerializer::new();
+        let result1 = serializer1
+            .serialize(&events, batch_start, batch_end)
+            .unwrap();
+
+        let mut serializer2 = GoTraceSerializer::new();
+        let result2 = serializer2
+            .serialize(&events, batch_start, batch_end)
+            .unwrap();
+
+        let mut serializer3 = GoTraceSerializer::new();
+        let result3 = serializer3
+            .serialize(&events, batch_start, batch_end)
+            .unwrap();
+
+        // All outputs must be identical
+        assert_eq!(
+            result1.data, result2.data,
+            "Serialization not deterministic: run 1 != run 2"
+        );
+        assert_eq!(
+            result2.data, result3.data,
+            "Serialization not deterministic: run 2 != run 3"
+        );
+
+        // Verify output is non-trivial (contains actual events beyond header)
+        assert!(
+            result1.data.len() > GO_TRACE_HEADER.len() + 100,
+            "Output suspiciously small: {} bytes",
+            result1.data.len()
+        );
     }
 
     /// Generate a realistic trace and write to file for validation with `go tool trace`.
