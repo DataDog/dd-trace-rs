@@ -213,7 +213,14 @@ mod block_reason {
 /// This state machine tracks goroutine, processor, and thread states to ensure
 /// that emitted events conform to Go's trace format requirements.
 ///
-/// Uses 1:1 mapping of worker_id to both M and P (worker 0 → M=0, P=0).
+/// # M/P Mapping Strategy
+///
+/// Uses 1:1 identity mapping: `worker_id` maps to both M (OS thread) and P (processor)
+/// with the same ID. For example, Tokio worker 0 → M=0, P=0.
+///
+/// This simplification works because Tokio's thread pool model aligns well with
+/// Go's M:P binding, where each worker thread acts as both the OS thread and
+/// the logical processor.
 #[derive(Debug, Default)]
 struct TraceStateMachine {
     /// Goroutine states indexed by goroutine ID.
@@ -546,6 +553,29 @@ impl TraceStateMachine {
 }
 
 /// Serializer for Go v2 execution trace format.
+///
+/// Converts Tokio runtime events into a binary trace format compatible with
+/// Go's `runtime/trace` (v2, Go 1.22+), enabling visualization in Datadog's
+/// Timeline View or Go's native trace viewer.
+///
+/// # Event Mapping
+///
+/// - `TaskSpawn` → `GoCreate` (new goroutine in Runnable state)
+/// - `PollStart` → `GoStart` (goroutine begins execution)
+/// - `PollEnd` → `GoStop` (voluntary yield, stays Runnable)
+/// - `WakeEvent` → `GoUnblock` (Waiting → Runnable)
+/// - `TaskTerminate` → `GoDestroy` (goroutine exits)
+/// - `WorkerPark` → `ProcStop` (worker thread idle)
+/// - `WorkerUnpark` → `ProcStart` (worker thread active)
+///
+/// # Usage
+///
+/// ```ignore
+/// let mut serializer = GoTraceSerializer::new();
+/// let result = serializer.serialize(&events, batch_start, batch_end)?;
+/// // result.data contains the binary Go trace
+/// // result.filename is "go.trace"
+/// ```
 #[derive(Debug, Default)]
 pub struct GoTraceSerializer {
     /// String table for deduplication.
