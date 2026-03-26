@@ -51,9 +51,50 @@
 //!
 //! // ... use the runtime ...
 //!
-//! // Shutdown gracefully
+//! // Shutdown gracefully - ORDER IS CRITICAL!
+//! // See "Shutdown Sequence" section below.
+//! drop(runtime);  // 1. Drop runtime first
+//! drop(guard);    // 2. Then drop dial9 guard
+//! std::thread::sleep(Duration::from_millis(100));
+//! timeline_handle.flush();
 //! timeline_handle.shutdown(Duration::from_secs(5)).ok();
 //! ```
+//!
+//! # Shutdown Sequence
+//!
+//! **CRITICAL**: The shutdown order matters for event delivery!
+//!
+//! `dial9-tokio-telemetry` uses thread-local buffers (1024 event threshold) in each
+//! worker thread. Events only flush from these buffers when:
+//! 1. The buffer fills up (1024 events)
+//! 2. The worker thread exits (Drop impl on ThreadLocalBuffer)
+//! 3. Explicit flush via dial9's API
+//!
+//! For short-lived applications or demos, the buffers may never fill, so you must
+//! ensure worker threads exit before the dial9 guard is dropped. The correct sequence:
+//!
+//! ```rust,ignore
+//! // 1. Drop runtime FIRST - this makes worker threads exit, flushing their
+//! //    thread-local buffers to the CentralCollector
+//! drop(runtime);
+//!
+//! // 2. Drop dial9 guard - this triggers final flush from collector to TraceWriter
+//! drop(guard);
+//!
+//! // 3. Brief pause to let events propagate through channels
+//! std::thread::sleep(Duration::from_millis(100));
+//!
+//! // 4. Flush our timeline to upload any remaining events
+//! timeline_handle.flush();
+//!
+//! // 5. Shutdown the timeline worker
+//! timeline_handle.shutdown(Duration::from_secs(5)).ok();
+//! ```
+//!
+//! **Wrong order** (guard dropped before runtime):
+//! - Worker threads still running, holding unflushed events in thread-local buffers
+//! - Guard drop tries to flush, but workers haven't exited yet
+//! - Events are lost, tasks appear "unscheduled" with no poll events
 
 mod buffer;
 mod config;

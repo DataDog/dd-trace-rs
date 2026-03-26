@@ -90,29 +90,37 @@ fn main() {
         println!("\n=== All demos completed! ===");
     });
 
-    // Graceful shutdown of dial9 - this triggers flushing of thread-local buffers
-    // Note: dial9 emits events asynchronously. TaskSpawn events arrive immediately,
-    // but Poll/Worker events from thread-local buffers can take several seconds.
-    // In production with continuous profiling, this delay doesn't matter as events
-    // accumulate in the timeline buffer and are uploaded periodically.
+    // Shutdown sequence is CRITICAL for event delivery!
+    //
+    // dial9 uses thread-local buffers (1024 event threshold) that only flush when:
+    // - Buffer fills up (1024 events)
+    // - Worker thread exits (Drop impl on ThreadLocalBuffer)
+    // - Explicit flush
+    //
+    // ORDER MATTERS:
+    // 1. Drop runtime first - worker threads exit, flushing thread-local buffers
+    // 2. Drop dial9 guard - triggers final flush from collector to our writer
+    // 3. Then flush our timeline
+    //
+    // WRONG order (guard before runtime) causes events to be lost because worker
+    // threads are still running and holding unflushed events in their buffers.
     println!("\nShutting down...");
-    runtime.block_on(async {
-        if let Err(e) = guard.graceful_shutdown(Duration::from_secs(10)).await {
-            eprintln!("dial9 graceful shutdown error: {}", e);
-        }
-    });
 
-    // Wait for events to arrive from dial9's background thread
-    std::thread::sleep(Duration::from_secs(3));
-
-    // Flush timeline
-    println!("Flushing timeline...");
-    timeline_handle.flush();
-    std::thread::sleep(Duration::from_secs(1));
-
-    // Drop the runtime
+    // 1. Drop runtime - worker threads exit, flushing thread-local buffers
     drop(runtime);
 
+    // 2. Drop dial9 guard - triggers final flush from collector to TraceWriter
+    drop(guard);
+
+    // 3. Brief pause to let events propagate through channels
+    std::thread::sleep(Duration::from_millis(100));
+
+    // 4. Flush our timeline to upload remaining events
+    println!("Flushing timeline...");
+    timeline_handle.flush();
+    std::thread::sleep(Duration::from_millis(500));
+
+    // 5. Shutdown timeline worker
     match timeline_handle.shutdown(Duration::from_secs(5)) {
         Ok(()) => println!("Timeline shutdown complete"),
         Err(e) => eprintln!("Timeline shutdown error: {:?}", e),

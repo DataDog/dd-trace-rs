@@ -6,6 +6,9 @@
 pub mod go_trace;
 pub mod pprof_timeline;
 
+#[cfg(test)]
+mod go_trace_tests;
+
 use std::time::SystemTime;
 
 use crate::tokio_timeline::buffer::OwnedEvent;

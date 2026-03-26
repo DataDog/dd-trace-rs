@@ -5,8 +5,37 @@ edition = "2021"
 publish = false
 autobenches = false
 
+# Simple example - minimal setup showing basic integration
 [[bin]]
-name = "tokio_timeline"
+name = "simple"
+path = "src/simple.rs"
+doc = false
+bench = false
+
+# Producer/Consumer pattern - channels, wake events
+[[bin]]
+name = "producer_consumer"
+path = "src/producer_consumer.rs"
+doc = false
+bench = false
+
+# Mutex contention - shared resource patterns
+[[bin]]
+name = "mutex_contention"
+path = "src/mutex_contention.rs"
+doc = false
+bench = false
+
+# Connection pool - semaphore-limited concurrency
+[[bin]]
+name = "connection_pool"
+path = "src/connection_pool.rs"
+doc = false
+bench = false
+
+# Keep the original comprehensive demo
+[[bin]]
+name = "comprehensive"
 path = "src/main.rs"
 doc = false
 bench = false

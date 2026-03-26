@@ -278,6 +278,35 @@ impl TimelineWorker {
         let batch_end = SystemTime::now();
         self.last_flush = Instant::now();
 
+        // Debug: count event types
+        #[cfg(debug_assertions)]
+        {
+            let mut poll_start = 0;
+            let mut poll_end = 0;
+            let mut task_spawn = 0;
+            let mut task_terminate = 0;
+            let mut worker_park = 0;
+            let mut worker_unpark = 0;
+            let mut wake_event = 0;
+
+            for event in &events {
+                match event {
+                    OwnedEvent::PollStart { .. } => poll_start += 1,
+                    OwnedEvent::PollEnd { .. } => poll_end += 1,
+                    OwnedEvent::TaskSpawn { .. } => task_spawn += 1,
+                    OwnedEvent::TaskTerminate { .. } => task_terminate += 1,
+                    OwnedEvent::WorkerPark { .. } => worker_park += 1,
+                    OwnedEvent::WorkerUnpark { .. } => worker_unpark += 1,
+                    OwnedEvent::WakeEvent { .. } => wake_event += 1,
+                }
+            }
+
+            eprintln!(
+                "[tokio-timeline] Flushing {} events: spawn={} poll_start={} poll_end={} terminate={} park={} unpark={} wake={}",
+                events.len(), task_spawn, poll_start, poll_end, task_terminate, worker_park, worker_unpark, wake_event
+            );
+        }
+
         // Serialize based on format
         let timelines = self.serialize_events(&events, batch_start, batch_end);
 
@@ -285,22 +314,9 @@ impl TimelineWorker {
             return;
         }
 
-        // Debug: save trace/profile to file for analysis
-        for timeline in &timelines {
-            let path = format!("/tmp/generated_{}", timeline.filename);
-            let _ = std::fs::write(&path, &timeline.data);
-            eprintln!("[debug] Saved {} bytes to {}", timeline.data.len(), path);
-        }
-
-        // Upload
+        // Upload to Datadog profiling API
         if let Err(e) = self.uploader.upload(&timelines, batch_start, batch_end) {
-            eprintln!("[error] Timeline upload failed: {}", e);
-        } else {
-            eprintln!(
-                "[debug] Timeline uploaded: {} events, {} bytes",
-                events.len(),
-                timelines.iter().map(|t| t.data.len()).sum::<usize>()
-            );
+            eprintln!("[tokio-timeline] Upload failed: {}", e);
         }
     }
 

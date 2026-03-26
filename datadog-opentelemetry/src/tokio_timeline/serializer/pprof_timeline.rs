@@ -279,7 +279,8 @@ impl PprofTimelineSerializer {
         self.reset();
 
         // Pre-register common strings
-        // IMPORTANT: "thread id" uses a space (not underscore) - this is required by Datadog backend
+        // IMPORTANT: "thread id" uses a space (not underscore) - this is required by Datadog
+        // backend
         let wall_time_id = self.get_or_create_string_id("wall-time");
         let nanoseconds_id = self.get_or_create_string_id("nanoseconds");
         let thread_id_key = self.get_or_create_string_id("thread id"); // Space, not underscore!
@@ -391,7 +392,8 @@ impl PprofTimelineSerializer {
                                 },
                                 value: vec![duration as i64],
                                 label: vec![
-                                    // "thread id" - required by Datadog backend (uses task_id as thread identifier)
+                                    // "thread id" - required by Datadog backend (uses task_id as
+                                    // thread identifier)
                                     proto::Label {
                                         key: thread_id_key,
                                         str: 0,
