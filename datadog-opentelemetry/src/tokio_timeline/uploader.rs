@@ -93,6 +93,7 @@ impl TimelineUploader {
         }
 
         // Add host tag - important for profiling
+        #[allow(clippy::disallowed_methods)]
         if let Ok(hostname) = std::env::var("DD_HOSTNAME").or_else(|_| {
             gethostname::gethostname()
                 .into_string()

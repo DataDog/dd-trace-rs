@@ -579,6 +579,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "jiff",
  "libdd-common",
  "libdd-data-pipeline",
  "libdd-telemetry",

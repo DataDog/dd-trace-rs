@@ -28,6 +28,7 @@ pub struct SerializedTimeline {
 
 /// Error type for serialization failures.
 #[derive(Debug)]
+#[allow(dead_code)] // Variants reserved for future error handling
 pub enum SerializeError {
     /// Failed to encode data.
     EncodingError(String),

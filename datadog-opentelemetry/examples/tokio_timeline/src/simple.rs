@@ -25,6 +25,7 @@ use std::time::Duration;
 use datadog_opentelemetry::tokio_timeline::{timeline, TimelineConfig};
 use dial9_tokio_telemetry::telemetry::TracedRuntime;
 
+#[allow(clippy::disallowed_methods)] // Allow env var access for configuration
 fn main() {
     // Configure Datadog connection
     let datadog_config = datadog_opentelemetry::configuration::Config::builder()

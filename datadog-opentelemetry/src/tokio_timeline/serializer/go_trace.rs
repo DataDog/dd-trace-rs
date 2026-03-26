@@ -317,6 +317,7 @@ impl TraceStateMachine {
 
     /// Starts a goroutine (GoStart event).
     /// Handles edge cases: auto-creates unknown G, blocks running G, unblocks waiting G.
+    #[allow(clippy::too_many_arguments)]
     fn go_start(
         &mut self,
         m_id: u64,
@@ -523,6 +524,7 @@ impl TraceStateMachine {
     /// because we can't emit the required GoStop on the other M's batch. In this case,
     /// we skip the destroy - the trace will show the goroutine as still running but
     /// this is better than emitting an invalid GoDestroy without a prior GoStart.
+    #[allow(clippy::too_many_arguments)]
     fn go_destroy(
         &mut self,
         m_id: u64,
