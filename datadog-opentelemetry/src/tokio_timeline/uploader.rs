@@ -265,69 +265,11 @@ impl TimelineUploader {
     }
 }
 
-/// Converts a SystemTime to ISO 8601 format string.
+/// Converts a SystemTime to ISO 8601 format string (RFC 3339).
 fn systemtime_to_iso8601(time: SystemTime) -> String {
-    let duration = time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-    let nanos = duration.subsec_nanos();
-
-    // Calculate date components (simplified, not handling leap seconds)
-    let days_since_epoch = secs / 86400;
-    let time_of_day = secs % 86400;
-
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-
-    // Calculate year/month/day from days since epoch (1970-01-01)
-    let (year, month, day) = days_to_ymd(days_since_epoch as i64);
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}Z",
-        year, month, day, hours, minutes, seconds, nanos
-    )
-}
-
-/// Converts days since Unix epoch to year/month/day.
-fn days_to_ymd(days: i64) -> (i32, u32, u32) {
-    // Simplified algorithm - doesn't handle all edge cases perfectly
-    let mut remaining_days = days;
-    let mut year = 1970i32;
-
-    loop {
-        let days_in_year = if is_leap_year(year) { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    let leap = is_leap_year(year);
-    let days_in_months: [i64; 12] = if leap {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-
-    let mut month = 1u32;
-    for days_in_month in days_in_months {
-        if remaining_days < days_in_month {
-            break;
-        }
-        remaining_days -= days_in_month;
-        month += 1;
-    }
-
-    let day = (remaining_days + 1) as u32;
-    (year, month, day)
-}
-
-/// Checks if a year is a leap year.
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    jiff::Timestamp::try_from(time)
+        .map(|ts| ts.to_string())
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
 /// Parses HTTP status code from response.
@@ -350,29 +292,11 @@ mod tests {
         let time = SystemTime::UNIX_EPOCH;
         let iso = systemtime_to_iso8601(time);
         assert!(iso.starts_with("1970-01-01T00:00:00"));
-    }
 
-    #[test]
-    fn test_days_to_ymd() {
-        // Unix epoch
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-
-        // One day after epoch
-        assert_eq!(days_to_ymd(1), (1970, 1, 2));
-
-        // End of January 1970
-        assert_eq!(days_to_ymd(30), (1970, 1, 31));
-
-        // February 1, 1970
-        assert_eq!(days_to_ymd(31), (1970, 2, 1));
-    }
-
-    #[test]
-    fn test_is_leap_year() {
-        assert!(!is_leap_year(1970));
-        assert!(is_leap_year(1972));
-        assert!(!is_leap_year(1900));
-        assert!(is_leap_year(2000));
+        // Test a known time (1 day after epoch)
+        let one_day = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(86400);
+        let iso = systemtime_to_iso8601(one_day);
+        assert!(iso.starts_with("1970-01-02T00:00:00"));
     }
 
     #[test]
