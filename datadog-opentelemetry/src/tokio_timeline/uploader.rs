@@ -74,20 +74,8 @@ impl TimelineUploader {
         let attachments_json: Vec<String> =
             attachments.iter().map(|a| format!("\"{}\"", a)).collect();
 
-        // Detect format based on attachments
-        let has_go_trace = attachments.iter().any(|a| *a == "go.trace");
-        let has_pprof = attachments.iter().any(|a| a.ends_with(".pprof"));
-
-        // Set family and language based on format
-        // - Go trace: use "go" family for timeline visualization
-        // - pprof: use "native" family with Rust language
-        let (family, language, runtime) = if has_go_trace {
-            ("go", "go", "go1.22.0")
-        } else if has_pprof {
-            ("native", "rust", "tokio")
-        } else {
-            ("native", "rust", "tokio")
-        };
+        // Use "go" family for timeline visualization with Go trace format
+        let (family, language, runtime) = ("go", "go", "go1.22.0");
 
         // Build tags string - service is required first
         let mut tags = Vec::new();
@@ -124,9 +112,7 @@ impl TimelineUploader {
         tags.push("profile_seq:0".to_string());
 
         // Add go_execution_traced tag for timeline visualization
-        if has_go_trace {
-            tags.push("go_execution_traced:yes".to_string());
-        }
+        tags.push("go_execution_traced:yes".to_string());
 
         // Build the event JSON with all required fields
         // The "info" field is required by Datadog's profiling backend

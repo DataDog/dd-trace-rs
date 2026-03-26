@@ -14,18 +14,6 @@ const DEFAULT_MAX_BUFFER_SIZE: usize = 10 * 1024 * 1024;
 /// Default maximum number of buffered events.
 const DEFAULT_MAX_BUFFERED_EVENTS: usize = 100_000;
 
-/// Format for serializing timeline data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TimelineFormat {
-    /// Go v2 execution trace format.
-    #[default]
-    GoTrace,
-    /// pprof protobuf format with timeline labels.
-    Pprof,
-    /// Both Go trace and pprof formats (for testing backend compatibility).
-    Both,
-}
-
 /// Configuration for timeline telemetry collection and upload.
 #[derive(Debug, Clone)]
 pub struct TimelineConfig {
@@ -35,8 +23,6 @@ pub struct TimelineConfig {
     pub max_buffer_size: usize,
     /// Maximum number of events to buffer before forcing a flush.
     pub max_buffered_events: usize,
-    /// Output format for timeline data.
-    pub format: TimelineFormat,
 }
 
 impl Default for TimelineConfig {
@@ -45,7 +31,6 @@ impl Default for TimelineConfig {
             upload_interval: DEFAULT_UPLOAD_INTERVAL,
             max_buffer_size: DEFAULT_MAX_BUFFER_SIZE,
             max_buffered_events: DEFAULT_MAX_BUFFERED_EVENTS,
-            format: TimelineFormat::default(),
         }
     }
 }
@@ -63,7 +48,6 @@ pub struct TimelineConfigBuilder {
     upload_interval: Option<Duration>,
     max_buffer_size: Option<usize>,
     max_buffered_events: Option<usize>,
-    format: Option<TimelineFormat>,
 }
 
 impl TimelineConfigBuilder {
@@ -93,14 +77,6 @@ impl TimelineConfigBuilder {
         self
     }
 
-    /// Sets the output format for timeline data.
-    ///
-    /// Default: `TimelineFormat::GoTrace`.
-    pub fn format(mut self, format: TimelineFormat) -> Self {
-        self.format = Some(format);
-        self
-    }
-
     /// Builds the `TimelineConfig`.
     pub fn build(self) -> TimelineConfig {
         TimelineConfig {
@@ -109,7 +85,6 @@ impl TimelineConfigBuilder {
             max_buffered_events: self
                 .max_buffered_events
                 .unwrap_or(DEFAULT_MAX_BUFFERED_EVENTS),
-            format: self.format.unwrap_or_default(),
         }
     }
 }
@@ -124,7 +99,6 @@ mod tests {
         assert_eq!(config.upload_interval, Duration::from_secs(60));
         assert_eq!(config.max_buffer_size, 10 * 1024 * 1024);
         assert_eq!(config.max_buffered_events, 100_000);
-        assert_eq!(config.format, TimelineFormat::GoTrace);
     }
 
     #[test]
@@ -133,24 +107,21 @@ mod tests {
             .upload_interval(Duration::from_secs(30))
             .max_buffer_size(5 * 1024 * 1024)
             .max_buffered_events(50_000)
-            .format(TimelineFormat::Pprof)
             .build();
 
         assert_eq!(config.upload_interval, Duration::from_secs(30));
         assert_eq!(config.max_buffer_size, 5 * 1024 * 1024);
         assert_eq!(config.max_buffered_events, 50_000);
-        assert_eq!(config.format, TimelineFormat::Pprof);
     }
 
     #[test]
     fn test_builder_partial() {
         let config = TimelineConfig::builder()
-            .format(TimelineFormat::Both)
+            .upload_interval(Duration::from_secs(120))
             .build();
 
-        assert_eq!(config.upload_interval, DEFAULT_UPLOAD_INTERVAL);
+        assert_eq!(config.upload_interval, Duration::from_secs(120));
         assert_eq!(config.max_buffer_size, DEFAULT_MAX_BUFFER_SIZE);
         assert_eq!(config.max_buffered_events, DEFAULT_MAX_BUFFERED_EVENTS);
-        assert_eq!(config.format, TimelineFormat::Both);
     }
 }

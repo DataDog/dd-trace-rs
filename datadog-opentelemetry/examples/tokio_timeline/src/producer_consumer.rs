@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use datadog_opentelemetry::tokio_timeline::{timeline, TimelineConfig, TimelineFormat};
+use datadog_opentelemetry::tokio_timeline::{timeline, TimelineConfig};
 use dial9_tokio_telemetry::telemetry::TracedRuntime;
 use tokio::sync::{mpsc, Mutex};
 
@@ -25,7 +25,6 @@ fn main() {
 
     let timeline_config = TimelineConfig::builder()
         .upload_interval(Duration::from_secs(10))
-        .format(TimelineFormat::GoTrace)
         .build();
 
     let (writer, timeline_handle) = timeline()

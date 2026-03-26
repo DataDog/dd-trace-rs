@@ -26,14 +26,13 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use datadog_opentelemetry::tokio_timeline::{timeline, TimelineConfig, TimelineFormat};
+//! use datadog_opentelemetry::tokio_timeline::{timeline, TimelineConfig};
 //! use dial9_tokio_telemetry::TracedRuntime;
 //! use std::time::Duration;
 //!
 //! // Configure timeline collection
 //! let timeline_config = TimelineConfig::builder()
 //!     .upload_interval(Duration::from_secs(60))
-//!     .format(TimelineFormat::Both)  // Test both formats
 //!     .build();
 //!
 //! // Build the writer and handle
@@ -110,7 +109,7 @@ use crossbeam_channel::Sender;
 
 use crate::core::configuration::Config;
 
-pub use config::{TimelineConfig, TimelineConfigBuilder, TimelineFormat};
+pub use config::{TimelineConfig, TimelineConfigBuilder};
 pub use worker::ShutdownError;
 pub use writer::DatadogTimelineWriter;
 
@@ -287,7 +286,6 @@ mod tests {
     fn test_timeline_builder_with_timeline_config() {
         let timeline_config = TimelineConfig::builder()
             .upload_interval(Duration::from_secs(30))
-            .format(TimelineFormat::Pprof)
             .build();
 
         let builder = timeline().with_timeline_config(timeline_config);

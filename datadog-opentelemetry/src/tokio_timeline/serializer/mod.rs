@@ -4,7 +4,6 @@
 //! Serialization formats for timeline data.
 
 pub mod go_trace;
-pub mod pprof_timeline;
 
 #[cfg(test)]
 mod go_trace_tests;
@@ -21,7 +20,7 @@ pub struct SerializedTimeline {
     /// Profile type name for multipart form field (e.g., "execution-trace").
     #[allow(dead_code)]
     pub name: &'static str,
-    /// Filename for the attachment (e.g., "go.trace" or "timeline.pprof").
+    /// Filename for the attachment (e.g., "go.trace").
     pub filename: &'static str,
     /// MIME type for the attachment.
     pub content_type: &'static str,

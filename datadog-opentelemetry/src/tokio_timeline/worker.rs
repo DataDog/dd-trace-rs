@@ -11,9 +11,8 @@ use crossbeam_channel::Receiver;
 
 use crate::core::configuration::Config;
 use crate::tokio_timeline::buffer::{EventBuffer, OwnedEvent};
-use crate::tokio_timeline::config::{TimelineConfig, TimelineFormat};
+use crate::tokio_timeline::config::TimelineConfig;
 use crate::tokio_timeline::serializer::go_trace::GoTraceSerializer;
-use crate::tokio_timeline::serializer::pprof_timeline::PprofTimelineSerializer;
 use crate::tokio_timeline::serializer::{SerializedTimeline, TimelineSerializer};
 use crate::tokio_timeline::uploader::TimelineUploader;
 
@@ -160,6 +159,7 @@ pub fn spawn_worker(
 /// Background worker that collects events and uploads them periodically.
 struct TimelineWorker {
     /// Timeline-specific configuration.
+    #[allow(dead_code)]
     timeline_config: TimelineConfig,
     /// Channel receiver for events.
     receiver: Receiver<OwnedEvent>,
@@ -171,8 +171,6 @@ struct TimelineWorker {
     uploader: TimelineUploader,
     /// Go trace serializer.
     go_serializer: GoTraceSerializer,
-    /// pprof serializer.
-    pprof_serializer: PprofTimelineSerializer,
     /// Last flush time.
     last_flush: Instant,
 }
@@ -197,7 +195,6 @@ impl TimelineWorker {
             waiter,
             uploader,
             go_serializer: GoTraceSerializer::new(),
-            pprof_serializer: PprofTimelineSerializer::new(),
             last_flush: Instant::now(),
         }
     }
@@ -307,15 +304,16 @@ impl TimelineWorker {
             );
         }
 
-        // Serialize based on format
-        let timelines = self.serialize_events(&events, batch_start, batch_end);
-
-        if timelines.is_empty() {
+        // Serialize events to Go trace format
+        let Some(timeline) = self.serialize_events(&events, batch_start, batch_end) else {
             return;
-        }
+        };
 
         // Upload to Datadog profiling API
-        if let Err(e) = self.uploader.upload(&timelines, batch_start, batch_end) {
+        if let Err(e) = self
+            .uploader
+            .upload(&[timeline], batch_start, batch_end)
+        {
             eprintln!("[tokio-timeline] Upload failed: {}", e);
         }
     }
@@ -325,37 +323,10 @@ impl TimelineWorker {
         events: &[OwnedEvent],
         batch_start: SystemTime,
         batch_end: SystemTime,
-    ) -> Vec<SerializedTimeline> {
-        let mut timelines = Vec::new();
-
-        match self.timeline_config.format {
-            TimelineFormat::GoTrace => {
-                if let Ok(timeline) = self.go_serializer.serialize(events, batch_start, batch_end) {
-                    timelines.push(timeline);
-                }
-            }
-            TimelineFormat::Pprof => {
-                if let Ok(timeline) =
-                    self.pprof_serializer
-                        .serialize(events, batch_start, batch_end)
-                {
-                    timelines.push(timeline);
-                }
-            }
-            TimelineFormat::Both => {
-                if let Ok(timeline) = self.go_serializer.serialize(events, batch_start, batch_end) {
-                    timelines.push(timeline);
-                }
-                if let Ok(timeline) =
-                    self.pprof_serializer
-                        .serialize(events, batch_start, batch_end)
-                {
-                    timelines.push(timeline);
-                }
-            }
-        }
-
-        timelines
+    ) -> Option<SerializedTimeline> {
+        self.go_serializer
+            .serialize(events, batch_start, batch_end)
+            .ok()
     }
 }
 
