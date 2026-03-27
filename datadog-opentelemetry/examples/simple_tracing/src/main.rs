@@ -3,11 +3,16 @@
 
 //! A simple example demonstrating basic tracing with Datadog OpenTelemetry.
 
-use opentelemetry::trace::Tracer;
+use opentelemetry::{
+    trace::{TraceContextExt, Tracer},
+    KeyValue,
+};
 
 fn foo() {
     opentelemetry::global::tracer("foo").in_span("foo", |_cx| {
         println!("foo");
+        _cx.span()
+            .set_attribute(KeyValue::new("grpc.code", "ABORTED"));
         bar()
     })
 }
