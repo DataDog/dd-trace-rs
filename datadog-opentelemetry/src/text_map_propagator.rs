@@ -8,13 +8,14 @@ use crate::{
     core::{configuration::Config, sampling::priority},
     propagation::{
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        DatadogCompositePropagator,
+        DatadogCompositePropagator, TracePropagationStyle,
     },
 };
 use opentelemetry::{
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
 };
+use opentelemetry_sdk::propagation::BaggagePropagator;
 
 use crate::TraceRegistry;
 
@@ -64,14 +65,28 @@ pub struct DatadogPropagator {
     inner: DatadogCompositePropagator<Config>,
     registry: TraceRegistry,
     cfg: Arc<Config>,
+    baggage_extract: bool,
+    baggage_inject: bool,
 }
 
 impl DatadogPropagator {
     pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
+        let baggage_extract = config
+            .trace_propagation_style_extract()
+            .or_else(|| config.trace_propagation_style())
+            .unwrap_or_default()
+            .contains(&TracePropagationStyle::Baggage);
+        let baggage_inject = config
+            .trace_propagation_style_inject()
+            .or_else(|| config.trace_propagation_style())
+            .unwrap_or_default()
+            .contains(&TracePropagationStyle::Baggage);
         DatadogPropagator {
             inner: DatadogCompositePropagator::new(config.clone()),
             registry,
             cfg: config,
+            baggage_extract,
+            baggage_inject,
         }
     }
 
@@ -83,6 +98,10 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         mut injector: &mut dyn opentelemetry::propagation::Injector,
     ) {
+        if self.baggage_inject {
+            BaggagePropagator::new().inject_context(cx, injector);
+        }
+
         let span = cx.span();
         let otel_span_context = span.span_context();
 
@@ -150,7 +169,8 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
-        self.inner
+        let cx = self
+            .inner
             .extract(&extractor)
             .map(|dd_span_context| {
                 let trace_flags = extract_trace_flags(&dd_span_context);
@@ -167,7 +187,13 @@ impl DatadogPropagator {
                 cx.with_remote_span_context(otel_span_context)
                     .with_value(DatadogExtractData::from_span_context(dd_span_context))
             })
-            .unwrap_or_else(|| cx.clone())
+            .unwrap_or_else(|| cx.clone());
+
+        if self.baggage_extract {
+            BaggagePropagator::new().extract_with_context(&cx, extractor)
+        } else {
+            cx
+        }
     }
 }
 
@@ -245,6 +271,7 @@ pub mod tests {
     };
     use assert_unordered::assert_eq_unordered;
     use opentelemetry::{
+        baggage::BaggageExt,
         propagation::{Extractor, TextMapPropagator},
         trace::{Span, SpanContext as OtelSpanContext, Status, TraceContextExt, TraceState},
         Context, KeyValue, SpanId, TraceFlags, TraceId,
@@ -678,5 +705,273 @@ pub mod tests {
                 );
             }
         }
+    }
+
+    const BAGGAGE_KEY: &str = "baggage";
+
+    fn get_propagator_with_separate_styles(
+        extract: Vec<TracePropagationStyle>,
+        inject: Vec<TracePropagationStyle>,
+    ) -> DatadogPropagator {
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_propagation_style_extract(extract)
+                .set_trace_propagation_style_inject(inject)
+                .build(),
+        );
+        DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
+    }
+
+    #[test]
+    fn baggage_extract_only_when_not_in_inject_styles() {
+        // Extract has baggage, inject does not.
+        let propagator = get_propagator_with_separate_styles(
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::Datadog,
+            ],
+            vec![TracePropagationStyle::TraceContext],
+        );
+
+        // Extraction: baggage header present → lands in OTel Context.
+        let mut carrier = HashMap::new();
+        carrier.insert(BAGGAGE_KEY.to_string(), "user=alice".to_string());
+        let cx = propagator.extract(&carrier);
+        assert!(
+            cx.baggage().get("user").is_some(),
+            "baggage should be extracted when Baggage is in extract styles"
+        );
+
+        // Injection: same Context → baggage header must NOT be written.
+        let mut injector: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut injector);
+        assert!(
+            injector.get(BAGGAGE_KEY).is_none(),
+            "baggage header must not be injected when Baggage is absent from inject styles"
+        );
+    }
+
+    #[test]
+    fn baggage_inject_only_when_not_in_extract_styles() {
+        // Inject has baggage, extract does not.
+        let propagator = get_propagator_with_separate_styles(
+            vec![TracePropagationStyle::Datadog],
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ],
+        );
+
+        // Extraction: baggage header present → must NOT land in OTel Context.
+        let mut carrier = HashMap::new();
+        carrier.insert(BAGGAGE_KEY.to_string(), "user=alice".to_string());
+        let cx = propagator.extract(&carrier);
+        assert!(
+            cx.baggage().get("user").is_none(),
+            "baggage must not be extracted when Baggage is absent from extract styles"
+        );
+
+        // Injection: context carrying baggage → header must be written.
+        let cx_with_baggage = Context::current_with_baggage(vec![KeyValue::new("server", "42")]);
+        let span_cx = OtelSpanContext::new(
+            TraceId::from(0x4bf9_2f35_77b3_4da6_a3ce_929d_0e0e_4736_u128),
+            SpanId::from(0x00f0_67aa_0ba9_02b7_u64),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::NONE,
+        );
+        let cx_with_both = cx_with_baggage.with_remote_span_context(span_cx);
+
+        let mut injector: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx_with_both, &mut injector);
+        let header = injector
+            .get(BAGGAGE_KEY)
+            .expect("baggage header must be injected");
+        assert!(
+            header.contains("server=42"),
+            "injected baggage header should contain the baggage entry"
+        );
+    }
+
+    // ── Helper: build a propagator from a single combined style list ──────────
+
+    fn get_propagator_with_combined_style(styles: Vec<TracePropagationStyle>) -> DatadogPropagator {
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_propagation_style(styles)
+                .build(),
+        );
+        DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
+    }
+
+    // ── Unit: composite propagator inclusion/exclusion ────────────────────────
+
+    #[test]
+    fn baggage_included_in_fields_when_configured() {
+        let propagator = get_propagator_with_combined_style(vec![TracePropagationStyle::Baggage]);
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            fields.contains(&BAGGAGE_KEY),
+            "fields() must include 'baggage' when Baggage style is configured; got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn baggage_excluded_from_fields_when_not_configured() {
+        let propagator = get_propagator_with_combined_style(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            !fields.contains(&BAGGAGE_KEY),
+            "fields() must not include 'baggage' when Baggage style is absent; got {fields:?}"
+        );
+    }
+
+    // ── Integration: inject / extract / round-trip ────────────────────────────
+
+    #[test]
+    fn baggage_inject_encodes_multiple_entries() {
+        let propagator = get_propagator_with_combined_style(vec![TracePropagationStyle::Baggage]);
+
+        let cx = Context::current_with_baggage(vec![
+            KeyValue::new("user", "alice"),
+            KeyValue::new("tenant", "acme"),
+        ]);
+
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+
+        let header = carrier
+            .get(BAGGAGE_KEY)
+            .expect("baggage header must be present");
+        assert!(
+            header.contains("user=alice"),
+            "header must contain user=alice; got {header}"
+        );
+        assert!(
+            header.contains("tenant=acme"),
+            "header must contain tenant=acme; got {header}"
+        );
+    }
+
+    #[test]
+    fn baggage_extract_populates_context() {
+        let propagator = get_propagator_with_combined_style(vec![TracePropagationStyle::Baggage]);
+
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        carrier.insert(
+            BAGGAGE_KEY.to_string(),
+            "user=alice,tenant=acme".to_string(),
+        );
+
+        let cx = propagator.extract(&carrier);
+
+        let baggage = cx.baggage();
+        assert_eq!(
+            baggage.get("user").map(|v| v.as_str()),
+            Some("alice"),
+            "extracted baggage must contain user=alice"
+        );
+        assert_eq!(
+            baggage.get("tenant").map(|v| v.as_str()),
+            Some("acme"),
+            "extracted baggage must contain tenant=acme"
+        );
+    }
+
+    #[test]
+    fn baggage_round_trip() {
+        let propagator = get_propagator_with_combined_style(vec![TracePropagationStyle::Baggage]);
+
+        // Inject
+        let original_cx = Context::current_with_baggage(vec![
+            KeyValue::new("request-id", "xyz-123"),
+            KeyValue::new("region", "us-east-1"),
+        ]);
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&original_cx, &mut carrier);
+
+        // Extract into a fresh context
+        let extracted_cx = propagator.extract(&carrier);
+        let baggage = extracted_cx.baggage();
+
+        assert_eq!(
+            baggage.get("request-id").map(|v| v.as_str()),
+            Some("xyz-123"),
+            "round-trip must preserve request-id"
+        );
+        assert_eq!(
+            baggage.get("region").map(|v| v.as_str()),
+            Some("us-east-1"),
+            "round-trip must preserve region"
+        );
+    }
+
+    // ── Env-var style scenarios ───────────────────────────────────────────────
+
+    #[test]
+    fn baggage_not_injected_when_style_is_datadog_tracecontext() {
+        // DD_TRACE_PROPAGATION_STYLE=datadog,tracecontext — no Baggage variant.
+        let propagator = get_propagator_with_combined_style(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+
+        let cx = Context::current_with_baggage(vec![KeyValue::new("user", "alice")]);
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+
+        assert!(
+            carrier.get(BAGGAGE_KEY).is_none(),
+            "baggage header must NOT be present when Baggage is not in propagation style"
+        );
+    }
+
+    #[test]
+    fn baggage_only_style_injects_only_baggage_header() {
+        // DD_TRACE_PROPAGATION_STYLE=baggage — no Datadog or TraceContext headers.
+        let propagator = get_propagator_with_combined_style(vec![TracePropagationStyle::Baggage]);
+
+        let cx = Context::current_with_baggage(vec![KeyValue::new("user", "alice")]);
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+
+        assert!(
+            carrier.get(BAGGAGE_KEY).is_some(),
+            "baggage header must be present"
+        );
+        assert!(
+            carrier.get("traceparent").is_none(),
+            "traceparent must NOT be present when TraceContext is not in propagation style"
+        );
+        assert!(
+            carrier.get("x-datadog-trace-id").is_none(),
+            "x-datadog-trace-id must NOT be present when Datadog is not in propagation style"
+        );
+    }
+
+    #[test]
+    fn baggage_injected_by_default_config() {
+        // Default config (no explicit style set) includes Baggage.
+        let config = Arc::new(Config::builder().build());
+        let propagator = DatadogPropagator::new(config.clone(), TraceRegistry::new(config));
+
+        // Verify via fields()
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            fields.contains(&BAGGAGE_KEY),
+            "fields() must include 'baggage' with default config; got {fields:?}"
+        );
+
+        // Verify via actual injection
+        let cx = Context::current_with_baggage(vec![KeyValue::new("env", "prod")]);
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+        assert!(
+            carrier.get(BAGGAGE_KEY).is_some(),
+            "baggage header must be injected with default config"
+        );
     }
 }

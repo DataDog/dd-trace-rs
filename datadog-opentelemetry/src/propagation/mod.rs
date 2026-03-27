@@ -14,6 +14,8 @@ use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
 use tracecontext::TRACESTATE_KEY;
 
+/// W3C Baggage propagation (`baggage` header).
+pub mod baggage;
 pub mod carrier;
 pub(crate) mod config;
 pub mod context;
