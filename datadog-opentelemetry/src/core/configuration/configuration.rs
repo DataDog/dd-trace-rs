@@ -559,7 +559,6 @@ macro_rules! impl_config_value_provider {
   };
 }
 
-
 /// Manages extra services discovered at runtime
 /// This is used to track services beyond the main service for remote configuration
 #[derive(Debug, Clone)]
