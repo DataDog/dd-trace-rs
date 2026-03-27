@@ -31,7 +31,9 @@
         "version": "A",
         "type": "string",
         "default": "http://localhost:8125",
-        "propertyKeys": ["dogstatsd_agent_url"]
+        "propertyKeys": ["dogstatsd_agent_url"],
+        "skip_default_generation": true,
+        "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
     "DD_ENV": [
@@ -39,7 +41,9 @@
         "version": "A",
         "type": "string",
         "default": "",
-        "propertyKeys": ["env"]
+        "propertyKeys": ["env"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
@@ -55,7 +59,9 @@
         "version": "A",
         "type": "string",
         "default": "ERROR",
-        "propertyKeys": ["log_level_filter"]
+        "propertyKeys": ["log_level_filter"],
+        "skip_default_generation": true,
+        "rust_value": "LevelFilter::default()"
       }
     ],
     "DD_METRICS_OTEL_ENABLED": [
@@ -80,7 +86,9 @@
         "version": "A",
         "type": "decimal",
         "default": "5.0",
-        "propertyKeys": ["remote_config_poll_interval"]
+        "propertyKeys": ["remote_config_poll_interval"],
+        "skip_default_generation": true,
+        "rust_value": "5.0"
       }
     ],
     "DD_SERVICE": [
@@ -88,7 +96,10 @@
         "version": "C",
         "type": "string",
         "default": "unnamed-rust-service",
-        "propertyKeys": ["service"]
+        "propertyKeys": ["service"],
+        "skip_default_generation": true,
+        "rust_value": "ServiceName::Default",
+        "config_item_type": "override_code"
       }
     ],
     "DD_TAGS": [
@@ -104,7 +115,9 @@
         "version": "B",
         "type": "decimal",
         "default": "60.0",
-        "propertyKeys": ["telemetry_heartbeat_interval"]
+        "propertyKeys": ["telemetry_heartbeat_interval"],
+        "skip_default_generation": true,
+        "rust_value": "60.0"
       }
     ],
     "DD_TELEMETRY_LOG_COLLECTION_ENABLED": [
@@ -144,7 +157,7 @@
         "version": "A",
         "type": "boolean",
         "default": "false",
-        "propertyKeys": ["trace_partial_flushed_enabled"]
+        "propertyKeys": ["trace_partial_flush_enabled"]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS": [
@@ -152,7 +165,9 @@
         "version": "A",
         "type": "int",
         "default": "300",
-        "propertyKeys": ["trace_partial_flushed_min_spans"]
+        "propertyKeys": ["trace_partial_flush_min_spans"],
+        "skip_default_generation": true,
+        "rust_value": "300usize"
       }
     ],
     "DD_TRACE_PROPAGATION_EXTRACT_FIRST": [
@@ -168,7 +183,9 @@
         "version": "A",
         "type": "array",
         "default": "datadog,tracecontext",
-        "propertyKeys": ["trace_propagation_style"]
+        "propertyKeys": ["trace_propagation_style"],
+        "skip_default_generation": true,
+        "rust_value": "Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext])"
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_EXTRACT": [
@@ -176,7 +193,9 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_propagation_style_extract"]
+        "propertyKeys": ["trace_propagation_style_extract"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "DD_TRACE_PROPAGATION_STYLE_INJECT": [
@@ -184,7 +203,9 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_propagation_style_inject"]
+        "propertyKeys": ["trace_propagation_style_inject"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "DD_TRACE_RATE_LIMIT": [
@@ -192,7 +213,9 @@
         "version": "A",
         "type": "int",
         "default": "100",
-        "propertyKeys": ["trace_rate_limit"]
+        "propertyKeys": ["trace_rate_limit"],
+        "skip_default_generation": true,
+        "rust_value": "100i32"
       }
     ],
     "DD_TRACE_SAMPLING_RULES": [
@@ -200,7 +223,10 @@
         "version": "A",
         "type": "array",
         "default": "",
-        "propertyKeys": ["trace_sampling_rules"]
+        "propertyKeys": ["trace_sampling_rules"],
+        "skip_default_generation": true,
+        "rust_value": "ParsedSamplingRules::default()",
+        "config_item_type": "override_rc"
       }
     ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
@@ -216,7 +242,9 @@
         "version": "A",
         "type": "int",
         "default": "512",
-        "propertyKeys": ["datadog_tags_max_length"]
+        "propertyKeys": ["datadog_tags_max_length"],
+        "skip_default_generation": true,
+        "rust_value": "512usize"
       }
     ],
     "DD_VERSION": [
@@ -224,7 +252,9 @@
         "version": "A",
         "type": "string",
         "default": "",
-        "propertyKeys": ["version"]
+        "propertyKeys": ["version"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "OTEL_EXPORTER_OTLP_ENDPOINT": [
@@ -240,7 +270,9 @@
         "version": "A",
         "type": "map",
         "default": "",
-        "propertyKeys": ["otlp_headers"]
+        "propertyKeys": ["otlp_headers"],
+        "skip_default_generation": true,
+        "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": [
@@ -256,7 +288,9 @@
         "version": "A",
         "type": "map",
         "default": null,
-        "propertyKeys": ["otlp_metrics_headers"]
+        "propertyKeys": ["otlp_metrics_headers"],
+        "skip_default_generation": true,
+        "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": [
@@ -264,7 +298,9 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_metrics_protocol"]
+        "propertyKeys": ["otlp_metrics_protocol"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": [
@@ -272,7 +308,9 @@
         "version": "A",
         "type": "string",
         "default": "delta",
-        "propertyKeys": ["otel_metrics_temporality_preference"]
+        "propertyKeys": ["otel_metrics_temporality_preference"],
+        "skip_default_generation": true,
+        "rust_value": "Some(opentelemetry_sdk::metrics::Temporality::Delta)"
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": [
@@ -288,7 +326,9 @@
         "version": "C",
         "type": "string",
         "default": "grpc",
-        "propertyKeys": ["otlp_protocol"]
+        "propertyKeys": ["otlp_protocol"],
+        "skip_default_generation": true,
+        "rust_value": "None"
       }
     ],
     "OTEL_EXPORTER_OTLP_TIMEOUT": [
@@ -327,8 +367,8 @@
       {
         "version": "A",
         "type": "map",
-        "default_value": "",
-        "propertyKeys": []
+"default_value": "",
+        "propertyKeys": ["otel_resource_attributes"]
       }
     ]
   }

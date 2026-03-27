@@ -23,7 +23,8 @@
 mod configuration;
 pub(crate) mod remote_config;
 mod sources;
-mod supported_configurations;
 
 pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};
-pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};
+pub(crate) use configuration::{
+    is_alias_deprecated, ConfigurationProvider, RemoteConfigUpdate, SupportedConfigurations,
+};

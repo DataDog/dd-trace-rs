@@ -13,7 +13,9 @@ use rustc_version_runtime::version;
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
-use crate::core::configuration::supported_configurations::SupportedConfigurations;
+#[path = "supported_configurations.rs"]
+mod supported_configurations;
+pub(crate) use supported_configurations::{is_alias_deprecated, SupportedConfigurations};
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
@@ -930,28 +932,19 @@ pub struct Config {
 
 impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {
-        let default = default_config();
+        use SupportedConfigurations as S;
 
-        /// Wrapper to parse "," separated string to vector
         struct DdTags(Vec<String>);
-
         impl FromStr for DdTags {
             type Err = &'static str;
-
             fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(DdTags(
-                    s.split(',').map(|s| s.to_string()).collect::<Vec<String>>(),
-                ))
+                Ok(DdTags(s.split(',').map(|s| s.to_string()).collect()))
             }
         }
 
-        /// Wrapper to parse "," separated key:value tags to vector<(key, value)>
-        /// discarding tags without ":" delimiter
         struct DdKeyValueTags(Vec<(String, String)>);
-
         impl FromStr for DdKeyValueTags {
             type Err = &'static str;
-
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 Ok(DdKeyValueTags(
                     s.split(',')
@@ -965,10 +958,8 @@ impl Config {
         }
 
         struct OtelResourceAttributes(Vec<(String, String)>);
-
         impl FromStr for OtelResourceAttributes {
             type Err = &'static str;
-
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 Ok(OtelResourceAttributes(
                     s.split(',')
@@ -981,19 +972,17 @@ impl Config {
             }
         }
 
-        let parsed_sampling_rules_config = sources
-            .get_parse::<ParsedSamplingRules>(SupportedConfigurations::DD_TRACE_SAMPLING_RULES);
-
+        let parsed_sampling_rules_config =
+            sources.get_parse::<ParsedSamplingRules>(S::DD_TRACE_SAMPLING_RULES);
         let mut sampling_rules_item = ConfigItemWithOverride::new_rc(
             parsed_sampling_rules_config.name,
-            ParsedSamplingRules::default(), // default is empty rules
+            ParsedSamplingRules::default(),
         );
-
-        // Set env value if it was parsed from environment
         if let Some(rules) = parsed_sampling_rules_config.value {
             sampling_rules_item.set_value_source(rules.value, rules.origin);
         }
 
+        let default = default_config();
         let cisu = ConfigItemSourceUpdater { sources };
 
         Self {
@@ -1004,48 +993,27 @@ impl Config {
             service: cisu.update_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
-            // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
             otel_resource_attributes: cisu.update_parsed_with_transform(
                 default.otel_resource_attributes,
                 |OtelResourceAttributes(attrs)| attrs,
             ),
-            otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
                 crate::metrics_exporter::parse_temporality,
             ),
-            agent_host: cisu.update_string(default.agent_host, Cow::Owned),
-            trace_agent_port: cisu.update_parsed(default.trace_agent_port),
-            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
-            dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
-            dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
-            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
-
-            trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
-            trace_partial_flush_min_spans: cisu
-                .update_parsed(default.trace_partial_flush_min_spans),
-
-            // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
-
-            enabled: cisu.update_parsed(default.enabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
-            trace_stats_computation_enabled: cisu
-                .update_parsed(default.trace_stats_computation_enabled),
-            telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
-            telemetry_log_collection_enabled: cisu
-                .update_parsed(default.telemetry_log_collection_enabled),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
-            trace_propagation_style: cisu
-                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
-                    TracePropagationStyle::from_tags(Some(tags))
-                }),
+            trace_propagation_style: cisu.update_parsed_with_transform(
+                default.trace_propagation_style,
+                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+            ),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -1054,36 +1022,52 @@ impl Config {
                 default.trace_propagation_style_inject,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
             ),
-            trace_propagation_extract_first: cisu
-                .update_parsed(default.trace_propagation_extract_first),
+            trace_partial_flush_min_spans: cisu
+                .update_parsed(default.trace_partial_flush_min_spans),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
-            remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
             remote_config_poll_interval: cisu.update_parsed_with_transform(
                 default.remote_config_poll_interval,
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-            datadog_tags_max_length: cisu
-                .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
-                    max.min(DATADOG_TAGS_MAX_LENGTH)
-                }),
-            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
-            otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
-            otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
-            otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
+            datadog_tags_max_length: cisu.update_parsed_with_transform(
+                default.datadog_tags_max_length,
+                |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
+            ),
             otlp_metrics_protocol: cisu.update_string(
                 default.otlp_metrics_protocol,
                 crate::metrics_exporter::OtlpProtocol::parse_optional,
             ),
+            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
+            otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
             otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
             otlp_protocol: cisu.update_string(
                 default.otlp_protocol,
                 crate::metrics_exporter::OtlpProtocol::parse_optional,
             ),
+            agent_host: cisu.update_string(default.agent_host, Cow::Owned),
+            dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
+            dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
+            telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
+            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
+            remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
+            telemetry_log_collection_enabled: cisu
+                .update_parsed(default.telemetry_log_collection_enabled),
+            trace_agent_port: cisu.update_parsed(default.trace_agent_port),
+            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
+            enabled: cisu.update_parsed(default.enabled),
+            trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
+            trace_propagation_extract_first: cisu
+                .update_parsed(default.trace_propagation_extract_first),
+            trace_stats_computation_enabled: cisu
+                .update_parsed(default.trace_stats_computation_enabled),
+            otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
+            otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
             otlp_metrics_timeout: cisu.update_parsed(default.otlp_metrics_timeout),
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
+            otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
             metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
         }
@@ -1100,47 +1084,6 @@ impl Config {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
 
-    pub(crate) fn get_telemetry_configuration(&self) -> Vec<&dyn ConfigurationProvider> {
-        vec![
-            &self.service,
-            &self.env,
-            &self.version,
-            &self.global_tags,
-            &self.agent_host,
-            &self.trace_agent_port,
-            &self.trace_agent_url,
-            &self.dogstatsd_agent_host,
-            &self.dogstatsd_agent_port,
-            &self.dogstatsd_agent_url,
-            &self.trace_sampling_rules,
-            &self.trace_rate_limit,
-            &self.enabled,
-            &self.log_level_filter,
-            &self.trace_stats_computation_enabled,
-            &self.telemetry_enabled,
-            &self.telemetry_log_collection_enabled,
-            &self.telemetry_heartbeat_interval,
-            &self.trace_partial_flush_enabled,
-            &self.trace_partial_flush_min_spans,
-            &self.trace_propagation_style,
-            &self.trace_propagation_style_extract,
-            &self.trace_propagation_style_inject,
-            &self.trace_propagation_extract_first,
-            &self.remote_config_enabled,
-            &self.remote_config_poll_interval,
-            &self.datadog_tags_max_length,
-            &self.otlp_endpoint,
-            &self.otlp_timeout,
-            &self.otlp_headers,
-            &self.otlp_protocol,
-            &self.otlp_metrics_endpoint,
-            &self.otlp_metrics_timeout,
-            &self.otlp_metrics_headers,
-            &self.otlp_metrics_protocol,
-            &self.metric_export_interval,
-            &self.metric_export_timeout,
-        ]
-    }
 
     /// Returns the unique runtime identifier for this process.
     pub fn runtime_id(&self) -> &str {
@@ -1201,31 +1144,11 @@ impl Config {
             .map(|attr| (attr.0.as_str(), attr.1.as_str()))
     }
 
-    /// Returns the OpenTelemetry metrics exporter type.
-    pub fn otel_metrics_exporter(&self) -> &str {
-        self.otel_metrics_exporter.value().as_ref()
-    }
-
     /// Returns the OpenTelemetry metrics temporality preference (Delta or Cumulative).
     pub fn otel_metrics_temporality_preference(
         &self,
     ) -> Option<opentelemetry_sdk::metrics::Temporality> {
         *self.otel_metrics_temporality_preference.value()
-    }
-
-    /// Returns the URL of the Datadog trace agent.
-    pub fn trace_agent_url(&self) -> &Cow<'static, str> {
-        self.trace_agent_url.value()
-    }
-
-    /// Returns the host of the DogStatsD agent.
-    pub fn dogstatsd_agent_host(&self) -> &Cow<'static, str> {
-        self.dogstatsd_agent_host.value()
-    }
-
-    /// Returns the port of the DogStatsD agent.
-    pub fn dogstatsd_agent_port(&self) -> &u32 {
-        self.dogstatsd_agent_port.value()
     }
 
     /// Returns the full URL of the DogStatsD agent.
@@ -1243,19 +1166,9 @@ impl Config {
         *self.trace_rate_limit.value()
     }
 
-    /// Returns whether tracing is enabled.
-    pub fn enabled(&self) -> bool {
-        *self.enabled.value()
-    }
-
     /// Returns the configured log level filter.
     pub fn log_level_filter(&self) -> &LevelFilter {
         self.log_level_filter.value()
-    }
-
-    /// Returns whether client-side trace stats computation is enabled.
-    pub fn trace_stats_computation_enabled(&self) -> bool {
-        *self.trace_stats_computation_enabled.value()
     }
 
     #[cfg(feature = "test-utils")]
@@ -1270,34 +1183,9 @@ impl Config {
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
     }
 
-    /// Returns whether telemetry collection is enabled.
-    pub fn telemetry_enabled(&self) -> bool {
-        *self.telemetry_enabled.value()
-    }
-
-    /// Returns whether telemetry log collection is enabled.
-    pub fn telemetry_log_collection_enabled(&self) -> bool {
-        *self.telemetry_log_collection_enabled.value()
-    }
-
     /// Returns the telemetry heartbeat interval in seconds.
     pub fn telemetry_heartbeat_interval(&self) -> f64 {
         *self.telemetry_heartbeat_interval.value()
-    }
-
-    /// Returns whether OpenTelemetry metrics export is enabled.
-    pub fn metrics_otel_enabled(&self) -> bool {
-        *self.metrics_otel_enabled.value()
-    }
-
-    /// Returns the OTLP metrics endpoint URL.
-    pub fn otlp_metrics_endpoint(&self) -> &str {
-        self.otlp_metrics_endpoint.value().as_ref()
-    }
-
-    /// Returns the OTLP endpoint URL (fallback for metrics if metrics endpoint is not set).
-    pub fn otlp_endpoint(&self) -> &str {
-        self.otlp_endpoint.value().as_ref()
     }
 
     /// Returns the OTLP headers (fallback for metrics if metrics headers are not set).
@@ -1320,32 +1208,6 @@ impl Config {
         *self.otlp_protocol.value()
     }
 
-    /// Returns the OTLP metrics timeout in milliseconds.
-    pub fn otlp_metrics_timeout(&self) -> u32 {
-        *self.otlp_metrics_timeout.value()
-    }
-
-    /// Returns the OTLP timeout in milliseconds (fallback for metrics if metrics timeout is not
-    /// set).
-    pub fn otlp_timeout(&self) -> u32 {
-        *self.otlp_timeout.value()
-    }
-
-    /// Returns the metric export interval in milliseconds.
-    pub fn metric_export_interval(&self) -> u32 {
-        *self.metric_export_interval.value()
-    }
-
-    /// Returns the metric export timeout in milliseconds.
-    pub fn metric_export_timeout(&self) -> u32 {
-        *self.metric_export_timeout.value()
-    }
-
-    /// Returns whether partial trace flushing is enabled.
-    pub fn trace_partial_flush_enabled(&self) -> bool {
-        *self.trace_partial_flush_enabled.value()
-    }
-
     /// Returns the minimum number of spans required to trigger a partial flush.
     pub fn trace_partial_flush_min_spans(&self) -> usize {
         *self.trace_partial_flush_min_spans.value()
@@ -1364,11 +1226,6 @@ impl Config {
     /// Returns the configured trace propagation styles for context injection.
     pub fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style_inject.value().as_deref()
-    }
-
-    /// Returns whether to stop extraction after the first successful propagator.
-    pub fn trace_propagation_extract_first(&self) -> bool {
-        *self.trace_propagation_extract_first.value()
     }
 
     pub(crate) fn update_sampling_rules_from_remote(
@@ -1455,11 +1312,6 @@ impl Config {
         self.extra_services_tracker.get_extra_services()
     }
 
-    /// Check if remote configuration is enabled
-    pub fn remote_config_enabled(&self) -> bool {
-        *self.remote_config_enabled.value()
-    }
-
     /// Get RC poll interval (seconds)
     pub fn remote_config_poll_interval(&self) -> f64 {
         *self.remote_config_poll_interval.value()
@@ -1471,204 +1323,8 @@ impl Config {
     }
 }
 
-impl std::fmt::Debug for Config {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("runtime_id", &self.runtime_id)
-            .field("tracer_version", &self.tracer_version)
-            .field("language_version", &self.language_version)
-            .field("service", &self.service)
-            .field("env", &self.env)
-            .field("version", &self.version)
-            .field("global_tags", &self.global_tags)
-            .field("trace_agent_url", &self.trace_agent_url)
-            .field("dogstatsd_agent_url", &self.dogstatsd_agent_url)
-            .field("trace_sampling_rules", &self.trace_sampling_rules)
-            .field("trace_rate_limit", &self.trace_rate_limit)
-            .field("enabled", &self.enabled)
-            .field("log_level_filter", &self.log_level_filter)
-            .field(
-                "trace_stats_computation_enabled",
-                &self.trace_stats_computation_enabled,
-            )
-            .field("trace_propagation_style", &self.trace_propagation_style)
-            .field(
-                "trace_propagation_style_extract",
-                &self.trace_propagation_style_extract,
-            )
-            .field(
-                "trace_propagation_style_inject",
-                &self.trace_propagation_style_inject,
-            )
-            .field(
-                "trace_propagation_extract_first",
-                &self.trace_propagation_extract_first,
-            )
-            .field("extra_services_tracker", &self.extra_services_tracker)
-            .field("remote_config_enabled", &self.remote_config_enabled)
-            .field(
-                "remote_config_poll_interval",
-                &self.remote_config_poll_interval,
-            )
-            .field("remote_config_callbacks", &self.remote_config_callbacks)
-            .finish()
-    }
-}
-
 fn default_config() -> Config {
-    Config {
-        runtime_id: Config::process_runtime_id(),
-        env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
-        // TODO(paullgdc): Default service naming detection, probably from arg0
-        service: ConfigItemWithOverride::new_code(
-            SupportedConfigurations::DD_SERVICE,
-            ServiceName::Default,
-        ),
-        version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
-        global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
-        otel_resource_attributes: ConfigItem::new(
-            SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES,
-            Vec::new(),
-        ),
-        otel_metrics_exporter: ConfigItem::new(
-            SupportedConfigurations::OTEL_METRICS_EXPORTER,
-            Cow::Borrowed("otlp"),
-        ),
-        otel_metrics_temporality_preference: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
-            Some(opentelemetry_sdk::metrics::Temporality::Delta),
-        ),
-
-        agent_host: ConfigItem::new(
-            SupportedConfigurations::DD_AGENT_HOST,
-            Cow::Borrowed("localhost"),
-        ),
-        trace_agent_port: ConfigItem::new(SupportedConfigurations::DD_TRACE_AGENT_PORT, 8126),
-        trace_agent_url: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_AGENT_URL,
-            Cow::Borrowed(""),
-        ),
-        dogstatsd_agent_host: ConfigItem::new(
-            SupportedConfigurations::DD_DOGSTATSD_HOST,
-            Cow::Borrowed("localhost"),
-        ),
-        dogstatsd_agent_port: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_PORT, 8125),
-        dogstatsd_agent_url: ConfigItem::new(
-            SupportedConfigurations::DD_DOGSTATSD_URL,
-            Cow::Borrowed(""),
-        ),
-        trace_sampling_rules: ConfigItemWithOverride::new_rc(
-            SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
-            ParsedSamplingRules::default(), // Empty rules by default
-        ),
-        trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
-        enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
-        log_level_filter: ConfigItem::new(
-            SupportedConfigurations::DD_LOG_LEVEL,
-            LevelFilter::default(),
-        ),
-        tracer_version: TRACER_VERSION,
-        language: "rust",
-        language_version: version().to_string(),
-        trace_stats_computation_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
-            true,
-        ),
-        #[cfg(feature = "test-utils")]
-        wait_agent_info_ready: false,
-
-        telemetry_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED,
-            true,
-        ),
-        telemetry_log_collection_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
-            true,
-        ),
-        telemetry_heartbeat_interval: ConfigItem::new(
-            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
-            60.0,
-        ),
-        trace_partial_flush_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
-            false,
-        ),
-        trace_partial_flush_min_spans: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
-            300,
-        ),
-        trace_propagation_style: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
-            Some(vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ]),
-        ),
-        trace_propagation_style_extract: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
-            None,
-        ),
-        trace_propagation_style_inject: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT,
-            None,
-        ),
-        trace_propagation_extract_first: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
-            false,
-        ),
-        extra_services_tracker: ExtraServicesTracker::new(),
-        remote_config_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
-            true,
-        ),
-        remote_config_poll_interval: ConfigItem::new(
-            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
-            RC_DEFAULT_POLL_INTERVAL,
-        ),
-        remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-        datadog_tags_max_length: ConfigItem::new(
-            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
-            DATADOG_TAGS_MAX_LENGTH,
-        ),
-        metrics_otel_enabled: ConfigItem::new(
-            SupportedConfigurations::DD_METRICS_OTEL_ENABLED,
-            true,
-        ),
-        otlp_metrics_endpoint: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
-            Cow::Borrowed(""),
-        ),
-        otlp_endpoint: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT,
-            Cow::Borrowed(""),
-        ),
-        otlp_headers: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS,
-            Cow::Borrowed(""),
-        ),
-        otlp_metrics_protocol: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
-            None,
-        ),
-        otlp_metrics_headers: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS,
-            Cow::Borrowed(""),
-        ),
-        otlp_protocol: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL, None),
-        otlp_metrics_timeout: ConfigItem::new(
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
-            10000u32,
-        ),
-        otlp_timeout: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT, 7500u32),
-        metric_export_interval: ConfigItem::new(
-            SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
-            10000u32,
-        ),
-        metric_export_timeout: ConfigItem::new(
-            SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
-            7500u32,
-        ),
-    }
+    supported_configurations::default_config()
 }
 
 /// Builder for constructing a [`Config`] instance.
@@ -1767,28 +1423,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Enable or disable telemetry data collection and sending.
-    ///
-    /// **Default**: `true`
-    ///
-    /// Env variable: `DD_INSTRUMENTATION_TELEMETRY_ENABLED`
-    pub fn set_telemetry_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.telemetry_enabled.set_code(enabled);
-        self
-    }
-
-    /// Enable or disable log collection for telemetry.
-    ///
-    /// **Default**: `true`
-    ///
-    /// Env variable: `DD_TELEMETRY_LOG_COLLECTION_ENABLED`
-    pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config
-            .telemetry_log_collection_enabled
-            .set_code(enabled);
-        self
-    }
-
     /// Interval in seconds for sending telemetry heartbeat messages.
     ///
     ///  **Default**: `60.0`
@@ -1798,73 +1432,6 @@ impl ConfigBuilder {
         self.config
             .telemetry_heartbeat_interval
             .set_code(seconds.abs());
-        self
-    }
-
-    /// Sets the hostname of the Datadog Agent.
-    ///
-    ///  **Default**: `localhost`
-    ///
-    /// Env variable: `DD_AGENT_HOST`
-    pub fn set_agent_host(&mut self, host: String) -> &mut Self {
-        self.config
-            .agent_host
-            .set_code(Cow::Owned(host.to_string()));
-        self
-    }
-
-    /// Sets the port of the Datadog Agent for trace collection.
-    ///
-    ///  **Default**: `8126`
-    ///
-    /// Env variable: `DD_TRACE_AGENT_PORT`
-    pub fn set_trace_agent_port(&mut self, port: u32) -> &mut Self {
-        self.config.trace_agent_port.set_code(port);
-        self
-    }
-
-    /// Sets the URL of the Datadog Agent. This takes precedence over `DD_AGENT_HOST` and
-    /// `DD_TRACE_AGENT_PORT`.
-    ///
-    ///  **Default**: `http://localhost:8126`
-    ///
-    /// Env variable: `DD_TRACE_AGENT_URL`
-    pub fn set_trace_agent_url(&mut self, url: String) -> &mut Self {
-        self.config
-            .trace_agent_url
-            .set_code(Cow::Owned(url.to_string()));
-        self
-    }
-
-    /// Enable or disable OpenTelemetry metrics export.
-    ///
-    /// **Default**: `false`
-    ///
-    /// Env variable: `DD_METRICS_OTEL_ENABLED`
-    pub fn set_metrics_otel_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.metrics_otel_enabled.set_code(enabled);
-        self
-    }
-
-    /// Set the OTLP metrics endpoint URL.
-    ///
-    /// **Default**: `(empty, falls back to OTEL_EXPORTER_OTLP_ENDPOINT or agent URL)`
-    ///
-    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
-    pub fn set_otlp_metrics_endpoint(&mut self, endpoint: String) -> &mut Self {
-        self.config
-            .otlp_metrics_endpoint
-            .set_code(Cow::Owned(endpoint));
-        self
-    }
-
-    /// Set the OTLP general endpoint URL (fallback for metrics endpoint).
-    ///
-    /// **Default**: `(empty)`
-    ///
-    /// Env variable: `OTEL_EXPORTER_OTLP_ENDPOINT`
-    pub fn set_otlp_endpoint(&mut self, endpoint: String) -> &mut Self {
-        self.config.otlp_endpoint.set_code(Cow::Owned(endpoint));
         self
     }
 
@@ -1894,26 +1461,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Set the OTLP metrics timeout in milliseconds.
-    ///
-    /// **Default**: `7500`
-    ///
-    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`
-    pub fn set_otlp_metrics_timeout(&mut self, timeout: u32) -> &mut Self {
-        self.config.otlp_metrics_timeout.set_code(timeout);
-        self
-    }
-
-    /// Set the OTLP general timeout in milliseconds (fallback for metrics timeout).
-    ///
-    /// **Default**: `7500`
-    ///
-    /// Env variable: `OTEL_EXPORTER_OTLP_TIMEOUT`
-    pub fn set_otlp_timeout(&mut self, timeout: u32) -> &mut Self {
-        self.config.otlp_timeout.set_code(timeout);
-        self
-    }
-
     /// Set the OTLP metrics temporality preference.
     ///
     /// **Default**: `Delta`
@@ -1926,58 +1473,6 @@ impl ConfigBuilder {
         self.config
             .otel_metrics_temporality_preference
             .set_code(Some(temporality));
-        self
-    }
-
-    /// Set the metric export interval in milliseconds.
-    ///
-    /// **Default**: `10000`
-    ///
-    /// Env variable: `OTEL_METRIC_EXPORT_INTERVAL`
-    pub fn set_metric_export_interval(&mut self, interval: u32) -> &mut Self {
-        self.config.metric_export_interval.set_code(interval);
-        self
-    }
-
-    /// Set the metric export timeout in milliseconds.
-    ///
-    /// **Default**: `7500`
-    ///
-    /// Env variable: `OTEL_METRIC_EXPORT_TIMEOUT`
-    pub fn set_metric_export_timeout(&mut self, timeout: u32) -> &mut Self {
-        self.config.metric_export_timeout.set_code(timeout);
-        self
-    }
-
-    /// Sets the hostname for DogStatsD metric collection.
-    ///
-    /// **Default**: `localhost`
-    ///
-    /// Env variable: `DD_DOGSTATSD_HOST`
-    pub fn set_dogstatsd_agent_host(&mut self, host: String) -> &mut Self {
-        self.config
-            .dogstatsd_agent_host
-            .set_code(Cow::Owned(host.to_string()));
-        self
-    }
-
-    /// Sets the port for DogStatsD metric collection.
-    ///
-    /// **Default**: `8125`
-    ///
-    /// Env variable: `DD_DOGSTATSD_PORT`
-    pub fn set_dogstatsd_agent_port(&mut self, port: u32) -> &mut Self {
-        self.config.dogstatsd_agent_port.set_code(port);
-        self
-    }
-
-    /// Enable partial flushing of traces.
-    ///
-    /// **Default**: `false`
-    ///
-    /// Env variable: `DD_TRACE_PARTIAL_FLUSH_ENABLED`
-    pub fn set_trace_partial_flush_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.trace_partial_flush_enabled.set_code(enabled);
         self
     }
 
@@ -2060,26 +1555,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// When set to `true`, stops extracting after the first successful trace context extraction.
-    ///
-    /// **Default**: `false`
-    ///
-    /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
-    pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
-        self.config.trace_propagation_extract_first.set_code(first);
-        self
-    }
-
-    /// Set to `false` to disable tracing.
-    ///
-    /// **Default**: `true`
-    ///
-    /// Env variable: `DD_TRACE_ENABLED`
-    pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.enabled.set_code(enabled);
-        self
-    }
-
     /// Sets the internal log level for the tracer.
     ///
     /// **Default**: `Error`
@@ -2087,31 +1562,6 @@ impl ConfigBuilder {
     /// Env variable: `DD_LOG_LEVEL`
     pub fn set_log_level_filter(&mut self, filter: LevelFilter) -> &mut Self {
         self.config.log_level_filter.set_code(filter);
-        self
-    }
-
-    /// Enable computation of trace statistics.
-    ///
-    /// **Default**: `true`
-    ///
-    /// Env variable: `DD_TRACE_STATS_COMPUTATION_ENABLED`
-    pub fn set_trace_stats_computation_enabled(
-        &mut self,
-        trace_stats_computation_enabled: bool,
-    ) -> &mut Self {
-        self.config
-            .trace_stats_computation_enabled
-            .set_code(trace_stats_computation_enabled);
-        self
-    }
-
-    /// Enable or disable remote configuration.
-    ///
-    /// **Default**: `true`
-    ///
-    /// Env variable: `DD_REMOTE_CONFIGURATION_ENABLED`
-    pub fn set_remote_config_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.remote_config_enabled.set_code(enabled);
         self
     }
 

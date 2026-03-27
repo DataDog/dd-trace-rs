@@ -7,7 +7,7 @@ use libdd_telemetry::data::ConfigurationOrigin;
 
 use crate::dd_warn;
 
-use super::supported_configurations::{is_alias_deprecated, SupportedConfigurations};
+use super::configuration::{is_alias_deprecated, SupportedConfigurations};
 
 /// Source of a configuration value
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,7 +266,7 @@ mod tests {
         HashMapSource,
     };
     use crate::core::configuration::sources::ConfigKey;
-    use crate::core::configuration::supported_configurations::SupportedConfigurations;
+    use crate::core::configuration::SupportedConfigurations;
 
     #[test]
     fn test_composite_source_single_origin() {
