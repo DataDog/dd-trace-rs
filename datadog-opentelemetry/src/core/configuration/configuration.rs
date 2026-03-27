@@ -8,17 +8,15 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
 
-use rustc_version_runtime::version;
-
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
 #[path = "supported_configurations.rs"]
 mod supported_configurations;
-pub(crate) use supported_configurations::{is_alias_deprecated, SupportedConfigurations};
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
+pub(crate) use supported_configurations::{is_alias_deprecated, SupportedConfigurations};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -1010,10 +1008,10 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
-            trace_propagation_style: cisu.update_parsed_with_transform(
-                default.trace_propagation_style,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
-            ),
+            trace_propagation_style: cisu
+                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
+                    TracePropagationStyle::from_tags(Some(tags))
+                }),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -1032,10 +1030,10 @@ impl Config {
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-            datadog_tags_max_length: cisu.update_parsed_with_transform(
-                default.datadog_tags_max_length,
-                |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
-            ),
+            datadog_tags_max_length: cisu
+                .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
+                    max.min(DATADOG_TAGS_MAX_LENGTH)
+                }),
             otlp_metrics_protocol: cisu.update_string(
                 default.otlp_metrics_protocol,
                 crate::metrics_exporter::OtlpProtocol::parse_optional,
@@ -1083,7 +1081,6 @@ impl Config {
     pub fn builder() -> ConfigBuilder {
         Self::builder_with_sources(&CompositeSource::default_sources())
     }
-
 
     /// Returns the unique runtime identifier for this process.
     pub fn runtime_id(&self) -> &str {
