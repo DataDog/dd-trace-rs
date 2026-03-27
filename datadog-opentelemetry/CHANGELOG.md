@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 (Mar 27, 2026)
+
+- Change telemetry.sdk.name to datadog and telemetry.sdk.version to our own version in https://github.com/DataDog/dd-trace-rs/pull/196
+- Fix rpc.grpc.status_code stats serialization in https://github.com/DataDog/libdatadog/pull/1780
+- Tag spans with sampling rate (_dd.p.ksr) in https://github.com/DataDog/dd-trace-rs/pull/180
+
+
 ## 0.3.1 (Mar 17, 2026)
 
 - Fix sampling effective rate reporting in spans, as it was being truncated in https://github.com/DataDog/dd-trace-rs/pull/183
