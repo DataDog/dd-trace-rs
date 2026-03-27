@@ -16,6 +16,7 @@ mod supported_configurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
+pub use supported_configurations::Config;
 pub(crate) use supported_configurations::{is_alias_deprecated, SupportedConfigurations};
 
 /// Different types of remote configuration updates that can trigger callbacks
@@ -558,7 +559,6 @@ macro_rules! impl_config_value_provider {
   };
 }
 
-type SamplingRulesConfigItem = ConfigItemWithOverride<ParsedSamplingRules>;
 
 /// Manages extra services discovered at runtime
 /// This is used to track services beyond the main service for remote configuration
@@ -791,142 +791,6 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
 
 impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
 impl_config_value_provider!(option: String);
-
-#[derive(Clone)]
-#[non_exhaustive]
-/// Configuration for the Datadog Tracer
-///
-/// # Usage
-/// ```
-/// use datadog_opentelemetry::configuration::Config;
-///
-///
-/// let config = Config::builder() // This pulls configuration from the environment and other sources
-///     .set_service("my-service".to_string()) // Override service name
-///     .set_version("1.0.0".to_string()) // Override version
-/// .build();
-/// ```
-pub struct Config {
-    // # Global
-    runtime_id: &'static str,
-
-    // # Tracer
-    tracer_version: &'static str,
-    language_version: String,
-    language: &'static str,
-
-    // # Service tagging
-    service: ConfigItemWithOverride<ServiceName>,
-    env: ConfigItem<Option<String>>,
-    version: ConfigItem<Option<String>>,
-
-    // # Agent
-    /// A list of default tags to be added to every span
-    /// If DD_ENV or DD_VERSION is used, it overrides any env or version tag defined in DD_TAGS
-    global_tags: ConfigItem<Vec<(String, String)>>,
-    /// OTEL resource attributes parsed from OTEL_RESOURCE_ATTRIBUTES env var
-    otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
-    /// OTEL metrics exporter type
-    otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
-    /// OTEL metrics temporality preference
-    otel_metrics_temporality_preference:
-        ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
-    /// host of the trace agent
-    agent_host: ConfigItem<Cow<'static, str>>,
-    /// port of the trace agent
-    trace_agent_port: ConfigItem<u32>,
-    /// url of the trace agent
-    trace_agent_url: ConfigItem<Cow<'static, str>>,
-    /// host of the dogstatsd agent
-    dogstatsd_agent_host: ConfigItem<Cow<'static, str>>,
-    /// port of the dogstatsd agent
-    dogstatsd_agent_port: ConfigItem<u32>,
-    /// url of the dogstatsd agent
-    dogstatsd_agent_url: ConfigItem<Cow<'static, str>>,
-
-    // # Sampling
-    ///  A list of sampling rules. Each rule is matched against the root span of a trace
-    /// If a rule matches, the trace is sampled with the associated sample rate.
-    trace_sampling_rules: SamplingRulesConfigItem,
-
-    /// Maximum number of spans to sample per second
-    /// Only applied if trace_sampling_rules are matched
-    trace_rate_limit: ConfigItem<i32>,
-
-    /// Disables the library if this is false
-    enabled: ConfigItem<bool>,
-    /// The log level filter for the tracer
-    log_level_filter: ConfigItem<LevelFilter>,
-
-    /// Whether to enable stats computation for the tracer
-    /// Results in dropped spans not being sent to the agent
-    trace_stats_computation_enabled: ConfigItem<bool>,
-
-    /// Configurations for testing. Not exposed to customer
-    #[cfg(feature = "test-utils")]
-    wait_agent_info_ready: bool,
-
-    // # Telemetry configuration
-    /// Disables telemetry if false
-    telemetry_enabled: ConfigItem<bool>,
-    /// Disables telemetry log collection if false.
-    telemetry_log_collection_enabled: ConfigItem<bool>,
-    /// Interval by which telemetry events are flushed (seconds)
-    telemetry_heartbeat_interval: ConfigItem<f64>,
-
-    /// Partial flush
-    trace_partial_flush_enabled: ConfigItem<bool>,
-    trace_partial_flush_min_spans: ConfigItem<usize>,
-
-    /// Trace propagation configuration
-    trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    trace_propagation_extract_first: ConfigItem<bool>,
-
-    /// Whether remote configuration is enabled
-    remote_config_enabled: ConfigItem<bool>,
-
-    /// Interval by with remote configuration is polled (seconds)
-    /// 5 seconds is the highest interval allowed by the spec
-    remote_config_poll_interval: ConfigItem<f64>,
-
-    /// Tracks extra services discovered at runtime
-    /// Used for remote configuration to report all services
-    extra_services_tracker: ExtraServicesTracker,
-
-    /// General callbacks to be called when configuration is updated from remote configuration
-    /// Allows components like the DatadogSampler to be updated without circular imports
-    remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
-
-    /// Max length of x-datadog-tags header. It only accepts values between 0 and 512.
-    /// The default value is 512 and x-datadog-tags header is not injected if value is 0.
-    datadog_tags_max_length: ConfigItem<usize>,
-
-    // # OpenTelemetry Metrics
-    /// Enables OpenTelemetry metrics export
-    metrics_otel_enabled: ConfigItem<bool>,
-    /// OTLP metrics endpoint
-    otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
-    /// OTLP general endpoint
-    otlp_endpoint: ConfigItem<Cow<'static, str>>,
-    /// OTLP general headers
-    otlp_headers: ConfigItem<Cow<'static, str>>,
-    /// OTLP metrics protocol (grpc, http/protobuf, http/json)
-    otlp_metrics_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
-    /// OTLP metrics headers
-    otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
-    /// OTLP general protocol (fallback for metrics protocol)
-    otlp_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
-    /// OTLP metrics timeout in milliseconds
-    otlp_metrics_timeout: ConfigItem<u32>,
-    /// OTLP general timeout
-    otlp_timeout: ConfigItem<u32>,
-    /// Metric export interval in milliseconds
-    metric_export_interval: ConfigItem<u32>,
-    /// Metric export timeout in milliseconds
-    metric_export_timeout: ConfigItem<u32>,
-}
 
 impl Config {
     fn from_sources(sources: &CompositeSource) -> Self {

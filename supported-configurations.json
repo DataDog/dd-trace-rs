@@ -42,6 +42,7 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["env"],
+        "rust_type": "Option<String>",
         "skip_default_generation": "all",
         "rust_value": "None"
       }
@@ -60,6 +61,7 @@
         "type": "string",
         "default": "ERROR",
         "propertyKeys": ["log_level_filter"],
+        "rust_type": "LevelFilter",
         "skip_default_generation": "all",
         "rust_value": "LevelFilter::default()"
       }
@@ -96,6 +98,7 @@
         "type": "string",
         "default": "unnamed-rust-service",
         "propertyKeys": ["service"],
+        "rust_type": "ServiceName",
         "skip_default_generation": "all",
         "rust_value": "ServiceName::Default",
         "config_item_type": "override_code"
@@ -164,6 +167,7 @@
         "type": "int",
         "default": "300",
         "propertyKeys": ["trace_partial_flush_min_spans"],
+        "rust_type": "usize",
         "skip_default_generation": "all",
         "rust_value": "300usize"
       }
@@ -212,6 +216,7 @@
         "type": "int",
         "default": "100",
         "propertyKeys": ["trace_rate_limit"],
+        "rust_type": "i32",
         "skip_default_generation": "all",
         "rust_value": "100i32"
       }
@@ -222,6 +227,7 @@
         "type": "array",
         "default": "",
         "propertyKeys": ["trace_sampling_rules"],
+        "rust_type": "ParsedSamplingRules",
         "skip_default_generation": "all",
         "rust_value": "ParsedSamplingRules::default()",
         "config_item_type": "override_rc"
@@ -241,6 +247,7 @@
         "type": "int",
         "default": "512",
         "propertyKeys": ["datadog_tags_max_length"],
+        "rust_type": "usize",
         "skip_default_generation": "all",
         "rust_value": "512usize"
       }
@@ -251,6 +258,7 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["version"],
+        "rust_type": "Option<String>",
         "skip_default_generation": "all",
         "rust_value": "None"
       }
@@ -269,6 +277,7 @@
         "type": "map",
         "default": "",
         "propertyKeys": ["otlp_headers"],
+        "rust_type": "Cow<'static, str>",
         "skip_default_generation": "all",
         "rust_value": "Cow::Borrowed(\"\")"
       }
@@ -287,6 +296,7 @@
         "type": "map",
         "default": null,
         "propertyKeys": ["otlp_metrics_headers"],
+        "rust_type": "Cow<'static, str>",
         "skip_default_generation": "all",
         "rust_value": "Cow::Borrowed(\"\")"
       }
@@ -297,6 +307,7 @@
         "type": "string",
         "default": null,
         "propertyKeys": ["otlp_metrics_protocol"],
+        "rust_type": "Option<crate::metrics_exporter::OtlpProtocol>",
         "skip_default_generation": "all",
         "rust_value": "None"
       }
@@ -307,6 +318,7 @@
         "type": "string",
         "default": "delta",
         "propertyKeys": ["otel_metrics_temporality_preference"],
+        "rust_type": "Option<opentelemetry_sdk::metrics::Temporality>",
         "skip_default_generation": "all",
         "rust_value": "Some(opentelemetry_sdk::metrics::Temporality::Delta)"
       }
@@ -325,6 +337,7 @@
         "type": "string",
         "default": "grpc",
         "propertyKeys": ["otlp_protocol"],
+        "rust_type": "Option<crate::metrics_exporter::OtlpProtocol>",
         "skip_default_generation": "all",
         "rust_value": "None"
       }

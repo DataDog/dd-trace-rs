@@ -45,6 +45,7 @@ as_str_block = ""
 aliases_block = []
 alias_deprecated_block = []
 deprecated_block = []
+struct_field_lines = []
 getter_lines = []
 setter_lines = []
 telemetry_lines = []
@@ -72,6 +73,19 @@ for i, (key, versions) in enumerate(
         skip_set = {s.strip() for s in skip_raw.split(",")}
     else:
         skip_set = set()
+
+    # Build struct field line
+    if field_name:
+        rust_type = versions[0].get("rust_type", TYPE_MAP.get(json_type))
+        config_item_type = versions[0].get("config_item_type")
+        if config_item_type in ("override_code", "override_rc"):
+            struct_field_lines.append(
+                "    pub(super) {}: ConfigItemWithOverride<{}>,".format(field_name, rust_type)
+            )
+        else:
+            struct_field_lines.append(
+                "    pub(super) {}: ConfigItem<{}>,".format(field_name, rust_type)
+            )
 
     # Build getter/setter lines for simple types
     skip_getters = "getter" in skip_set
@@ -275,6 +289,32 @@ pub fn is_alias_deprecated(name: &str) -> bool {{
     }}
 }}
 
+/// Configuration for the Datadog Tracer
+///
+/// # Usage
+/// ```
+/// use datadog_opentelemetry::configuration::Config;
+///
+///
+/// let config = Config::builder() // This pulls configuration from the environment and other sources
+///     .set_service("my-service".to_string()) // Override service name
+///     .set_version("1.0.0".to_string()) // Override version
+/// .build();
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct Config {{
+    pub(super) runtime_id: &'static str,
+    pub(super) tracer_version: &'static str,
+    pub(super) language_version: String,
+    pub(super) language: &'static str,
+{struct_fields_block}
+    #[cfg(feature = "test-utils")]
+    pub(super) wait_agent_info_ready: bool,
+    pub(super) extra_services_tracker: ExtraServicesTracker,
+    pub(super) remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
+}}
+
 #[allow(missing_docs)]
 impl Config {{
 {getters_block}
@@ -324,6 +364,7 @@ impl std::fmt::Debug for Config {{
     aliases_joined=NL.join(aliases_block),
     deprecated_joined=NL.join(deprecated_block),
     alias_deprecated_joined=NL.join(alias_deprecated_block),
+    struct_fields_block="\n".join(struct_field_lines),
     default_config_block="\n".join(default_config_lines),
     getters_block="\n\n".join(getter_lines),
     setters_block="\n\n".join(setter_lines),

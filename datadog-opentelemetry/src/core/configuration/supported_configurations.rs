@@ -197,6 +197,73 @@ pub fn is_alias_deprecated(name: &str) -> bool {
     }
 }
 
+/// Configuration for the Datadog Tracer
+///
+/// # Usage
+/// ```
+/// use datadog_opentelemetry::configuration::Config;
+///
+///
+/// let config = Config::builder() // This pulls configuration from the environment and other sources
+///     .set_service("my-service".to_string()) // Override service name
+///     .set_version("1.0.0".to_string()) // Override version
+/// .build();
+/// ```
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct Config {
+    pub(super) runtime_id: &'static str,
+    pub(super) tracer_version: &'static str,
+    pub(super) language_version: String,
+    pub(super) language: &'static str,
+    pub(super) agent_host: ConfigItem<Cow<'static, str>>,
+    pub(super) dogstatsd_agent_host: ConfigItem<Cow<'static, str>>,
+    pub(super) dogstatsd_agent_port: ConfigItem<u32>,
+    pub(super) dogstatsd_agent_url: ConfigItem<Cow<'static, str>>,
+    pub(super) env: ConfigItem<Option<String>>,
+    pub(super) telemetry_enabled: ConfigItem<bool>,
+    pub(super) log_level_filter: ConfigItem<LevelFilter>,
+    pub(super) metrics_otel_enabled: ConfigItem<bool>,
+    pub(super) remote_config_enabled: ConfigItem<bool>,
+    pub(super) remote_config_poll_interval: ConfigItem<f64>,
+    pub(super) service: ConfigItemWithOverride<ServiceName>,
+    pub(super) global_tags: ConfigItem<Vec<(String, String)>>,
+    pub(super) telemetry_heartbeat_interval: ConfigItem<f64>,
+    pub(super) telemetry_log_collection_enabled: ConfigItem<bool>,
+    pub(super) trace_agent_port: ConfigItem<u32>,
+    pub(super) trace_agent_url: ConfigItem<Cow<'static, str>>,
+    pub(super) enabled: ConfigItem<bool>,
+    pub(super) trace_partial_flush_enabled: ConfigItem<bool>,
+    pub(super) trace_partial_flush_min_spans: ConfigItem<usize>,
+    pub(super) trace_propagation_extract_first: ConfigItem<bool>,
+    pub(super) trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
+    pub(super) trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
+    pub(super) trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
+    pub(super) trace_rate_limit: ConfigItem<i32>,
+    pub(super) trace_sampling_rules: ConfigItemWithOverride<ParsedSamplingRules>,
+    pub(super) trace_stats_computation_enabled: ConfigItem<bool>,
+    pub(super) datadog_tags_max_length: ConfigItem<usize>,
+    pub(super) version: ConfigItem<Option<String>>,
+    pub(super) otlp_endpoint: ConfigItem<Cow<'static, str>>,
+    pub(super) otlp_headers: ConfigItem<Cow<'static, str>>,
+    pub(super) otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
+    pub(super) otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
+    pub(super) otlp_metrics_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    pub(super) otel_metrics_temporality_preference:
+        ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
+    pub(super) otlp_metrics_timeout: ConfigItem<u32>,
+    pub(super) otlp_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    pub(super) otlp_timeout: ConfigItem<u32>,
+    pub(super) otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
+    pub(super) metric_export_interval: ConfigItem<u32>,
+    pub(super) metric_export_timeout: ConfigItem<u32>,
+    pub(super) otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
+    #[cfg(feature = "test-utils")]
+    pub(super) wait_agent_info_ready: bool,
+    pub(super) extra_services_tracker: ExtraServicesTracker,
+    pub(super) remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
+}
+
 #[allow(missing_docs)]
 impl Config {
     pub fn agent_host(&self) -> &str {
