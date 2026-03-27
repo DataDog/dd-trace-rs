@@ -65,54 +65,70 @@ for i, (key, versions) in enumerate(
     default_val = versions[0].get("default")
     property_keys = versions[0].get("propertyKeys", [])
     field_name = property_keys[0] if property_keys else None
-    skip = versions[0].get("skip_default_generation", False)
+    skip_raw = versions[0].get("skip_default_generation", "")
+    if skip_raw is True or skip_raw == "all":
+        skip_set = {"getter", "setter", "default"}
+    elif skip_raw:
+        skip_set = {s.strip() for s in skip_raw.split(",")}
+    else:
+        skip_set = set()
 
     # Build getter/setter lines for simple types
-    if not skip and field_name and json_type in ("string", "int", "decimal", "boolean"):
+    skip_getters = "getter" in skip_set
+    skip_setters = "setter" in skip_set
+    if field_name and json_type in ("string", "int", "decimal", "boolean"):
         if json_type == "string":
-            getter_lines.append(
-                "    pub fn {}(&self) -> &str {{ self.{}.value().as_ref() }}".format(
-                    field_name, field_name
+            if not skip_getters:
+                getter_lines.append(
+                    "    pub fn {}(&self) -> &str {{ self.{}.value().as_ref() }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
-            setter_lines.append(
-                "    pub fn set_{}(&mut self, val: String) -> &mut Self {{ self.config.{}.set_code(Cow::Owned(val)); self }}".format(
-                    field_name, field_name
+            if not skip_setters:
+                setter_lines.append(
+                    "    pub fn set_{}(&mut self, val: String) -> &mut Self {{ self.config.{}.set_code(Cow::Owned(val)); self }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
         elif json_type == "int":
-            getter_lines.append(
-                "    pub fn {}(&self) -> u32 {{ *self.{}.value() }}".format(
-                    field_name, field_name
+            if not skip_getters:
+                getter_lines.append(
+                    "    pub fn {}(&self) -> u32 {{ *self.{}.value() }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
-            setter_lines.append(
-                "    pub fn set_{}(&mut self, val: u32) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                    field_name, field_name
+            if not skip_setters:
+                setter_lines.append(
+                    "    pub fn set_{}(&mut self, val: u32) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
         elif json_type == "decimal":
-            getter_lines.append(
-                "    pub fn {}(&self) -> f64 {{ *self.{}.value() }}".format(
-                    field_name, field_name
+            if not skip_getters:
+                getter_lines.append(
+                    "    pub fn {}(&self) -> f64 {{ *self.{}.value() }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
-            setter_lines.append(
-                "    pub fn set_{}(&mut self, val: f64) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                    field_name, field_name
+            if not skip_setters:
+                setter_lines.append(
+                    "    pub fn set_{}(&mut self, val: f64) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
         elif json_type == "boolean":
-            getter_lines.append(
-                "    pub fn {}(&self) -> bool {{ *self.{}.value() }}".format(
-                    field_name, field_name
+            if not skip_getters:
+                getter_lines.append(
+                    "    pub fn {}(&self) -> bool {{ *self.{}.value() }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
-            setter_lines.append(
-                "    pub fn set_{}(&mut self, val: bool) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                    field_name, field_name
+            if not skip_setters:
+                setter_lines.append(
+                    "    pub fn set_{}(&mut self, val: bool) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
+                        field_name, field_name
+                    )
                 )
-            )
 
     # Build default_config() field line
     if field_name:
@@ -137,7 +153,7 @@ for i, (key, versions) in enumerate(
                         field_name, key, rust_value
                     )
                 )
-        elif not skip:
+        elif "default" not in skip_set:
             rust_val = None
             if json_type == "string":
                 rust_val = 'Cow::Borrowed("{}")'.format(default_val or "")

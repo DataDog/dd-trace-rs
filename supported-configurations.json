@@ -32,7 +32,7 @@
         "type": "string",
         "default": "http://localhost:8125",
         "propertyKeys": ["dogstatsd_agent_url"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
@@ -42,7 +42,7 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["env"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
@@ -60,7 +60,7 @@
         "type": "string",
         "default": "ERROR",
         "propertyKeys": ["log_level_filter"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "LevelFilter::default()"
       }
     ],
@@ -87,8 +87,7 @@
         "type": "decimal",
         "default": "5.0",
         "propertyKeys": ["remote_config_poll_interval"],
-        "skip_default_generation": true,
-        "rust_value": "5.0"
+        "skip_default_generation": "getter,setter"
       }
     ],
     "DD_SERVICE": [
@@ -97,7 +96,7 @@
         "type": "string",
         "default": "unnamed-rust-service",
         "propertyKeys": ["service"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "ServiceName::Default",
         "config_item_type": "override_code"
       }
@@ -116,8 +115,7 @@
         "type": "decimal",
         "default": "60.0",
         "propertyKeys": ["telemetry_heartbeat_interval"],
-        "skip_default_generation": true,
-        "rust_value": "60.0"
+        "skip_default_generation": "getter,setter"
       }
     ],
     "DD_TELEMETRY_LOG_COLLECTION_ENABLED": [
@@ -166,7 +164,7 @@
         "type": "int",
         "default": "300",
         "propertyKeys": ["trace_partial_flush_min_spans"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "300usize"
       }
     ],
@@ -184,7 +182,7 @@
         "type": "array",
         "default": "datadog,tracecontext",
         "propertyKeys": ["trace_propagation_style"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext])"
       }
     ],
@@ -194,7 +192,7 @@
         "type": "array",
         "default": "",
         "propertyKeys": ["trace_propagation_style_extract"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
@@ -204,7 +202,7 @@
         "type": "array",
         "default": "",
         "propertyKeys": ["trace_propagation_style_inject"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
@@ -214,7 +212,7 @@
         "type": "int",
         "default": "100",
         "propertyKeys": ["trace_rate_limit"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "100i32"
       }
     ],
@@ -224,7 +222,7 @@
         "type": "array",
         "default": "",
         "propertyKeys": ["trace_sampling_rules"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "ParsedSamplingRules::default()",
         "config_item_type": "override_rc"
       }
@@ -243,7 +241,7 @@
         "type": "int",
         "default": "512",
         "propertyKeys": ["datadog_tags_max_length"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "512usize"
       }
     ],
@@ -253,7 +251,7 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["version"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
@@ -271,7 +269,7 @@
         "type": "map",
         "default": "",
         "propertyKeys": ["otlp_headers"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
@@ -289,7 +287,7 @@
         "type": "map",
         "default": null,
         "propertyKeys": ["otlp_metrics_headers"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "Cow::Borrowed(\"\")"
       }
     ],
@@ -299,7 +297,7 @@
         "type": "string",
         "default": null,
         "propertyKeys": ["otlp_metrics_protocol"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
@@ -309,7 +307,7 @@
         "type": "string",
         "default": "delta",
         "propertyKeys": ["otel_metrics_temporality_preference"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "Some(opentelemetry_sdk::metrics::Temporality::Delta)"
       }
     ],
@@ -327,7 +325,7 @@
         "type": "string",
         "default": "grpc",
         "propertyKeys": ["otlp_protocol"],
-        "skip_default_generation": true,
+        "skip_default_generation": "all",
         "rust_value": "None"
       }
     ],
