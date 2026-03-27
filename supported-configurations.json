@@ -317,7 +317,7 @@
       {
         "version": "A",
         "type": "int",
-        "default": null,
+        "default": "10000",
         "propertyKeys": ["otlp_metrics_timeout"]
       }
     ],

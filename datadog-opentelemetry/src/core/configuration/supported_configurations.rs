@@ -510,7 +510,7 @@ pub(super) fn default_config() -> Config {
             S::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
             Some(opentelemetry_sdk::metrics::Temporality::Delta),
         ),
-        otlp_metrics_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT, 0),
+        otlp_metrics_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT, 10000),
         otlp_protocol: ConfigItem::new(S::OTEL_EXPORTER_OTLP_PROTOCOL, None),
         otlp_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_TIMEOUT, 10000),
         otel_metrics_exporter: ConfigItem::new(S::OTEL_METRICS_EXPORTER, Cow::Borrowed("otlp")),
