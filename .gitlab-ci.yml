@@ -9,7 +9,7 @@ variables:
   REPO_NOTIFICATION_CHANNEL: "#dd-trace-rs-alerts"
 
 default:
-  tags: ["runner:main", "size:large"]
+  tags: ["arch:amd64"]
 
 # Config inversion CI steps
 validate_supported_configurations_v2_local_file:
