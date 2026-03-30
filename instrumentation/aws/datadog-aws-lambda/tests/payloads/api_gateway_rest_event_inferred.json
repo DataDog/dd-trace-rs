@@ -1,0 +1,27 @@
+{
+  "resource": "/my/path",
+  "path": "/my/path",
+  "httpMethod": "GET",
+  "headers": {
+    "x-datadog-trace-id": "12345",
+    "x-datadog-parent-id": "67890",
+    "x-datadog-sampling-priority": "1"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "myApiId",
+    "domainName": "myApiId.execute-api.us-east-1.amazonaws.com",
+    "httpMethod": "GET",
+    "identity": {
+      "sourceIp": "127.0.0.1",
+      "userAgent": "curl/7.64.1"
+    },
+    "path": "/my/path",
+    "protocol": "HTTP/1.1",
+    "requestId": "req-id-123",
+    "requestTimeEpoch": 1583349317135,
+    "resourcePath": "/my/path",
+    "stage": "prod"
+  },
+  "isBase64Encoded": false
+}
