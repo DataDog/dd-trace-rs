@@ -1,0 +1,8 @@
+{
+  "headers": {
+    "X-Datadog-Trace-Id": "12345",
+    "X-Datadog-Parent-Id": "67890",
+    "X-Datadog-Sampling-Priority": "1"
+  },
+  "body": "hello"
+}
