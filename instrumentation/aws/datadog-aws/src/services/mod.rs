@@ -12,7 +12,7 @@ use aws_smithy_runtime_api::client::interceptors::context::Input;
 use opentelemetry::KeyValue;
 
 use crate::attribute_keys::{
-    AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_SERVICE, COMPONENT, RESOURCE_NAME, SERVICE_NAME,
+    AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_SERVICE, COMPONENT, OPERATION_NAME, RESOURCE_NAME,
     SPAN_KIND, TRACER_NAME,
 };
 
@@ -112,11 +112,11 @@ pub(crate) fn base_tags(
     partition: &str,
 ) -> Vec<KeyValue> {
     vec![
+        KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
         KeyValue::new(AWS_SERVICE, sdk_service_name),
         KeyValue::new(AWS_OPERATION, operation.to_owned()),
         KeyValue::new(AWS_REGION, region.to_owned()),
         KeyValue::new(AWS_PARTITION, partition.to_owned()),
-        KeyValue::new(SERVICE_NAME, format!("aws.{service_id}")),
         KeyValue::new(RESOURCE_NAME, format!("{service_id}.{operation}")),
         KeyValue::new(COMPONENT, TRACER_NAME),
         KeyValue::new(SPAN_KIND, "client"),

@@ -19,6 +19,7 @@ pub(crate) const PARTITION_AWS_ISO_F: &str = "aws-iso-f";
 pub(crate) const TRACER_NAME: &str = "datadog-aws-sdk";
 
 // Generic aws.sdk span attributes.
+pub(crate) const OPERATION_NAME: &str = "operation.name";
 pub(crate) const AWS_SERVICE: &str = "aws.service";
 pub(crate) const AWS_OPERATION: &str = "aws.operation";
 pub(crate) const AWS_REGION: &str = "aws.region";
@@ -30,7 +31,6 @@ pub(crate) const HTTP_URL: &str = "http.url";
 pub(crate) const HTTP_STATUS_CODE: &str = "http.status_code";
 pub(crate) const COMPONENT: &str = "component";
 pub(crate) const SPAN_KIND: &str = "span.kind";
-pub(crate) const SERVICE_NAME: &str = "service.name";
 pub(crate) const RESOURCE_NAME: &str = "resource.name";
 
 // SQS aws.sdk span attributes.
