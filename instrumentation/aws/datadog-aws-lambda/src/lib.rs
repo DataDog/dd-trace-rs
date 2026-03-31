@@ -5,9 +5,10 @@ mod attribute_keys;
 mod invocation;
 mod span_inferrer;
 
-use invocation::{run_handler, start_invocation};
+use invocation::Invocation;
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
+use opentelemetry::trace::FutureExt;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::future::Future;
@@ -147,21 +148,30 @@ where
         let cold_start = self.take_cold_start();
         let inner_handler = Arc::clone(&self.inner);
         let provider = self.provider.clone();
-        let (lambda_span, inferred_spans) = start_invocation(&event, &provider, cold_start);
+        let invocation = Invocation::start(&event, &provider, cold_start);
         let typed_payload = match serde_json::from_value::<E>(event.payload) {
             Ok(payload) => payload,
             Err(err) => {
-                return Box::pin(run_handler(
-                    lambda_span,
-                    inferred_spans,
-                    provider,
-                    std::future::ready(Err(err.into())),
-                ));
+                return Box::pin(async move {
+                    let result: Result<R, lambda_runtime::Error> = Err(err.into());
+                    let result = invocation.finish(result);
+                    if let Err(err) = provider.force_flush() {
+                        tracing::error!("flush failed: {err}");
+                    }
+                    result
+                });
             }
         };
         let typed_event = LambdaEvent::new(typed_payload, event.context);
         let fut = inner_handler(typed_event);
-        Box::pin(async move { run_handler(lambda_span, inferred_spans, provider, fut).await })
+        Box::pin(async move {
+            let result = fut.with_context(invocation.handler_context()).await;
+            let result = invocation.finish(result);
+            if let Err(err) = provider.force_flush() {
+                tracing::error!("flush failed: {err}");
+            }
+            result
+        })
     }
 }
 
