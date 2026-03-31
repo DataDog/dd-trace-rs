@@ -26,6 +26,8 @@ pub(crate) struct InferredSpan {
     /// e.g. `"sqs"`, `"sns"`, `"eventbridge"`
     pub trigger_source: &'static str,
     pub trigger_arn: Option<String>,
+    /// ARN-based key to link inferred spans to AWS resources.
+    pub dd_resource_key: Option<String>,
     pub service: String,
     pub resource: String,
     /// e.g. `"web"`, `"http"` (Lambda Function URL).
@@ -128,6 +130,9 @@ impl InferredSpanScope {
                 KeyValue::new(attr::OPERATION_NAME_CUSTOM, desc.operation),
                 KeyValue::new(attr::PEER_SERVICE, desc.service.clone()),
             ];
+            if let Some(ref key) = desc.dd_resource_key {
+                attrs.push(KeyValue::new("dd_resource_key", key.clone()));
+            }
             for (k, v) in &desc.tags {
                 attrs.push(KeyValue::new(k.clone(), v.clone()));
             }
@@ -310,6 +315,7 @@ mod tests {
             operation: "aws.sqs",
             trigger_source: "sqs",
             trigger_arn: None,
+            dd_resource_key: None,
             service: "my-queue".to_string(),
             resource: "my-queue".to_string(),
             span_type: "web",
@@ -359,6 +365,7 @@ mod tests {
             operation: "aws.sqs",
             trigger_source: "sqs",
             trigger_arn: None,
+            dd_resource_key: None,
             service: "my-queue".to_string(),
             resource: "my-queue".to_string(),
             span_type: "web",
@@ -369,6 +376,7 @@ mod tests {
                 operation: "aws.sns",
                 trigger_source: "sns",
                 trigger_arn: None,
+                dd_resource_key: None,
                 service: "my-topic".to_string(),
                 resource: "my-topic".to_string(),
                 span_type: "web",

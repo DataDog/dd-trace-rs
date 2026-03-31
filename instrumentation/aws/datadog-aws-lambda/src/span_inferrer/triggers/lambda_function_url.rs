@@ -78,6 +78,7 @@ impl LambdaFunctionUrlEvent {
             operation: "aws.lambda.url",
             trigger_source: "lambda-function-url",
             trigger_arn: None,
+            dd_resource_key: None,
             service: self.request_context.domain_name.clone(),
             resource,
             span_type: "http",

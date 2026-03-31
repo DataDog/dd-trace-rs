@@ -98,6 +98,7 @@ impl SqsRecord {
             operation: "aws.sqs",
             trigger_source: "sqs",
             trigger_arn: Some(self.event_source_arn.clone()),
+            dd_resource_key: None,
             service: queue_name.to_owned(),
             resource: queue_name.to_owned(),
             span_type: "web",

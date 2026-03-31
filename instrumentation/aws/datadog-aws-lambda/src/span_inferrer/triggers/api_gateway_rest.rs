@@ -24,6 +24,10 @@ pub(crate) struct ApiGatewayRestEvent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestContext {
+    #[serde(default)]
+    api_id: String,
+    #[serde(default)]
+    stage: String,
     domain_name: Option<String>,
     request_id: String,
     #[serde(rename = "requestTimeEpoch", default)]
@@ -91,10 +95,28 @@ impl ApiGatewayRestEvent {
             self.request_context.resource_path.clone(),
         );
 
+        let (trigger_arn, dd_resource_key) = if !self.request_context.api_id.is_empty() {
+            let region = super::aws_region();
+            let partition = super::get_aws_partition_by_region(&region);
+            let api_id = &self.request_context.api_id;
+            let stage = &self.request_context.stage;
+            (
+                Some(format!(
+                    "arn:{partition}:apigateway:{region}::/restapis/{api_id}/stages/{stage}"
+                )),
+                Some(format!(
+                    "arn:{partition}:apigateway:{region}::/restapis/{api_id}"
+                )),
+            )
+        } else {
+            (None, None)
+        };
+
         let span = InferredSpan {
             operation: "aws.apigateway",
             trigger_source: "api-gateway",
-            trigger_arn: None,
+            trigger_arn,
+            dd_resource_key,
             service: domain_name.to_owned(),
             resource,
             span_type: "web",
