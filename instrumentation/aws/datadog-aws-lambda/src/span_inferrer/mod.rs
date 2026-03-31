@@ -131,7 +131,7 @@ impl InferredSpanScope {
                 KeyValue::new(attr::PEER_SERVICE, desc.service.clone()),
             ];
             if let Some(ref key) = desc.dd_resource_key {
-                attrs.push(KeyValue::new("dd_resource_key", key.clone()));
+                attrs.push(KeyValue::new(attr::DD_RESOURCE_KEY, key.clone()));
             }
             for (k, v) in &desc.tags {
                 attrs.push(KeyValue::new(k.clone(), v.clone()));
