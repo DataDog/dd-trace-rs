@@ -22,6 +22,10 @@ pub(crate) struct ApiGatewayHttpEvent {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RequestContext {
+    #[serde(default)]
+    api_id: String,
+    #[serde(default)]
+    stage: String,
     domain_name: String,
     request_id: String,
     time_epoch: i64,
@@ -78,10 +82,28 @@ impl ApiGatewayHttpEvent {
             self.request_context.request_id.clone(),
         );
 
+        let (trigger_arn, dd_resource_key) = if !self.request_context.api_id.is_empty() {
+            let region = super::aws_region();
+            let partition = super::get_aws_partition_by_region(&region);
+            let api_id = &self.request_context.api_id;
+            let stage = &self.request_context.stage;
+            (
+                Some(format!(
+                    "arn:{partition}:apigateway:{region}::/restapis/{api_id}/stages/{stage}"
+                )),
+                Some(format!(
+                    "arn:{partition}:apigateway:{region}::/apis/{api_id}"
+                )),
+            )
+        } else {
+            (None, None)
+        };
+
         let span = InferredSpan {
             operation: "aws.httpapi",
             trigger_source: "api-gateway",
-            trigger_arn: None,
+            trigger_arn,
+            dd_resource_key,
             service: self.request_context.domain_name.clone(),
             resource,
             span_type: "web",

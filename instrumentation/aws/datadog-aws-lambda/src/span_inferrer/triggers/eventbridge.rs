@@ -46,6 +46,7 @@ impl EventBridgeEvent {
             operation: "aws.eventbridge",
             trigger_source: "eventbridge",
             trigger_arn: None,
+            dd_resource_key: None,
             service: resource.clone(),
             resource,
             span_type: "web",

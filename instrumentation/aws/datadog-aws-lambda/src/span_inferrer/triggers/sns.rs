@@ -93,6 +93,7 @@ impl SnsEntity {
             operation: "aws.sns",
             trigger_source: "sns",
             trigger_arn: Some(self.topic_arn.clone()),
+            dd_resource_key: None,
             service: topic_name.to_owned(),
             resource: topic_name.to_owned(),
             span_type: "web",

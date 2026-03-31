@@ -16,6 +16,24 @@ use super::InferredSpan;
 use serde_json::Value;
 use std::collections::HashMap;
 
+/// Returns the AWS partition for the given region.
+pub(crate) fn get_aws_partition_by_region(region: &str) -> &'static str {
+    if region.starts_with("us-gov-") {
+        "aws-us-gov"
+    } else if region.starts_with("cn-") {
+        "aws-cn"
+    } else {
+        "aws"
+    }
+}
+
+/// Read the AWS region from the Lambda environment.
+pub(crate) fn aws_region() -> String {
+    std::env::var("AWS_REGION")
+        .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+        .unwrap_or_default()
+}
+
 /// Result of trigger extraction: carrier + inferred spans + event metadata.
 pub(crate) struct TriggerResult {
     pub carrier: HashMap<String, String>,
