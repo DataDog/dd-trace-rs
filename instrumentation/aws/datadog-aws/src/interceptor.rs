@@ -142,7 +142,8 @@ impl Intercept for DatadogAwsInterceptor {
             return Ok(());
         };
         let service_id = handler.span_service_id();
-        let mut tags = base_tags(service_id, operation, region, partition);
+        let sdk_service_name = handler.sdk_service_name();
+        let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
         tags.extend(handler.service_tags(operation, context.input(), region, partition));
 
         // Create the span as a child of the current context. This must happen

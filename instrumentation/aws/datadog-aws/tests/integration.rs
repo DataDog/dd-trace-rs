@@ -189,9 +189,9 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     let attrs = span_attrs(&spans[0]);
 
     assert_eq!(spans[0].name, "sqs.request");
-    assert_eq!(attrs["aws.service"], "sqs");
+    assert_eq!(attrs["aws.service"], "SQS");
     assert_eq!(attrs["aws.operation"], "SendMessage");
-    assert_eq!(attrs["region"], "us-east-1");
+    assert_eq!(attrs["aws.region"], "us-east-1");
     assert_eq!(attrs["aws.partition"], "aws");
     assert_eq!(attrs["service.name"], "aws.sqs");
     assert_eq!(attrs["resource.name"], "sqs.SendMessage");
@@ -392,7 +392,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "sns.request");
-    assert_eq!(attrs["aws.service"], "sns");
+    assert_eq!(attrs["aws.service"], "SNS");
     assert_eq!(attrs["aws.operation"], "Publish");
     assert_eq!(attrs["topicname"], "MyTopic");
     assert_eq!(attrs["service.name"], "aws.sns");
@@ -560,7 +560,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "eventbridge.request");
-    assert_eq!(attrs["aws.service"], "eventbridge");
+    assert_eq!(attrs["aws.service"], "EventBridge");
     assert_eq!(attrs["aws.operation"], "PutEvents");
     assert_eq!(attrs["service.name"], "aws.eventbridge");
     assert_eq!(attrs["resource.name"], "eventbridge.PutEvents");
