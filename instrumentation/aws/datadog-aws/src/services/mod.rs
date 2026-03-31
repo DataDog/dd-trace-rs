@@ -117,7 +117,7 @@ pub(crate) fn base_tags(
         KeyValue::new(AWS_OPERATION, operation.to_owned()),
         KeyValue::new(AWS_REGION, region.to_owned()),
         KeyValue::new(AWS_PARTITION, partition.to_owned()),
-        KeyValue::new(RESOURCE_NAME, format!("{service_id}.{operation}")),
+        KeyValue::new(RESOURCE_NAME, format!("{sdk_service_name}.{operation}")),
         KeyValue::new(COMPONENT, TRACER_NAME),
         KeyValue::new(SPAN_KIND, "client"),
     ]

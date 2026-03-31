@@ -194,7 +194,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     assert_eq!(attrs["aws.region"], "us-east-1");
     assert_eq!(attrs["aws.partition"], "aws");
     assert_eq!(attrs["operation.name"], "aws.sqs.request");
-    assert_eq!(attrs["resource.name"], "sqs.SendMessage");
+    assert_eq!(attrs["resource.name"], "SQS.SendMessage");
     assert_eq!(attrs["component"], "datadog-aws-sdk");
     assert_eq!(attrs["span.kind"], "client");
     assert_eq!(attrs["queuename"], "MyQueue");
@@ -396,7 +396,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     assert_eq!(attrs["aws.operation"], "Publish");
     assert_eq!(attrs["topicname"], "MyTopic");
     assert_eq!(attrs["operation.name"], "aws.sns.request");
-    assert_eq!(attrs["resource.name"], "sns.Publish");
+    assert_eq!(attrs["resource.name"], "SNS.Publish");
 
     // SNS injects _datadog as a Binary attribute; the value is base64-encoded
     // so traceparent won't appear in plaintext. Assert the attribute name and type.
@@ -563,7 +563,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
     assert_eq!(attrs["aws.service"], "EventBridge");
     assert_eq!(attrs["aws.operation"], "PutEvents");
     assert_eq!(attrs["operation.name"], "aws.eventbridge.request");
-    assert_eq!(attrs["resource.name"], "eventbridge.PutEvents");
+    assert_eq!(attrs["resource.name"], "EventBridge.PutEvents");
 
     // EventBridge uses JSON protocol, so we can fully parse the body and verify
     // the injected traceparent points to the span that was created.
