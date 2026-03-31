@@ -5,11 +5,10 @@ use crate::attribute_keys as attr;
 use crate::span_inferrer::{InferredSpanScope, TriggerContext, TriggerExtractor};
 
 use lambda_runtime::LambdaEvent;
-use opentelemetry::trace::{FutureExt, SpanKind, TraceContextExt, Tracer, TracerProvider as _};
+use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer, TracerProvider as _};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
 use serde_json::Value;
-use std::future::Future;
 use std::time::SystemTime;
 
 static TRACER_NAME: &str = "datadog-lambda-rs";
@@ -85,63 +84,72 @@ impl LambdaSpan {
         // type). Is there a way to still includde this information?
     }
 
-    pub(crate) fn finish(self, provider: &SdkTracerProvider) {
+    pub(crate) fn finish(self) {
         self.cx.span().end();
-        if let Err(e) = provider.force_flush() {
-            tracing::error!("flush failed: {e}");
-        }
     }
 }
 
-pub(crate) fn start_invocation(
-    event: &LambdaEvent<Value>,
-    provider: &SdkTracerProvider,
-    cold_start: bool,
-) -> (LambdaSpan, InferredSpanScope) {
-    let tracer = provider.tracer(TRACER_NAME);
-    let extraction = TriggerExtractor::extract(&event.payload);
-    let (parent_cx, inferred_spans) = InferredSpanScope::start(
-        &tracer,
-        &extraction.upstream_cx,
-        extraction.inferred_span.as_ref(),
-    );
-    let trigger = TriggerContext {
-        parent_cx,
-        is_async: extraction.is_async,
-        event_source: extraction.event_source,
-        event_source_arn: extraction.event_source_arn,
-    };
-    let lambda_span = LambdaSpan::start(&tracer, &trigger, &event.context, cold_start);
-
-    (lambda_span, inferred_spans)
-}
-
-pub(crate) async fn run_handler<R, Err, Fut>(
+pub(crate) struct Invocation {
     lambda_span: LambdaSpan,
     inferred_spans: InferredSpanScope,
-    provider: SdkTracerProvider,
-    fut: Fut,
-) -> Result<R, Err>
-where
-    Err: std::fmt::Display,
-    Fut: Future<Output = Result<R, Err>>,
-{
-    let invocation_start = SystemTime::now();
-    let result = fut.with_context(lambda_span.cx.clone()).await;
-    let invocation_end = SystemTime::now();
+    started_at: SystemTime,
+}
 
-    if let Err(ref err) = result {
-        lambda_span.set_error(err);
+impl Invocation {
+    pub(crate) fn start(
+        event: &LambdaEvent<Value>,
+        provider: &SdkTracerProvider,
+        cold_start: bool,
+    ) -> Self {
+        let tracer = provider.tracer(TRACER_NAME);
+        let extraction = TriggerExtractor::extract(&event.payload);
+        let (parent_cx, inferred_spans) = InferredSpanScope::start(
+            &tracer,
+            &extraction.upstream_cx,
+            extraction.inferred_span.as_ref(),
+        );
+        let trigger = TriggerContext {
+            parent_cx,
+            is_async: extraction.is_async,
+            event_source: extraction.event_source,
+            event_source_arn: extraction.event_source_arn,
+        };
+        let lambda_span = LambdaSpan::start(&tracer, &trigger, &event.context, cold_start);
+
+        Self {
+            lambda_span,
+            inferred_spans,
+            started_at: SystemTime::now(),
+        }
     }
-    inferred_spans.end(invocation_start, invocation_end);
-    lambda_span.finish(&provider);
-    result
+
+    pub(crate) fn handler_context(&self) -> Context {
+        self.lambda_span.cx.clone()
+    }
+
+    pub(crate) fn finish<R, Err>(self, result: Result<R, Err>) -> Result<R, Err>
+    where
+        Err: std::fmt::Display,
+    {
+        let invocation_end = SystemTime::now();
+
+        if let Err(ref err) = result {
+            self.lambda_span.set_error(err);
+        }
+        self.finish_spans(invocation_end);
+        result
+    }
+
+    fn finish_spans(self, invocation_end: SystemTime) {
+        self.inferred_spans.end(self.started_at, invocation_end);
+        self.lambda_span.finish();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::span_inferrer::{InferredSpanScope, TriggerContext};
+    use crate::span_inferrer::TriggerContext;
     use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
     use opentelemetry::Value;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SpanData};
@@ -195,7 +203,8 @@ mod tests {
         };
 
         let span = LambdaSpan::start(&tracer, &trigger, &lambda_cx, true);
-        span.finish(&provider);
+        span.finish();
+        provider.force_flush().unwrap();
 
         let spans = finished_spans(&exporter);
         assert_eq!(spans.len(), 1);
@@ -254,14 +263,19 @@ mod tests {
     #[tokio::test]
     async fn error_handler_sets_error_attributes() {
         let (provider, exporter) = test_provider();
-        let tracer = provider.tracer("test");
-        let span = LambdaSpan::start(&tracer, &test_trigger(), &test_lambda_cx(), false);
+        let invocation = Invocation {
+            lambda_span: LambdaSpan::start(
+                &provider.tracer("test"),
+                &test_trigger(),
+                &test_lambda_cx(),
+                false,
+            ),
+            inferred_spans: InferredSpanScope::empty(),
+            started_at: SystemTime::now(),
+        };
 
-        let _: Result<(), String> =
-            run_handler(span, InferredSpanScope::empty(), provider, async {
-                Err("boom".to_string())
-            })
-            .await;
+        let _: Result<(), String> = invocation.finish(Err::<(), String>("boom".to_string()));
+        provider.force_flush().unwrap();
 
         let spans = finished_spans(&exporter);
         let attrs = &spans[0].attributes;
@@ -275,11 +289,19 @@ mod tests {
     #[tokio::test]
     async fn successful_handler_sets_no_error_attributes() {
         let (provider, exporter) = test_provider();
-        let tracer = provider.tracer("test");
-        let span = LambdaSpan::start(&tracer, &test_trigger(), &test_lambda_cx(), false);
+        let invocation = Invocation {
+            lambda_span: LambdaSpan::start(
+                &provider.tracer("test"),
+                &test_trigger(),
+                &test_lambda_cx(),
+                false,
+            ),
+            inferred_spans: InferredSpanScope::empty(),
+            started_at: SystemTime::now(),
+        };
 
-        let _: Result<(), String> =
-            run_handler(span, InferredSpanScope::empty(), provider, async { Ok(()) }).await;
+        let _: Result<(), String> = invocation.finish(Ok(()));
+        provider.force_flush().unwrap();
 
         let spans = finished_spans(&exporter);
         let attrs = &spans[0].attributes;
@@ -305,8 +327,12 @@ mod tests {
             lambda_runtime::Context::default(),
         );
 
-        let (span, _) = start_invocation(&raw_event, &provider, false);
-        assert!(span.cx.span().span_context().is_valid());
+        let invocation = Invocation::start(&raw_event, &provider, false);
+        assert!(invocation
+            .handler_context()
+            .span()
+            .span_context()
+            .is_valid());
     }
 
     #[test]
@@ -336,8 +362,12 @@ mod tests {
             test_lambda_cx(),
         );
 
-        let (span, inferred_spans) = start_invocation(&raw_event, &provider, false);
-        assert!(span.cx.span().span_context().is_valid());
-        assert!(!inferred_spans.is_empty());
+        let invocation = Invocation::start(&raw_event, &provider, false);
+        assert!(invocation
+            .handler_context()
+            .span()
+            .span_context()
+            .is_valid());
+        assert!(!invocation.inferred_spans.is_empty());
     }
 }
