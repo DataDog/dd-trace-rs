@@ -46,6 +46,14 @@ impl AwsService {
         }
     }
 
+    pub(crate) fn sdk_service_name(self) -> &'static str {
+        match self {
+            Self::Sqs => "SQS",
+            Self::Sns => "SNS",
+            Self::EventBridge => "EventBridge",
+        }
+    }
+
     pub(crate) fn inject(
         self,
         operation: &str,
@@ -98,12 +106,13 @@ impl AwsService {
 /// Base tags common to all AWS service spans.
 pub(crate) fn base_tags(
     service_id: &'static str,
+    sdk_service_name: &'static str,
     operation: &str,
     region: &str,
     partition: &str,
 ) -> Vec<KeyValue> {
     vec![
-        KeyValue::new(AWS_SERVICE, service_id),
+        KeyValue::new(AWS_SERVICE, sdk_service_name),
         KeyValue::new(AWS_OPERATION, operation.to_owned()),
         KeyValue::new(AWS_REGION, region.to_owned()),
         KeyValue::new(AWS_PARTITION, partition.to_owned()),

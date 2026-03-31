@@ -21,7 +21,7 @@ pub(crate) const TRACER_NAME: &str = "datadog-aws-sdk";
 // Generic aws.sdk span attributes.
 pub(crate) const AWS_SERVICE: &str = "aws.service";
 pub(crate) const AWS_OPERATION: &str = "aws.operation";
-pub(crate) const AWS_REGION: &str = "region";
+pub(crate) const AWS_REGION: &str = "aws.region";
 pub(crate) const AWS_PARTITION: &str = "aws.partition";
 pub(crate) const AWS_AGENT: &str = "aws.agent";
 pub(crate) const AWS_REQUEST_ID: &str = "aws.request_id";
