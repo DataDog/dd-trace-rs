@@ -106,6 +106,7 @@ logs-http = [
     "opentelemetry-otlp/http-proto",
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
+_propagation = []
 test-utils = [
     "libdd-data-pipeline/test-utils",
     "criterion",

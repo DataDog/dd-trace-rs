@@ -274,9 +274,14 @@ pub mod sampling;
 #[cfg(feature = "test-utils")]
 pub mod span_processor;
 
+#[cfg(all(feature = "_propagation", not(feature = "test-utils")))]
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod propagation;
+
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
-#[cfg(not(feature = "test-utils"))]
+#[cfg(not(any(feature = "test-utils", feature = "_propagation")))]
 pub(crate) mod propagation;
 #[cfg(not(feature = "test-utils"))]
 mod sampler;
