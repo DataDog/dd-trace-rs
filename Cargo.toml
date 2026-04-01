@@ -22,12 +22,13 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "3.0.1", default-features = false }
-libdd-trace-utils = { version = "3.0.0", default-features = false }
-libdd-telemetry = { version = "4.0.0", default-features = false }
-libdd-common = { version = "3.0.1", default-features = false }
-libdd-tinybytes = { version = "1.1.0", default-features = false }
+# Libdatadog dependencies - pinned to commit with extended heartbeat interval fix.
+# TODO: revert to crates.io versions once the next libdatadog release (>v30.0.0) is published.
+libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "f1f0df1b5d9066a7fbff14524c04ca3636d778d6", default-features = false }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "f1f0df1b5d9066a7fbff14524c04ca3636d778d6", default-features = false }
+libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "f1f0df1b5d9066a7fbff14524c04ca3636d778d6", default-features = false }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "f1f0df1b5d9066a7fbff14524c04ca3636d778d6", default-features = false }
+libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "f1f0df1b5d9066a7fbff14524c04ca3636d778d6", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
