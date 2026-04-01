@@ -121,7 +121,7 @@ async fn send_request(
 
     let cx = Context::current().with_baggage(vec![
         KeyValue::new("request-id", "xyz-123"),
-        KeyValue::new("service", "rust-propagator-service-example"),
+        KeyValue::new("caller", "rust-propagator-example"),
     ]);
 
     let mut req = hyper::Request::builder().uri(url);

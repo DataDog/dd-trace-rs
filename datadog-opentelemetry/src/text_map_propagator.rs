@@ -65,8 +65,10 @@ pub struct DatadogPropagator {
     inner: DatadogCompositePropagator<Config>,
     registry: TraceRegistry,
     cfg: Arc<Config>,
+    baggage_propagator: BaggagePropagator,
     baggage_extract: bool,
     baggage_inject: bool,
+    fields: Vec<String>,
 }
 
 impl DatadogPropagator {
@@ -81,12 +83,19 @@ impl DatadogPropagator {
             .or_else(|| config.trace_propagation_style())
             .unwrap_or_default()
             .contains(&TracePropagationStyle::Baggage);
+        let inner = DatadogCompositePropagator::new(config.clone());
+        let mut fields = inner.keys().to_vec();
+        if baggage_inject && !fields.iter().any(|k| k == crate::propagation::baggage::BAGGAGE_KEY) {
+            fields.push(crate::propagation::baggage::BAGGAGE_KEY.to_owned());
+        }
         DatadogPropagator {
-            inner: DatadogCompositePropagator::new(config.clone()),
+            inner,
             registry,
             cfg: config,
+            baggage_propagator: BaggagePropagator::new(),
             baggage_extract,
             baggage_inject,
+            fields,
         }
     }
 
@@ -99,7 +108,7 @@ impl DatadogPropagator {
         mut injector: &mut dyn opentelemetry::propagation::Injector,
     ) {
         if self.baggage_inject {
-            BaggagePropagator::new().inject_context(cx, injector);
+            self.baggage_propagator.inject_context(cx, injector);
         }
 
         let span = cx.span();
@@ -190,7 +199,7 @@ impl DatadogPropagator {
             .unwrap_or_else(|| cx.clone());
 
         if self.baggage_extract {
-            BaggagePropagator::new().extract_with_context(&cx, extractor)
+            self.baggage_propagator.extract_with_context(&cx, extractor)
         } else {
             cx
         }
@@ -225,11 +234,7 @@ impl TextMapPropagator for DatadogPropagator {
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
-        let fields = if self.cfg.enabled() {
-            self.inner.keys()
-        } else {
-            &[]
-        };
+        let fields: &[String] = if self.cfg.enabled() { &self.fields } else { &[] };
         FieldIter::new(fields)
     }
 }
@@ -707,7 +712,7 @@ pub mod tests {
         }
     }
 
-    const BAGGAGE_KEY: &str = "baggage";
+    use crate::propagation::baggage::BAGGAGE_KEY;
 
     fn get_propagator_with_separate_styles(
         extract: Vec<TracePropagationStyle>,
@@ -826,6 +831,32 @@ pub mod tests {
         assert!(
             !fields.contains(&BAGGAGE_KEY),
             "fields() must not include 'baggage' when Baggage style is absent; got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn baggage_included_in_fields_when_only_in_inject_styles() {
+        let propagator = get_propagator_with_separate_styles(
+            vec![TracePropagationStyle::Datadog],
+            vec![TracePropagationStyle::Baggage, TracePropagationStyle::TraceContext],
+        );
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            fields.contains(&BAGGAGE_KEY),
+            "fields() must include 'baggage' when Baggage is only in inject styles; got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn baggage_included_in_fields_when_only_in_extract_styles() {
+        let propagator = get_propagator_with_separate_styles(
+            vec![TracePropagationStyle::Baggage, TracePropagationStyle::Datadog],
+            vec![TracePropagationStyle::TraceContext],
+        );
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            fields.contains(&BAGGAGE_KEY),
+            "fields() must include 'baggage' when Baggage is only in extract styles; got {fields:?}"
         );
     }
 
