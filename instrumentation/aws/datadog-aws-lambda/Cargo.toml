@@ -1,10 +1,8 @@
 # Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 # SPDX-License-Identifier: Apache-2.0
 
-[workspace]
-
 [package]
-name = "datadog-lambda-rs"
+name = "datadog-aws-lambda"
 rust-version = "1.85.0"
 edition = "2021"
 version = "0.3.1"

@@ -1,10 +1,8 @@
 # Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 # SPDX-License-Identifier: Apache-2.0
 
-[workspace]
-
 [package]
-name = "datadog-aws-sdk"
+name = "datadog-aws"
 rust-version = "1.91.1"
 edition = "2021"
 version = "0.3.1"
@@ -12,7 +10,7 @@ publish = false
 license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 authors = ["Datadog Inc. <info@datadoghq.com>"]
-description = "Datadog instrumentation for AWS SDK for Rust"
+description = "Datadog instrumentation for AWS SDK for Rust. Currently supports SQS, SNS, and EventBridge."
 
 [dependencies]
 aws-sdk-eventbridge = "1.102"
