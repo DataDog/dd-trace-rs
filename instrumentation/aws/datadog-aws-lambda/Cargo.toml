@@ -3,26 +3,26 @@
 
 [package]
 name = "datadog-aws-lambda"
+description = "Datadog distributed tracing for AWS Lambda. Provides inferred spans and trace context extraction for SQS, SNS, EventBridge, API Gateway (REST and HTTP APIs), and Lambda Function URLs."
+version.workspace = true
+edition.workspace = true
 rust-version = "1.85.0"
-edition = "2021"
-version = "0.3.1"
-publish = false
-license = "Apache-2.0"
-repository = "https://github.com/DataDog/dd-trace-rs"
-authors = ["Datadog Inc. <info@datadoghq.com>"]
-description = "Datadog Lambda tracing for Rust"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
 
 [dependencies]
 base64 = "0.22"
 datadog-opentelemetry = { version = "0.3", path = "../../../datadog-opentelemetry" }
 lambda_runtime = "0.13"
-serde = "1.0.194"
-serde_json = "1.0.140"
-opentelemetry = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.31.0", features = ["semconv_experimental"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }
-tracing = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
-opentelemetry_sdk = { version = "0.31.0", features = ["trace", "metrics", "logs", "testing"], default-features = false }
-tokio = { version = "1.44.1", features = ["macros", "rt-multi-thread", "time"] }
+opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs", "testing"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
