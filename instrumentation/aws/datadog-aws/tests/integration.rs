@@ -36,7 +36,7 @@ use serial_test::serial;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-use datadog_aws_sdk::DatadogAwsInterceptor;
+use datadog_aws::DatadogAwsInterceptor;
 
 
 /// Starts a minimal mock HTTP server: every request gets `x-amzn-requestid: test_req`,
