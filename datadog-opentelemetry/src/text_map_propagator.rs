@@ -85,7 +85,11 @@ impl DatadogPropagator {
             .contains(&TracePropagationStyle::Baggage);
         let inner = DatadogCompositePropagator::new(config.clone());
         let mut fields = inner.keys().to_vec();
-        if baggage_inject && !fields.iter().any(|k| k == crate::propagation::baggage::BAGGAGE_KEY) {
+        if baggage_inject
+            && !fields
+                .iter()
+                .any(|k| k == crate::propagation::baggage::BAGGAGE_KEY)
+        {
             fields.push(crate::propagation::baggage::BAGGAGE_KEY.to_owned());
         }
         DatadogPropagator {
@@ -234,7 +238,11 @@ impl TextMapPropagator for DatadogPropagator {
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
-        let fields: &[String] = if self.cfg.enabled() { &self.fields } else { &[] };
+        let fields: &[String] = if self.cfg.enabled() {
+            &self.fields
+        } else {
+            &[]
+        };
         FieldIter::new(fields)
     }
 }
@@ -838,7 +846,10 @@ pub mod tests {
     fn baggage_included_in_fields_when_only_in_inject_styles() {
         let propagator = get_propagator_with_separate_styles(
             vec![TracePropagationStyle::Datadog],
-            vec![TracePropagationStyle::Baggage, TracePropagationStyle::TraceContext],
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ],
         );
         let fields: Vec<&str> = propagator.fields().collect();
         assert!(
@@ -850,7 +861,10 @@ pub mod tests {
     #[test]
     fn baggage_included_in_fields_when_only_in_extract_styles() {
         let propagator = get_propagator_with_separate_styles(
-            vec![TracePropagationStyle::Baggage, TracePropagationStyle::Datadog],
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::Datadog,
+            ],
             vec![TracePropagationStyle::TraceContext],
         );
         let fields: Vec<&str> = propagator.fields().collect();
