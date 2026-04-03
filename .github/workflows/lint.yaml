@@ -3,6 +3,12 @@ permissions:
   contents: read
 on:
   push:
+    paths:
+      - "instrumentation/**"
+      - "datadog-opentelemetry/**"
+      - ".github/workflows/lint.yaml"
+      - ".github/workflows/test-aws-integrations.yaml"
+      - ".github/actionlint.yaml"
 env: 
   CARGO_TERM_COLOR: always
 
@@ -26,6 +32,26 @@ jobs:
       - name: Install nightly-2024-12-16 toolchain and rustfmt
         run: rustup install nightly-2024-12-16 && rustup default nightly-2024-12-16 && rustup component add rustfmt
       - run: cargo fmt --all -- --check
+  instrumentation-rustfmt:
+    name: "rustfmt #instrumentation"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: ./.github/actions/cache
+      - name: Install nightly-2024-12-16 toolchain and rustfmt
+        run: rustup install nightly-2024-12-16 && rustup default nightly-2024-12-16 && rustup component add rustfmt
+      - name: Run rustfmt in instrumentation workspaces
+        shell: bash
+        run: |
+          mapfile -t workspaces < <(find instrumentation -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort)
+          test ${#workspaces[@]} -gt 0
+          for manifest in "${workspaces[@]}"; do
+            workspace_dir="$(dirname "$manifest")"
+            echo "Checking rustfmt in $workspace_dir"
+            (cd "$workspace_dir" && cargo fmt --all -- --check)
+          done
   clippy:
     name: "clippy #${{ matrix.platform }} ${{ matrix.rust_version }}"
     runs-on: ${{ matrix.platform }}
@@ -52,6 +78,32 @@ jobs:
         run: |
           # shellcheck disable=SC2046
           cargo hack --each-feature clippy -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+  instrumentation-clippy:
+    name: "clippy #instrumentation ${{ matrix.rust_version }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust_version: ["1.84.1", "stable", "nightly-2024-12-16"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: ./.github/actions/cache
+        with:
+          rust_version: ${{ matrix.rust_version }}
+      - name: Install ${{ matrix.rust_version }} toolchain and clippy
+        run: rustup install ${{ matrix.rust_version }} && rustup default ${{ matrix.rust_version }} && rustup component add clippy
+      - name: Run clippy in instrumentation workspaces
+        shell: bash
+        run: |
+          mapfile -t workspaces < <(find instrumentation -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort)
+          test ${#workspaces[@]} -gt 0
+          for manifest in "${workspaces[@]}"; do
+            workspace_dir="$(dirname "$manifest")"
+            echo "Checking clippy in $workspace_dir"
+            (cd "$workspace_dir" && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call))
+          done
   shellcheck:
     runs-on: ubuntu-latest
     steps:
