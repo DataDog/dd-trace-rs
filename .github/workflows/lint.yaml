@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust_version: ["1.84.1", "stable", "nightly-2024-12-16"]
+        rust_version: ["1.91.1", "stable", "nightly-2024-12-16"]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -97,7 +97,7 @@ jobs:
           for manifest in "${workspaces[@]}"; do
             workspace_dir="$(dirname "$manifest")"
             echo "Checking clippy in $workspace_dir"
-            (cd "$workspace_dir" && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call))
+            (cd "$workspace_dir" && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.91.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call))
           done
   shellcheck:
     runs-on: ubuntu-latest
