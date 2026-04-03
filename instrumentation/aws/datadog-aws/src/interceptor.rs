@@ -29,24 +29,24 @@ use crate::services::{base_tags, AwsService};
 /// # Example
 ///
 /// ```rust,ignore
-/// use datadog_aws_sdk::DatadogAwsInterceptor;
+/// use datadog_aws_sdk::AwsInterceptor;
 ///
 /// let sqs_config = aws_sdk_sqs::config::Builder::from(&sdk_config)
-///     .interceptor(DatadogAwsInterceptor::new())
+///     .interceptor(AwsInterceptor::new())
 ///     .build();
 /// let sqs_client = aws_sdk_sqs::Client::from_conf(sqs_config);
 /// ```
 #[derive(Debug, Clone)]
-pub struct DatadogAwsInterceptor {}
+pub struct AwsInterceptor {}
 
-impl DatadogAwsInterceptor {
-    /// Creates a new [`DatadogAwsInterceptor`].
+impl AwsInterceptor {
+    /// Creates a new [`AwsInterceptor`].
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Default for DatadogAwsInterceptor {
+impl Default for AwsInterceptor {
     fn default() -> Self {
         Self::new()
     }
@@ -115,9 +115,9 @@ fn partition_from_region(region: &str) -> &'static str {
     }
 }
 
-impl Intercept for DatadogAwsInterceptor {
+impl Intercept for AwsInterceptor {
     fn name(&self) -> &'static str {
-        "DatadogAwsInterceptor"
+        "AwsInterceptor"
     }
 
     fn modify_before_serialization(

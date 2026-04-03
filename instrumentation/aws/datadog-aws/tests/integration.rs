@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! End-to-end integration tests for DatadogAwsInterceptor.
+//! End-to-end integration tests for AwsInterceptor.
 //!
 //! Each test starts a minimal mock HTTP server, makes a real AWS SDK call with
 //! the interceptor attached, and asserts on the finished OTel span and any
@@ -36,7 +36,7 @@ use serial_test::serial;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
-use datadog_aws_sdk::DatadogAwsInterceptor;
+use datadog_aws::AwsInterceptor;
 
 
 /// Starts a minimal mock HTTP server: every request gets `x-amzn-requestid: test_req`,
@@ -113,21 +113,21 @@ fn sdk_config(endpoint: &str) -> SdkConfig {
 
 fn sqs_client(cfg: &SdkConfig) -> aws_sdk_sqs::Client {
     let config = aws_sdk_sqs::config::Builder::from(cfg)
-        .interceptor(DatadogAwsInterceptor::new())
+        .interceptor(AwsInterceptor::new())
         .build();
     aws_sdk_sqs::Client::from_conf(config)
 }
 
 fn sns_client(cfg: &SdkConfig) -> aws_sdk_sns::Client {
     let config = aws_sdk_sns::config::Builder::from(cfg)
-        .interceptor(DatadogAwsInterceptor::new())
+        .interceptor(AwsInterceptor::new())
         .build();
     aws_sdk_sns::Client::from_conf(config)
 }
 
 fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
     let config = aws_sdk_eventbridge::config::Builder::from(cfg)
-        .interceptor(DatadogAwsInterceptor::new())
+        .interceptor(AwsInterceptor::new())
         .build();
     aws_sdk_eventbridge::Client::from_conf(config)
 }
