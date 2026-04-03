@@ -3,12 +3,6 @@ permissions:
   contents: read
 on:
   push:
-    paths:
-      - "instrumentation/**"
-      - "datadog-opentelemetry/**"
-      - ".github/workflows/lint.yaml"
-      - ".github/workflows/test-aws-integrations.yaml"
-      - ".github/actionlint.yaml"
 env: 
   CARGO_TERM_COLOR: always
 
