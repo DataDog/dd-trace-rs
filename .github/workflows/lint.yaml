@@ -99,6 +99,7 @@ jobs:
         run: |
           mapfile -t workspaces < <(find instrumentation -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort)
           test ${#workspaces[@]} -gt 0
+          # shellcheck disable=SC2046
           for manifest in "${workspaces[@]}"; do
             workspace_dir="$(dirname "$manifest")"
             echo "Checking clippy in $workspace_dir"
