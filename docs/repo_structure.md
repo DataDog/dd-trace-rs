@@ -31,8 +31,10 @@ are always public.
 
 **Feature flags** (in `datadog-opentelemetry/Cargo.toml`):
 
-- `metrics-grpc` / `metrics-http` — OTLP transport for metrics (default: grpc)
-- `logs-grpc` / `logs-http` — OTLP transport for logs (default: grpc)
+- `metrics` - defaults to `metrics-grpc`
+- `metrics-grpc` / `metrics-http` — OTLP transport for metrics
+- `logs` - defaults to `logs-grpc`
+- `logs-grpc` / `logs-http` — OTLP transport for logs
 - `test-utils` — exposes internal helpers and pulls in test dependencies; never enable in production
   builds
 
