@@ -54,8 +54,8 @@ impl LambdaSpan {
             KeyValue::new(attr::RESOURCE_NAMES, function_name.clone()),
             KeyValue::new(attr::DD_ORIGIN, "lambda"),
         ];
-        if let Some(source) = trigger.event_source {
-            attrs.push(KeyValue::new(attr::FUNCTION_TRIGGER_EVENT_SOURCE, source));
+        if let Some(ref source) = trigger.event_source {
+            attrs.push(KeyValue::new(attr::FUNCTION_TRIGGER_EVENT_SOURCE, source.clone()));
         }
         if let Some(ref arn) = trigger.event_source_arn {
             attrs.push(KeyValue::new(
@@ -106,7 +106,7 @@ impl Invocation {
         let (parent_cx, inferred_spans) = InferredSpanScope::start(
             &tracer,
             &extraction.upstream_cx,
-            extraction.inferred_span.as_ref(),
+            &extraction.inference_result,
         );
         let trigger = TriggerContext {
             parent_cx,
@@ -341,11 +341,19 @@ mod tests {
         let raw_event = LambdaEvent::new(
             serde_json::json!({
                 "Records": [{
+                    "messageId": "msg-001",
+                    "receiptHandle": "receipt-001",
                     "eventSource": "aws:sqs",
                     "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:test-queue",
                     "awsRegion": "us-east-1",
                     "body": "hello",
-                    "attributes": { "SentTimestamp": "1718444400000" },
+                    "md5OfBody": "d8e8fca2dc0f896fd7cb4cb0031ba249",
+                    "attributes": {
+                        "SentTimestamp": "1718444400000",
+                        "ApproximateFirstReceiveTimestamp": "1718444400100",
+                        "ApproximateReceiveCount": "1",
+                        "SenderId": "AIDAIENQZJOLO23YVJ4VO"
+                    },
                     "messageAttributes": {
                         "_datadog": {
                             "stringValue": serde_json::to_string(&serde_json::json!({

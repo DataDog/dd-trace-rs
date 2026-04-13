@@ -13,6 +13,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
+libdd-trace-inferrer = { workspace = true }
 base64 = "0.22"
 datadog-opentelemetry = { version = "0.3", path = "../../../datadog-opentelemetry", features = ["test-utils"] }
 lambda_runtime = "0.13"
