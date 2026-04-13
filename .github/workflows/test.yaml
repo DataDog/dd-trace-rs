@@ -167,9 +167,14 @@ jobs:
       - build-artifacts
     uses: DataDog/system-tests/.github/workflows/run-parametric.yml@8a65f66d74ca77f34e7e5a2f737e963ce9cec563  # main
     secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     with:
       library: rust
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
       ref: 8a65f66d74ca77f34e7e5a2f737e963ce9cec563 # main
+      push_to_test_optimization: true
