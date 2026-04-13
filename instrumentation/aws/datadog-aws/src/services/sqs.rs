@@ -165,11 +165,10 @@ fn build_datadog_attribute(
 mod tests {
     use super::*;
     use crate::services::test_helpers::{
-        collect_string_tags, sample_trace_headers, DATADOG_PARENT_ID_KEY,
-        DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        DATADOG_TRACE_ID_KEY,
     };
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
-    use aws_smithy_runtime_api::client::interceptors::context::Input;
 
     #[test]
     fn skips_injection_when_message_attributes_are_full() {

@@ -131,10 +131,7 @@ impl Intercept for AwsInterceptor {
         };
         let service = metadata.service();
         let operation = metadata.name();
-        let region = cfg
-            .load::<Region>()
-            .map(|r| r.as_ref())
-            .unwrap_or_default();
+        let region = cfg.load::<Region>().map(|r| r.as_ref()).unwrap_or_default();
         let partition = partition_from_region(region);
 
         // Resolve the service handler; skip span creation for unsupported services.

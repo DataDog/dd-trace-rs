@@ -195,11 +195,10 @@ fn build_datadog_attribute(
 mod tests {
     use super::*;
     use crate::services::test_helpers::{
-        collect_string_tags, sample_trace_headers, DATADOG_PARENT_ID_KEY,
-        DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        DATADOG_TRACE_ID_KEY,
     };
     use aws_sdk_sns::types::PublishBatchRequestEntry;
-    use aws_smithy_runtime_api::client::interceptors::context::Input;
 
     fn parse_binary_attr(attr: &MessageAttributeValue) -> HashMap<String, String> {
         assert_eq!(attr.data_type(), "Binary");

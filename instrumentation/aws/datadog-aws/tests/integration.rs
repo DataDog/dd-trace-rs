@@ -31,13 +31,14 @@ use hyper_util::server::conn::auto::Builder;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData};
+use opentelemetry_sdk::trace::{
+    InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
+};
 use serial_test::serial;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 use datadog_aws::AwsInterceptor;
-
 
 /// Starts a minimal mock HTTP server: every request gets `x-amzn-requestid: test_req`,
 /// the given status code, and body `{}`.
@@ -211,11 +212,20 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     // not the caller's context, proving the injected downstream parent is correct.
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute name");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute name"
+    );
     let tp = extract_traceparent(&bodies[0]).expect("traceparent should be in body");
     let (injected_trace_id, injected_parent_id) = split_traceparent(&tp);
-    assert_eq!(injected_trace_id, format!("{}", spans[0].span_context.trace_id()));
-    assert_eq!(injected_parent_id, format!("{}", spans[0].span_context.span_id()));
+    assert_eq!(
+        injected_trace_id,
+        format!("{}", spans[0].span_context.trace_id())
+    );
+    assert_eq!(
+        injected_parent_id,
+        format!("{}", spans[0].span_context.span_id())
+    );
 }
 
 #[tokio::test]
@@ -254,8 +264,14 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
     // Verify _datadog was injected into the batch entries.
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute");
-    assert!(bodies[0].contains("traceparent"), "body should contain traceparent");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute"
+    );
+    assert!(
+        bodies[0].contains("traceparent"),
+        "body should contain traceparent"
+    );
 }
 
 #[tokio::test]
@@ -265,11 +281,7 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
     let (url, _srv, _bodies) = mock_aws(200).await;
     let client = sqs_client(&sdk_config(&url));
 
-    let _ = client
-        .receive_message()
-        .queue_url(QUEUE_URL)
-        .send()
-        .await;
+    let _ = client.receive_message().queue_url(QUEUE_URL).send().await;
 
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
@@ -402,8 +414,14 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     // so traceparent won't appear in plaintext. Assert the attribute name and type.
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute name");
-    assert!(bodies[0].contains("Binary"), "body should indicate Binary data type");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute name"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "body should indicate Binary data type"
+    );
 }
 
 #[tokio::test]
@@ -455,8 +473,14 @@ async fn sns_publish_batch_creates_span_with_topicname() {
     // SNS batch injects _datadog Binary attribute into each entry.
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "batch body should contain _datadog attribute");
-    assert!(bodies[0].contains("Binary"), "batch body should indicate Binary data type");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "batch body should contain _datadog attribute"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "batch body should indicate Binary data type"
+    );
 }
 
 #[tokio::test]
@@ -577,8 +601,14 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
         .as_str()
         .expect("_datadog.traceparent should be a string");
     let (injected_trace_id, injected_parent_id) = split_traceparent(tp);
-    assert_eq!(injected_trace_id, format!("{}", spans[0].span_context.trace_id()));
-    assert_eq!(injected_parent_id, format!("{}", spans[0].span_context.span_id()));
+    assert_eq!(
+        injected_trace_id,
+        format!("{}", spans[0].span_context.trace_id())
+    );
+    assert_eq!(
+        injected_parent_id,
+        format!("{}", spans[0].span_context.span_id())
+    );
 }
 
 #[tokio::test]
@@ -690,7 +720,10 @@ async fn http_tags_set_on_span() {
     assert!(attrs["http.url"].starts_with(&url));
     assert_eq!(attrs["http.status_code"], "200");
     assert_eq!(attrs["aws.request_id"], "test_req");
-    assert!(attrs.contains_key("aws.agent"), "aws.agent should be set from user-agent header");
+    assert!(
+        attrs.contains_key("aws.agent"),
+        "aws.agent should be set from user-agent header"
+    );
 }
 
 #[tokio::test]

@@ -12,8 +12,8 @@ use aws_smithy_runtime_api::client::interceptors::context::Input;
 use opentelemetry::KeyValue;
 
 use crate::attribute_keys::{
-    AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_SERVICE, COMPONENT, OPERATION_NAME, RESOURCE_NAME,
-    SPAN_KIND, TRACER_NAME,
+    AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_SERVICE, COMPONENT, OPERATION_NAME,
+    RESOURCE_NAME, SPAN_KIND, TRACER_NAME,
 };
 
 // SQS and SNS both cap message attributes at 10.

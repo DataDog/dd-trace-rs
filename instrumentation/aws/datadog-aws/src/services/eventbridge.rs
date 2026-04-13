@@ -159,8 +159,7 @@ fn inject_into_put_events(
 mod tests {
     use super::*;
     use crate::services::test_helpers::{
-        collect_string_tags, sample_trace_headers, DATADOG_PARENT_ID_KEY,
-        DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+        collect_string_tags, sample_trace_headers, DATADOG_TRACE_ID_KEY,
     };
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use aws_smithy_runtime_api::client::interceptors::context::Input;
