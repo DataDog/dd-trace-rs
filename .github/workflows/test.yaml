@@ -166,7 +166,6 @@ jobs:
     needs:
       - build-artifacts
     uses: DataDog/system-tests/.github/workflows/run-parametric.yml@1e5d6b7096279ca43ce4826fda3cc805635b63c1  # main
-    secrets: inherit
     permissions:
       id-token: write
     with:
