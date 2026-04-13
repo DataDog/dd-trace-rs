@@ -100,7 +100,7 @@ impl Trigger {
         Self::Unknown
     }
 
-    fn extract(self, _payload: &Value) -> Option<TriggerResult> {
+    fn extract(self) -> Option<TriggerResult> {
         match self {
             Self::ApiGatewayHttp(e) => {
                 let (carrier, span) = e.extract()?;
@@ -164,7 +164,7 @@ impl Trigger {
 }
 
 pub(crate) fn extract(payload: &Value) -> Option<TriggerResult> {
-    Trigger::from_payload(payload).extract(payload)
+    Trigger::from_payload(payload).extract()
 }
 
 #[cfg(test)]
