@@ -185,6 +185,7 @@ mod tests {
         std::future::ready(Ok(()))
     }
 
+    #[allow(clippy::type_complexity)]
     fn test_handler() -> WrappedHandler<
         fn(LambdaEvent<Value>) -> std::future::Ready<Result<(), lambda_runtime::Error>>,
         Value,

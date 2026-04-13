@@ -28,6 +28,8 @@ pub(crate) fn get_aws_partition_by_region(region: &str) -> &'static str {
 }
 
 /// Read the AWS region from the Lambda environment.
+// AWS_REGION / AWS_DEFAULT_REGION are Lambda platform variables, not application config.
+#[allow(clippy::disallowed_methods)]
 pub(crate) fn aws_region() -> String {
     std::env::var("AWS_REGION")
         .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
