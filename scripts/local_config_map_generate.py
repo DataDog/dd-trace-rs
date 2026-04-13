@@ -47,7 +47,8 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
         if "deprecated" in version and version["deprecated"]:
             deprecated_block.append(f"SupportedConfigurations::{key} => true,")
     if len(aliases_accumulator) > 0:
-        aliases_block.append(f"SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in aliases_accumulator)}],")
+        aliases_str = ', '.join(f'"{a}"' for a in aliases_accumulator)
+        aliases_block.append(f"SupportedConfigurations::{key} => &[{aliases_str}],")
         
 
 if len(undocumented_configurations) > 0:
@@ -56,12 +57,17 @@ for i, key in enumerate(undocumented_configurations):
     enum_block += f"\n    #[cfg(test)]\n    #[allow(unused)]\n    {key},"
     as_str_block += f"\n            #[cfg(test)]\n            SupportedConfigurations::{key} => \"{key}\","
     if len(undocumented_configurations[key]["aliases"]) > 0:
-        aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{', '.join(f'\"{a}\"' for a in undocumented_configurations[key]["aliases"])}],")
+        aliases_str = ', '.join(f'"{a}"' for a in undocumented_configurations[key]["aliases"])
+        aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{aliases_str}],")
     if undocumented_configurations[key]["deprecated"]:
         deprecated_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => true,")
     for alias in undocumented_configurations[key]["aliases"]:
         if alias not in undocumented_configurations.keys():
             alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
+
+aliases_join = "\n            ".join(aliases_block)
+deprecated_join = "\n            ".join(deprecated_block)
+alias_deprecated_join = "\n            ".join(alias_deprecated_block)
 
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
@@ -86,14 +92,14 @@ impl SupportedConfigurations {{
 
     pub fn aliases(&self) -> &[&'static str] {{
         match self {{
-            {"\n            ".join(aliases_block)}
+            {aliases_join}
             _ => &[],
         }}
     }}
 
     pub fn is_deprecated(&self) -> bool {{
         match self {{
-            {"\n            ".join(deprecated_block)}
+            {deprecated_join}
             _ => false,
         }}
     }}
@@ -101,7 +107,7 @@ impl SupportedConfigurations {{
 
 pub(crate) fn is_alias_deprecated(name: &str) -> bool {{
     match name {{
-        {"\n            ".join(alias_deprecated_block)}
+        {alias_deprecated_join}
         _ => false,
     }}
 }}

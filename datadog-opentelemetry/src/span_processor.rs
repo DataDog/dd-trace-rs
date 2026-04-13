@@ -1,6 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Datadog OTel SpanProcessor
+
 use hashbrown::{hash_map, HashMap as BHashMap};
 use std::{
     collections::HashMap,
@@ -23,6 +25,7 @@ use crate::{
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
+    exporter::AsyncExporterError,
     span_exporter::DatadogExporter,
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
     text_map_propagator::DatadogExtractData,
@@ -32,8 +35,8 @@ use opentelemetry::{
     trace::{SpanContext, TraceContextExt, TraceState},
     Key, KeyValue, SpanId, TraceFlags, TraceId,
 };
-use opentelemetry_sdk::trace::SpanData;
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::{error::OTelSdkError, trace::SpanData};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 #[derive(Debug)]
@@ -69,7 +72,7 @@ struct InnerTraceRegistry {
     config: Arc<Config>,
 }
 
-pub enum RegisterTracePropagationResult {
+pub(crate) enum RegisterTracePropagationResult {
     Existing(SamplingDecision),
     New,
 }
@@ -262,7 +265,7 @@ struct CachePadded<T>(T);
 /// - The finished spans of the trace
 /// - The number of open spans in the trace
 /// - The sampling decision of the trace
-pub(crate) struct TraceRegistry {
+pub struct TraceRegistry {
     // Example:
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
@@ -271,6 +274,10 @@ pub(crate) struct TraceRegistry {
 }
 
 impl TraceRegistry {
+    /// Creates a new trace registry.
+    ///
+    /// The registry uses sharding to minimize lock contention when multiple threads
+    /// are creating and finishing spans concurrently.
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             inner: Arc::new(std::array::from_fn(|_| {
@@ -297,6 +304,7 @@ impl TraceRegistry {
     ///
     /// If the trace is already registered with a non None sampling decision,
     /// it will return the existing sampling decision instead
+    #[allow(private_interfaces)]
     pub fn register_local_root_trace_propagation_data(
         &self,
         trace_id: [u8; 16],
@@ -321,6 +329,7 @@ impl TraceRegistry {
     }
 
     /// Register a new span with the given trace ID and span ID.
+    #[allow(private_interfaces)]
     pub fn register_span(
         &self,
         trace_id: [u8; 16],
@@ -345,6 +354,10 @@ impl TraceRegistry {
         inner.finish_span(trace_id, span_data)
     }
 
+    /// Retrieves the trace propagation data for a given trace ID.
+    ///
+    /// Returns the sampling decision, origin, and internal tags associated with the trace.
+    #[allow(private_interfaces)]
     pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
         let inner = self
             .get_shard(trace_id)
@@ -354,6 +367,10 @@ impl TraceRegistry {
         inner.get_trace_propagation_data(trace_id).clone()
     }
 
+    /// Aggregates and returns metrics from all registry shards.
+    ///
+    /// Collects counters for spans created/finished, trace segments, and partial flushes
+    /// across all shards in the registry.
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
         let mut stats = TraceRegistryMetrics::default();
         for shard_idx in 0..TRACE_REGISTRY_SHARDS {
@@ -369,12 +386,21 @@ impl TraceRegistry {
     }
 }
 
+/// Metrics collected by the trace registry.
+///
+/// Tracks the lifecycle of spans and traces through the registry, useful for
+/// monitoring and debugging trace collection behavior.
 #[derive(Default, Debug)]
 pub struct TraceRegistryMetrics {
+    /// Number of spans created and registered in the registry.
     pub spans_created: usize,
+    /// Number of spans that have finished processing.
     pub spans_finished: usize,
+    /// Number of trace segments created (complete or partial traces).
     pub trace_segments_created: usize,
+    /// Number of trace segments closed and sent to the exporter.
     pub trace_segments_closed: usize,
+    /// Number of times traces were partially flushed before completion.
     pub trace_partial_flush_count: usize,
 }
 
@@ -558,15 +584,23 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
-        if let Err(e) = self.span_exporter.export_chunk_no_wait(trace_chunk) {
-            dd_error!(
-                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{e}'",
-            );
+        if let Err(e) = self.span_exporter.send_chunk(trace_chunk) {
+            match e {
+                AsyncExporterError::Panic(p) => {
+                    dd_error!("DatadogSpanProcessor.on_end message='Failed to export trace chunk' operation='DatadogExporter.export_chunk_no_wait' panic='{}'", p)
+                }
+                _ => dd_debug!(
+                    "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
+                    exporter_error_to_otel(&e, "export_chunk_no_wait")
+                ),
+            }
         }
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
-        self.span_exporter.force_flush()
+        self.span_exporter
+            .force_flush()
+            .map_err(|e| exporter_error_to_otel(&e, "force_flush"))
     }
 
     fn shutdown_with_timeout(
@@ -587,14 +621,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // Wait fot all tasks to finish, keeping in mind how much time is left
         // since the beginning of the call
         let left = deadline.saturating_duration_since(std::time::Instant::now());
-        self.span_exporter
-            .wait_for_shutdown(left)
-            .map_err(|e| match e {
-                opentelemetry_sdk::error::OTelSdkError::Timeout(_) => {
-                    opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                }
+        self.span_exporter.wait_for_shutdown(left).map_err(|e| {
+            let e = match e {
+                AsyncExporterError::TimedOut(_) => AsyncExporterError::TimedOut(timeout),
                 _ => e,
-            })?;
+            };
+            exporter_error_to_otel(&e, "wait_for_shutdown")
+        })?;
 
         if let Some(rc_client_handle) = &self.rc_client_handle {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
@@ -636,11 +669,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
         let dd_resource = create_dd_resource(resource.clone(), &self.config);
-        if let Err(e) = self.span_exporter.set_resource(dd_resource.clone()) {
-            dd_error!(
-                "DatadogSpanProcessor.set_resource message='Failed to set resource' error='{e}'",
-            );
-        }
+        self.span_exporter.set_resource(dd_resource.clone());
         // set the shared resource in the DatadogSpanProcessor
         *self.resource.write().unwrap() = dd_resource.clone();
 
@@ -648,9 +677,31 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        self.config.update_service_name(service_name);
-
+        // Only set calculated service name if DD_SERVICE is default
+        // and otel service name is not default
+        if self.config.service_is_default()
+            && service_name.is_some()
+            && service_name.as_ref().unwrap().as_str() != self.config.service().to_string()
+        {
+            self.config.set_calculated_service_name(service_name);
+        }
         init_telemetry(&self.config);
+    }
+}
+
+fn exporter_error_to_otel(e: &AsyncExporterError, operation: &str) -> OTelSdkError {
+    match e {
+        AsyncExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        AsyncExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
+        AsyncExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
+            "DatadogExporter.{operation}: the sender mutex was poisonned"
+        )),
+        AsyncExporterError::BatchFull(_) => {
+            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: unexpected error"))
+        }
+        AsyncExporterError::Panic(_) => {
+            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: a panic happened"))
+        }
     }
 }
 

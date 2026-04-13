@@ -50,6 +50,14 @@
         "propertyKeys": ["telemetry_enabled"]
       }
     ],
+    "DD_LOGS_OTEL_ENABLED": [
+      {
+        "version": "B",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["logs_otel_enabled"]
+      }
+    ],
     "DD_LOG_LEVEL": [
       {
         "version": "A",
@@ -243,6 +251,38 @@
         "propertyKeys": ["otlp_headers"]
       }
     ],
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["otlp_logs_endpoint"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["otlp_logs_headers"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "SDK-dependent, but will typically be either http/protobuf or grpc.",
+        "propertyKeys": ["otlp_logs_protocol"]
+      }
+    ],
+    "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "10000",
+        "propertyKeys": ["otlp_logs_timeout"]
+      }
+    ],
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT": [
       {
         "version": "A",
@@ -297,6 +337,14 @@
         "type": "int",
         "default": "10000",
         "propertyKeys": ["otlp_timeout"]
+      }
+    ],
+    "OTEL_LOGS_EXPORTER": [
+      {
+        "version": "B",
+        "type": "string",
+        "default": "otlp",
+        "propertyKeys": ["otel_logs_exporter"]
       }
     ],
     "OTEL_METRICS_EXPORTER": [

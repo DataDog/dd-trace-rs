@@ -86,3 +86,23 @@ async fn test_remote_span_extraction_propagation() {
     })
     .await;
 }
+
+#[tokio::test]
+async fn test_instrument_error_reporting() {
+    const SESSION_NAME: &str = "tracing_api/test_instrument_error_reporting";
+    let cfg = Config::builder();
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
+        let _guard = subscriber.set_default();
+
+        #[tracing::instrument(err)]
+        fn foo() -> Result<String, String> {
+            Err("this is an error".to_owned())
+        }
+
+        let _ = foo();
+    })
+    .await;
+}

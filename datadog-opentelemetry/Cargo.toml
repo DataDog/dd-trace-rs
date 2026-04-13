@@ -9,6 +9,11 @@ license.workspace = true
 readme.workspace = true
 authors.workspace = true
 
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+
+
 [dependencies]
 
 # External dependencies
@@ -19,12 +24,13 @@ opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true }
 opentelemetry-otlp = { workspace = true, features = [
     "metrics",
+    "logs",
 ], default-features = false, optional = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 
 # sampling
-lru = "0.12"
+lru = "0.16.3"
 serde = { workspace = true, features = ["derive"] }
 
 # propagation
@@ -57,11 +63,12 @@ libdd-data-pipeline = { workspace = true }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
+libdd-tinybytes = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
 pretty_assertions = "1.4.1"
-proptest = {version = "1.9", features = ["std"], default-features = false}
+proptest = { version = "1.9", features = ["std"], default-features = false }
 test-case = "3.3.1"
 tokio = { workspace = true }
 
@@ -76,14 +83,38 @@ tracing = { version = "0.1.4" }
 tracing-opentelemetry = { version = "0.32" }
 tracing-subscriber = { version = "0.3" }
 
+# Testing the logging API 
+log = { version = "0.4.21" }
+opentelemetry-appender-log = { version = "0.31.0" }
+
 # Benchmarking
 criterion = "0.5.1"
 
 [features]
-default = ["metrics-grpc"]
+default = []
+metrics = ["metrics-grpc"]
 metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
-metrics-http = ["opentelemetry-otlp", "opentelemetry-otlp/http-proto", "opentelemetry-otlp/reqwest-blocking-client"]
-test-utils = ["libdd-data-pipeline/test-utils", "criterion", "metrics-grpc", "metrics-http"]
+metrics-http = [
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/http-proto",
+    "opentelemetry-otlp/reqwest-blocking-client",
+]
+logs = ["logs-grpc"]
+logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
+logs-http = [
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/http-proto",
+    "opentelemetry-otlp/reqwest-blocking-client",
+]
+_unstable_propagation = []
+test-utils = [
+    "libdd-data-pipeline/test-utils",
+    "criterion",
+    "metrics-grpc",
+    "metrics-http",
+    "logs-grpc",
+    "logs-http",
+]
 
 [[bench]]
 name = "smoke"
@@ -104,3 +135,15 @@ path = "benches/inject_benchmark.rs"
 name = "extract_benchmark"
 harness = false
 path = "benches/extract_benchmark.rs"
+
+[[bench]]
+name = "datadog_sampling_benchmark"
+harness = false
+path = "benches/datadog_sampling_benchmark.rs"
+required-features = ["test-utils"]
+
+[[bench]]
+name = "otel_sampling_benchmark"
+harness = false
+path = "benches/otel_sampling_benchmark.rs"
+required-features = ["test-utils"]

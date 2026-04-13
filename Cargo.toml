@@ -14,7 +14,7 @@ resolver = "2"
 [workspace.package]
 rust-version = "1.84.1"
 edition = "2021"
-version = "0.2.1"
+version = "0.3.2"
 license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
@@ -23,20 +23,24 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "1.0.0", default-features = false }
-libdd-trace-utils = { version = "1.0.0", default-features = false }
-libdd-telemetry = { version = "1.0.0", default-features = false }
-libdd-common = { version = "1.0.0", default-features = false }
+libdd-data-pipeline = { version = "3.0.1", default-features = false }
+libdd-trace-utils = { version = "3.0.0", default-features = false }
+libdd-telemetry = { version = "4.0.0", default-features = false }
+libdd-common = { version = "3.0.1", default-features = false }
+libdd-tinybytes = { version = "1.1.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry = { version = "0.31.0", features = [
     "trace",
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry-otlp = { version = "0.31.0", features = [
     "metrics",
+    "logs",
 ], default-features = false }
 opentelemetry-semantic-conventions = { version = "0.31.0", features = [
     "semconv_experimental",
@@ -59,3 +63,4 @@ codegen-units = 1
 debug = false
 incremental = false
 opt-level = 3
+

@@ -9,12 +9,12 @@ variables:
   REPO_NOTIFICATION_CHANNEL: "#dd-trace-rs-alerts"
 
 default:
-  tags: ["runner:main", "size:large"]
+  tags: ["arch:amd64"]
 
 # Config inversion CI steps
 validate_supported_configurations_v2_local_file:
   stage: config-validation
-  image: registry.ddbuild.io/ci/libdatadog-build/packaging:82290795
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
   rules:
     - when: on_success
   extends: .validate_supported_configurations_v2_local_file
@@ -22,10 +22,13 @@ validate_supported_configurations_v2_local_file:
     LOCAL_JSON_PATH: "supported-configurations.json"
     BACKFILLED: "true"
 
-# Executed on release (branch with tag vx.y.z)
+# Executed on release tag datadog-opentelemetry-vx.y.z
 update_central_configurations_version_range_v2:
   stage: config-validation
-  image: registry.ddbuild.io/ci/libdatadog-build/packaging:82290795
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^datadog-opentelemetry-v[0-9]+\.[0-9]+\.[0-9]+$/'
+      when: on_success
   extends: .update_central_configurations_version_range_v2
   variables:
     LOCAL_REPO_NAME: "dd-trace-rs"

@@ -13,24 +13,26 @@
       "code.module.name": "tests::integration_tests::tracing_api",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
-      "otel.trace_id": "691237a8000000004dfbfd06b2dde6a4",
+      "otel.trace_id": "69b98796000000001f48aab59b6aa9a0",
       "span.kind": "internal",
       "target": "tests::integration_tests::tracing_api",
+
+
       "telemetry.sdk.language": "rust",
-      "telemetry.sdk.name": "opentelemetry",
-      "telemetry.sdk.version": "0.31.0",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.3.2",
       "thread.name": "integration_tests::tracing_api::test_smoke"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "busy_ns": 34416.0,
-      "code.line.number": 25.0,
-      "idle_ns": 75209.0,
-      "thread.id": 10.0
+      "busy_ns": 36500.0,
+      "code.line.number": 26.0,
+      "idle_ns": 75791.0,
+      "thread.id": 2.0
     },
-    "duration": 100000,
-    "start": 1762801576853805000
+    "duration": 101000,
+    "start": 1773766550861138000
   },
      {
        "name": "internal",
@@ -46,23 +48,25 @@
          "code.module.name": "tests::integration_tests::tracing_api",
          "otel.scope.name": "test",
          "otel.status_code": "Unset",
-         "otel.trace_id": "691237a8000000004dfbfd06b2dde6a4",
+         "otel.trace_id": "69b98796000000001f48aab59b6aa9a0",
          "span.kind": "internal",
          "target": "tests::integration_tests::tracing_api",
+
+
          "telemetry.sdk.language": "rust",
-         "telemetry.sdk.name": "opentelemetry",
-         "telemetry.sdk.version": "0.31.0",
+         "telemetry.sdk.name": "datadog",
+         "telemetry.sdk.version": "0.3.2",
          "thread.name": "integration_tests::tracing_api::test_smoke"
        },
        "metrics": {
          "_sampling_priority_v1": 1.0,
          "busy_ns": 0.0,
-         "code.line.number": 28.0,
+         "code.line.number": 29.0,
          "idle_ns": 0.0,
-         "thread.id": 10.0
+         "thread.id": 2.0
        },
        "duration": 9000,
-       "start": 1762801576853878000
+       "start": 1773766550861213000
      },
      {
        "name": "internal",
@@ -78,21 +82,23 @@
          "code.module.name": "tests::integration_tests::tracing_api",
          "otel.scope.name": "test",
          "otel.status_code": "Unset",
-         "otel.trace_id": "691237a8000000004dfbfd06b2dde6a4",
+         "otel.trace_id": "69b98796000000001f48aab59b6aa9a0",
          "span.kind": "internal",
          "target": "tests::integration_tests::tracing_api",
+
+
          "telemetry.sdk.language": "rust",
-         "telemetry.sdk.name": "opentelemetry",
-         "telemetry.sdk.version": "0.31.0",
+         "telemetry.sdk.name": "datadog",
+         "telemetry.sdk.version": "0.3.2",
          "thread.name": "integration_tests::tracing_api::test_smoke"
        },
        "metrics": {
          "_sampling_priority_v1": 1.0,
          "busy_ns": 0.0,
-         "code.line.number": 31.0,
+         "code.line.number": 32.0,
          "idle_ns": 0.0,
-         "thread.id": 10.0
+         "thread.id": 2.0
        },
-       "duration": 4000,
-       "start": 1762801576853896000
+       "duration": 5000,
+       "start": 1773766550861230000
      }]]
