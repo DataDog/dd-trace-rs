@@ -4,7 +4,7 @@ permissions:
 on:
   push:
     paths:
-      - "instrumentation/aws/**"
+      - "instrumentation/**"
       - "datadog-opentelemetry/**"
       - ".github/workflows/test-aws-integrations.yaml"
   workflow_dispatch:
@@ -14,7 +14,7 @@ env:
 
 defaults:
   run:
-    working-directory: instrumentation/aws
+    working-directory: instrumentation
 
 jobs:
   # Build the AWS workspace natively in Amazon Linux 2023 on both Lambda architectures
@@ -43,8 +43,8 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
-            instrumentation/aws/target/
-          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-build-${{ matrix.target }}-${{ hashFiles('instrumentation/aws/**/Cargo.toml', 'instrumentation/aws/**/Cargo.lock') }}
+            instrumentation/target/
+          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-build-${{ matrix.target }}-${{ hashFiles('instrumentation/**/Cargo.toml', 'instrumentation/**/Cargo.lock') }}
           restore-keys: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-build-${{ matrix.target }}-
       - name: Install Rust stable
         run: |
@@ -79,8 +79,8 @@ jobs:
             ~/.cargo/git/db/
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
-            instrumentation/aws/target/
-          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-test-${{ matrix.target }}-${{ hashFiles('instrumentation/aws/**/Cargo.toml', 'instrumentation/aws/**/Cargo.lock') }}
+            instrumentation/target/
+          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-test-${{ matrix.target }}-${{ hashFiles('instrumentation/**/Cargo.toml', 'instrumentation/**/Cargo.lock') }}
           restore-keys: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-test-${{ matrix.target }}-
       - name: Install Rust stable
         run: |

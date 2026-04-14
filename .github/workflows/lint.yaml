@@ -26,7 +26,7 @@ jobs:
       - name: Install nightly-2026-04-07 toolchain and rustfmt
         run: rustup install nightly-2026-04-07 && rustup default nightly-2026-04-07 && rustup component add rustfmt
       - run: cargo fmt --all -- --check
-  # The instrumentation/ crates live in their own sub-workspaces and are not members
+  # The instrumentation/ crates live in a separate workspace and are not members
   # of the root workspace, so the `cargo fmt --all` step above does not cover them.
   instrumentation-rustfmt:
     name: "rustfmt #instrumentation"
@@ -41,7 +41,7 @@ jobs:
       - name: Run rustfmt in instrumentation workspaces
         shell: bash
         run: |
-          mapfile -t workspaces < <(find instrumentation -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort)
+          mapfile -t workspaces < <(find instrumentation -mindepth 1 -maxdepth 1 -name Cargo.toml -print | sort)
           test ${#workspaces[@]} -gt 0
           for manifest in "${workspaces[@]}"; do
             workspace_dir="$(dirname "$manifest")"
@@ -93,7 +93,7 @@ jobs:
       - name: Run clippy in instrumentation workspaces
         shell: bash
         run: |
-          mapfile -t workspaces < <(find instrumentation -mindepth 2 -maxdepth 2 -name Cargo.toml -print | sort)
+          mapfile -t workspaces < <(find instrumentation -mindepth 1 -maxdepth 1 -name Cargo.toml -print | sort)
           test ${#workspaces[@]} -gt 0
           # shellcheck disable=SC2046
           for manifest in "${workspaces[@]}"; do
