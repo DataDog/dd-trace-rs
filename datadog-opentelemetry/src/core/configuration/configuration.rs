@@ -1,6 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use libdd_library_config::tracer_metadata::TracerMetadata;
 use libdd_telemetry::data::Configuration;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
@@ -1606,6 +1607,22 @@ impl Config {
     /// Return tags max length
     pub fn datadog_tags_max_length(&self) -> usize {
         *self.datadog_tags_max_length.value()
+    }
+
+    /// Generate tracer metadata from this config.
+    pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
+        let mut metadata = TracerMetadata::default();
+
+        metadata.runtime_id = Some(self.runtime_id.to_owned());
+        metadata.tracer_language = "rust".to_owned();
+        metadata.tracer_version = self.tracer_version.to_owned();
+        // What about metadata.hostname?
+        metadata.service_name = Some(self.service().to_owned());
+        metadata.service_env = self.env().map(str::to_owned);
+        metadata.service_version = self.version().map(str::to_owned);
+        // What about metadata.process_tags and metadata.container_id ?
+
+        metadata
     }
 }
 

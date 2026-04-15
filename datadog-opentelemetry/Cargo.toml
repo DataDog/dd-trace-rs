@@ -26,6 +26,7 @@ opentelemetry-otlp = { workspace = true, features = [
     "metrics",
     "logs",
 ], default-features = false, optional = true }
+libdd-library-config = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 
