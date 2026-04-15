@@ -1,7 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use libdd_library_config::tracer_metadata::TracerMetadata;
 use libdd_telemetry::data::Configuration;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
@@ -10,6 +9,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
+
+#[cfg(target_os = "linux")]
+use libdd_library_config::tracer_metadata::TracerMetadata;
 
 use rustc_version_runtime::version;
 
@@ -1610,6 +1612,7 @@ impl Config {
     }
 
     /// Generate tracer metadata from this config.
+    #[cfg(target_os = "linux")]
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
         TracerMetadata {
             runtime_id: Some(self.runtime_id.to_owned()),
