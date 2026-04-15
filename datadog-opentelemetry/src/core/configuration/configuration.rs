@@ -1611,18 +1611,16 @@ impl Config {
 
     /// Generate tracer metadata from this config.
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
-        let mut metadata = TracerMetadata::default();
-
-        metadata.runtime_id = Some(self.runtime_id.to_owned());
-        metadata.tracer_language = "rust".to_owned();
-        metadata.tracer_version = self.tracer_version.to_owned();
-        // What about metadata.hostname?
-        metadata.service_name = Some(self.service().to_owned());
-        metadata.service_env = self.env().map(str::to_owned);
-        metadata.service_version = self.version().map(str::to_owned);
-        // What about metadata.process_tags and metadata.container_id ?
-
-        metadata
+        TracerMetadata {
+            runtime_id: Some(self.runtime_id.to_owned()),
+            tracer_language: "rust".to_owned(),
+            tracer_version: self.tracer_version.to_owned(),
+            service_name: Some(self.service().to_owned()),
+            service_env: self.env().map(str::to_owned),
+            service_version: self.version().map(str::to_owned),
+            // What about hostname, process_tags and container_id ?
+            ..Default::default()
+        }
     }
 }
 
