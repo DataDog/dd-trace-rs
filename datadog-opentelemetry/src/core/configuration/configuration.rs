@@ -552,7 +552,7 @@ impl ConfigItemSourceUpdater<'_> {
         self.apply_result(default, result, transform)
     }
 
-    /// Updates a ConfigItem from not empty sources string with transformation
+    /// Updates a ConfigItem from non empty sources string with transformation
     pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
         &self,
         default: ConfigItemType,
