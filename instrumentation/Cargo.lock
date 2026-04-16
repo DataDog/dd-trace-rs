@@ -763,11 +763,18 @@ dependencies = [
 name = "datadog-aws-core"
 version = "0.3.1"
 dependencies = [
+ "aws-credential-types",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-types",
+ "bytes",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
  "opentelemetry",
+ "opentelemetry_sdk",
  "serde_json",
+ "tokio",
  "tracing",
 ]
 
@@ -775,18 +782,12 @@ dependencies = [
 name = "datadog-aws-eventbridge"
 version = "0.3.1"
 dependencies = [
- "aws-credential-types",
  "aws-sdk-eventbridge",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-types",
- "bytes",
  "datadog-aws-core",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-util",
  "opentelemetry",
- "opentelemetry_sdk",
  "serde_json",
  "serial_test",
  "tokio",
@@ -810,18 +811,12 @@ dependencies = [
 name = "datadog-aws-sns"
 version = "0.3.1"
 dependencies = [
- "aws-credential-types",
  "aws-sdk-sns",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-types",
- "bytes",
  "datadog-aws-core",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-util",
  "opentelemetry",
- "opentelemetry_sdk",
  "serde_json",
  "serial_test",
  "tokio",
@@ -831,18 +826,12 @@ dependencies = [
 name = "datadog-aws-sqs"
 version = "0.3.1"
 dependencies = [
- "aws-credential-types",
  "aws-sdk-sqs",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-types",
- "bytes",
  "datadog-aws-core",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-util",
  "opentelemetry",
- "opentelemetry_sdk",
  "serde_json",
  "serial_test",
  "tokio",
@@ -2084,6 +2073,7 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

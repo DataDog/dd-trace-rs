@@ -13,7 +13,15 @@ authors.workspace = true
 publish = false
 
 [features]
-test-utils = []
+test-utils = [
+    "dep:aws-credential-types",
+    "dep:bytes",
+    "dep:http-body-util",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:opentelemetry_sdk",
+    "dep:tokio",
+]
 
 [dependencies]
 aws-smithy-runtime-api = { workspace = true }
@@ -22,3 +30,12 @@ aws-types = { workspace = true }
 serde_json = { workspace = true }
 opentelemetry = { workspace = true }
 tracing = { workspace = true }
+
+# Optional deps enabled by the test-utils feature
+aws-credential-types = { version = "1", features = ["test-util"], optional = true }
+bytes = { version = "1", optional = true }
+http-body-util = { version = "0.1", optional = true }
+hyper = { version = "1", features = ["server", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio", "server"], optional = true }
+opentelemetry_sdk = { version = "0.31.0", features = ["trace", "testing"], optional = true }
+tokio = { version = "1.44.1", features = ["rt", "macros", "net", "io-util"], optional = true }

@@ -22,12 +22,6 @@ opentelemetry = { workspace = true }
 
 [dev-dependencies]
 datadog-aws-core = { workspace = true, features = ["test-utils"] }
-aws-credential-types = { version = "1", features = ["test-util"] }
 aws-types = { workspace = true }
-bytes = "1"
-http-body-util = "0.1"
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio", "server"] }
-opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 serial_test = "3"
 tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }
