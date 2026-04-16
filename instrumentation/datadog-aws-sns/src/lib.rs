@@ -142,7 +142,8 @@ impl Intercept for SnsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0.read_before_transmit(context, runtime_components, cfg)
+        self.0
+            .read_before_transmit(context, runtime_components, cfg)
     }
 
     fn read_after_execution(

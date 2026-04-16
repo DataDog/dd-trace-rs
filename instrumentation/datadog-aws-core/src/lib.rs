@@ -89,8 +89,7 @@ pub mod integration_test_helpers {
                             hyper::service::service_fn(move |req: Request<Incoming>| {
                                 let bodies_req = bodies_conn.clone();
                                 async move {
-                                    let raw =
-                                        req.into_body().collect().await.unwrap_or_default();
+                                    let raw = req.into_body().collect().await.unwrap_or_default();
                                     let text =
                                         String::from_utf8_lossy(&raw.to_bytes()).into_owned();
                                     bodies_req.lock().unwrap().push(text);

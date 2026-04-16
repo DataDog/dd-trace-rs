@@ -23,7 +23,10 @@ use aws_sdk_sqs::operation::send_message::SendMessageInput;
 use aws_sdk_sqs::operation::send_message_batch::SendMessageBatchInput;
 use aws_sdk_sqs::types::MessageAttributeValue;
 use aws_smithy_runtime_api::box_error::BoxError;
-use aws_smithy_runtime_api::client::interceptors::context::{BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextRef};
+use aws_smithy_runtime_api::client::interceptors::context::{
+    BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
+    FinalizerInterceptorContextRef,
+};
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
@@ -131,7 +134,8 @@ impl Intercept for SqsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0.read_before_transmit(context, runtime_components, cfg)
+        self.0
+            .read_before_transmit(context, runtime_components, cfg)
     }
 
     fn read_after_execution(

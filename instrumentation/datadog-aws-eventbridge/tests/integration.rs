@@ -57,8 +57,14 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
         .as_str()
         .expect("_datadog.traceparent should be a string");
     let (injected_trace_id, injected_parent_id) = split_traceparent(tp);
-    assert_eq!(injected_trace_id, format!("{}", spans[0].span_context.trace_id()));
-    assert_eq!(injected_parent_id, format!("{}", spans[0].span_context.span_id()));
+    assert_eq!(
+        injected_trace_id,
+        format!("{}", spans[0].span_context.trace_id())
+    );
+    assert_eq!(
+        injected_parent_id,
+        format!("{}", spans[0].span_context.span_id())
+    );
 }
 
 #[tokio::test]
@@ -101,7 +107,12 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
         .detail(r#"{"b":2}"#)
         .build();
 
-    let _ = client.put_events().entries(entry1).entries(entry2).send().await;
+    let _ = client
+        .put_events()
+        .entries(entry1)
+        .entries(entry2)
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);

@@ -143,7 +143,8 @@ impl Intercept for EventBridgeInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0.read_before_transmit(context, runtime_components, cfg)
+        self.0
+            .read_before_transmit(context, runtime_components, cfg)
     }
 
     fn read_after_execution(
@@ -272,7 +273,9 @@ mod tests {
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use aws_smithy_runtime_api::client::interceptors::context::Input;
-    use datadog_aws_core::test_helpers::{collect_string_tags, sample_trace_headers, DATADOG_TRACE_ID_KEY};
+    use datadog_aws_core::test_helpers::{
+        collect_string_tags, sample_trace_headers, DATADOG_TRACE_ID_KEY,
+    };
 
     fn parse_detail_datadog(detail: &str) -> HashMap<String, String> {
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();

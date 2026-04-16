@@ -18,10 +18,10 @@ use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 
 use crate::attribute_keys::{
-    AWS_AGENT, AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_SERVICE, COMPONENT, HTTP_METHOD,
-    HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, PARTITION_AWS, PARTITION_AWS_CN, PARTITION_AWS_GOV,
-    PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E, PARTITION_AWS_ISO_F, RESOURCE_NAME,
-    SPAN_KIND, TRACER_NAME, AWS_REQUEST_ID,
+    AWS_AGENT, AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_REQUEST_ID, AWS_SERVICE, COMPONENT,
+    HTTP_METHOD, HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, PARTITION_AWS, PARTITION_AWS_CN,
+    PARTITION_AWS_GOV, PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E,
+    PARTITION_AWS_ISO_F, RESOURCE_NAME, SPAN_KIND, TRACER_NAME,
 };
 
 /// Trait implemented by each service crate to provide service-specific
@@ -196,9 +196,9 @@ impl Intercept for AwsInterceptor {
         let trace_headers = extract_trace_headers(&cx);
 
         if !trace_headers.is_empty() {
-            if let Err(err) =
-                self.handler
-                    .inject(operation, &trace_headers, context.input_mut())
+            if let Err(err) = self
+                .handler
+                .inject(operation, &trace_headers, context.input_mut())
             {
                 tracing::debug!(
                     error = %err,

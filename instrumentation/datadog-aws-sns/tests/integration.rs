@@ -32,7 +32,12 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     let (url, _srv, captured) = mock_aws(200).await;
     let client = sns_client(&sdk_config(&url));
 
-    let _ = client.publish().topic_arn(TOPIC_ARN).message("hello").send().await;
+    let _ = client
+        .publish()
+        .topic_arn(TOPIC_ARN)
+        .message("hello")
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
@@ -46,8 +51,14 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
 
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute name");
-    assert!(bodies[0].contains("Binary"), "body should indicate Binary data type");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute name"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "body should indicate Binary data type"
+    );
 }
 
 #[tokio::test]
@@ -57,7 +68,12 @@ async fn sns_publish_with_target_sets_targetname_tag() {
     let (url, _srv, _bodies) = mock_aws(200).await;
     let client = sns_client(&sdk_config(&url));
 
-    let _ = client.publish().target_arn(TARGET_ARN).message("hello").send().await;
+    let _ = client
+        .publish()
+        .target_arn(TARGET_ARN)
+        .message("hello")
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     let attrs = span_attrs(&spans[0]);
@@ -93,8 +109,14 @@ async fn sns_publish_batch_creates_span_with_topicname() {
 
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "batch body should contain _datadog attribute");
-    assert!(bodies[0].contains("Binary"), "batch body should indicate Binary data type");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "batch body should contain _datadog attribute"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "batch body should indicate Binary data type"
+    );
 }
 
 #[tokio::test]
@@ -104,7 +126,12 @@ async fn sns_subscribe_creates_span_with_topicname() {
     let (url, _srv, _bodies) = mock_aws(200).await;
     let client = sns_client(&sdk_config(&url));
 
-    let _ = client.subscribe().topic_arn(TOPIC_ARN).protocol("sqs").send().await;
+    let _ = client
+        .subscribe()
+        .topic_arn(TOPIC_ARN)
+        .protocol("sqs")
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
@@ -135,7 +162,11 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
     let (url, _srv, _bodies) = mock_aws(200).await;
     let client = sns_client(&sdk_config(&url));
 
-    let _ = client.get_topic_attributes().topic_arn(TOPIC_ARN).send().await;
+    let _ = client
+        .get_topic_attributes()
+        .topic_arn(TOPIC_ARN)
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     let attrs = span_attrs(&spans[0]);
@@ -150,10 +181,18 @@ async fn sns_error_response_sets_span_error_status() {
     let (url, _srv, _bodies) = mock_aws(400).await;
     let client = sns_client(&sdk_config(&url));
 
-    let _ = client.publish().topic_arn(TOPIC_ARN).message("hello").send().await;
+    let _ = client
+        .publish()
+        .topic_arn(TOPIC_ARN)
+        .message("hello")
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["http.status_code"], "400");
-    assert!(matches!(spans[0].status, opentelemetry::trace::Status::Error { .. }));
+    assert!(matches!(
+        spans[0].status,
+        opentelemetry::trace::Status::Error { .. }
+    ));
 }

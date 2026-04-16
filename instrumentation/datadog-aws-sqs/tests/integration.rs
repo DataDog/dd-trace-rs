@@ -67,11 +67,20 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
 
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute name");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute name"
+    );
     let tp = extract_traceparent(&bodies[0]).expect("traceparent should be in body");
     let (injected_trace_id, injected_parent_id) = split_traceparent(&tp);
-    assert_eq!(injected_trace_id, format!("{}", spans[0].span_context.trace_id()));
-    assert_eq!(injected_parent_id, format!("{}", spans[0].span_context.span_id()));
+    assert_eq!(
+        injected_trace_id,
+        format!("{}", spans[0].span_context.trace_id())
+    );
+    assert_eq!(
+        injected_parent_id,
+        format!("{}", spans[0].span_context.span_id())
+    );
 }
 
 #[tokio::test]
@@ -109,8 +118,14 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
 
     let bodies = captured.lock().unwrap();
     assert_eq!(bodies.len(), 1);
-    assert!(bodies[0].contains("_datadog"), "body should contain _datadog attribute");
-    assert!(bodies[0].contains("traceparent"), "body should contain traceparent");
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute"
+    );
+    assert!(
+        bodies[0].contains("traceparent"),
+        "body should contain traceparent"
+    );
 }
 
 #[tokio::test]
@@ -127,7 +142,10 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "ReceiveMessage");
     assert_eq!(attrs["queuename"], "MyQueue");
-    assert_eq!(attrs["cloud.resource_id"], "arn:aws:sqs:us-east-1:123456789012:MyQueue");
+    assert_eq!(
+        attrs["cloud.resource_id"],
+        "arn:aws:sqs:us-east-1:123456789012:MyQueue"
+    );
 }
 
 #[tokio::test]
@@ -158,7 +176,11 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
     let (url, _srv, _bodies) = mock_aws(200).await;
     let client = sqs_client(&sdk_config(&url));
 
-    let _ = client.delete_message_batch().queue_url(QUEUE_URL).send().await;
+    let _ = client
+        .delete_message_batch()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await;
 
     let spans = exporter.get_finished_spans().unwrap();
     assert_eq!(spans.len(), 1);
@@ -184,7 +206,10 @@ async fn sqs_queue_url_trailing_slash_parsed_correctly() {
     let spans = exporter.get_finished_spans().unwrap();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["queuename"], "MyQueue");
-    assert_eq!(attrs["cloud.resource_id"], "arn:aws:sqs:us-east-1:123456789012:MyQueue");
+    assert_eq!(
+        attrs["cloud.resource_id"],
+        "arn:aws:sqs:us-east-1:123456789012:MyQueue"
+    );
 }
 
 #[tokio::test]
@@ -205,7 +230,10 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["http.status_code"], "400");
-    assert!(matches!(spans[0].status, opentelemetry::trace::Status::Error { .. }));
+    assert!(matches!(
+        spans[0].status,
+        opentelemetry::trace::Status::Error { .. }
+    ));
 }
 
 #[tokio::test]
@@ -228,12 +256,21 @@ async fn sqs_send_message_propagates_parent_context() {
         .await;
 
     let spans = exporter.get_finished_spans().unwrap();
-    let sqs_span = spans.iter().find(|s| s.name == "sqs.request").expect("sqs.request span not found");
+    let sqs_span = spans
+        .iter()
+        .find(|s| s.name == "sqs.request")
+        .expect("sqs.request span not found");
 
-    assert_eq!(sqs_span.parent_span_id, parent_cx.span().span_context().span_id());
+    assert_eq!(
+        sqs_span.parent_span_id,
+        parent_cx.span().span_context().span_id()
+    );
 
     let bodies = captured.lock().unwrap();
     let tp = extract_traceparent(&bodies[0]).expect("traceparent should be in body");
     let (_, injected_parent_id) = split_traceparent(&tp);
-    assert_eq!(injected_parent_id, format!("{}", sqs_span.span_context.span_id()));
+    assert_eq!(
+        injected_parent_id,
+        format!("{}", sqs_span.span_context.span_id())
+    );
 }
