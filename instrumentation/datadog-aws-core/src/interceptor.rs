@@ -137,14 +137,14 @@ pub(crate) fn base_tags(
     sdk_service_name: &'static str,
     operation: &str,
     region: &str,
-    partition: &str,
+    partition: &'static str,
 ) -> Vec<KeyValue> {
     vec![
         KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
         KeyValue::new(AWS_SERVICE, sdk_service_name),
         KeyValue::new(AWS_OPERATION, operation.to_owned()),
         KeyValue::new(AWS_REGION, region.to_owned()),
-        KeyValue::new(AWS_PARTITION, partition.to_owned()),
+        KeyValue::new(AWS_PARTITION, partition),
         KeyValue::new(RESOURCE_NAME, format!("{sdk_service_name}.{operation}")),
         KeyValue::new(COMPONENT, TRACER_NAME),
         KeyValue::new(SPAN_KIND, "client"),
