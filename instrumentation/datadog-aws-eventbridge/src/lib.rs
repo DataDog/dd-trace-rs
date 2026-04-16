@@ -227,10 +227,9 @@ fn inject_into_put_events(
         .as_millis()
         .to_string();
 
-    let mut ctx: serde_json::Map<String, serde_json::Value> = trace_headers
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
+    let serde_json::Value::Object(mut ctx) = serde_json::to_value(trace_headers)? else {
+        return Ok(());
+    };
     ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
 
     for entry in entries.iter_mut() {

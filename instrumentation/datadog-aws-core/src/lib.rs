@@ -5,7 +5,7 @@ pub mod attribute_keys;
 mod interceptor;
 pub mod limits;
 
-pub use interceptor::{base_tags, AwsInterceptor, ServiceHandler};
+pub use interceptor::{AwsInterceptor, ServiceHandler};
 
 /// Lightweight test helpers for unit tests within service crates.
 #[cfg(any(test, feature = "test-utils"))]

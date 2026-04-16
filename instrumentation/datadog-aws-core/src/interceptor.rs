@@ -90,19 +90,11 @@ impl Storable for SpanContext {
     type Storer = StoreReplace<Self>;
 }
 
-struct PropagatorCarrier(HashMap<String, String>);
-
-impl opentelemetry::propagation::Injector for PropagatorCarrier {
-    fn set(&mut self, key: &str, value: String) {
-        self.0.insert(key.to_string(), value);
-    }
-}
-
 fn extract_trace_headers(cx: &Context) -> HashMap<String, String> {
     global::get_text_map_propagator(|p| {
-        let mut carrier = PropagatorCarrier(HashMap::new());
+        let mut carrier = HashMap::new();
         p.inject_context(cx, &mut carrier);
-        carrier.0
+        carrier
     })
 }
 
@@ -140,7 +132,7 @@ pub(crate) fn partition_from_region(region: &str) -> &'static str {
 }
 
 /// Base tags common to all AWS service spans.
-pub fn base_tags(
+pub(crate) fn base_tags(
     service_id: &'static str,
     sdk_service_name: &'static str,
     operation: &str,
