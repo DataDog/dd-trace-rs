@@ -32,9 +32,8 @@ use opentelemetry::KeyValue;
 use datadog_aws_core::attribute_keys::{
     CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_SYSTEM, QUEUE_NAME,
 };
+use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
-
-const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqsOperation {

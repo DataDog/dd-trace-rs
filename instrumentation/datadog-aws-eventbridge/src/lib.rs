@@ -38,9 +38,8 @@ use opentelemetry::KeyValue;
 use datadog_aws_core::attribute_keys::{
     DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, RULE_NAME, START_TIME_KEY,
 };
+use datadog_aws_core::limits::ONE_MB;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
-
-const ONE_MB: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 enum EventBridgeOperation {

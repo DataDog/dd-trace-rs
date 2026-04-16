@@ -3,6 +3,7 @@
 
 pub mod attribute_keys;
 mod interceptor;
+pub mod limits;
 
 pub use interceptor::{base_tags, AwsInterceptor, ServiceHandler};
 
