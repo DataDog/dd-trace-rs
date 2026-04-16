@@ -1159,6 +1159,44 @@ mod tests {
     }
 
     #[test]
+    fn test_format_sampling_rate_locale_independent() {
+        use std::ffi::CString;
+
+        // Save original locale
+        let original_locale = unsafe {
+            let loc = libc::setlocale(libc::LC_ALL, std::ptr::null());
+            if loc.is_null() {
+                None
+            } else {
+                Some(CString::from(std::ffi::CStr::from_ptr(loc)))
+            }
+        };
+
+        // Set German locale (uses comma as decimal separator)
+        let german = CString::new("de_DE.UTF-8").unwrap();
+        let result = unsafe { libc::setlocale(libc::LC_ALL, german.as_ptr()) };
+
+        if result.is_null() {
+            eprintln!("de_DE.UTF-8 locale not available, skipping locale test");
+            return;
+        }
+
+        // Rust's format! macro is locale-independent by design.
+        // This test documents that contract.
+        assert_eq!(format_sampling_rate(0.3), Some("0.3".to_string()));
+        assert_eq!(format_sampling_rate(1.0), Some("1".to_string()));
+        assert_eq!(format_sampling_rate(0.5), Some("0.5".to_string()));
+        assert_eq!(format_sampling_rate(0.000001), Some("0.000001".to_string()));
+
+        // Restore original locale
+        if let Some(orig) = original_locale {
+            unsafe {
+                libc::setlocale(libc::LC_ALL, orig.as_ptr());
+            }
+        }
+    }
+
+    #[test]
     fn test_should_sample_parent_context() {
         let sampler = DatadogSampler::new(vec![], 100);
 

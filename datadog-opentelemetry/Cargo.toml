@@ -67,6 +67,7 @@ libdd-tinybytes = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
+libc = "0.2"
 pretty_assertions = "1.4.1"
 proptest = { version = "1.9", features = ["std"], default-features = false }
 test-case = "3.3.1"
