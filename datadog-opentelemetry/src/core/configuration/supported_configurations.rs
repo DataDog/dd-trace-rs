@@ -216,89 +216,47 @@ pub struct Config {
     pub(super) tracer_version: &'static str,
     pub(super) language_version: String,
     pub(super) language: &'static str,
-    /// Configured via `DD_AGENT_HOST`, default: `localhost`
     pub(super) agent_host: ConfigItem<Cow<'static, str>>,
-    /// Configured via `DD_DOGSTATSD_HOST`, default: `localhost`
     pub(super) dogstatsd_agent_host: ConfigItem<Cow<'static, str>>,
-    /// Configured via `DD_DOGSTATSD_PORT`, default: `8125`
     pub(super) dogstatsd_agent_port: ConfigItem<u32>,
-    /// Configured via `DD_DOGSTATSD_URL`, default: `http://localhost:8125`
     pub(super) dogstatsd_agent_url: ConfigItem<Cow<'static, str>>,
-    /// Configured via `DD_ENV`, default: ``
     pub(super) env: ConfigItem<Option<String>>,
-    /// Configured via `DD_INSTRUMENTATION_TELEMETRY_ENABLED`, default: `true`
     pub(super) telemetry_enabled: ConfigItem<bool>,
-    /// Configured via `DD_LOG_LEVEL`, default: `ERROR`
     pub(super) log_level_filter: ConfigItem<LevelFilter>,
-    /// Configured via `DD_METRICS_OTEL_ENABLED`, default: `true`
     pub(super) metrics_otel_enabled: ConfigItem<bool>,
-    /// Configured via `DD_REMOTE_CONFIGURATION_ENABLED`, default: `true`
-    /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
     pub(super) remote_config_enabled: ConfigItem<bool>,
-    /// Configured via `DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS`, default: `5.0`
     pub(super) remote_config_poll_interval: ConfigItem<f64>,
-    /// Configured via `DD_SERVICE`, default: `unnamed-rust-service`
     pub(super) service: ConfigItemWithOverride<ServiceName>,
-    /// Configured via `DD_TAGS`, default: ``
     pub(super) global_tags: ConfigItem<Vec<(String, String)>>,
-    /// Configured via `DD_TELEMETRY_HEARTBEAT_INTERVAL`, default: `60.0`
     pub(super) telemetry_heartbeat_interval: ConfigItem<f64>,
-    /// Configured via `DD_TELEMETRY_LOG_COLLECTION_ENABLED`, default: `true`
     pub(super) telemetry_log_collection_enabled: ConfigItem<bool>,
-    /// Configured via `DD_TRACE_AGENT_PORT`, default: `8126`
     pub(super) trace_agent_port: ConfigItem<u32>,
-    /// Configured via `DD_TRACE_AGENT_URL`, default: ``
     pub(super) trace_agent_url: ConfigItem<Cow<'static, str>>,
-    /// Configured via `DD_TRACE_ENABLED`, default: `true`
     pub(super) enabled: ConfigItem<bool>,
-    /// Configured via `DD_TRACE_PARTIAL_FLUSH_ENABLED`, default: `false`
     pub(super) trace_partial_flush_enabled: ConfigItem<bool>,
-    /// Configured via `DD_TRACE_PARTIAL_FLUSH_MIN_SPANS`, default: `300`
     pub(super) trace_partial_flush_min_spans: ConfigItem<usize>,
-    /// Configured via `DD_TRACE_PROPAGATION_EXTRACT_FIRST`, default: `false`
     pub(super) trace_propagation_extract_first: ConfigItem<bool>,
-    /// Configured via `DD_TRACE_PROPAGATION_STYLE`, default: `datadog,tracecontext`
     pub(super) trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    /// Configured via `DD_TRACE_PROPAGATION_STYLE_EXTRACT`, default: ``
     pub(super) trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    /// Configured via `DD_TRACE_PROPAGATION_STYLE_INJECT`, default: ``
     pub(super) trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
-    /// Configured via `DD_TRACE_RATE_LIMIT`, default: `100`
     pub(super) trace_rate_limit: ConfigItem<i32>,
-    /// Configured via `DD_TRACE_SAMPLING_RULES`, default: ``
     pub(super) trace_sampling_rules: ConfigItemWithOverride<ParsedSamplingRules>,
-    /// Configured via `DD_TRACE_STATS_COMPUTATION_ENABLED`, default: `true`
     pub(super) trace_stats_computation_enabled: ConfigItem<bool>,
-    /// Configured via `DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH`, default: `512`
     pub(super) datadog_tags_max_length: ConfigItem<usize>,
-    /// Configured via `DD_VERSION`, default: ``
     pub(super) version: ConfigItem<Option<String>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_ENDPOINT`
     pub(super) otlp_endpoint: ConfigItem<Cow<'static, str>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_HEADERS`, default: ``
     pub(super) otlp_headers: ConfigItem<Cow<'static, str>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
     pub(super) otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_METRICS_HEADERS`
     pub(super) otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`
     pub(super) otlp_metrics_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE`, default: `delta`
     pub(super) otel_metrics_temporality_preference:
         ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`, default: `10000`
     pub(super) otlp_metrics_timeout: ConfigItem<u32>,
-    /// Configured via `OTEL_EXPORTER_OTLP_PROTOCOL`, default: `grpc`
     pub(super) otlp_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
-    /// Configured via `OTEL_EXPORTER_OTLP_TIMEOUT`, default: `10000`
     pub(super) otlp_timeout: ConfigItem<u32>,
-    /// Configured via `OTEL_METRICS_EXPORTER`, default: `otlp`
     pub(super) otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
-    /// Configured via `OTEL_METRIC_EXPORT_INTERVAL`, default: `10000`
     pub(super) metric_export_interval: ConfigItem<u32>,
-    /// Configured via `OTEL_METRIC_EXPORT_TIMEOUT`, default: `7500`
     pub(super) metric_export_timeout: ConfigItem<u32>,
-    /// Configured via `OTEL_RESOURCE_ATTRIBUTES`
     pub(super) otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
     #[cfg(feature = "test-utils")]
     pub(super) wait_agent_info_ready: bool,
@@ -306,84 +264,104 @@ pub struct Config {
     pub(super) remote_config_callbacks: Arc<Mutex<RemoteConfigCallbacks>>,
 }
 
-#[allow(missing_docs)]
 impl Config {
+    /// Returns `DD_AGENT_HOST` — default: `localhost`
     pub fn agent_host(&self) -> &str {
         self.agent_host.value().as_ref()
     }
 
+    /// Returns `DD_DOGSTATSD_HOST` — default: `localhost`
     pub fn dogstatsd_agent_host(&self) -> &str {
         self.dogstatsd_agent_host.value().as_ref()
     }
 
+    /// Returns `DD_DOGSTATSD_PORT` — default: `8125`
     pub fn dogstatsd_agent_port(&self) -> u32 {
         *self.dogstatsd_agent_port.value()
     }
 
+    /// Returns `DD_INSTRUMENTATION_TELEMETRY_ENABLED` — default: `true`
     pub fn telemetry_enabled(&self) -> bool {
         *self.telemetry_enabled.value()
     }
 
+    /// Returns `DD_METRICS_OTEL_ENABLED` — default: `true`
     pub fn metrics_otel_enabled(&self) -> bool {
         *self.metrics_otel_enabled.value()
     }
 
+    /// Returns `DD_REMOTE_CONFIGURATION_ENABLED` — default: `true`
+    /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
     pub fn remote_config_enabled(&self) -> bool {
         *self.remote_config_enabled.value()
     }
 
+    /// Returns `DD_TELEMETRY_LOG_COLLECTION_ENABLED` — default: `true`
     pub fn telemetry_log_collection_enabled(&self) -> bool {
         *self.telemetry_log_collection_enabled.value()
     }
 
+    /// Returns `DD_TRACE_AGENT_PORT` — default: `8126`
     pub fn trace_agent_port(&self) -> u32 {
         *self.trace_agent_port.value()
     }
 
+    /// Returns `DD_TRACE_AGENT_URL` — default: ``
     pub fn trace_agent_url(&self) -> &str {
         self.trace_agent_url.value().as_ref()
     }
 
+    /// Returns `DD_TRACE_ENABLED` — default: `true`
     pub fn enabled(&self) -> bool {
         *self.enabled.value()
     }
 
+    /// Returns `DD_TRACE_PARTIAL_FLUSH_ENABLED` — default: `false`
     pub fn trace_partial_flush_enabled(&self) -> bool {
         *self.trace_partial_flush_enabled.value()
     }
 
+    /// Returns `DD_TRACE_PROPAGATION_EXTRACT_FIRST` — default: `false`
     pub fn trace_propagation_extract_first(&self) -> bool {
         *self.trace_propagation_extract_first.value()
     }
 
+    /// Returns `DD_TRACE_STATS_COMPUTATION_ENABLED` — default: `true`
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
     }
 
+    /// Returns `OTEL_EXPORTER_OTLP_ENDPOINT`
     pub fn otlp_endpoint(&self) -> &str {
         self.otlp_endpoint.value().as_ref()
     }
 
+    /// Returns `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
     pub fn otlp_metrics_endpoint(&self) -> &str {
         self.otlp_metrics_endpoint.value().as_ref()
     }
 
+    /// Returns `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` — default: `10000`
     pub fn otlp_metrics_timeout(&self) -> u32 {
         *self.otlp_metrics_timeout.value()
     }
 
+    /// Returns `OTEL_EXPORTER_OTLP_TIMEOUT` — default: `10000`
     pub fn otlp_timeout(&self) -> u32 {
         *self.otlp_timeout.value()
     }
 
+    /// Returns `OTEL_METRICS_EXPORTER` — default: `otlp`
     pub fn otel_metrics_exporter(&self) -> &str {
         self.otel_metrics_exporter.value().as_ref()
     }
 
+    /// Returns `OTEL_METRIC_EXPORT_INTERVAL` — default: `10000`
     pub fn metric_export_interval(&self) -> u32 {
         *self.metric_export_interval.value()
     }
 
+    /// Returns `OTEL_METRIC_EXPORT_TIMEOUT` — default: `7500`
     pub fn metric_export_timeout(&self) -> u32 {
         *self.metric_export_timeout.value()
     }
@@ -435,103 +413,123 @@ impl Config {
     }
 }
 
-#[allow(missing_docs)]
 impl ConfigBuilder {
+    /// Sets `DD_AGENT_HOST` — default: `localhost`
     pub fn set_agent_host(&mut self, val: String) -> &mut Self {
         self.config.agent_host.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `DD_DOGSTATSD_HOST` — default: `localhost`
     pub fn set_dogstatsd_agent_host(&mut self, val: String) -> &mut Self {
         self.config.dogstatsd_agent_host.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `DD_DOGSTATSD_PORT` — default: `8125`
     pub fn set_dogstatsd_agent_port(&mut self, val: u32) -> &mut Self {
         self.config.dogstatsd_agent_port.set_code(val);
         self
     }
 
+    /// Sets `DD_INSTRUMENTATION_TELEMETRY_ENABLED` — default: `true`
     pub fn set_telemetry_enabled(&mut self, val: bool) -> &mut Self {
         self.config.telemetry_enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_METRICS_OTEL_ENABLED` — default: `true`
     pub fn set_metrics_otel_enabled(&mut self, val: bool) -> &mut Self {
         self.config.metrics_otel_enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_REMOTE_CONFIGURATION_ENABLED` — default: `true`
+    /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
     pub fn set_remote_config_enabled(&mut self, val: bool) -> &mut Self {
         self.config.remote_config_enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_TELEMETRY_LOG_COLLECTION_ENABLED` — default: `true`
     pub fn set_telemetry_log_collection_enabled(&mut self, val: bool) -> &mut Self {
         self.config.telemetry_log_collection_enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_TRACE_AGENT_PORT` — default: `8126`
     pub fn set_trace_agent_port(&mut self, val: u32) -> &mut Self {
         self.config.trace_agent_port.set_code(val);
         self
     }
 
+    /// Sets `DD_TRACE_AGENT_URL` — default: ``
     pub fn set_trace_agent_url(&mut self, val: String) -> &mut Self {
         self.config.trace_agent_url.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `DD_TRACE_ENABLED` — default: `true`
     pub fn set_enabled(&mut self, val: bool) -> &mut Self {
         self.config.enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_TRACE_PARTIAL_FLUSH_ENABLED` — default: `false`
     pub fn set_trace_partial_flush_enabled(&mut self, val: bool) -> &mut Self {
         self.config.trace_partial_flush_enabled.set_code(val);
         self
     }
 
+    /// Sets `DD_TRACE_PROPAGATION_EXTRACT_FIRST` — default: `false`
     pub fn set_trace_propagation_extract_first(&mut self, val: bool) -> &mut Self {
         self.config.trace_propagation_extract_first.set_code(val);
         self
     }
 
+    /// Sets `DD_TRACE_STATS_COMPUTATION_ENABLED` — default: `true`
     pub fn set_trace_stats_computation_enabled(&mut self, val: bool) -> &mut Self {
         self.config.trace_stats_computation_enabled.set_code(val);
         self
     }
 
+    /// Sets `OTEL_EXPORTER_OTLP_ENDPOINT`
     pub fn set_otlp_endpoint(&mut self, val: String) -> &mut Self {
         self.config.otlp_endpoint.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
     pub fn set_otlp_metrics_endpoint(&mut self, val: String) -> &mut Self {
         self.config.otlp_metrics_endpoint.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` — default: `10000`
     pub fn set_otlp_metrics_timeout(&mut self, val: u32) -> &mut Self {
         self.config.otlp_metrics_timeout.set_code(val);
         self
     }
 
+    /// Sets `OTEL_EXPORTER_OTLP_TIMEOUT` — default: `10000`
     pub fn set_otlp_timeout(&mut self, val: u32) -> &mut Self {
         self.config.otlp_timeout.set_code(val);
         self
     }
 
+    /// Sets `OTEL_METRICS_EXPORTER` — default: `otlp`
     pub fn set_otel_metrics_exporter(&mut self, val: String) -> &mut Self {
         self.config.otel_metrics_exporter.set_code(Cow::Owned(val));
         self
     }
 
+    /// Sets `OTEL_METRIC_EXPORT_INTERVAL` — default: `10000`
     pub fn set_metric_export_interval(&mut self, val: u32) -> &mut Self {
         self.config.metric_export_interval.set_code(val);
         self
     }
 
+    /// Sets `OTEL_METRIC_EXPORT_TIMEOUT` — default: `7500`
     pub fn set_metric_export_timeout(&mut self, val: u32) -> &mut Self {
         self.config.metric_export_timeout.set_code(val);
         self
