@@ -24,7 +24,7 @@ fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_creates_span_and_injects_detail() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
 
     let entry = PutEventsRequestEntry::builder()
@@ -67,7 +67,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_with_bus_name_creates_span() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
 
     let entry = PutEventsRequestEntry::builder()
@@ -87,7 +87,7 @@ async fn eventbridge_put_events_with_bus_name_creates_span() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_multi_entry_creates_single_span() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
 
     let entry1 = PutEventsRequestEntry::builder()
@@ -117,7 +117,7 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_rule_creates_span_with_rulename() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
 
     let _ = client.put_rule().name("my-rule").send().await;
@@ -132,7 +132,7 @@ async fn eventbridge_put_rule_creates_span_with_rulename() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_targets_creates_span_with_rulename() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
 
     let _ = client.put_targets().rule("my-rule").send().await;

@@ -31,7 +31,7 @@ const QUEUE_URL_TRAILING: &str = "https://sqs.us-east-1.amazonaws.com/1234567890
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -85,7 +85,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let entry1 = SendMessageBatchRequestEntry::builder()
@@ -129,7 +129,7 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
 #[tokio::test]
 #[serial]
 async fn sqs_receive_message_creates_span_with_queue_tags() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client.receive_message().queue_url(QUEUE_URL).send().await;
@@ -148,7 +148,7 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_delete_message_creates_span_with_queue_tags() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -168,7 +168,7 @@ async fn sqs_delete_message_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -187,7 +187,7 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_queue_url_trailing_slash_parsed_correctly() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -209,7 +209,7 @@ async fn sqs_queue_url_trailing_slash_parsed_correctly() {
 #[tokio::test]
 #[serial]
 async fn sqs_error_response_sets_span_error_status_and_http_code() {
-    let harness = TestHarness::new(400).await;
+    let harness = TestHarness::bad_request().await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -232,7 +232,7 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_propagates_parent_context() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
     let tracer = global::tracer("test");

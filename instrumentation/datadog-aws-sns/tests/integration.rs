@@ -26,7 +26,7 @@ const TARGET_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTarget";
 #[tokio::test]
 #[serial]
 async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client
@@ -61,7 +61,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
 #[tokio::test]
 #[serial]
 async fn sns_publish_with_target_sets_targetname_tag() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client
@@ -80,7 +80,7 @@ async fn sns_publish_with_target_sets_targetname_tag() {
 #[tokio::test]
 #[serial]
 async fn sns_publish_batch_creates_span_with_topicname() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let entry = aws_sdk_sns::types::PublishBatchRequestEntry::builder()
@@ -117,7 +117,7 @@ async fn sns_publish_batch_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_subscribe_creates_span_with_topicname() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client
@@ -137,7 +137,7 @@ async fn sns_subscribe_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_create_topic_uses_name_field_not_arn() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client.create_topic().name("MyNewTopic").send().await;
@@ -151,7 +151,7 @@ async fn sns_create_topic_uses_name_field_not_arn() {
 #[tokio::test]
 #[serial]
 async fn sns_get_topic_attributes_creates_span_with_topicname() {
-    let harness = TestHarness::new(200).await;
+    let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client
@@ -169,7 +169,7 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_error_response_sets_span_error_status() {
-    let harness = TestHarness::new(400).await;
+    let harness = TestHarness::bad_request().await;
     let client = sns_client(&harness.sdk_config());
 
     let _ = client

@@ -93,25 +93,48 @@ pub mod integration_test_helpers {
     }
 
     /// Shared setup used in integration tests.
+    ///
+    /// Typical usage is one harness per test:
+    /// 1. `let harness = TestHarness::ok().await;`
+    /// 2. Build the AWS client with `harness.sdk_config()`.
+    /// 3. Execute SDK calls, then assert on `harness.finished_spans()` and
+    ///    `harness.server.bodies()`.
+    ///
+    /// Tests should remain serialized (`#[serial]`) because harness creation sets global
+    /// OpenTelemetry tracer/propagator state via `init_test_tracer`.
     pub struct TestHarness {
         pub exporter: InMemorySpanExporter,
         pub server: MockAwsServer,
     }
 
     impl TestHarness {
-        pub async fn new(status: u16) -> Self {
-            Self {
-                exporter: init_test_tracer(),
-                server: mock_aws(status).await,
-            }
+        /// Initializes tracing and starts a mock AWS endpoint returning `200 OK`
+        /// for every request.
+        pub async fn ok() -> Self {
+            Self::from_status(200).await
         }
 
+        /// Initializes tracing and starts a mock AWS endpoint returning
+        /// `400 Bad Request` for every request.
+        pub async fn bad_request() -> Self {
+            Self::from_status(400).await
+        }
+
+        /// Builds an SDK config targeting this harness's mock AWS endpoint.
         pub fn sdk_config(&self) -> SdkConfig {
             sdk_config(&self.server.url)
         }
 
+        /// Returns all finished spans currently exported by this harness.
         pub fn finished_spans(&self) -> Vec<SpanData> {
             self.exporter.get_finished_spans().unwrap()
+        }
+
+        async fn from_status(status: u16) -> Self {
+            Self {
+                exporter: init_test_tracer(),
+                server: mock_aws(status).await,
+            }
         }
     }
 
