@@ -552,6 +552,25 @@ impl ConfigItemSourceUpdater<'_> {
         self.apply_result(default, result, transform)
     }
 
+    /// Updates a ConfigItem from non empty sources string with transformation
+    pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        let result = self.sources.get(default.name());
+        match result.value {
+            Some(ref config_key) if config_key.value.is_empty() => default,
+            Some(_) => self.apply_result(default, result, transform),
+            None => default,
+        }
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -1068,7 +1087,7 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string(default.service, ServiceName::Configured),
+            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -1085,10 +1104,11 @@ impl Config {
             ),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
-            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
+            trace_agent_url: cisu.update_non_empty_string(default.trace_agent_url, Cow::Owned),
             dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
             dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
-            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
+            dogstatsd_agent_url: cisu
+                .update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
 
             trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
             trace_partial_flush_min_spans: cisu
@@ -3128,6 +3148,25 @@ mod tests {
     #[test]
     fn test_dd_agent_url_from_url_empty() {
         let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url_set_to_empty_string() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_AGENT_URL", "")],
+            ConfigSourceOrigin::Calculated,
+        ));
         sources.add_source(HashMapSource::from_iter(
             [
                 ("DD_AGENT_HOST", "agent-host"),
