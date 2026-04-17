@@ -9,9 +9,7 @@
 
 use aws_sdk_eventbridge::types::PutEventsRequestEntry;
 use aws_types::SdkConfig;
-use datadog_aws_core::integration_test_helpers::{
-    init_test_tracer, mock_aws, sdk_config, span_attrs, split_traceparent,
-};
+use datadog_aws_core::integration_test_helpers::{span_attrs, split_traceparent, TestHarness};
 use serial_test::serial;
 
 use datadog_aws_eventbridge::EventBridgeInterceptor;
@@ -26,9 +24,8 @@ fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_creates_span_and_injects_detail() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = eventbridge_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = eventbridge_client(&harness.sdk_config());
 
     let entry = PutEventsRequestEntry::builder()
         .source("my.source")
@@ -38,7 +35,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
 
     let _ = client.put_events().entries(entry).send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "eventbridge.request");
@@ -47,7 +44,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
     assert_eq!(attrs["operation.name"], "aws.eventbridge.request");
     assert_eq!(attrs["resource.name"], "EventBridge.PutEvents");
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
     let body: serde_json::Value = serde_json::from_str(&bodies[0]).unwrap();
     let entries = body["Entries"].as_array().unwrap();
@@ -70,9 +67,8 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_with_bus_name_creates_span() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = eventbridge_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = eventbridge_client(&harness.sdk_config());
 
     let entry = PutEventsRequestEntry::builder()
         .source("my.source")
@@ -83,7 +79,7 @@ async fn eventbridge_put_events_with_bus_name_creates_span() {
 
     let _ = client.put_events().entries(entry).send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     assert_eq!(span_attrs(&spans[0])["aws.operation"], "PutEvents");
 }
@@ -91,9 +87,8 @@ async fn eventbridge_put_events_with_bus_name_creates_span() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_events_multi_entry_creates_single_span() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = eventbridge_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = eventbridge_client(&harness.sdk_config());
 
     let entry1 = PutEventsRequestEntry::builder()
         .source("src1")
@@ -114,7 +109,7 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     assert_eq!(span_attrs(&spans[0])["aws.operation"], "PutEvents");
 }
@@ -122,13 +117,12 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_rule_creates_span_with_rulename() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = eventbridge_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = eventbridge_client(&harness.sdk_config());
 
     let _ = client.put_rule().name("my-rule").send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "PutRule");
@@ -138,13 +132,12 @@ async fn eventbridge_put_rule_creates_span_with_rulename() {
 #[tokio::test]
 #[serial]
 async fn eventbridge_put_targets_creates_span_with_rulename() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = eventbridge_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = eventbridge_client(&harness.sdk_config());
 
     let _ = client.put_targets().rule("my-rule").send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "PutTargets");

@@ -58,8 +58,8 @@ pub mod integration_test_helpers {
     use opentelemetry_sdk::trace::{
         InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
     };
-    use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
     use wiremock::matchers::any;
+    use wiremock::{Mock, MockServer as WireMockServer, Request, Respond, ResponseTemplate};
 
     #[derive(Clone)]
     struct CaptureBodyResponder {
@@ -78,13 +78,47 @@ pub mod integration_test_helpers {
         }
     }
 
+    /// Handle to the shared mock AWS endpoint used by integration tests.
+    pub struct MockAwsServer {
+        pub url: String,
+        bodies: Arc<Mutex<Vec<String>>>,
+        _server: WireMockServer,
+    }
+
+    impl MockAwsServer {
+        /// Returns a snapshot of all request bodies received so far.
+        pub fn bodies(&self) -> Vec<String> {
+            self.bodies.lock().unwrap().clone()
+        }
+    }
+
+    /// Shared setup used in integration tests.
+    pub struct TestHarness {
+        pub exporter: InMemorySpanExporter,
+        pub server: MockAwsServer,
+    }
+
+    impl TestHarness {
+        pub async fn new(status: u16) -> Self {
+            Self {
+                exporter: init_test_tracer(),
+                server: mock_aws(status).await,
+            }
+        }
+
+        pub fn sdk_config(&self) -> SdkConfig {
+            sdk_config(&self.server.url)
+        }
+
+        pub fn finished_spans(&self) -> Vec<SpanData> {
+            self.exporter.get_finished_spans().unwrap()
+        }
+    }
+
     /// Starts a minimal mock HTTP server. Every request gets status `status`,
     /// body `{}`, and header `x-amzn-requestid: test_req`.
-    ///
-    /// Returns `(base_url, mock_server, captured_bodies)` where
-    /// `captured_bodies` accumulates each request body as a UTF-8 string.
-    pub async fn mock_aws(status: u16) -> (String, MockServer, Arc<Mutex<Vec<String>>>) {
-        let server = MockServer::start().await;
+    pub async fn mock_aws(status: u16) -> MockAwsServer {
+        let server = WireMockServer::start().await;
         let bodies: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
         let responder = CaptureBodyResponder {
@@ -97,7 +131,11 @@ pub mod integration_test_helpers {
             .mount(&server)
             .await;
 
-        (server.uri(), server, bodies)
+        MockAwsServer {
+            url: server.uri(),
+            bodies,
+            _server: server,
+        }
     }
 
     /// Registers an `InMemorySpanExporter` as the global tracer provider and

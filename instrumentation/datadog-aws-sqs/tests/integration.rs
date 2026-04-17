@@ -10,7 +10,7 @@
 use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
 use aws_types::SdkConfig;
 use datadog_aws_core::integration_test_helpers::{
-    extract_traceparent, init_test_tracer, mock_aws, sdk_config, span_attrs, split_traceparent,
+    extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context};
@@ -31,9 +31,8 @@ const QUEUE_URL_TRAILING: &str = "https://sqs.us-east-1.amazonaws.com/1234567890
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client
         .send_message()
@@ -42,7 +41,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
 
@@ -65,7 +64,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     assert_eq!(attrs["aws.request_id"], "test_req");
     assert_eq!(spans[0].span_kind, SpanKind::Client);
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
     assert!(
         bodies[0].contains("_datadog"),
@@ -86,9 +85,8 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let entry1 = SendMessageBatchRequestEntry::builder()
         .id("1")
@@ -109,14 +107,14 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "sqs.request");
     assert_eq!(attrs["aws.operation"], "SendMessageBatch");
     assert_eq!(attrs["queuename"], "MyQueue");
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
     assert!(
         bodies[0].contains("_datadog"),
@@ -131,13 +129,12 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
 #[tokio::test]
 #[serial]
 async fn sqs_receive_message_creates_span_with_queue_tags() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client.receive_message().queue_url(QUEUE_URL).send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "ReceiveMessage");
@@ -151,9 +148,8 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_delete_message_creates_span_with_queue_tags() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client
         .delete_message()
@@ -162,7 +158,7 @@ async fn sqs_delete_message_creates_span_with_queue_tags() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "DeleteMessage");
@@ -172,9 +168,8 @@ async fn sqs_delete_message_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client
         .delete_message_batch()
@@ -182,7 +177,7 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "DeleteMessageBatch");
@@ -192,9 +187,8 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
 #[tokio::test]
 #[serial]
 async fn sqs_queue_url_trailing_slash_parsed_correctly() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client
         .send_message()
@@ -203,7 +197,7 @@ async fn sqs_queue_url_trailing_slash_parsed_correctly() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["queuename"], "MyQueue");
     assert_eq!(
@@ -215,9 +209,8 @@ async fn sqs_queue_url_trailing_slash_parsed_correctly() {
 #[tokio::test]
 #[serial]
 async fn sqs_error_response_sets_span_error_status_and_http_code() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(400).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(400).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let _ = client
         .send_message()
@@ -226,7 +219,7 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["http.status_code"], "400");
@@ -239,9 +232,8 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_propagates_parent_context() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = sqs_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sqs_client(&harness.sdk_config());
 
     let tracer = global::tracer("test");
     let parent_span = tracer.start("parent");
@@ -255,7 +247,7 @@ async fn sqs_send_message_propagates_parent_context() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let sqs_span = spans
         .iter()
         .find(|s| s.name == "sqs.request")
@@ -266,7 +258,7 @@ async fn sqs_send_message_propagates_parent_context() {
         parent_cx.span().span_context().span_id()
     );
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     let tp = extract_traceparent(&bodies[0]).expect("traceparent should be in body");
     let (_, injected_parent_id) = split_traceparent(&tp);
     assert_eq!(

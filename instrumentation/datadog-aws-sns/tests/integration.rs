@@ -8,9 +8,7 @@
 //! that global state, causing spans to land in the wrong exporter.
 
 use aws_types::SdkConfig;
-use datadog_aws_core::integration_test_helpers::{
-    init_test_tracer, mock_aws, sdk_config, span_attrs,
-};
+use datadog_aws_core::integration_test_helpers::{span_attrs, TestHarness};
 use serial_test::serial;
 
 use datadog_aws_sns::SnsInterceptor;
@@ -28,9 +26,8 @@ const TARGET_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTarget";
 #[tokio::test]
 #[serial]
 async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client
         .publish()
@@ -39,7 +36,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "sns.request");
@@ -49,7 +46,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     assert_eq!(attrs["operation.name"], "aws.sns.request");
     assert_eq!(attrs["resource.name"], "SNS.Publish");
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
     assert!(
         bodies[0].contains("_datadog"),
@@ -64,9 +61,8 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
 #[tokio::test]
 #[serial]
 async fn sns_publish_with_target_sets_targetname_tag() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client
         .publish()
@@ -75,7 +71,7 @@ async fn sns_publish_with_target_sets_targetname_tag() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["targetname"], "MyTarget");
     assert!(!attrs.contains_key("topicname"));
@@ -84,9 +80,8 @@ async fn sns_publish_with_target_sets_targetname_tag() {
 #[tokio::test]
 #[serial]
 async fn sns_publish_batch_creates_span_with_topicname() {
-    let exporter = init_test_tracer();
-    let (url, _srv, captured) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let entry = aws_sdk_sns::types::PublishBatchRequestEntry::builder()
         .id("1")
@@ -101,13 +96,13 @@ async fn sns_publish_batch_creates_span_with_topicname() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(spans[0].name, "sns.request");
     assert_eq!(attrs["aws.operation"], "PublishBatch");
     assert_eq!(attrs["topicname"], "MyTopic");
 
-    let bodies = captured.lock().unwrap();
+    let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
     assert!(
         bodies[0].contains("_datadog"),
@@ -122,9 +117,8 @@ async fn sns_publish_batch_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_subscribe_creates_span_with_topicname() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client
         .subscribe()
@@ -133,7 +127,7 @@ async fn sns_subscribe_creates_span_with_topicname() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "Subscribe");
@@ -143,13 +137,12 @@ async fn sns_subscribe_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_create_topic_uses_name_field_not_arn() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client.create_topic().name("MyNewTopic").send().await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "CreateTopic");
     assert_eq!(attrs["topicname"], "MyNewTopic");
@@ -158,9 +151,8 @@ async fn sns_create_topic_uses_name_field_not_arn() {
 #[tokio::test]
 #[serial]
 async fn sns_get_topic_attributes_creates_span_with_topicname() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(200).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(200).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client
         .get_topic_attributes()
@@ -168,7 +160,7 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "GetTopicAttributes");
     assert_eq!(attrs["topicname"], "MyTopic");
@@ -177,9 +169,8 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
 #[tokio::test]
 #[serial]
 async fn sns_error_response_sets_span_error_status() {
-    let exporter = init_test_tracer();
-    let (url, _srv, _bodies) = mock_aws(400).await;
-    let client = sns_client(&sdk_config(&url));
+    let harness = TestHarness::new(400).await;
+    let client = sns_client(&harness.sdk_config());
 
     let _ = client
         .publish()
@@ -188,7 +179,7 @@ async fn sns_error_response_sets_span_error_status() {
         .send()
         .await;
 
-    let spans = exporter.get_finished_spans().unwrap();
+    let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["http.status_code"], "400");
     assert!(matches!(
