@@ -46,8 +46,6 @@ pub mod test_helpers {
 #[cfg(feature = "test-utils")]
 pub mod integration_test_helpers {
     use std::collections::HashMap;
-    use std::convert::Infallible;
-    use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
 
     use aws_credential_types::provider::SharedCredentialsProvider;
@@ -55,63 +53,51 @@ pub mod integration_test_helpers {
     use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
     use aws_types::region::Region;
     use aws_types::SdkConfig;
-    use bytes::Bytes;
-    use http_body_util::{combinators::BoxBody, BodyExt, Full};
-    use hyper::body::Incoming;
-    use hyper::{Request, Response};
-    use hyper_util::rt::{TokioExecutor, TokioIo};
-    use hyper_util::server::conn::auto::Builder;
     use opentelemetry::global;
     use opentelemetry_sdk::propagation::TraceContextPropagator;
     use opentelemetry_sdk::trace::{
         InMemorySpanExporter, SdkTracerProvider, SimpleSpanProcessor, SpanData,
     };
-    use tokio::net::TcpListener;
-    use tokio::task::JoinHandle;
+    use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+    use wiremock::matchers::any;
+
+    #[derive(Clone)]
+    struct CaptureBodyResponder {
+        status: u16,
+        bodies: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Respond for CaptureBodyResponder {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let body = String::from_utf8_lossy(&request.body).into_owned();
+            self.bodies.lock().unwrap().push(body);
+
+            ResponseTemplate::new(self.status)
+                .insert_header("x-amzn-requestid", "test_req")
+                .set_body_raw("{}", "application/json")
+        }
+    }
 
     /// Starts a minimal mock HTTP server. Every request gets status `status`,
     /// body `{}`, and header `x-amzn-requestid: test_req`.
     ///
-    /// Returns `(base_url, server_handle, captured_bodies)` where
+    /// Returns `(base_url, mock_server, captured_bodies)` where
     /// `captured_bodies` accumulates each request body as a UTF-8 string.
-    pub async fn mock_aws(status: u16) -> (String, JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr: SocketAddr = listener.local_addr().unwrap();
+    pub async fn mock_aws(status: u16) -> (String, MockServer, Arc<Mutex<Vec<String>>>) {
+        let server = MockServer::start().await;
         let bodies: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let bodies_server = bodies.clone();
-        let handle = tokio::spawn(async move {
-            while let Ok((stream, _)) = listener.accept().await {
-                let bodies_conn = bodies_server.clone();
-                tokio::spawn(async move {
-                    let _ = Builder::new(TokioExecutor::new())
-                        .serve_connection(
-                            TokioIo::new(stream),
-                            hyper::service::service_fn(move |req: Request<Incoming>| {
-                                let bodies_req = bodies_conn.clone();
-                                async move {
-                                    let raw = req.into_body().collect().await.unwrap_or_default();
-                                    let text =
-                                        String::from_utf8_lossy(&raw.to_bytes()).into_owned();
-                                    bodies_req.lock().unwrap().push(text);
-                                    let body: BoxBody<Bytes, hyper::Error> =
-                                        Full::new(Bytes::from_static(b"{}"))
-                                            .map_err(|e| match e {})
-                                            .boxed();
-                                    let resp = Response::builder()
-                                        .status(status)
-                                        .header("x-amzn-requestid", "test_req")
-                                        .header("Content-Type", "application/json")
-                                        .body(body)
-                                        .unwrap();
-                                    Ok::<_, Infallible>(resp)
-                                }
-                            }),
-                        )
-                        .await;
-                });
-            }
-        });
-        (format!("http://{addr}"), handle, bodies)
+
+        let responder = CaptureBodyResponder {
+            status,
+            bodies: Arc::clone(&bodies),
+        };
+
+        Mock::given(any())
+            .respond_with(responder)
+            .mount(&server)
+            .await;
+
+        (server.uri(), server, bodies)
     }
 
     /// Registers an `InMemorySpanExporter` as the global tracer provider and

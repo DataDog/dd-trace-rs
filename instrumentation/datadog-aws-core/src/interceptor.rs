@@ -90,6 +90,8 @@ impl Storable for SpanContext {
     type Storer = StoreReplace<Self>;
 }
 
+// Keys in this carrier come from the active global propagator (for example,
+// W3C TraceContext injects `traceparent`/`tracestate`).
 fn extract_trace_headers(cx: &Context) -> HashMap<String, String> {
     global::get_text_map_propagator(|p| {
         let mut carrier = HashMap::new();
