@@ -41,6 +41,8 @@ use datadog_aws_core::attribute_keys::{
 use datadog_aws_core::limits::ONE_MB;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
+const TRACER_NAME: &str = "datadog-aws-eventbridge";
+
 #[derive(Debug, Clone, Copy)]
 enum EventBridgeOperation {
     PutEvents,
@@ -108,11 +110,15 @@ impl ServiceHandler for EventBridgeHandler {
 /// AWS SDK interceptor that injects Datadog trace context into EventBridge requests
 /// and creates spans representing EventBridge operations.
 #[derive(Debug)]
-pub struct EventBridgeInterceptor(AwsInterceptor);
+pub struct EventBridgeInterceptor {
+    inner: AwsInterceptor,
+}
 
 impl EventBridgeInterceptor {
     pub fn new() -> Self {
-        Self(AwsInterceptor::new(Box::new(EventBridgeHandler)))
+        Self {
+            inner: AwsInterceptor::new(Box::new(EventBridgeHandler), TRACER_NAME),
+        }
     }
 }
 
@@ -133,7 +139,7 @@ impl Intercept for EventBridgeInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .modify_before_serialization(context, runtime_components, cfg)
     }
 
@@ -143,7 +149,7 @@ impl Intercept for EventBridgeInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_before_transmit(context, runtime_components, cfg)
     }
 
@@ -153,7 +159,7 @@ impl Intercept for EventBridgeInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_after_execution(context, runtime_components, cfg)
     }
 }

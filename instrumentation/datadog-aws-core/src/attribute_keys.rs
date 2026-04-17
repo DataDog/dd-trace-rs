@@ -15,9 +15,6 @@ pub const PARTITION_AWS_ISO_B: &str = "aws-iso-b";
 pub const PARTITION_AWS_ISO_E: &str = "aws-iso-e";
 pub const PARTITION_AWS_ISO_F: &str = "aws-iso-f";
 
-// OTel tracer name.
-pub const TRACER_NAME: &str = "datadog-aws-sdk";
-
 // Generic aws.sdk span attributes.
 pub const OPERATION_NAME: &str = "operation.name";
 pub const AWS_SERVICE: &str = "aws.service";
@@ -29,7 +26,6 @@ pub const AWS_REQUEST_ID: &str = "aws.request_id";
 pub const HTTP_METHOD: &str = "http.method";
 pub const HTTP_URL: &str = "http.url";
 pub const HTTP_STATUS_CODE: &str = "http.status_code";
-pub const COMPONENT: &str = "component";
 pub const SPAN_KIND: &str = "span.kind";
 pub const RESOURCE_NAME: &str = "resource.name";
 

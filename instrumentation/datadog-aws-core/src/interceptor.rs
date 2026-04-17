@@ -18,10 +18,10 @@ use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 
 use crate::attribute_keys::{
-    AWS_AGENT, AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_REQUEST_ID, AWS_SERVICE, COMPONENT,
-    HTTP_METHOD, HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, PARTITION_AWS, PARTITION_AWS_CN,
-    PARTITION_AWS_GOV, PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E,
-    PARTITION_AWS_ISO_F, RESOURCE_NAME, SPAN_KIND, TRACER_NAME,
+    AWS_AGENT, AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_REQUEST_ID, AWS_SERVICE, HTTP_METHOD,
+    HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, PARTITION_AWS, PARTITION_AWS_CN, PARTITION_AWS_GOV,
+    PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E, PARTITION_AWS_ISO_F,
+    RESOURCE_NAME, SPAN_KIND,
 };
 
 /// Trait implemented by each service crate to provide service-specific
@@ -60,9 +60,9 @@ pub struct AwsInterceptor {
 }
 
 impl AwsInterceptor {
-    pub fn new(handler: Box<dyn ServiceHandler>) -> Self {
+    pub fn new(handler: Box<dyn ServiceHandler>, tracer_name: &'static str) -> Self {
         Self {
-            tracer: global::tracer(TRACER_NAME),
+            tracer: global::tracer(tracer_name),
             handler,
         }
     }
@@ -148,7 +148,6 @@ pub(crate) fn base_tags(
         KeyValue::new(AWS_REGION, region.to_owned()),
         KeyValue::new(AWS_PARTITION, partition),
         KeyValue::new(RESOURCE_NAME, format!("{sdk_service_name}.{operation}")),
-        KeyValue::new(COMPONENT, TRACER_NAME),
         KeyValue::new(SPAN_KIND, "client"),
     ]
 }

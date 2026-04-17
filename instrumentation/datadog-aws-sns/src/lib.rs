@@ -40,6 +40,8 @@ use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC
 use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
+const TRACER_NAME: &str = "datadog-aws-sns";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnsOperation {
     Publish,
@@ -107,11 +109,15 @@ impl ServiceHandler for SnsHandler {
 /// AWS SDK interceptor that injects Datadog trace context into SNS requests
 /// and creates spans representing SNS operations.
 #[derive(Debug)]
-pub struct SnsInterceptor(AwsInterceptor);
+pub struct SnsInterceptor {
+    inner: AwsInterceptor,
+}
 
 impl SnsInterceptor {
     pub fn new() -> Self {
-        Self(AwsInterceptor::new(Box::new(SnsHandler)))
+        Self {
+            inner: AwsInterceptor::new(Box::new(SnsHandler), TRACER_NAME),
+        }
     }
 }
 
@@ -132,7 +138,7 @@ impl Intercept for SnsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .modify_before_serialization(context, runtime_components, cfg)
     }
 
@@ -142,7 +148,7 @@ impl Intercept for SnsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_before_transmit(context, runtime_components, cfg)
     }
 
@@ -152,7 +158,7 @@ impl Intercept for SnsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_after_execution(context, runtime_components, cfg)
     }
 }

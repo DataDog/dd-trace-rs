@@ -38,6 +38,8 @@ use datadog_aws_core::attribute_keys::{
 use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
+const TRACER_NAME: &str = "datadog-aws-sqs";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqsOperation {
     SendMessage,
@@ -99,11 +101,15 @@ impl ServiceHandler for SqsHandler {
 /// AWS SDK interceptor that injects Datadog trace context into SQS requests
 /// and creates spans representing SQS operations.
 #[derive(Debug)]
-pub struct SqsInterceptor(AwsInterceptor);
+pub struct SqsInterceptor {
+    inner: AwsInterceptor,
+}
 
 impl SqsInterceptor {
     pub fn new() -> Self {
-        Self(AwsInterceptor::new(Box::new(SqsHandler)))
+        Self {
+            inner: AwsInterceptor::new(Box::new(SqsHandler), TRACER_NAME),
+        }
     }
 }
 
@@ -124,7 +130,7 @@ impl Intercept for SqsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .modify_before_serialization(context, runtime_components, cfg)
     }
 
@@ -134,7 +140,7 @@ impl Intercept for SqsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_before_transmit(context, runtime_components, cfg)
     }
 
@@ -144,7 +150,7 @@ impl Intercept for SqsInterceptor {
         runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.0
+        self.inner
             .read_after_execution(context, runtime_components, cfg)
     }
 }
