@@ -78,6 +78,21 @@ for i, (key, versions) in enumerate(
     if field_name:
         rust_type = versions[0].get("rust_type", TYPE_MAP.get(json_type))
         config_item_type = versions[0].get("config_item_type")
+
+        # Doc comment: env var + default
+        default_display = versions[0].get("default")
+        doc = "    /// Configured via `{}`".format(key)
+        if default_display is not None:
+            doc += ", default: `{}`".format(default_display)
+        struct_field_lines.append(doc)
+
+        # Doc comment: aliases
+        all_aliases = [a for v in versions for a in v.get("aliases", [])]
+        if all_aliases:
+            struct_field_lines.append(
+                "    /// Aliases: {}".format(", ".join("`{}`".format(a) for a in all_aliases))
+            )
+
         if config_item_type in ("override_code", "override_rc"):
             struct_field_lines.append(
                 "    pub(super) {}: ConfigItemWithOverride<{}>,".format(field_name, rust_type)
