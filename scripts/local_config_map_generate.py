@@ -91,13 +91,17 @@ for i, (key, versions) in enumerate(
     default_display = versions[0].get("default")
     all_aliases = [a for v in versions for a in v.get("aliases", [])]
 
-    def make_doc(prefix):
-        doc = "    /// {} `{}`".format(prefix, key)
+    def getter_doc():
+        return "    /// Returns the value of `{}`.".format(key)
+
+    def setter_doc():
+        lines = ["    /// Sets the value of `{}`.".format(key)]
         if default_display is not None:
-            doc += " — default: `{}`".format(default_display)
+            lines += ["    ///", "    ///  **Default**: `{}`".format(default_display), "    ///"]
+        lines.append("    /// Env variable: `{}`".format(key))
         if all_aliases:
-            doc += "\n    /// Aliases: {}".format(", ".join("`{}`".format(a) for a in all_aliases))
-        return doc
+            lines.append("    /// Aliases: {}".format(", ".join("`{}`".format(a) for a in all_aliases)))
+        return "\n".join(lines)
 
     # Build getter/setter lines for simple types
     skip_getters = "getter" in skip_set
@@ -107,52 +111,52 @@ for i, (key, versions) in enumerate(
             if not skip_getters:
                 getter_lines.append(
                     "{}\n    pub fn {}(&self) -> &str {{ self.{}.value().as_ref() }}".format(
-                        make_doc("Returns"), field_name, field_name
+                        getter_doc(), field_name, field_name
                     )
                 )
             if not skip_setters:
                 setter_lines.append(
                     "{}\n    pub fn set_{}(&mut self, val: String) -> &mut Self {{ self.config.{}.set_code(Cow::Owned(val)); self }}".format(
-                        make_doc("Sets"), field_name, field_name
+                        setter_doc(), field_name, field_name
                     )
                 )
         elif json_type == "int":
             if not skip_getters:
                 getter_lines.append(
                     "{}\n    pub fn {}(&self) -> u32 {{ *self.{}.value() }}".format(
-                        make_doc("Returns"), field_name, field_name
+                        getter_doc(), field_name, field_name
                     )
                 )
             if not skip_setters:
                 setter_lines.append(
                     "{}\n    pub fn set_{}(&mut self, val: u32) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                        make_doc("Sets"), field_name, field_name
+                        setter_doc(), field_name, field_name
                     )
                 )
         elif json_type == "decimal":
             if not skip_getters:
                 getter_lines.append(
                     "{}\n    pub fn {}(&self) -> f64 {{ *self.{}.value() }}".format(
-                        make_doc("Returns"), field_name, field_name
+                        getter_doc(), field_name, field_name
                     )
                 )
             if not skip_setters:
                 setter_lines.append(
                     "{}\n    pub fn set_{}(&mut self, val: f64) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                        make_doc("Sets"), field_name, field_name
+                        setter_doc(), field_name, field_name
                     )
                 )
         elif json_type == "boolean":
             if not skip_getters:
                 getter_lines.append(
                     "{}\n    pub fn {}(&self) -> bool {{ *self.{}.value() }}".format(
-                        make_doc("Returns"), field_name, field_name
+                        getter_doc(), field_name, field_name
                     )
                 )
             if not skip_setters:
                 setter_lines.append(
                     "{}\n    pub fn set_{}(&mut self, val: bool) -> &mut Self {{ self.config.{}.set_code(val); self }}".format(
-                        make_doc("Sets"), field_name, field_name
+                        setter_doc(), field_name, field_name
                     )
                 )
 

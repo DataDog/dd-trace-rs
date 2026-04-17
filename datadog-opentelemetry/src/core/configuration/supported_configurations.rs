@@ -265,103 +265,102 @@ pub struct Config {
 }
 
 impl Config {
-    /// Returns `DD_AGENT_HOST` — default: `localhost`
+    /// Returns the value of `DD_AGENT_HOST`.
     pub fn agent_host(&self) -> &str {
         self.agent_host.value().as_ref()
     }
 
-    /// Returns `DD_DOGSTATSD_HOST` — default: `localhost`
+    /// Returns the value of `DD_DOGSTATSD_HOST`.
     pub fn dogstatsd_agent_host(&self) -> &str {
         self.dogstatsd_agent_host.value().as_ref()
     }
 
-    /// Returns `DD_DOGSTATSD_PORT` — default: `8125`
+    /// Returns the value of `DD_DOGSTATSD_PORT`.
     pub fn dogstatsd_agent_port(&self) -> u32 {
         *self.dogstatsd_agent_port.value()
     }
 
-    /// Returns `DD_INSTRUMENTATION_TELEMETRY_ENABLED` — default: `true`
+    /// Returns the value of `DD_INSTRUMENTATION_TELEMETRY_ENABLED`.
     pub fn telemetry_enabled(&self) -> bool {
         *self.telemetry_enabled.value()
     }
 
-    /// Returns `DD_METRICS_OTEL_ENABLED` — default: `true`
+    /// Returns the value of `DD_METRICS_OTEL_ENABLED`.
     pub fn metrics_otel_enabled(&self) -> bool {
         *self.metrics_otel_enabled.value()
     }
 
-    /// Returns `DD_REMOTE_CONFIGURATION_ENABLED` — default: `true`
-    /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
+    /// Returns the value of `DD_REMOTE_CONFIGURATION_ENABLED`.
     pub fn remote_config_enabled(&self) -> bool {
         *self.remote_config_enabled.value()
     }
 
-    /// Returns `DD_TELEMETRY_LOG_COLLECTION_ENABLED` — default: `true`
+    /// Returns the value of `DD_TELEMETRY_LOG_COLLECTION_ENABLED`.
     pub fn telemetry_log_collection_enabled(&self) -> bool {
         *self.telemetry_log_collection_enabled.value()
     }
 
-    /// Returns `DD_TRACE_AGENT_PORT` — default: `8126`
+    /// Returns the value of `DD_TRACE_AGENT_PORT`.
     pub fn trace_agent_port(&self) -> u32 {
         *self.trace_agent_port.value()
     }
 
-    /// Returns `DD_TRACE_AGENT_URL` — default: ``
+    /// Returns the value of `DD_TRACE_AGENT_URL`.
     pub fn trace_agent_url(&self) -> &str {
         self.trace_agent_url.value().as_ref()
     }
 
-    /// Returns `DD_TRACE_ENABLED` — default: `true`
+    /// Returns the value of `DD_TRACE_ENABLED`.
     pub fn enabled(&self) -> bool {
         *self.enabled.value()
     }
 
-    /// Returns `DD_TRACE_PARTIAL_FLUSH_ENABLED` — default: `false`
+    /// Returns the value of `DD_TRACE_PARTIAL_FLUSH_ENABLED`.
     pub fn trace_partial_flush_enabled(&self) -> bool {
         *self.trace_partial_flush_enabled.value()
     }
 
-    /// Returns `DD_TRACE_PROPAGATION_EXTRACT_FIRST` — default: `false`
+    /// Returns the value of `DD_TRACE_PROPAGATION_EXTRACT_FIRST`.
     pub fn trace_propagation_extract_first(&self) -> bool {
         *self.trace_propagation_extract_first.value()
     }
 
-    /// Returns `DD_TRACE_STATS_COMPUTATION_ENABLED` — default: `true`
+    /// Returns the value of `DD_TRACE_STATS_COMPUTATION_ENABLED`.
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
     }
 
-    /// Returns `OTEL_EXPORTER_OTLP_ENDPOINT`
+    /// Returns the value of `OTEL_EXPORTER_OTLP_ENDPOINT`.
     pub fn otlp_endpoint(&self) -> &str {
         self.otlp_endpoint.value().as_ref()
     }
 
-    /// Returns `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+    /// Returns the value of `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`.
     pub fn otlp_metrics_endpoint(&self) -> &str {
         self.otlp_metrics_endpoint.value().as_ref()
     }
 
-    /// Returns `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` — default: `10000`
+    /// Returns the value of `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`.
     pub fn otlp_metrics_timeout(&self) -> u32 {
         *self.otlp_metrics_timeout.value()
     }
 
-    /// Returns `OTEL_EXPORTER_OTLP_TIMEOUT` — default: `10000`
+    /// Returns the value of `OTEL_EXPORTER_OTLP_TIMEOUT`.
     pub fn otlp_timeout(&self) -> u32 {
         *self.otlp_timeout.value()
     }
 
-    /// Returns `OTEL_METRICS_EXPORTER` — default: `otlp`
+    /// Returns the value of `OTEL_METRICS_EXPORTER`.
     pub fn otel_metrics_exporter(&self) -> &str {
         self.otel_metrics_exporter.value().as_ref()
     }
 
-    /// Returns `OTEL_METRIC_EXPORT_INTERVAL` — default: `10000`
+    /// Returns the value of `OTEL_METRIC_EXPORT_INTERVAL`.
     pub fn metric_export_interval(&self) -> u32 {
         *self.metric_export_interval.value()
     }
 
-    /// Returns `OTEL_METRIC_EXPORT_TIMEOUT` — default: `7500`
+    /// Returns the value of `OTEL_METRIC_EXPORT_TIMEOUT`.
     pub fn metric_export_timeout(&self) -> u32 {
         *self.metric_export_timeout.value()
     }
@@ -414,122 +413,198 @@ impl Config {
 }
 
 impl ConfigBuilder {
-    /// Sets `DD_AGENT_HOST` — default: `localhost`
+    /// Sets the value of `DD_AGENT_HOST`.
+    ///
+    ///  **Default**: `localhost`
+    ///
+    /// Env variable: `DD_AGENT_HOST`
     pub fn set_agent_host(&mut self, val: String) -> &mut Self {
         self.config.agent_host.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `DD_DOGSTATSD_HOST` — default: `localhost`
+    /// Sets the value of `DD_DOGSTATSD_HOST`.
+    ///
+    ///  **Default**: `localhost`
+    ///
+    /// Env variable: `DD_DOGSTATSD_HOST`
     pub fn set_dogstatsd_agent_host(&mut self, val: String) -> &mut Self {
         self.config.dogstatsd_agent_host.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `DD_DOGSTATSD_PORT` — default: `8125`
+    /// Sets the value of `DD_DOGSTATSD_PORT`.
+    ///
+    ///  **Default**: `8125`
+    ///
+    /// Env variable: `DD_DOGSTATSD_PORT`
     pub fn set_dogstatsd_agent_port(&mut self, val: u32) -> &mut Self {
         self.config.dogstatsd_agent_port.set_code(val);
         self
     }
 
-    /// Sets `DD_INSTRUMENTATION_TELEMETRY_ENABLED` — default: `true`
+    /// Sets the value of `DD_INSTRUMENTATION_TELEMETRY_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_INSTRUMENTATION_TELEMETRY_ENABLED`
     pub fn set_telemetry_enabled(&mut self, val: bool) -> &mut Self {
         self.config.telemetry_enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_METRICS_OTEL_ENABLED` — default: `true`
+    /// Sets the value of `DD_METRICS_OTEL_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_METRICS_OTEL_ENABLED`
     pub fn set_metrics_otel_enabled(&mut self, val: bool) -> &mut Self {
         self.config.metrics_otel_enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_REMOTE_CONFIGURATION_ENABLED` — default: `true`
+    /// Sets the value of `DD_REMOTE_CONFIGURATION_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_REMOTE_CONFIGURATION_ENABLED`
     /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
     pub fn set_remote_config_enabled(&mut self, val: bool) -> &mut Self {
         self.config.remote_config_enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_TELEMETRY_LOG_COLLECTION_ENABLED` — default: `true`
+    /// Sets the value of `DD_TELEMETRY_LOG_COLLECTION_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_TELEMETRY_LOG_COLLECTION_ENABLED`
     pub fn set_telemetry_log_collection_enabled(&mut self, val: bool) -> &mut Self {
         self.config.telemetry_log_collection_enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_TRACE_AGENT_PORT` — default: `8126`
+    /// Sets the value of `DD_TRACE_AGENT_PORT`.
+    ///
+    ///  **Default**: `8126`
+    ///
+    /// Env variable: `DD_TRACE_AGENT_PORT`
     pub fn set_trace_agent_port(&mut self, val: u32) -> &mut Self {
         self.config.trace_agent_port.set_code(val);
         self
     }
 
-    /// Sets `DD_TRACE_AGENT_URL` — default: ``
+    /// Sets the value of `DD_TRACE_AGENT_URL`.
+    ///
+    ///  **Default**: ``
+    ///
+    /// Env variable: `DD_TRACE_AGENT_URL`
     pub fn set_trace_agent_url(&mut self, val: String) -> &mut Self {
         self.config.trace_agent_url.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `DD_TRACE_ENABLED` — default: `true`
+    /// Sets the value of `DD_TRACE_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_ENABLED`
     pub fn set_enabled(&mut self, val: bool) -> &mut Self {
         self.config.enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_TRACE_PARTIAL_FLUSH_ENABLED` — default: `false`
+    /// Sets the value of `DD_TRACE_PARTIAL_FLUSH_ENABLED`.
+    ///
+    ///  **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_PARTIAL_FLUSH_ENABLED`
     pub fn set_trace_partial_flush_enabled(&mut self, val: bool) -> &mut Self {
         self.config.trace_partial_flush_enabled.set_code(val);
         self
     }
 
-    /// Sets `DD_TRACE_PROPAGATION_EXTRACT_FIRST` — default: `false`
+    /// Sets the value of `DD_TRACE_PROPAGATION_EXTRACT_FIRST`.
+    ///
+    ///  **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
     pub fn set_trace_propagation_extract_first(&mut self, val: bool) -> &mut Self {
         self.config.trace_propagation_extract_first.set_code(val);
         self
     }
 
-    /// Sets `DD_TRACE_STATS_COMPUTATION_ENABLED` — default: `true`
+    /// Sets the value of `DD_TRACE_STATS_COMPUTATION_ENABLED`.
+    ///
+    ///  **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_STATS_COMPUTATION_ENABLED`
     pub fn set_trace_stats_computation_enabled(&mut self, val: bool) -> &mut Self {
         self.config.trace_stats_computation_enabled.set_code(val);
         self
     }
 
-    /// Sets `OTEL_EXPORTER_OTLP_ENDPOINT`
+    /// Sets the value of `OTEL_EXPORTER_OTLP_ENDPOINT`.
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_ENDPOINT`
     pub fn set_otlp_endpoint(&mut self, val: String) -> &mut Self {
         self.config.otlp_endpoint.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
+    /// Sets the value of `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`.
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
     pub fn set_otlp_metrics_endpoint(&mut self, val: String) -> &mut Self {
         self.config.otlp_metrics_endpoint.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT` — default: `10000`
+    /// Sets the value of `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`.
+    ///
+    ///  **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`
     pub fn set_otlp_metrics_timeout(&mut self, val: u32) -> &mut Self {
         self.config.otlp_metrics_timeout.set_code(val);
         self
     }
 
-    /// Sets `OTEL_EXPORTER_OTLP_TIMEOUT` — default: `10000`
+    /// Sets the value of `OTEL_EXPORTER_OTLP_TIMEOUT`.
+    ///
+    ///  **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TIMEOUT`
     pub fn set_otlp_timeout(&mut self, val: u32) -> &mut Self {
         self.config.otlp_timeout.set_code(val);
         self
     }
 
-    /// Sets `OTEL_METRICS_EXPORTER` — default: `otlp`
+    /// Sets the value of `OTEL_METRICS_EXPORTER`.
+    ///
+    ///  **Default**: `otlp`
+    ///
+    /// Env variable: `OTEL_METRICS_EXPORTER`
     pub fn set_otel_metrics_exporter(&mut self, val: String) -> &mut Self {
         self.config.otel_metrics_exporter.set_code(Cow::Owned(val));
         self
     }
 
-    /// Sets `OTEL_METRIC_EXPORT_INTERVAL` — default: `10000`
+    /// Sets the value of `OTEL_METRIC_EXPORT_INTERVAL`.
+    ///
+    ///  **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_METRIC_EXPORT_INTERVAL`
     pub fn set_metric_export_interval(&mut self, val: u32) -> &mut Self {
         self.config.metric_export_interval.set_code(val);
         self
     }
 
-    /// Sets `OTEL_METRIC_EXPORT_TIMEOUT` — default: `7500`
+    /// Sets the value of `OTEL_METRIC_EXPORT_TIMEOUT`.
+    ///
+    ///  **Default**: `7500`
+    ///
+    /// Env variable: `OTEL_METRIC_EXPORT_TIMEOUT`
     pub fn set_metric_export_timeout(&mut self, val: u32) -> &mut Self {
         self.config.metric_export_timeout.set_code(val);
         self
