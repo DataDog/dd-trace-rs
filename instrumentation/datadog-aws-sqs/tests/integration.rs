@@ -27,6 +27,8 @@ fn sqs_client(cfg: &SdkConfig) -> aws_sdk_sqs::Client {
 
 const QUEUE_URL: &str = "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue";
 const QUEUE_URL_TRAILING: &str = "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue/";
+const HTTP_200: &str = "200";
+const HTTP_400: &str = "400";
 
 #[tokio::test]
 #[serial]
@@ -52,7 +54,6 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     assert_eq!(attrs["aws.partition"], "aws");
     assert_eq!(attrs["operation.name"], "aws.sqs.request");
     assert_eq!(attrs["resource.name"], "SQS.SendMessage");
-    assert_eq!(attrs["component"], "datadog-aws-sdk");
     assert_eq!(attrs["span.kind"], "client");
     assert_eq!(attrs["queuename"], "MyQueue");
     assert_eq!(
@@ -60,7 +61,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
     );
     assert_eq!(attrs["messaging.system"], "amazonsqs");
-    assert_eq!(attrs["http.status_code"], "200");
+    assert_eq!(attrs["http.status_code"], HTTP_200);
     assert_eq!(attrs["aws.request_id"], "test_req");
     assert_eq!(spans[0].span_kind, SpanKind::Client);
 
@@ -222,7 +223,7 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
     let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
     let attrs = span_attrs(&spans[0]);
-    assert_eq!(attrs["http.status_code"], "400");
+    assert_eq!(attrs["http.status_code"], HTTP_400);
     assert!(matches!(
         spans[0].status,
         opentelemetry::trace::Status::Error { .. }

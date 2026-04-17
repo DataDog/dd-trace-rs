@@ -22,6 +22,7 @@ fn sns_client(cfg: &SdkConfig) -> aws_sdk_sns::Client {
 
 const TOPIC_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTopic";
 const TARGET_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTarget";
+const HTTP_400: &str = "400";
 
 #[tokio::test]
 #[serial]
@@ -181,7 +182,7 @@ async fn sns_error_response_sets_span_error_status() {
 
     let spans = harness.finished_spans();
     let attrs = span_attrs(&spans[0]);
-    assert_eq!(attrs["http.status_code"], "400");
+    assert_eq!(attrs["http.status_code"], HTTP_400);
     assert!(matches!(
         spans[0].status,
         opentelemetry::trace::Status::Error { .. }
