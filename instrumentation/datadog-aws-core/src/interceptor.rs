@@ -1,6 +1,21 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+//! Generic AWS SDK interceptor and supporting utilities shared by all service crates.
+//!
+//! [`AwsInterceptor`] hooks into the AWS SDK for Rust request pipeline via the
+//! [`Intercept`] trait. For each request it:
+//! 1. Creates a Datadog client span with base + service-specific tags
+//!    (`modify_before_serialization`).
+//! 2. Injects propagation headers into the outbound request payload via the
+//!    [`ServiceHandler`] implementation (`modify_before_serialization`).
+//! 3. Adds HTTP-level tags once the final request is known (`read_before_transmit`).
+//! 4. Records the response status and any error, then ends the span
+//!    (`read_after_execution`).
+//!
+//! The [`SpanContext`] type ferries the active OTel [`Context`] through the
+//! SDK's [`ConfigBag`] between hooks.
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -60,6 +75,8 @@ pub struct AwsInterceptor {
 }
 
 impl AwsInterceptor {
+    /// Creates a new interceptor delegating service-specific behaviour to `handler`,
+    /// using `tracer_name` as the OTel tracer scope name.
     pub fn new(handler: Box<dyn ServiceHandler>, tracer_name: &'static str) -> Self {
         Self {
             tracer: global::tracer(tracer_name),
@@ -76,8 +93,9 @@ impl fmt::Debug for AwsInterceptor {
     }
 }
 
-// Stores the OTel Context (which owns the active span) in ConfigBag so it can
-// be accessed across interceptor hooks for the same request.
+/// Carries the OTel [`Context`] (and its active span) through the SDK's [`ConfigBag`]
+/// so that `modify_before_serialization`, `read_before_transmit`, and
+/// `read_after_execution` can all operate on the same span.
 struct SpanContext(Context);
 
 impl fmt::Debug for SpanContext {
@@ -90,8 +108,11 @@ impl Storable for SpanContext {
     type Storer = StoreReplace<Self>;
 }
 
-// Keys in this carrier come from the active global propagator (for example,
-// W3C TraceContext injects `traceparent`/`tracestate`).
+/// Serialises the active span's trace context into a carrier map using the global propagator.
+///
+/// Keys depend on the configured propagator — e.g. W3C TraceContext produces
+/// `traceparent`/`tracestate`, Datadog produces `x-datadog-trace-id` etc.
+/// Returns an empty map when there is no active span.
 fn extract_trace_headers(cx: &Context) -> HashMap<String, String> {
     global::get_text_map_propagator(|p| {
         let mut carrier = HashMap::new();
@@ -100,6 +121,7 @@ fn extract_trace_headers(cx: &Context) -> HashMap<String, String> {
     })
 }
 
+/// Adds HTTP response tags to `span`: status code and, when present, the AWS request ID.
 fn set_response_tags(
     span: &opentelemetry::trace::SpanRef<'_>,
     response: &aws_smithy_runtime_api::http::Response,
@@ -113,8 +135,11 @@ fn set_response_tags(
     }
 }
 
-// The AWS SDK for Rust does not expose partition publicly, so we derive it from the region prefix.
-// Longest-prefix-first: us-isof- and us-isob- must be checked before the shorter us-iso- prefix.
+/// Derives the AWS partition identifier from a region string.
+///
+/// The AWS SDK for Rust does not expose partition publicly, so we infer it from
+/// the region prefix. Prefixes are checked longest-first: `us-isof-` and `us-isob-`
+/// must be matched before the shorter `us-iso-` prefix to avoid false positives.
 pub(crate) fn partition_from_region(region: &str) -> &'static str {
     if region.starts_with("cn-") {
         PARTITION_AWS_CN
@@ -133,7 +158,11 @@ pub(crate) fn partition_from_region(region: &str) -> &'static str {
     }
 }
 
-/// Base tags common to all AWS service spans.
+/// Builds the set of span tags shared by every AWS service span.
+///
+/// Includes `operation.name`, `aws.service`, `aws.operation`, `aws.region`,
+/// `aws.partition`, `resource.name`, and `span.kind`.
+/// Service crates extend this list with their own tags via [`ServiceHandler::service_tags`].
 pub(crate) fn base_tags(
     service_id: &'static str,
     sdk_service_name: &'static str,
@@ -157,6 +186,12 @@ impl Intercept for AwsInterceptor {
         "AwsInterceptor"
     }
 
+    /// Creates the Datadog span and injects trace context into the request payload.
+    ///
+    /// Called before the SDK serializes the request, so the input is still mutable.
+    /// The created [`SpanContext`] is stashed in `cfg` for the later hooks.
+    /// Injection errors are logged at `debug` level and swallowed — they must never
+    /// fail the underlying AWS call.
     fn modify_before_serialization(
         &self,
         context: &mut BeforeSerializationInterceptorContextMut<'_>,
@@ -214,6 +249,9 @@ impl Intercept for AwsInterceptor {
         Ok(())
     }
 
+    /// Adds HTTP-level tags once the final serialized request is available.
+    ///
+    /// Records `http.method`, `http.url`, and `http.useragent` on the span.
     fn read_before_transmit(
         &self,
         context: &BeforeTransmitInterceptorContextRef<'_>,
@@ -233,6 +271,7 @@ impl Intercept for AwsInterceptor {
         Ok(())
     }
 
+    /// Records the response status and any SDK error, then ends the span.
     fn read_after_execution(
         &self,
         context: &FinalizerInterceptorContextRef<'_>,
