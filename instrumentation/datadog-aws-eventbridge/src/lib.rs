@@ -1,6 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg_attr(not(test), deny(clippy::panic))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 //! Datadog trace context injection for AWS SDK for Rust EventBridge operations.
 //!
 //! # Usage
@@ -43,6 +47,10 @@ use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
 
+/// EventBridge operations that this interceptor recognises.
+///
+/// Only `PutEvents` supports trace context injection (via the `detail` JSON payload).
+/// Rule-management operations are tracked to produce accurate `rulename` span tags.
 #[derive(Debug, Clone, Copy)]
 enum EventBridgeOperation {
     PutEvents,
@@ -56,6 +64,8 @@ enum EventBridgeOperation {
 }
 
 impl EventBridgeOperation {
+    /// Maps an SDK operation name string to the enum variant, or `None` for
+    /// operations this interceptor does not handle.
     fn from_name(operation: &str) -> Option<Self> {
         match operation {
             "PutEvents" => Some(Self::PutEvents),
@@ -71,6 +81,7 @@ impl EventBridgeOperation {
     }
 }
 
+/// [`ServiceHandler`] implementation for Amazon EventBridge.
 struct EventBridgeHandler;
 
 impl ServiceHandler for EventBridgeHandler {
@@ -164,7 +175,10 @@ impl Intercept for EventBridgeInterceptor {
     }
 }
 
-// Only PutEvents carries a detail payload that supports trace context injection.
+/// Dispatches trace context injection to the appropriate per-operation function.
+///
+/// Only `PutEvents` carries a `detail` JSON payload that supports injection;
+/// all other operations are no-ops.
 fn inject(
     operation: EventBridgeOperation,
     trace_headers: &HashMap<String, String>,
@@ -180,6 +194,8 @@ fn inject(
     Ok(())
 }
 
+/// Returns EventBridge-specific span tags: a `rulename` tag when a rule name
+/// can be extracted from the operation input, otherwise an empty list.
 fn service_tags(
     operation: EventBridgeOperation,
     input: &aws_smithy_runtime_api::client::interceptors::context::Input,
@@ -190,6 +206,10 @@ fn service_tags(
     }
 }
 
+/// Extracts the rule name from an operation input for rule-management operations.
+///
+/// `PutEvents` has no rule and returns `None`. `PutTargets` and `RemoveTargets`
+/// carry the rule name in the `rule` field; the remaining operations use `name`.
 fn extract_rule_name(
     operation: EventBridgeOperation,
     input: &aws_smithy_runtime_api::client::interceptors::context::Input,
@@ -220,6 +240,14 @@ fn extract_rule_name(
     }
 }
 
+/// Injects Datadog trace context into each entry of a `PutEvents` input.
+///
+/// Context is merged into each entry's `detail` JSON object under the `_datadog` key,
+/// along with a `start` timestamp (milliseconds since epoch) and, when set,
+/// `resource.name` from `event_bus_name`.
+///
+/// Entries with non-JSON detail, serialization failures, or a resulting detail that
+/// would exceed the 1 MB EventBridge per-entry limit are silently skipped.
 fn inject_into_put_events(
     input: &mut PutEventsInput,
     trace_headers: &HashMap<String, String>,
