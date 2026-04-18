@@ -1,6 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg_attr(not(test), deny(clippy::panic))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 //! Datadog trace context injection for AWS SDK for Rust SQS operations.
 //!
 //! # Usage
@@ -40,6 +44,11 @@ use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-sqs";
 
+/// SQS operations that this interceptor recognises.
+///
+/// Only `SendMessage` and `SendMessageBatch` support trace context injection.
+/// The remaining variants are tracked to produce accurate `operation.name` and
+/// service tags without injecting into read/delete operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqsOperation {
     SendMessage,
@@ -50,6 +59,8 @@ enum SqsOperation {
 }
 
 impl SqsOperation {
+    /// Maps an SDK operation name string to the enum variant, or `None` for
+    /// operations this interceptor does not handle.
     fn from_name(operation: &str) -> Option<Self> {
         match operation {
             "SendMessage" => Some(Self::SendMessage),
@@ -62,6 +73,7 @@ impl SqsOperation {
     }
 }
 
+/// [`ServiceHandler`] implementation for Amazon SQS.
 struct SqsHandler;
 
 impl ServiceHandler for SqsHandler {
@@ -155,6 +167,10 @@ impl Intercept for SqsInterceptor {
     }
 }
 
+/// Dispatches trace context injection to the appropriate per-operation function.
+///
+/// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
+/// that supports injection; all other operations are no-ops.
 fn inject(
     operation: SqsOperation,
     trace_headers: &HashMap<String, String>,
@@ -176,6 +192,11 @@ fn inject(
     Ok(())
 }
 
+/// Returns SQS-specific span tags for the given operation.
+///
+/// Always includes `messaging.system = "amazonsqs"`. When a queue URL is
+/// available on the input, also includes `queuename` and `cloud.resource_id`
+/// (formatted as a full SQS ARN).
 fn service_tags(
     operation: SqsOperation,
     input: &aws_smithy_runtime_api::client::interceptors::context::Input,
@@ -212,6 +233,10 @@ fn service_tags(
     tags
 }
 
+/// Injects a `_datadog` String message attribute into a `SendMessage` input.
+///
+/// Skipped when the message already has 10 attributes and none is `_datadog`
+/// (replacing an existing `_datadog` key is always allowed).
 fn inject_into_send_message(
     input: &mut SendMessageInput,
     trace_headers: &HashMap<String, String>,
@@ -227,6 +252,9 @@ fn inject_into_send_message(
     Ok(())
 }
 
+/// Injects a `_datadog` String message attribute into each entry of a `SendMessageBatch` input.
+///
+/// The same skip/overwrite rules as [`inject_into_send_message`] apply per entry.
 fn inject_into_send_message_batch(
     input: &mut SendMessageBatchInput,
     trace_headers: &HashMap<String, String>,
@@ -246,7 +274,10 @@ fn inject_into_send_message_batch(
     Ok(())
 }
 
-// Respect the 10-attribute cap unless replacing an existing _datadog attribute.
+/// Returns `true` when injection should be skipped to respect the 10-attribute cap.
+///
+/// An existing `_datadog` attribute counts as a slot we can reuse, so the cap
+/// is only enforced when `_datadog` is absent.
 fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
@@ -265,6 +296,7 @@ fn extract_sqs_metadata(
     Some((queue_name.to_string(), cloud_resource_id))
 }
 
+/// Serialises `trace_headers` as a JSON String-typed SQS message attribute.
 fn build_datadog_attribute(
     trace_headers: &HashMap<String, String>,
 ) -> Result<MessageAttributeValue, BoxError> {
