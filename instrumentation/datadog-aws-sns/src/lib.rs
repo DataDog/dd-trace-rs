@@ -1,6 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+#![cfg_attr(not(test), deny(clippy::panic))]
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+#![cfg_attr(not(test), deny(clippy::expect_used))]
+
 //! Datadog trace context injection for AWS SDK for Rust SNS operations.
 //!
 //! # Usage
@@ -42,6 +46,11 @@ use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-sns";
 
+/// SNS operations that this interceptor recognises.
+///
+/// Only `Publish` and `PublishBatch` support trace context injection.
+/// The remaining variants are tracked to produce accurate span tags for
+/// topic/target ARN lookups without injecting into management operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnsOperation {
     Publish,
@@ -55,6 +64,8 @@ enum SnsOperation {
 }
 
 impl SnsOperation {
+    /// Maps an SDK operation name string to the enum variant, or `None` for
+    /// operations this interceptor does not handle.
     fn from_name(operation: &str) -> Option<Self> {
         match operation {
             "Publish" => Some(Self::Publish),
@@ -70,6 +81,7 @@ impl SnsOperation {
     }
 }
 
+/// [`ServiceHandler`] implementation for Amazon SNS.
 struct SnsHandler;
 
 impl ServiceHandler for SnsHandler {
@@ -163,6 +175,10 @@ impl Intercept for SnsInterceptor {
     }
 }
 
+/// Dispatches trace context injection to the appropriate per-operation function.
+///
+/// Only `Publish` and `PublishBatch` carry a message attributes payload that
+/// supports injection; all other operations are no-ops.
 fn inject(
     operation: SnsOperation,
     trace_headers: &HashMap<String, String>,
@@ -184,6 +200,11 @@ fn inject(
     Ok(())
 }
 
+/// Returns SNS-specific span tags for the given operation.
+///
+/// For `Publish`, includes `topicname` (from `topic_arn`) or `targetname` (from
+/// `target_arn`). For all other topic operations, includes `topicname`.
+/// For `CreateTopic`, uses the `name` parameter directly instead of an ARN.
 fn service_tags(
     operation: SnsOperation,
     input: &aws_smithy_runtime_api::client::interceptors::context::Input,
@@ -220,6 +241,9 @@ fn service_tags(
     }
 }
 
+/// Injects a `_datadog` Binary message attribute into a `Publish` input.
+///
+/// Skipped when the message already has 10 attributes and none is `_datadog`.
 fn inject_into_publish(
     input: &mut PublishInput,
     trace_headers: &HashMap<String, String>,
@@ -235,6 +259,9 @@ fn inject_into_publish(
     Ok(())
 }
 
+/// Injects a `_datadog` Binary message attribute into each entry of a `PublishBatch` input.
+///
+/// The same skip/overwrite rules as [`inject_into_publish`] apply per entry.
 fn inject_into_publish_batch(
     input: &mut PublishBatchInput,
     trace_headers: &HashMap<String, String>,
@@ -254,11 +281,15 @@ fn inject_into_publish_batch(
     Ok(())
 }
 
-// Respect the 10-attribute cap unless replacing an existing _datadog attribute.
+/// Returns `true` when injection should be skipped to respect the 10-attribute cap.
+///
+/// An existing `_datadog` attribute counts as a slot we can reuse, so the cap
+/// is only enforced when `_datadog` is absent.
 fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
 
+/// Helper trait for extracting a topic ARN from SNS input types that carry one.
 trait HasTopicArn: std::fmt::Debug + 'static {
     fn topic_arn(&self) -> Option<&str>;
 }
@@ -280,6 +311,8 @@ impl_has_topic_arn!(
     SubscribeInput,
 );
 
+/// Extracts the topic ARN from an input implementing [`HasTopicArn`] and returns
+/// a `topicname` tag with the resource name portion of the ARN.
 fn topic_arn_tag<T: HasTopicArn + Send + Sync>(
     input: &aws_smithy_runtime_api::client::interceptors::context::Input,
 ) -> Vec<KeyValue> {
@@ -290,12 +323,16 @@ fn topic_arn_tag<T: HasTopicArn + Send + Sync>(
         .unwrap_or_default()
 }
 
+/// Returns the resource name (last colon-separated segment) from an ARN string.
 fn arn_resource_name(arn: &str) -> &str {
     arn.rsplit(':').next().unwrap_or(arn)
 }
 
-// SNS trace context is a Binary-typed attribute. String-typed JSON attributes interfere
-// with SNS subscription filter policies, which silently drop messages they cannot parse.
+/// Serialises `trace_headers` as a Binary-typed SNS message attribute.
+///
+/// SNS uses Binary (not String) so that SNS subscription filter policies do not
+/// attempt to parse the Datadog JSON payload. String-typed attributes are
+/// inspected by filter policies and silently drop messages they cannot parse.
 fn build_datadog_attribute(
     trace_headers: &HashMap<String, String>,
 ) -> Result<MessageAttributeValue, BoxError> {
