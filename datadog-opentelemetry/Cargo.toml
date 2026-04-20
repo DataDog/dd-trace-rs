@@ -67,6 +67,7 @@ libdd-tinybytes = { workspace = true }
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true }
+libc = "0.2"
 
 [dev-dependencies]
 assert_unordered = "0.3"
