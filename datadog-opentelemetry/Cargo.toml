@@ -26,7 +26,6 @@ opentelemetry-otlp = { workspace = true, features = [
     "metrics",
     "logs",
 ], default-features = false, optional = true }
-libdd-library-config = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 
@@ -65,6 +64,9 @@ libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
+
+[target.'cfg(target_os="linux")'.dependencies]
+libdd-library-config = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
