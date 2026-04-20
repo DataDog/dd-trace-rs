@@ -347,47 +347,18 @@ impl DatadogTracingBuilder {
     /// them globally.
     ///
     /// On compatible platforms (currently Linux), [Self::init] (as opposed to [Self::init_local])
-    /// automatically publishes tracer metadata using both a Datadog-specific protocol and to the
-    /// [OTel process
+    /// automatically publishes tracer metadata to the [OTel process
     /// context](https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4719-process-ctx.md).
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
 
-        // For now, both the datadog-specific and the otel publications are linux-specific and
-        // involves fd manipulations, so we gate it.
+        // For now, otel process context spec is linux-specific.
         #[cfg(target_os = "linux")]
-        {
-            use libdd_library_config::tracer_metadata::{
-                store_tracer_metadata, AnonymousFileHandle,
-            };
-            use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
-            use std::sync::atomic::{AtomicI32, Ordering};
-
-            // This stores the current file descriptor corresponding to the published tracer
-            // metadata, if any. If another tracer is set globally later, we swap the new fd in and
-            // close the previous descriptor.
-            //
-            // `RawFd` is defined as `i32` on almost all but exotic platforms, and -1 is never a
-            // valid descriptor (this is the error value returned by e.g. the `open` syscall).
-            static CURRENT_TRACER_METADATA_FD: AtomicI32 = AtomicI32::new(-1);
-            let tracer_metadata = config.to_tracer_metadata();
-
-            match store_tracer_metadata(&tracer_metadata) {
-                Ok(AnonymousFileHandle::Linux(fd)) => {
-                    let previous =
-                        CURRENT_TRACER_METADATA_FD.swap(fd.into_raw_fd(), Ordering::Relaxed);
-
-                    if previous != -1 {
-                        // Safety: we only ever store a fd coming from an owned fd in
-                        // TRACER_METADATA_FD.
-                        let _ = unsafe { OwnedFd::from_raw_fd(previous) };
-                    }
-                }
-                Err(e) => {
-                    dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
-                }
-            }
+        if let Err(e) = libdd_library_config::otel_process_ctx::linux::publish(
+            &config.to_tracer_metadata().to_otel_process_ctx(),
+        ) {
+            dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
         }
 
         let (tracer_provider, propagator) =
@@ -402,6 +373,11 @@ impl DatadogTracingBuilder {
     ///
     /// You will need to set them up yourself, at a latter point if you want to use global tracing
     /// methods and library integrations
+    ///
+    /// # Process context
+    ///
+    /// As opposed as [Self::init], this method won't automatically publish tracer metadata to the
+    /// OTel process context.
     ///
     /// # Example
     ///
