@@ -8,6 +8,7 @@ pub(crate) const ERROR: &str = "error";
 pub(crate) const ERROR_MESSAGE: &str = "error.message";
 
 // Root span tags
+pub(crate) const LANGUAGE: &str = "language";
 pub(crate) const REQUEST_ID: &str = "request_id";
 pub(crate) const COLD_START: &str = "cold_start";
 pub(crate) const FUNCTION_ARN: &str = "function_arn";
@@ -15,4 +16,3 @@ pub(crate) const FUNCTION_VERSION: &str = "function_version";
 pub(crate) const FUNCTION_NAME: &str = "functionname";
 pub(crate) const RESOURCE_NAMES: &str = "resource_names";
 pub(crate) const DD_ORIGIN: &str = "_dd.origin";
-pub(crate) const DATADOG_LAMBDA: &str = "datadog_lambda";

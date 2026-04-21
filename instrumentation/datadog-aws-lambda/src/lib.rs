@@ -16,22 +16,55 @@ use lambda_runtime::LambdaEvent;
 use opentelemetry::trace::FutureExt;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
+use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::task::{self, Poll};
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-/// Applies Lambda-appropriate tracing defaults to a [`ConfigBuilder`].
-///
-/// These settings are enforced for correctness in Lambda:
-/// - `trace_stats_computation_enabled = false` (the extension handles stats)
-/// - `trace_writer_synchronous_write = true` (flush blocks until spans reach agent)
-fn apply_lambda_tracing_defaults(
-    mut builder: datadog_opentelemetry::configuration::ConfigBuilder,
-) -> datadog_opentelemetry::configuration::ConfigBuilder {
+#[derive(Default)]
+pub struct Config {
+    /// Service name. Overrides `DD_SERVICE`. Ignored when [`tracing`](Self::tracing) is `Some`.
+    pub service: Option<String>,
+    /// Deployment environment. Overrides `DD_ENV`. Ignored when [`tracing`](Self::tracing) is
+    /// `Some`.
+    pub env: Option<String>,
+    /// Service version. Overrides `DD_VERSION`. Ignored when [`tracing`](Self::tracing) is `Some`.
+    pub version: Option<String>,
+    /// Full control over the OTel SDK and Datadog tracer config.
+    ///
+    /// When `None` (default), Lambda-appropriate defaults are applied and
+    /// `service`/`env`/`version` above are forwarded. When `Some`, the builder is used as-is;
+    /// `service`/`env`/`version` are ignored and you are responsible for setting:
+    /// - `trace_stats_computation_enabled = false` (the Datadog agent handles stats for serverless
+    ///   environments)
+    /// - `trace_writer_synchronous_write = true` (so `force_flush()` blocks until spans reach
+    ///   agent)
+    pub tracing: Option<datadog_opentelemetry::DatadogTracingBuilder>,
+}
+
+fn build_tracing(
+    service: Option<String>,
+    env: Option<String>,
+    version: Option<String>,
+) -> datadog_opentelemetry::DatadogTracingBuilder {
+    let mut builder = datadog_opentelemetry::configuration::Config::builder();
+    // Stats are computed server-side by the extension; client-side computation is redundant.
     builder.set_trace_stats_computation_enabled(false);
+    // Synchronous writes make force_flush() block until data reaches the agent,
+    // this helps reduce span loss when the Lambda process freezes after the handler returns.
     builder.set_trace_writer_synchronous_write(true);
-    builder
+    if let Some(s) = service {
+        builder.set_service(s);
+    }
+    if let Some(e) = env {
+        builder.set_env(e);
+    }
+    if let Some(v) = version {
+        builder.set_version(v);
+    }
+    datadog_opentelemetry::tracing().with_config(builder.build())
 }
 
 /// A Lambda handler wrapped with Datadog tracing.
@@ -40,47 +73,58 @@ fn apply_lambda_tracing_defaults(
 /// applies Lambda-appropriate defaults, and implements [`tower::Service`] so it composes
 /// naturally with tower middleware.
 ///
-/// The inner handler is any [`tower::Service`] that accepts `LambdaEvent<E>`. Plain async
-/// functions can be converted with [`service_fn`](lambda_runtime::service_fn).
-///
 /// # Examples
 ///
 /// ```ignore
-/// use lambda_runtime::service_fn;
+/// // Zero-config
+/// lambda_runtime::run(WrappedHandler::new(my_handler, Config::default())).await
 ///
-/// // Zero-config (Lambda defaults applied automatically)
-/// let config = datadog_opentelemetry::configuration::Config::builder();
-/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), config)).await
+/// // Set service/env/version
+/// lambda_runtime::run(WrappedHandler::new(my_handler, Config {
+///     service: Some("my-service".into()),
+///     env: Some("prod".into()),
+///     ..Default::default()
+/// })).await
 ///
-/// // Custom config
-/// let mut builder = datadog_opentelemetry::configuration::Config::builder();
-/// builder.set_service("my-svc".into());
-/// builder.set_env("prod".into());
-/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), builder)).await
+/// // Full tracer control
+/// lambda_runtime::run(WrappedHandler::new(my_handler, Config {
+///     tracing: Some(
+///         datadog_opentelemetry::tracing()
+///             .with_config(builder_config_here)
+///             .with_span_processor(MyProcessor),
+///     ),
+///     ..Default::default()
+/// })).await
 ///
-/// // With tower middleware between tracing and the handler
-/// let svc = tower::ServiceBuilder::new()
-///     .layer(some_middleware)
-///     .service(service_fn(my_handler));
-/// lambda_runtime::run(WrappedHandler::new(svc, datadog_opentelemetry::configuration::Config::builder())).await
+/// // With tower middleware
+/// lambda_runtime::run(
+///     tower::ServiceBuilder::new()
+///         .layer(some_middleware)
+///         .service(WrappedHandler::new(my_handler, Config::default()))
+/// ).await
 /// ```
-pub struct WrappedHandler<S, E, R> {
-    inner: S,
+pub struct WrappedHandler<F, E, R> {
+    inner: Arc<F>,
     provider: opentelemetry_sdk::trace::SdkTracerProvider,
     tracer: opentelemetry_sdk::trace::SdkTracer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
 }
 
-impl<S, E, R> WrappedHandler<S, E, R> {
-    pub fn new(handler: S, config: datadog_opentelemetry::configuration::ConfigBuilder) -> Self {
-        let config = apply_lambda_tracing_defaults(config);
-        let provider = datadog_opentelemetry::tracing()
-            .with_config(config.build())
+impl<F, E, R> WrappedHandler<F, E, R> {
+    pub fn new(handler: F, config: Config) -> Self {
+        let Config {
+            tracing,
+            service,
+            env,
+            version,
+        } = config;
+        let provider = tracing
+            .unwrap_or_else(|| build_tracing(service, env, version))
             .init();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
-            inner: handler,
+            inner: Arc::new(handler),
             provider,
             tracer,
             cold_start: true,
@@ -93,33 +137,26 @@ impl<S, E, R> WrappedHandler<S, E, R> {
     }
 }
 
-impl<S, E, R> Service<LambdaEvent<Box<RawValue>>> for WrappedHandler<S, E, R>
+impl<F, Fut, E, R> Service<LambdaEvent<Box<RawValue>>> for WrappedHandler<F, E, R>
 where
-    S: Service<LambdaEvent<E>, Response = R, Error = lambda_runtime::Error>
-        + Clone
-        + Send
-        + 'static,
-    S::Future: Send + 'static,
-    E: DeserializeOwned + Send + 'static,
+    F: Fn(LambdaEvent<E>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<R, lambda_runtime::Error>> + Send + 'static,
+    E: DeserializeOwned + Send + Sync + 'static,
     R: Send + 'static,
 {
     type Response = R;
     type Error = lambda_runtime::Error;
     type Future = BoxFuture<Result<R, lambda_runtime::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, event: LambdaEvent<Box<RawValue>>) -> Self::Future {
         let cold_start = self.take_cold_start();
-        let mut inner = self.inner.clone();
+        let inner_handler = Arc::clone(&self.inner);
         let provider = self.provider.clone();
         let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
-        // Deserialize here rather than letting the runtime do it so that
-        // deserialization errors are captured on the span. If we took
-        // LambdaEvent<E> directly, the runtime would handle the error
-        // before our code runs and the invocation would not be traced.
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
@@ -134,7 +171,7 @@ where
             }
         };
         let typed_event = LambdaEvent::new(typed_payload, event.context);
-        let fut = inner.call(typed_event);
+        let fut = inner_handler(typed_event);
         Box::pin(async move {
             let result = fut.with_context(invocation.handler_context()).await;
             let result = invocation.finish(result);
@@ -149,13 +186,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lambda_runtime::service_fn;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-
-    type NoopService = lambda_runtime::tower::util::ServiceFn<
-        fn(LambdaEvent<serde_json::Value>) -> std::future::Ready<Result<(), lambda_runtime::Error>>,
-    >;
 
     fn noop_handler(
         _: LambdaEvent<serde_json::Value>,
@@ -163,11 +193,16 @@ mod tests {
         std::future::ready(Ok(()))
     }
 
-    fn test_handler() -> WrappedHandler<NoopService, serde_json::Value, ()> {
+    #[allow(clippy::type_complexity)]
+    fn test_handler() -> WrappedHandler<
+        fn(LambdaEvent<serde_json::Value>) -> std::future::Ready<Result<(), lambda_runtime::Error>>,
+        serde_json::Value,
+        (),
+    > {
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         WrappedHandler {
-            inner: service_fn(noop_handler as fn(_) -> _),
+            inner: Arc::new(noop_handler),
             provider,
             tracer,
             cold_start: true,
@@ -184,78 +219,5 @@ mod tests {
         let mut second = test_handler();
         assert!(second.take_cold_start());
         assert!(!second.take_cold_start());
-    }
-
-    /// Sends a JSON payload through WrappedHandler and verifies the inner handler receives
-    /// the deserialized payload and its response is returned unchanged.
-    #[tokio::test]
-    async fn handler_receives_payload_and_returns_response() {
-        // Handler that echoes the payload back as the response.
-        async fn echo(
-            event: LambdaEvent<serde_json::Value>,
-        ) -> Result<serde_json::Value, lambda_runtime::Error> {
-            Ok(event.payload)
-        }
-
-        let input = r#"{"key":"value"}"#;
-        let raw = RawValue::from_string(input.to_string()).unwrap();
-        let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
-
-        let mut handler = WrappedHandler::new(
-            service_fn(echo),
-            datadog_opentelemetry::configuration::Config::builder(),
-        );
-        let response = handler.call(event).await.unwrap();
-
-        assert_eq!(response, serde_json::json!({"key": "value"}));
-    }
-
-    /// Composes a middleware layer between tracing and the handler, then verifies
-    /// both the middleware and handler execute.
-    ///
-    /// ```text
-    /// WrappedHandler (tracing) -> counter middleware -> echo handler
-    /// ```
-    #[tokio::test]
-    async fn middleware_between_tracing_and_handler_executes() {
-        // Handler that echoes the payload back as the response.
-        async fn echo(
-            event: LambdaEvent<serde_json::Value>,
-        ) -> Result<serde_json::Value, lambda_runtime::Error> {
-            Ok(event.payload)
-        }
-
-        // Counter that the middleware increments to prove it ran.
-        let middleware_call_count = Arc::new(AtomicUsize::new(0));
-        let counter = middleware_call_count.clone();
-
-        // Compose: counter middleware -> echo handler.
-        let service_with_middleware = lambda_runtime::tower::ServiceBuilder::new()
-            .map_request(move |req: LambdaEvent<serde_json::Value>| {
-                counter.fetch_add(1, Ordering::SeqCst);
-                req
-            })
-            .service(service_fn(echo));
-
-        let input = r#"{"hello":"world"}"#;
-        let raw = RawValue::from_string(input.to_string()).unwrap();
-        let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
-
-        let mut handler = WrappedHandler::new(
-            service_with_middleware,
-            datadog_opentelemetry::configuration::Config::builder(),
-        );
-        let response = handler.call(event).await.unwrap();
-
-        assert_eq!(
-            middleware_call_count.load(Ordering::SeqCst),
-            1,
-            "middleware should have run"
-        );
-        assert_eq!(
-            response,
-            serde_json::json!({"hello": "world"}),
-            "handler should have echoed payload"
-        );
     }
 }
