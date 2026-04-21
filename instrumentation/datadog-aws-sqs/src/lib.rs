@@ -114,13 +114,13 @@ impl ServiceHandler for SqsHandler {
 /// and creates spans representing SQS operations.
 #[derive(Debug)]
 pub struct SqsInterceptor {
-    inner: AwsInterceptor,
+    inner: AwsInterceptor<SqsHandler>,
 }
 
 impl SqsInterceptor {
     pub fn new() -> Self {
         Self {
-            inner: AwsInterceptor::new(Box::new(SqsHandler), TRACER_NAME),
+            inner: AwsInterceptor::new(SqsHandler, TRACER_NAME),
         }
     }
 }

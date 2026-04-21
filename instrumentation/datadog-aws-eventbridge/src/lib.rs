@@ -122,13 +122,13 @@ impl ServiceHandler for EventBridgeHandler {
 /// and creates spans representing EventBridge operations.
 #[derive(Debug)]
 pub struct EventBridgeInterceptor {
-    inner: AwsInterceptor,
+    inner: AwsInterceptor<EventBridgeHandler>,
 }
 
 impl EventBridgeInterceptor {
     pub fn new() -> Self {
         Self {
-            inner: AwsInterceptor::new(Box::new(EventBridgeHandler), TRACER_NAME),
+            inner: AwsInterceptor::new(EventBridgeHandler, TRACER_NAME),
         }
     }
 }

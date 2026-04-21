@@ -69,15 +69,15 @@ pub trait ServiceHandler: Send + Sync + 'static {
 ///
 /// Not intended to be used directly — each service crate exposes a named
 /// wrapper type (`SqsInterceptor`, `SnsInterceptor`, `EventBridgeInterceptor`).
-pub struct AwsInterceptor {
-    handler: Box<dyn ServiceHandler>,
+pub struct AwsInterceptor<H: ServiceHandler> {
+    handler: H,
     tracer: global::BoxedTracer,
 }
 
-impl AwsInterceptor {
+impl<H: ServiceHandler> AwsInterceptor<H> {
     /// Creates a new interceptor delegating service-specific behaviour to `handler`,
     /// using `tracer_name` as the OTel tracer scope name.
-    pub fn new(handler: Box<dyn ServiceHandler>, tracer_name: &'static str) -> Self {
+    pub fn new(handler: H, tracer_name: &'static str) -> Self {
         Self {
             tracer: global::tracer(tracer_name),
             handler,
@@ -85,7 +85,7 @@ impl AwsInterceptor {
     }
 }
 
-impl fmt::Debug for AwsInterceptor {
+impl<H: ServiceHandler> fmt::Debug for AwsInterceptor<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AwsInterceptor")
             .field("service", &self.handler.sdk_service_name())
@@ -181,7 +181,7 @@ pub(crate) fn base_tags(
     ]
 }
 
-impl Intercept for AwsInterceptor {
+impl<H: ServiceHandler> Intercept for AwsInterceptor<H> {
     fn name(&self) -> &'static str {
         "AwsInterceptor"
     }

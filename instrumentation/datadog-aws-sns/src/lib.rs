@@ -122,13 +122,13 @@ impl ServiceHandler for SnsHandler {
 /// and creates spans representing SNS operations.
 #[derive(Debug)]
 pub struct SnsInterceptor {
-    inner: AwsInterceptor,
+    inner: AwsInterceptor<SnsHandler>,
 }
 
 impl SnsInterceptor {
     pub fn new() -> Self {
         Self {
-            inner: AwsInterceptor::new(Box::new(SnsHandler), TRACER_NAME),
+            inner: AwsInterceptor::new(SnsHandler, TRACER_NAME),
         }
     }
 }
