@@ -3,7 +3,7 @@
 
 [package]
 name = "datadog-aws-lambda"
-description = "Datadog distributed tracing for AWS Lambda. Provides inferred spans and trace context extraction for SQS, SNS, EventBridge, API Gateway (REST and HTTP APIs), and Lambda Function URLs."
+description = "Datadog distributed tracing for AWS Lambda."
 version.workspace = true
 edition.workspace = true
 rust-version = "1.85.0"
