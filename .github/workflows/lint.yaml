@@ -84,8 +84,9 @@ jobs:
         run: rustup install ${{ matrix.rust_version }} && rustup default ${{ matrix.rust_version }} && rustup component add clippy
       - name: Run clippy in instrumentation workspace
         shell: bash
-        # shellcheck disable=SC2046
-        run: cd instrumentation && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.91.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+        run: |
+          # shellcheck disable=SC2046
+          cd instrumentation && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.91.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
   shellcheck:
     runs-on: ubuntu-latest
     steps:
