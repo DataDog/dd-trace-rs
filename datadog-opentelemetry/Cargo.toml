@@ -65,6 +65,10 @@ libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 
+[target.'cfg(target_os="linux")'.dependencies]
+libdd-library-config = { workspace = true }
+libc = "0.2"
+
 [dev-dependencies]
 assert_unordered = "0.3"
 pretty_assertions = "1.4.1"

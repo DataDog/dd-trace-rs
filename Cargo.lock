@@ -475,8 +475,10 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "libdd-common",
  "libdd-data-pipeline",
+ "libdd-library-config",
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-utils",
@@ -542,6 +544,16 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "event-listener"
@@ -1144,9 +1156,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.177"
+version = "0.2.185"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
+checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 
 [[package]]
 name = "libdd-common"
@@ -1196,7 +1208,7 @@ dependencies = [
  "libdd-dogstatsd-client",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1230,6 +1242,24 @@ dependencies = [
  "libdd-common",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "libdd-library-config"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+dependencies = [
+ "anyhow",
+ "libdd-trace-protobuf 2.0.0",
+ "memfd",
+ "prost",
+ "rand 0.8.5",
+ "rmp",
+ "rmp-serde",
+ "rustix",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -1273,7 +1303,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
+]
+
+[[package]]
+name = "libdd-trace-protobuf"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
+dependencies = [
+ "prost",
+ "serde",
+ "serde_bytes",
 ]
 
 [[package]]
@@ -1295,7 +1336,7 @@ checksum = "d92b882863f7c531d51e73f7bc5930c705e47829332128d9bdcad0fea3b2b942"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-utils",
 ]
 
@@ -1319,7 +1360,7 @@ dependencies = [
  "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
  "prost",
  "rand 0.8.5",
  "rmp",
@@ -1331,6 +1372,12 @@ dependencies = [
  "tracing",
  "urlencoding",
 ]
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litemap"
@@ -1377,6 +1424,15 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "memfd"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
+dependencies = [
+ "rustix",
+]
 
 [[package]]
 name = "mime"
@@ -2027,6 +2083,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2123,6 +2192,19 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -2655,6 +2737,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "url"
