@@ -2416,9 +2416,8 @@ impl ConfigBuilder {
         self
     }
 
-    /// Enables synchronous trace writes so that `force_flush()` blocks until data reaches
-    /// the agent. Useful in serverless environments where the process may freeze after
-    /// the handler returns.
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
