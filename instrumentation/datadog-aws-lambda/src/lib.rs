@@ -9,10 +9,12 @@
 
 mod attribute_keys;
 mod invocation;
+mod span_inferrer;
 
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
+use libdd_trace_inferrer::SpanInferrer;
 use opentelemetry::trace::FutureExt;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
@@ -107,6 +109,7 @@ pub struct WrappedHandler<F, E, R> {
     inner: Arc<F>,
     provider: opentelemetry_sdk::trace::SdkTracerProvider,
     tracer: opentelemetry_sdk::trace::SdkTracer,
+    inferrer: SpanInferrer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
 }
@@ -127,6 +130,7 @@ impl<F, E, R> WrappedHandler<F, E, R> {
             inner: Arc::new(handler),
             provider,
             tracer,
+            inferrer: span_inferrer::build_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }
@@ -156,7 +160,13 @@ where
         let cold_start = self.take_cold_start();
         let inner_handler = Arc::clone(&self.inner);
         let provider = self.provider.clone();
-        let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
+        let invocation = Invocation::start(
+            &self.tracer,
+            &self.inferrer,
+            event.payload.get(),
+            &event.context,
+            cold_start,
+        );
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
@@ -205,6 +215,7 @@ mod tests {
             inner: Arc::new(noop_handler),
             provider,
             tracer,
+            inferrer: span_inferrer::build_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }
