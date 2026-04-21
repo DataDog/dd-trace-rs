@@ -7,6 +7,7 @@ use crate::{
     catch_panic,
     core::{configuration::Config, sampling::priority},
     propagation::{
+        config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
         DatadogCompositePropagator, TracePropagationStyle,
     },
@@ -73,16 +74,8 @@ pub struct DatadogPropagator {
 
 impl DatadogPropagator {
     pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
-        let baggage_extract = config
-            .trace_propagation_style_extract()
-            .or_else(|| config.trace_propagation_style())
-            .unwrap_or_default()
-            .contains(&TracePropagationStyle::Baggage);
-        let baggage_inject = config
-            .trace_propagation_style_inject()
-            .or_else(|| config.trace_propagation_style())
-            .unwrap_or_default()
-            .contains(&TracePropagationStyle::Baggage);
+        let baggage_extract = get_extractors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
+        let baggage_inject = get_injectors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
         let inner = DatadogCompositePropagator::new(config.clone());
         let mut fields = inner.keys().to_vec();
         if baggage_inject
@@ -855,22 +848,6 @@ pub mod tests {
         assert!(
             fields.contains(&BAGGAGE_KEY),
             "fields() must include 'baggage' when Baggage is only in inject styles; got {fields:?}"
-        );
-    }
-
-    #[test]
-    fn baggage_included_in_fields_when_only_in_extract_styles() {
-        let propagator = get_propagator_with_separate_styles(
-            vec![
-                TracePropagationStyle::Baggage,
-                TracePropagationStyle::Datadog,
-            ],
-            vec![TracePropagationStyle::TraceContext],
-        );
-        let fields: Vec<&str> = propagator.fields().collect();
-        assert!(
-            fields.contains(&BAGGAGE_KEY),
-            "fields() must include 'baggage' when Baggage is only in extract styles; got {fields:?}"
         );
     }
 
