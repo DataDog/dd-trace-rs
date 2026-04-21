@@ -1615,7 +1615,7 @@ impl Config {
     #[cfg(target_os = "linux")]
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
         fn hostname() -> String {
-            let mut buf = Vec::with_capacity(256);
+            let mut buf = vec![0; 256];
 
             unsafe {
                 // Safety: buf is valid for writes for at most buf.len().
