@@ -74,8 +74,10 @@ pub struct DatadogPropagator {
 
 impl DatadogPropagator {
     pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
-        let baggage_extract = get_extractors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
-        let baggage_inject = get_injectors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
+        let baggage_extract =
+            get_extractors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
+        let baggage_inject =
+            get_injectors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
         let inner = DatadogCompositePropagator::new(config.clone());
         let mut fields = inner.keys().to_vec();
         if baggage_inject
