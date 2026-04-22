@@ -123,6 +123,10 @@ where
         let mut inner = self.inner.clone();
         let provider = self.provider.clone();
         let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
+        // Deserialize here rather than letting the runtime do it so that
+        // deserialization errors are captured on the span. If we took
+        // LambdaEvent<E> directly, the runtime would handle the error
+        // before our code runs and the invocation would not be traced.
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
