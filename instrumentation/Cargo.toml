@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [workspace]
-members = ["datadog-aws", "datadog-aws-lambda"]
+members = ["datadog-aws-lambda"]
 resolver = "2"
 
 [workspace.package]
