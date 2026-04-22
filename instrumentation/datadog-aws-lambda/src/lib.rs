@@ -153,6 +153,8 @@ where
 mod tests {
     use super::*;
     use lambda_runtime::service_fn;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     fn noop_handler(
         _: LambdaEvent<serde_json::Value>,
@@ -189,5 +191,72 @@ mod tests {
         let mut second = test_handler();
         assert!(second.take_cold_start());
         assert!(!second.take_cold_start());
+    }
+
+    /// Sends a JSON payload through WrappedHandler and verifies the inner handler receives
+    /// the deserialized payload and its response is returned unchanged.
+    #[tokio::test]
+    async fn handler_receives_payload_and_returns_response() {
+        // Handler that echoes the payload back as the response.
+        async fn echo(
+            event: LambdaEvent<serde_json::Value>,
+        ) -> Result<serde_json::Value, lambda_runtime::Error> {
+            Ok(event.payload)
+        }
+
+        let input = r#"{"key":"value"}"#;
+        let raw = RawValue::from_string(input.to_string()).unwrap();
+        let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
+
+        let mut handler = WrappedHandler::new(service_fn(echo), None);
+        let response = handler.call(event).await.unwrap();
+
+        assert_eq!(response, serde_json::json!({"key": "value"}));
+    }
+
+    /// Composes a middleware layer between tracing and the handler, then verifies
+    /// both the middleware and handler execute.
+    ///
+    /// ```text
+    /// WrappedHandler (tracing) -> counter middleware -> echo handler
+    /// ```
+    #[tokio::test]
+    async fn middleware_between_tracing_and_handler_executes() {
+        // Handler that echoes the payload back as the response.
+        async fn echo(
+            event: LambdaEvent<serde_json::Value>,
+        ) -> Result<serde_json::Value, lambda_runtime::Error> {
+            Ok(event.payload)
+        }
+
+        // Counter that the middleware increments to prove it ran.
+        let middleware_call_count = Arc::new(AtomicUsize::new(0));
+        let counter = middleware_call_count.clone();
+
+        // Compose: counter middleware -> echo handler.
+        let service_with_middleware = lambda_runtime::tower::ServiceBuilder::new()
+            .map_request(move |req: LambdaEvent<serde_json::Value>| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                req
+            })
+            .service(service_fn(echo));
+
+        let input = r#"{"hello":"world"}"#;
+        let raw = RawValue::from_string(input.to_string()).unwrap();
+        let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
+
+        let mut handler = WrappedHandler::new(service_with_middleware, None);
+        let response = handler.call(event).await.unwrap();
+
+        assert_eq!(
+            middleware_call_count.load(Ordering::SeqCst),
+            1,
+            "middleware should have run"
+        );
+        assert_eq!(
+            response,
+            serde_json::json!({"hello": "world"}),
+            "handler should have echoed payload"
+        );
     }
 }
