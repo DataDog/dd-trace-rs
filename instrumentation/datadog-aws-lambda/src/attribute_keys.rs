@@ -8,7 +8,6 @@ pub(crate) const ERROR: &str = "error";
 pub(crate) const ERROR_MESSAGE: &str = "error.message";
 
 // Root span tags
-pub(crate) const LANGUAGE: &str = "language";
 pub(crate) const REQUEST_ID: &str = "request_id";
 pub(crate) const COLD_START: &str = "cold_start";
 pub(crate) const FUNCTION_ARN: &str = "function_arn";

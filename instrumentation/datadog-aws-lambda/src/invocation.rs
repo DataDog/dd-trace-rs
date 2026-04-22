@@ -6,10 +6,10 @@
 //! Each invocation produces one *root span* (`aws.lambda`) that wraps the handler call.
 //!
 //! Typical usage:
-//! 1. [`Invocation::start`] — create the root span before the handler runs.
-//! 2. [`Invocation::handler_context`] — pass the returned context to the handler so its OTel spans
+//! 1. [`Invocation::start`] - create the root span before the handler runs.
+//! 2. [`Invocation::handler_context`] - pass the returned context to the handler so its OTel spans
 //!    are correctly parented.
-//! 3. [`Invocation::finish`] — record errors and end the span after the handler returns.
+//! 3. [`Invocation::finish`] - record errors and end the span after the handler returns.
 
 use crate::attribute_keys as attr;
 
@@ -26,8 +26,6 @@ pub(crate) static TRACER_NAME: &str = "datadog-lambda-rs";
 pub(crate) struct LambdaSpan {
     /// OTel context whose active span is the `aws.lambda` root span.
     cx: Context,
-    /// Lambda request ID, copied here for structured log correlation.
-    request_id: String,
 }
 
 impl LambdaSpan {
@@ -41,19 +39,15 @@ impl LambdaSpan {
     ) -> Self {
         let function_name = &lambda_cx.env_config.function_name;
         let request_id = lambda_cx.request_id.clone();
-
-        tracing::debug!(request_id, "creating invocation root span");
-
         let parent_cx = Context::current();
 
-        let mut builder = tracer.span_builder(TRACER_NAME);
+        let mut builder = tracer.span_builder("aws.lambda");
         builder.span_kind = Some(SpanKind::Server);
         let attrs = vec![
             KeyValue::new(attr::OPERATION_NAME, "aws.lambda"),
-            KeyValue::new(attr::LANGUAGE, "rust"),
             KeyValue::new(attr::RESOURCE_NAME, function_name.clone()),
             KeyValue::new(attr::SPAN_TYPE, "serverless"),
-            KeyValue::new(attr::REQUEST_ID, request_id.clone()),
+            KeyValue::new(attr::REQUEST_ID, request_id),
             KeyValue::new(attr::COLD_START, cold_start),
             KeyValue::new(attr::FUNCTION_ARN, lambda_cx.invoked_function_arn.clone()),
             KeyValue::new(attr::FUNCTION_VERSION, lambda_cx.env_config.version.clone()),
@@ -66,12 +60,11 @@ impl LambdaSpan {
         let span = tracer.build_with_context(builder, &parent_cx);
         let cx = parent_cx.with_span(span);
 
-        Self { cx, request_id }
+        Self { cx }
     }
 
     pub(crate) fn set_error(&self, err: &impl std::fmt::Display) {
         let err_msg = err.to_string();
-        tracing::warn!(request_id = self.request_id, "handler returned error");
         let span = self.cx.span();
         span.set_status(opentelemetry::trace::Status::Error {
             description: err_msg.clone().into(),
@@ -182,6 +175,7 @@ mod tests {
 
         let spans = finished_spans(&exporter);
         assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name, "aws.lambda");
         let attrs = &spans[0].attributes;
 
         assert_eq!(
