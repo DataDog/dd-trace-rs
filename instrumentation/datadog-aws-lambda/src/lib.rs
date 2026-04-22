@@ -156,21 +156,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    type NoopService = lambda_runtime::tower::util::ServiceFn<
+        fn(LambdaEvent<serde_json::Value>) -> std::future::Ready<Result<(), lambda_runtime::Error>>,
+    >;
+
     fn noop_handler(
         _: LambdaEvent<serde_json::Value>,
     ) -> std::future::Ready<Result<(), lambda_runtime::Error>> {
         std::future::ready(Ok(()))
     }
 
-    fn test_handler() -> WrappedHandler<
-        lambda_runtime::tower::util::ServiceFn<
-            fn(
-                LambdaEvent<serde_json::Value>,
-            ) -> std::future::Ready<Result<(), lambda_runtime::Error>>,
-        >,
-        serde_json::Value,
-        (),
-    > {
+    fn test_handler() -> WrappedHandler<NoopService, serde_json::Value, ()> {
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         WrappedHandler {
