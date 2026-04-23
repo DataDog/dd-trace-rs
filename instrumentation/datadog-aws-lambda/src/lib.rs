@@ -21,15 +21,17 @@ use std::task::{self, Poll};
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-/// Builds a [`DatadogTracingBuilder`](datadog_opentelemetry::DatadogTracingBuilder) with
-/// Lambda-appropriate defaults:
+/// Applies Lambda-appropriate tracing defaults to a [`ConfigBuilder`].
+///
+/// These settings are enforced for correctness in Lambda:
 /// - `trace_stats_computation_enabled = false` (the extension handles stats)
 /// - `trace_writer_synchronous_write = true` (flush blocks until spans reach agent)
-fn default_lambda_tracing() -> datadog_opentelemetry::DatadogTracingBuilder {
-    let mut builder = datadog_opentelemetry::configuration::Config::builder();
+fn apply_lambda_tracing_defaults(
+    mut builder: datadog_opentelemetry::configuration::ConfigBuilder,
+) -> datadog_opentelemetry::configuration::ConfigBuilder {
     builder.set_trace_stats_computation_enabled(false);
     builder.set_trace_writer_synchronous_write(true);
-    datadog_opentelemetry::tracing().with_config(builder.build())
+    builder
 }
 
 /// A Lambda handler wrapped with Datadog tracing.
@@ -41,34 +43,26 @@ fn default_lambda_tracing() -> datadog_opentelemetry::DatadogTracingBuilder {
 /// The inner handler is any [`tower::Service`] that accepts `LambdaEvent<E>`. Plain async
 /// functions can be converted with [`service_fn`](lambda_runtime::service_fn).
 ///
-/// When `config` is `None`, Lambda-appropriate defaults are applied:
-/// - `trace_stats_computation_enabled = false` (extension handles stats)
-/// - `trace_writer_synchronous_write = true` (flush blocks until spans reach agent)
-///
-/// When providing a custom config, set these values yourself to avoid redundant stats
-/// computation or span loss during Lambda freezes.
-///
 /// # Examples
 ///
 /// ```ignore
 /// use lambda_runtime::service_fn;
 ///
 /// // Zero-config (Lambda defaults applied automatically)
-/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), None)).await
+/// let config = datadog_opentelemetry::configuration::Config::builder();
+/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), config)).await
 ///
 /// // Custom config
 /// let mut builder = datadog_opentelemetry::configuration::Config::builder();
 /// builder.set_service("my-svc".into());
 /// builder.set_env("prod".into());
-/// builder.set_trace_stats_computation_enabled(false);
-/// builder.set_trace_writer_synchronous_write(true);
-/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), Some(builder.build()))).await
+/// lambda_runtime::run(WrappedHandler::new(service_fn(my_handler), builder)).await
 ///
 /// // With tower middleware between tracing and the handler
 /// let svc = tower::ServiceBuilder::new()
 ///     .layer(some_middleware)
 ///     .service(service_fn(my_handler));
-/// lambda_runtime::run(WrappedHandler::new(svc, None)).await
+/// lambda_runtime::run(WrappedHandler::new(svc, datadog_opentelemetry::configuration::Config::builder())).await
 /// ```
 pub struct WrappedHandler<S, E, R> {
     inner: S,
@@ -79,12 +73,12 @@ pub struct WrappedHandler<S, E, R> {
 }
 
 impl<S, E, R> WrappedHandler<S, E, R> {
-    pub fn new(handler: S, config: Option<datadog_opentelemetry::configuration::Config>) -> Self {
-        let tracing_builder = match config {
-            Some(cfg) => datadog_opentelemetry::tracing().with_config(cfg),
-            None => default_lambda_tracing(),
-        };
-        let provider = tracing_builder.init();
+    pub fn new(
+        handler: S,
+        config: datadog_opentelemetry::configuration::ConfigBuilder,
+    ) -> Self {
+        let config = apply_lambda_tracing_defaults(config);
+        let provider = datadog_opentelemetry::tracing().with_config(config.build()).init();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner: handler,
@@ -208,7 +202,10 @@ mod tests {
         let raw = RawValue::from_string(input.to_string()).unwrap();
         let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
 
-        let mut handler = WrappedHandler::new(service_fn(echo), None);
+        let mut handler = WrappedHandler::new(
+            service_fn(echo),
+            datadog_opentelemetry::configuration::Config::builder(),
+        );
         let response = handler.call(event).await.unwrap();
 
         assert_eq!(response, serde_json::json!({"key": "value"}));
@@ -245,7 +242,10 @@ mod tests {
         let raw = RawValue::from_string(input.to_string()).unwrap();
         let event = LambdaEvent::new(raw, lambda_runtime::Context::default());
 
-        let mut handler = WrappedHandler::new(service_with_middleware, None);
+        let mut handler = WrappedHandler::new(
+            service_with_middleware,
+            datadog_opentelemetry::configuration::Config::builder(),
+        );
         let response = handler.call(event).await.unwrap();
 
         assert_eq!(
