@@ -1,0 +1,92 @@
+name: Test (AWS integrations)
+permissions:
+  contents: read
+on:
+  push:
+    paths:
+      - "instrumentation/**"
+      - "datadog-opentelemetry/**"
+      - ".github/workflows/test-aws-integrations.yaml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    working-directory: instrumentation
+
+jobs:
+  # Build the AWS workspace natively in Amazon Linux 2023 on both Lambda architectures
+  build:
+    name: "build ${{ matrix.target }} (AL2023)"
+    runs-on: ${{ matrix.runner }}
+    container: public.ecr.aws/amazonlinux/amazonlinux:2023
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install container dependencies
+        working-directory: /
+        run: dnf install -y ca-certificates cmake gcc gcc-c++ git gzip make perl tar xz zstd
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/git/db/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            instrumentation/target/
+          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-build-${{ matrix.target }}-${{ hashFiles('instrumentation/**/Cargo.toml', 'instrumentation/**/Cargo.lock') }}
+          restore-keys: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-build-${{ matrix.target }}-
+      - name: Install Rust stable
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build --workspace
+        run: cargo build --workspace --locked
+
+  # Run unit and integration tests in Amazon Linux 2023
+  test:
+    name: "test ${{ matrix.target }} (AL2023)"
+    runs-on: ${{ matrix.runner }}
+    container: public.ecr.aws/amazonlinux/amazonlinux:2023
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install container dependencies
+        working-directory: /
+        run: dnf install -y ca-certificates cmake gcc gcc-c++ git gzip make perl tar xz zstd
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/git/db/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            instrumentation/target/
+          key: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-test-${{ matrix.target }}-${{ hashFiles('instrumentation/**/Cargo.toml', 'instrumentation/**/Cargo.lock') }}
+          restore-keys: v2-${{ runner.os }}-${{ runner.arch }}-aws-al2023-test-${{ matrix.target }}-
+      - name: Install Rust stable
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Run tests
+        run: cargo test --workspace --locked
+        env:
+          RUST_BACKTRACE: 1
