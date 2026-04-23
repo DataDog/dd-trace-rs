@@ -54,6 +54,7 @@ impl LambdaSpan {
             KeyValue::new(attr::FUNCTION_NAME, function_name.to_lowercase()),
             KeyValue::new(attr::RESOURCE_NAMES, function_name.clone()),
             KeyValue::new(attr::DD_ORIGIN, "lambda"),
+            KeyValue::new(attr::DATADOG_LAMBDA, env!("CARGO_PKG_VERSION")),
         ];
         builder.attributes = Some(attrs);
 
@@ -199,6 +200,10 @@ mod tests {
             Some(&Value::String("my-function".into()))
         );
         assert_eq!(find_attr(attrs, "cold_start"), Some(&Value::Bool(true)));
+        assert_eq!(
+            find_attr(attrs, "datadog_lambda"),
+            Some(&Value::String(env!("CARGO_PKG_VERSION").into()))
+        );
     }
 
     #[test]

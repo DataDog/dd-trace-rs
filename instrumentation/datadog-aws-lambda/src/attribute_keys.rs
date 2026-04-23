@@ -15,3 +15,4 @@ pub(crate) const FUNCTION_VERSION: &str = "function_version";
 pub(crate) const FUNCTION_NAME: &str = "functionname";
 pub(crate) const RESOURCE_NAMES: &str = "resource_names";
 pub(crate) const DD_ORIGIN: &str = "_dd.origin";
+pub(crate) const DATADOG_LAMBDA: &str = "datadog_lambda";
