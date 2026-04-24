@@ -109,11 +109,18 @@ for i, (key, versions) in enumerate(
     if field_name and json_type in ("string", "int", "decimal", "boolean"):
         if json_type == "string":
             if not skip_getters:
-                getter_lines.append(
-                    "{}\n    pub fn {}(&self) -> &str {{ self.{}.value().as_ref() }}".format(
-                        getter_doc(), field_name, field_name
+                if config_item_type in ("override_code", "override_rc"):
+                    getter_lines.append(
+                        "{}\n    pub fn {}(&self) -> impl Deref<Target = str> + use<'_> {{ self.{}.value() }}".format(
+                            getter_doc(), field_name, field_name
+                        )
                     )
-                )
+                else:
+                    getter_lines.append(
+                        "{}\n    pub fn {}(&self) -> &str {{ self.{}.value().as_ref() }}".format(
+                            getter_doc(), field_name, field_name
+                        )
+                    )
             if not skip_setters:
                 setter_lines.append(
                     "{}\n    pub fn set_{}(&mut self, val: String) -> &mut Self {{ self.config.{}.set_code(Cow::Owned(val)); self }}".format(
@@ -167,7 +174,7 @@ for i, (key, versions) in enumerate(
         if rust_value is not None:
             if config_item_type == "override_code":
                 default_config_lines.append(
-                    "        {}: ConfigItemWithOverride::new_code(S::{}, {}),".format(
+                    "        {}: ConfigItemWithOverride::new_calculated(S::{}, {}),".format(
                         field_name, key, rust_value
                     )
                 )
@@ -264,6 +271,7 @@ result = """\
 /// add it to the supported-configurations.json file, then run this script.
 use std::borrow::Cow;
 use std::sync::{{Arc, Mutex}};
+use std::time::Duration;
 
 use rustc_version_runtime::version;
 
@@ -325,6 +333,9 @@ pub struct Config {{
     pub(super) language_version: String,
     pub(super) language: &'static str,
 {struct_fields_block}
+    pub(super) trace_writer_synchronous_write: bool,
+    pub(super) trace_writer_synchronous_timeout: Duration,
+    pub(super) trace_writer_max_flush_interval: Duration,
     #[cfg(feature = "test-utils")]
     pub(super) wait_agent_info_ready: bool,
     pub(super) extra_services_tracker: ExtraServicesTracker,
@@ -354,6 +365,9 @@ pub(super) fn default_config() -> Config {{
         tracer_version: TRACER_VERSION,
         language: "rust",
         language_version: version().to_string(),
+        trace_writer_synchronous_write: false,
+        trace_writer_synchronous_timeout: Duration::from_secs(2),
+        trace_writer_max_flush_interval: Duration::from_secs(1),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
         extra_services_tracker: ExtraServicesTracker::new(),
@@ -369,6 +383,9 @@ impl std::fmt::Debug for Config {{
             .field("tracer_version", &self.tracer_version)
             .field("language_version", &self.language_version)
 {debug_block}
+            .field("trace_writer_synchronous_write", &self.trace_writer_synchronous_write)
+            .field("trace_writer_synchronous_timeout", &self.trace_writer_synchronous_timeout)
+            .field("trace_writer_max_flush_interval", &self.trace_writer_max_flush_interval)
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_callbacks", &self.remote_config_callbacks)
             .finish()

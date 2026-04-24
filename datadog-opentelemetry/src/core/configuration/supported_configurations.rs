@@ -6,6 +6,7 @@
 /// add it to the supported-configurations.json file, then run this script.
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rustc_version_runtime::version;
 
@@ -86,41 +87,83 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",
             SupportedConfigurations::DD_ENV => "DD_ENV",
-            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => "DD_INSTRUMENTATION_TELEMETRY_ENABLED",
+            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => {
+                "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
+            }
             SupportedConfigurations::DD_LOGS_OTEL_ENABLED => "DD_LOGS_OTEL_ENABLED",
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED => "DD_METRICS_OTEL_ENABLED",
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => "DD_REMOTE_CONFIGURATION_ENABLED",
-            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
+                "DD_REMOTE_CONFIGURATION_ENABLED"
+            }
+            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => {
+                "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS"
+            }
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
-            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => "DD_TELEMETRY_HEARTBEAT_INTERVAL",
-            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
+            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => {
+                "DD_TELEMETRY_HEARTBEAT_INTERVAL"
+            }
+            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => {
+                "DD_TELEMETRY_LOG_COLLECTION_ENABLED"
+            }
             SupportedConfigurations::DD_TRACE_AGENT_PORT => "DD_TRACE_AGENT_PORT",
             SupportedConfigurations::DD_TRACE_AGENT_URL => "DD_TRACE_AGENT_URL",
             SupportedConfigurations::DD_TRACE_ENABLED => "DD_TRACE_ENABLED",
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED => "DD_TRACE_PARTIAL_FLUSH_ENABLED",
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS => "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS",
-            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => "DD_TRACE_PROPAGATION_EXTRACT_FIRST",
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED => {
+                "DD_TRACE_PARTIAL_FLUSH_ENABLED"
+            }
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS => {
+                "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS"
+            }
+            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => {
+                "DD_TRACE_PROPAGATION_EXTRACT_FIRST"
+            }
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE => "DD_TRACE_PROPAGATION_STYLE",
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => "DD_TRACE_PROPAGATION_STYLE_INJECT",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => {
+                "DD_TRACE_PROPAGATION_STYLE_EXTRACT"
+            }
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => {
+                "DD_TRACE_PROPAGATION_STYLE_INJECT"
+            }
             SupportedConfigurations::DD_TRACE_RATE_LIMIT => "DD_TRACE_RATE_LIMIT",
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES => "DD_TRACE_SAMPLING_RULES",
-            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => "DD_TRACE_STATS_COMPUTATION_ENABLED",
-            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
+            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => {
+                "DD_TRACE_STATS_COMPUTATION_ENABLED"
+            }
+            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => {
+                "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
+            }
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT => "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS => "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => {
+                "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => {
+                "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => {
+                "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT => {
+                "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => {
+                "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS => {
+                "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => {
+                "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => {
+                "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"
+            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => {
+                "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT"
+            }
             SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
             SupportedConfigurations::OTEL_LOGS_EXPORTER => "OTEL_LOGS_EXPORTER",
@@ -133,17 +176,26 @@ impl SupportedConfigurations {
             #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => "DD_NONEXISTANT_CONFIGURATION",
             #[cfg(test)]
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => "DD_NONEXISTANT_CONFIGURATION_ALIAS",
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => {
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS"
+            }
             #[cfg(test)]
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => "DD_NONEXISTANT_CONFIGURATION_DEPRECATED",
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
+            }
         }
     }
 
     pub fn aliases(&self) -> &[&'static str] {
         match self {
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => &["DD_REMOTE_CONFIG_ENABLED"],
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
+                &["DD_REMOTE_CONFIG_ENABLED"]
+            }
             #[cfg(test)]
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &["DD_NONEXISTANT_CONFIGURATION_ALIAS", "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"],
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
+                "DD_NONEXISTANT_CONFIGURATION_ALIAS",
+                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS",
+            ],
             _ => &[],
         }
     }
@@ -160,7 +212,7 @@ impl SupportedConfigurations {
 pub fn is_alias_deprecated(name: &str) -> bool {
     match name {
         "DD_REMOTE_CONFIG_ENABLED" => true,
-            #[cfg(test)]
+        #[cfg(test)]
         "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS" => true,
         _ => false,
     }
@@ -188,7 +240,7 @@ pub struct Config {
     pub(super) agent_host: ConfigItem<Cow<'static, str>>,
     pub(super) dogstatsd_agent_host: ConfigItem<Cow<'static, str>>,
     pub(super) dogstatsd_agent_port: ConfigItem<u32>,
-    pub(super) dogstatsd_agent_url: ConfigItem<Cow<'static, str>>,
+    pub(super) dogstatsd_agent_url: ConfigItemWithOverride<Cow<'static, str>>,
     pub(super) env: ConfigItem<Option<String>>,
     pub(super) telemetry_enabled: ConfigItem<bool>,
     pub(super) logs_otel_enabled: ConfigItem<bool>,
@@ -201,7 +253,7 @@ pub struct Config {
     pub(super) telemetry_heartbeat_interval: ConfigItem<f64>,
     pub(super) telemetry_log_collection_enabled: ConfigItem<bool>,
     pub(super) trace_agent_port: ConfigItem<u32>,
-    pub(super) trace_agent_url: ConfigItem<Cow<'static, str>>,
+    pub(super) trace_agent_url: ConfigItemWithOverride<Cow<'static, str>>,
     pub(super) enabled: ConfigItem<bool>,
     pub(super) trace_partial_flush_enabled: ConfigItem<bool>,
     pub(super) trace_partial_flush_min_spans: ConfigItem<usize>,
@@ -218,20 +270,24 @@ pub struct Config {
     pub(super) otlp_headers: ConfigItem<Cow<'static, str>>,
     pub(super) otlp_logs_endpoint: ConfigItem<Cow<'static, str>>,
     pub(super) otlp_logs_headers: ConfigItem<Cow<'static, str>>,
-    pub(super) otlp_logs_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    pub(super) otlp_logs_protocol: ConfigItem<Option<OtlpProtocol>>,
     pub(super) otlp_logs_timeout: ConfigItem<u32>,
     pub(super) otlp_metrics_endpoint: ConfigItem<Cow<'static, str>>,
     pub(super) otlp_metrics_headers: ConfigItem<Cow<'static, str>>,
-    pub(super) otlp_metrics_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
-    pub(super) otel_metrics_temporality_preference: ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
+    pub(super) otlp_metrics_protocol: ConfigItem<Option<OtlpProtocol>>,
+    pub(super) otel_metrics_temporality_preference:
+        ConfigItem<Option<opentelemetry_sdk::metrics::Temporality>>,
     pub(super) otlp_metrics_timeout: ConfigItem<u32>,
-    pub(super) otlp_protocol: ConfigItem<Option<crate::metrics_exporter::OtlpProtocol>>,
+    pub(super) otlp_protocol: ConfigItem<Option<OtlpProtocol>>,
     pub(super) otlp_timeout: ConfigItem<u32>,
     pub(super) otel_logs_exporter: ConfigItem<Cow<'static, str>>,
     pub(super) otel_metrics_exporter: ConfigItem<Cow<'static, str>>,
     pub(super) metric_export_interval: ConfigItem<u32>,
     pub(super) metric_export_timeout: ConfigItem<u32>,
     pub(super) otel_resource_attributes: ConfigItem<Vec<(String, String)>>,
+    pub(super) trace_writer_synchronous_write: bool,
+    pub(super) trace_writer_synchronous_timeout: Duration,
+    pub(super) trace_writer_max_flush_interval: Duration,
     #[cfg(feature = "test-utils")]
     pub(super) wait_agent_info_ready: bool,
     pub(super) extra_services_tracker: ExtraServicesTracker,
@@ -241,79 +297,129 @@ pub struct Config {
 #[allow(missing_docs)]
 impl Config {
     /// Returns the value of `DD_AGENT_HOST`.
-    pub fn agent_host(&self) -> &str { self.agent_host.value().as_ref() }
+    pub fn agent_host(&self) -> &str {
+        self.agent_host.value().as_ref()
+    }
 
     /// Returns the value of `DD_DOGSTATSD_HOST`.
-    pub fn dogstatsd_agent_host(&self) -> &str { self.dogstatsd_agent_host.value().as_ref() }
+    pub fn dogstatsd_agent_host(&self) -> &str {
+        self.dogstatsd_agent_host.value().as_ref()
+    }
 
     /// Returns the value of `DD_DOGSTATSD_PORT`.
-    pub fn dogstatsd_agent_port(&self) -> u32 { *self.dogstatsd_agent_port.value() }
+    pub fn dogstatsd_agent_port(&self) -> u32 {
+        *self.dogstatsd_agent_port.value()
+    }
 
     /// Returns the value of `DD_INSTRUMENTATION_TELEMETRY_ENABLED`.
-    pub fn telemetry_enabled(&self) -> bool { *self.telemetry_enabled.value() }
+    pub fn telemetry_enabled(&self) -> bool {
+        *self.telemetry_enabled.value()
+    }
 
     /// Returns the value of `DD_LOGS_OTEL_ENABLED`.
-    pub fn logs_otel_enabled(&self) -> bool { *self.logs_otel_enabled.value() }
+    pub fn logs_otel_enabled(&self) -> bool {
+        *self.logs_otel_enabled.value()
+    }
 
     /// Returns the value of `DD_METRICS_OTEL_ENABLED`.
-    pub fn metrics_otel_enabled(&self) -> bool { *self.metrics_otel_enabled.value() }
+    pub fn metrics_otel_enabled(&self) -> bool {
+        *self.metrics_otel_enabled.value()
+    }
 
     /// Returns the value of `DD_REMOTE_CONFIGURATION_ENABLED`.
-    pub fn remote_config_enabled(&self) -> bool { *self.remote_config_enabled.value() }
+    pub fn remote_config_enabled(&self) -> bool {
+        *self.remote_config_enabled.value()
+    }
 
     /// Returns the value of `DD_TELEMETRY_LOG_COLLECTION_ENABLED`.
-    pub fn telemetry_log_collection_enabled(&self) -> bool { *self.telemetry_log_collection_enabled.value() }
+    pub fn telemetry_log_collection_enabled(&self) -> bool {
+        *self.telemetry_log_collection_enabled.value()
+    }
 
     /// Returns the value of `DD_TRACE_AGENT_PORT`.
-    pub fn trace_agent_port(&self) -> u32 { *self.trace_agent_port.value() }
+    pub fn trace_agent_port(&self) -> u32 {
+        *self.trace_agent_port.value()
+    }
 
     /// Returns the value of `DD_TRACE_AGENT_URL`.
-    pub fn trace_agent_url(&self) -> &str { self.trace_agent_url.value().as_ref() }
+    pub fn trace_agent_url(&self) -> impl Deref<Target = str> + use<'_> {
+        self.trace_agent_url.value()
+    }
 
     /// Returns the value of `DD_TRACE_ENABLED`.
-    pub fn enabled(&self) -> bool { *self.enabled.value() }
+    pub fn enabled(&self) -> bool {
+        *self.enabled.value()
+    }
 
     /// Returns the value of `DD_TRACE_PARTIAL_FLUSH_ENABLED`.
-    pub fn trace_partial_flush_enabled(&self) -> bool { *self.trace_partial_flush_enabled.value() }
+    pub fn trace_partial_flush_enabled(&self) -> bool {
+        *self.trace_partial_flush_enabled.value()
+    }
 
     /// Returns the value of `DD_TRACE_PROPAGATION_EXTRACT_FIRST`.
-    pub fn trace_propagation_extract_first(&self) -> bool { *self.trace_propagation_extract_first.value() }
+    pub fn trace_propagation_extract_first(&self) -> bool {
+        *self.trace_propagation_extract_first.value()
+    }
 
     /// Returns the value of `DD_TRACE_STATS_COMPUTATION_ENABLED`.
-    pub fn trace_stats_computation_enabled(&self) -> bool { *self.trace_stats_computation_enabled.value() }
+    pub fn trace_stats_computation_enabled(&self) -> bool {
+        *self.trace_stats_computation_enabled.value()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_ENDPOINT`.
-    pub fn otlp_endpoint(&self) -> &str { self.otlp_endpoint.value().as_ref() }
+    pub fn otlp_endpoint(&self) -> &str {
+        self.otlp_endpoint.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
-    pub fn otlp_logs_endpoint(&self) -> &str { self.otlp_logs_endpoint.value().as_ref() }
+    pub fn otlp_logs_endpoint(&self) -> &str {
+        self.otlp_logs_endpoint.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_LOGS_HEADERS`.
-    pub fn otlp_logs_headers(&self) -> &str { self.otlp_logs_headers.value().as_ref() }
+    pub fn otlp_logs_headers(&self) -> &str {
+        self.otlp_logs_headers.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`.
-    pub fn otlp_logs_timeout(&self) -> u32 { *self.otlp_logs_timeout.value() }
+    pub fn otlp_logs_timeout(&self) -> u32 {
+        *self.otlp_logs_timeout.value()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`.
-    pub fn otlp_metrics_endpoint(&self) -> &str { self.otlp_metrics_endpoint.value().as_ref() }
+    pub fn otlp_metrics_endpoint(&self) -> &str {
+        self.otlp_metrics_endpoint.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`.
-    pub fn otlp_metrics_timeout(&self) -> u32 { *self.otlp_metrics_timeout.value() }
+    pub fn otlp_metrics_timeout(&self) -> u32 {
+        *self.otlp_metrics_timeout.value()
+    }
 
     /// Returns the value of `OTEL_EXPORTER_OTLP_TIMEOUT`.
-    pub fn otlp_timeout(&self) -> u32 { *self.otlp_timeout.value() }
+    pub fn otlp_timeout(&self) -> u32 {
+        *self.otlp_timeout.value()
+    }
 
     /// Returns the value of `OTEL_LOGS_EXPORTER`.
-    pub fn otel_logs_exporter(&self) -> &str { self.otel_logs_exporter.value().as_ref() }
+    pub fn otel_logs_exporter(&self) -> &str {
+        self.otel_logs_exporter.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_METRICS_EXPORTER`.
-    pub fn otel_metrics_exporter(&self) -> &str { self.otel_metrics_exporter.value().as_ref() }
+    pub fn otel_metrics_exporter(&self) -> &str {
+        self.otel_metrics_exporter.value().as_ref()
+    }
 
     /// Returns the value of `OTEL_METRIC_EXPORT_INTERVAL`.
-    pub fn metric_export_interval(&self) -> u32 { *self.metric_export_interval.value() }
+    pub fn metric_export_interval(&self) -> u32 {
+        *self.metric_export_interval.value()
+    }
 
     /// Returns the value of `OTEL_METRIC_EXPORT_TIMEOUT`.
-    pub fn metric_export_timeout(&self) -> u32 { *self.metric_export_timeout.value() }
+    pub fn metric_export_timeout(&self) -> u32 {
+        *self.metric_export_timeout.value()
+    }
 
     pub(crate) fn get_telemetry_configuration(&self) -> Vec<&dyn ConfigurationProvider> {
         vec![
@@ -375,42 +481,60 @@ impl ConfigBuilder {
     ///  **Default**: `localhost`
     ///
     /// Env variable: `DD_AGENT_HOST`
-    pub fn set_agent_host(&mut self, val: String) -> &mut Self { self.config.agent_host.set_code(Cow::Owned(val)); self }
+    pub fn set_agent_host(&mut self, val: String) -> &mut Self {
+        self.config.agent_host.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `DD_DOGSTATSD_HOST`.
     ///
     ///  **Default**: `localhost`
     ///
     /// Env variable: `DD_DOGSTATSD_HOST`
-    pub fn set_dogstatsd_agent_host(&mut self, val: String) -> &mut Self { self.config.dogstatsd_agent_host.set_code(Cow::Owned(val)); self }
+    pub fn set_dogstatsd_agent_host(&mut self, val: String) -> &mut Self {
+        self.config.dogstatsd_agent_host.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `DD_DOGSTATSD_PORT`.
     ///
     ///  **Default**: `8125`
     ///
     /// Env variable: `DD_DOGSTATSD_PORT`
-    pub fn set_dogstatsd_agent_port(&mut self, val: u32) -> &mut Self { self.config.dogstatsd_agent_port.set_code(val); self }
+    pub fn set_dogstatsd_agent_port(&mut self, val: u32) -> &mut Self {
+        self.config.dogstatsd_agent_port.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_INSTRUMENTATION_TELEMETRY_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_INSTRUMENTATION_TELEMETRY_ENABLED`
-    pub fn set_telemetry_enabled(&mut self, val: bool) -> &mut Self { self.config.telemetry_enabled.set_code(val); self }
+    pub fn set_telemetry_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.telemetry_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_LOGS_OTEL_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_LOGS_OTEL_ENABLED`
-    pub fn set_logs_otel_enabled(&mut self, val: bool) -> &mut Self { self.config.logs_otel_enabled.set_code(val); self }
+    pub fn set_logs_otel_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.logs_otel_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_METRICS_OTEL_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_METRICS_OTEL_ENABLED`
-    pub fn set_metrics_otel_enabled(&mut self, val: bool) -> &mut Self { self.config.metrics_otel_enabled.set_code(val); self }
+    pub fn set_metrics_otel_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.metrics_otel_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_REMOTE_CONFIGURATION_ENABLED`.
     ///
@@ -418,121 +542,178 @@ impl ConfigBuilder {
     ///
     /// Env variable: `DD_REMOTE_CONFIGURATION_ENABLED`
     /// Aliases: `DD_REMOTE_CONFIG_ENABLED`
-    pub fn set_remote_config_enabled(&mut self, val: bool) -> &mut Self { self.config.remote_config_enabled.set_code(val); self }
+    pub fn set_remote_config_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.remote_config_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TELEMETRY_LOG_COLLECTION_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_TELEMETRY_LOG_COLLECTION_ENABLED`
-    pub fn set_telemetry_log_collection_enabled(&mut self, val: bool) -> &mut Self { self.config.telemetry_log_collection_enabled.set_code(val); self }
+    pub fn set_telemetry_log_collection_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.telemetry_log_collection_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TRACE_AGENT_PORT`.
     ///
     ///  **Default**: `8126`
     ///
     /// Env variable: `DD_TRACE_AGENT_PORT`
-    pub fn set_trace_agent_port(&mut self, val: u32) -> &mut Self { self.config.trace_agent_port.set_code(val); self }
+    pub fn set_trace_agent_port(&mut self, val: u32) -> &mut Self {
+        self.config.trace_agent_port.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TRACE_AGENT_URL`.
     ///
     ///  **Default**: ``
     ///
     /// Env variable: `DD_TRACE_AGENT_URL`
-    pub fn set_trace_agent_url(&mut self, val: String) -> &mut Self { self.config.trace_agent_url.set_code(Cow::Owned(val)); self }
+    pub fn set_trace_agent_url(&mut self, val: String) -> &mut Self {
+        self.config.trace_agent_url.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `DD_TRACE_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_TRACE_ENABLED`
-    pub fn set_enabled(&mut self, val: bool) -> &mut Self { self.config.enabled.set_code(val); self }
+    pub fn set_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TRACE_PARTIAL_FLUSH_ENABLED`.
     ///
     ///  **Default**: `false`
     ///
     /// Env variable: `DD_TRACE_PARTIAL_FLUSH_ENABLED`
-    pub fn set_trace_partial_flush_enabled(&mut self, val: bool) -> &mut Self { self.config.trace_partial_flush_enabled.set_code(val); self }
+    pub fn set_trace_partial_flush_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.trace_partial_flush_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TRACE_PROPAGATION_EXTRACT_FIRST`.
     ///
     ///  **Default**: `false`
     ///
     /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
-    pub fn set_trace_propagation_extract_first(&mut self, val: bool) -> &mut Self { self.config.trace_propagation_extract_first.set_code(val); self }
+    pub fn set_trace_propagation_extract_first(&mut self, val: bool) -> &mut Self {
+        self.config.trace_propagation_extract_first.set_code(val);
+        self
+    }
 
     /// Sets the value of `DD_TRACE_STATS_COMPUTATION_ENABLED`.
     ///
     ///  **Default**: `true`
     ///
     /// Env variable: `DD_TRACE_STATS_COMPUTATION_ENABLED`
-    pub fn set_trace_stats_computation_enabled(&mut self, val: bool) -> &mut Self { self.config.trace_stats_computation_enabled.set_code(val); self }
+    pub fn set_trace_stats_computation_enabled(&mut self, val: bool) -> &mut Self {
+        self.config.trace_stats_computation_enabled.set_code(val);
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_ENDPOINT`.
     /// Env variable: `OTEL_EXPORTER_OTLP_ENDPOINT`
-    pub fn set_otlp_endpoint(&mut self, val: String) -> &mut Self { self.config.otlp_endpoint.set_code(Cow::Owned(val)); self }
+    pub fn set_otlp_endpoint(&mut self, val: String) -> &mut Self {
+        self.config.otlp_endpoint.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`.
     /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
-    pub fn set_otlp_logs_endpoint(&mut self, val: String) -> &mut Self { self.config.otlp_logs_endpoint.set_code(Cow::Owned(val)); self }
+    pub fn set_otlp_logs_endpoint(&mut self, val: String) -> &mut Self {
+        self.config.otlp_logs_endpoint.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_LOGS_HEADERS`.
     /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_HEADERS`
-    pub fn set_otlp_logs_headers(&mut self, val: String) -> &mut Self { self.config.otlp_logs_headers.set_code(Cow::Owned(val)); self }
+    pub fn set_otlp_logs_headers(&mut self, val: String) -> &mut Self {
+        self.config.otlp_logs_headers.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`.
     ///
     ///  **Default**: `10000`
     ///
     /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`
-    pub fn set_otlp_logs_timeout(&mut self, val: u32) -> &mut Self { self.config.otlp_logs_timeout.set_code(val); self }
+    pub fn set_otlp_logs_timeout(&mut self, val: u32) -> &mut Self {
+        self.config.otlp_logs_timeout.set_code(val);
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`.
     /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
-    pub fn set_otlp_metrics_endpoint(&mut self, val: String) -> &mut Self { self.config.otlp_metrics_endpoint.set_code(Cow::Owned(val)); self }
+    pub fn set_otlp_metrics_endpoint(&mut self, val: String) -> &mut Self {
+        self.config.otlp_metrics_endpoint.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`.
     ///
     ///  **Default**: `10000`
     ///
     /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`
-    pub fn set_otlp_metrics_timeout(&mut self, val: u32) -> &mut Self { self.config.otlp_metrics_timeout.set_code(val); self }
+    pub fn set_otlp_metrics_timeout(&mut self, val: u32) -> &mut Self {
+        self.config.otlp_metrics_timeout.set_code(val);
+        self
+    }
 
     /// Sets the value of `OTEL_EXPORTER_OTLP_TIMEOUT`.
     ///
     ///  **Default**: `10000`
     ///
     /// Env variable: `OTEL_EXPORTER_OTLP_TIMEOUT`
-    pub fn set_otlp_timeout(&mut self, val: u32) -> &mut Self { self.config.otlp_timeout.set_code(val); self }
+    pub fn set_otlp_timeout(&mut self, val: u32) -> &mut Self {
+        self.config.otlp_timeout.set_code(val);
+        self
+    }
 
     /// Sets the value of `OTEL_LOGS_EXPORTER`.
     ///
     ///  **Default**: `otlp`
     ///
     /// Env variable: `OTEL_LOGS_EXPORTER`
-    pub fn set_otel_logs_exporter(&mut self, val: String) -> &mut Self { self.config.otel_logs_exporter.set_code(Cow::Owned(val)); self }
+    pub fn set_otel_logs_exporter(&mut self, val: String) -> &mut Self {
+        self.config.otel_logs_exporter.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_METRICS_EXPORTER`.
     ///
     ///  **Default**: `otlp`
     ///
     /// Env variable: `OTEL_METRICS_EXPORTER`
-    pub fn set_otel_metrics_exporter(&mut self, val: String) -> &mut Self { self.config.otel_metrics_exporter.set_code(Cow::Owned(val)); self }
+    pub fn set_otel_metrics_exporter(&mut self, val: String) -> &mut Self {
+        self.config.otel_metrics_exporter.set_code(Cow::Owned(val));
+        self
+    }
 
     /// Sets the value of `OTEL_METRIC_EXPORT_INTERVAL`.
     ///
     ///  **Default**: `10000`
     ///
     /// Env variable: `OTEL_METRIC_EXPORT_INTERVAL`
-    pub fn set_metric_export_interval(&mut self, val: u32) -> &mut Self { self.config.metric_export_interval.set_code(val); self }
+    pub fn set_metric_export_interval(&mut self, val: u32) -> &mut Self {
+        self.config.metric_export_interval.set_code(val);
+        self
+    }
 
     /// Sets the value of `OTEL_METRIC_EXPORT_TIMEOUT`.
     ///
     ///  **Default**: `7500`
     ///
     /// Env variable: `OTEL_METRIC_EXPORT_TIMEOUT`
-    pub fn set_metric_export_timeout(&mut self, val: u32) -> &mut Self { self.config.metric_export_timeout.set_code(val); self }
+    pub fn set_metric_export_timeout(&mut self, val: u32) -> &mut Self {
+        self.config.metric_export_timeout.set_code(val);
+        self
+    }
 }
 
 pub(super) fn default_config() -> Config {
@@ -542,6 +723,9 @@ pub(super) fn default_config() -> Config {
         tracer_version: TRACER_VERSION,
         language: "rust",
         language_version: version().to_string(),
+        trace_writer_synchronous_write: false,
+        trace_writer_synchronous_timeout: Duration::from_secs(2),
+        trace_writer_max_flush_interval: Duration::from_secs(1),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
         extra_services_tracker: ExtraServicesTracker::new(),
@@ -549,30 +733,63 @@ pub(super) fn default_config() -> Config {
         agent_host: ConfigItem::new(S::DD_AGENT_HOST, Cow::Borrowed("localhost")),
         dogstatsd_agent_host: ConfigItem::new(S::DD_DOGSTATSD_HOST, Cow::Borrowed("localhost")),
         dogstatsd_agent_port: ConfigItem::new(S::DD_DOGSTATSD_PORT, 8125),
-        dogstatsd_agent_url: ConfigItem::new(S::DD_DOGSTATSD_URL, Cow::Borrowed("")),
+        dogstatsd_agent_url: ConfigItemWithOverride::new_calculated(
+            S::DD_DOGSTATSD_URL,
+            Cow::Borrowed(""),
+        ),
         env: ConfigItem::new(S::DD_ENV, None),
         telemetry_enabled: ConfigItem::new(S::DD_INSTRUMENTATION_TELEMETRY_ENABLED, true),
         logs_otel_enabled: ConfigItem::new(S::DD_LOGS_OTEL_ENABLED, true),
         log_level_filter: ConfigItem::new(S::DD_LOG_LEVEL, LevelFilter::default()),
         metrics_otel_enabled: ConfigItem::new(S::DD_METRICS_OTEL_ENABLED, true),
         remote_config_enabled: ConfigItem::new(S::DD_REMOTE_CONFIGURATION_ENABLED, true),
-        remote_config_poll_interval: ConfigItem::new(S::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS, 5.0),
-        service: ConfigItemWithOverride::new_code(S::DD_SERVICE, ServiceName::Default),
+        remote_config_poll_interval: ConfigItem::new(
+            S::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
+            5.0,
+        ),
+        service: ConfigItemWithOverride::new_calculated(S::DD_SERVICE, ServiceName::Default),
         global_tags: ConfigItem::new(S::DD_TAGS, Vec::new()),
         telemetry_heartbeat_interval: ConfigItem::new(S::DD_TELEMETRY_HEARTBEAT_INTERVAL, 60.0),
-        telemetry_log_collection_enabled: ConfigItem::new(S::DD_TELEMETRY_LOG_COLLECTION_ENABLED, true),
+        telemetry_log_collection_enabled: ConfigItem::new(
+            S::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
+            true,
+        ),
         trace_agent_port: ConfigItem::new(S::DD_TRACE_AGENT_PORT, 8126),
-        trace_agent_url: ConfigItem::new(S::DD_TRACE_AGENT_URL, Cow::Borrowed("")),
+        trace_agent_url: ConfigItemWithOverride::new_calculated(
+            S::DD_TRACE_AGENT_URL,
+            Cow::Borrowed(""),
+        ),
         enabled: ConfigItem::new(S::DD_TRACE_ENABLED, true),
         trace_partial_flush_enabled: ConfigItem::new(S::DD_TRACE_PARTIAL_FLUSH_ENABLED, false),
-        trace_partial_flush_min_spans: ConfigItem::new(S::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS, 300usize),
-        trace_propagation_extract_first: ConfigItem::new(S::DD_TRACE_PROPAGATION_EXTRACT_FIRST, false),
-        trace_propagation_style: ConfigItem::new(S::DD_TRACE_PROPAGATION_STYLE, Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext])),
-        trace_propagation_style_extract: ConfigItem::new(S::DD_TRACE_PROPAGATION_STYLE_EXTRACT, None),
+        trace_partial_flush_min_spans: ConfigItem::new(
+            S::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
+            300usize,
+        ),
+        trace_propagation_extract_first: ConfigItem::new(
+            S::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
+            false,
+        ),
+        trace_propagation_style: ConfigItem::new(
+            S::DD_TRACE_PROPAGATION_STYLE,
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ]),
+        ),
+        trace_propagation_style_extract: ConfigItem::new(
+            S::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
+            None,
+        ),
         trace_propagation_style_inject: ConfigItem::new(S::DD_TRACE_PROPAGATION_STYLE_INJECT, None),
         trace_rate_limit: ConfigItem::new(S::DD_TRACE_RATE_LIMIT, 100i32),
-        trace_sampling_rules: ConfigItemWithOverride::new_rc(S::DD_TRACE_SAMPLING_RULES, ParsedSamplingRules::default()),
-        trace_stats_computation_enabled: ConfigItem::new(S::DD_TRACE_STATS_COMPUTATION_ENABLED, true),
+        trace_sampling_rules: ConfigItemWithOverride::new_rc(
+            S::DD_TRACE_SAMPLING_RULES,
+            ParsedSamplingRules::default(),
+        ),
+        trace_stats_computation_enabled: ConfigItem::new(
+            S::DD_TRACE_STATS_COMPUTATION_ENABLED,
+            true,
+        ),
         datadog_tags_max_length: ConfigItem::new(S::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH, 512usize),
         version: ConfigItem::new(S::DD_VERSION, None),
         otlp_endpoint: ConfigItem::new(S::OTEL_EXPORTER_OTLP_ENDPOINT, Cow::Borrowed("")),
@@ -581,10 +798,19 @@ pub(super) fn default_config() -> Config {
         otlp_logs_headers: ConfigItem::new(S::OTEL_EXPORTER_OTLP_LOGS_HEADERS, Cow::Borrowed("")),
         otlp_logs_protocol: ConfigItem::new(S::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL, None),
         otlp_logs_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT, 10000),
-        otlp_metrics_endpoint: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT, Cow::Borrowed("")),
-        otlp_metrics_headers: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_HEADERS, Cow::Borrowed("")),
+        otlp_metrics_endpoint: ConfigItem::new(
+            S::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_metrics_headers: ConfigItem::new(
+            S::OTEL_EXPORTER_OTLP_METRICS_HEADERS,
+            Cow::Borrowed(""),
+        ),
         otlp_metrics_protocol: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL, None),
-        otel_metrics_temporality_preference: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE, Some(opentelemetry_sdk::metrics::Temporality::Delta)),
+        otel_metrics_temporality_preference: ConfigItem::new(
+            S::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
+            Some(opentelemetry_sdk::metrics::Temporality::Delta),
+        ),
         otlp_metrics_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT, 10000),
         otlp_protocol: ConfigItem::new(S::OTEL_EXPORTER_OTLP_PROTOCOL, None),
         otlp_timeout: ConfigItem::new(S::OTEL_EXPORTER_OTLP_TIMEOUT, 10000),
@@ -612,23 +838,50 @@ impl std::fmt::Debug for Config {
             .field("log_level_filter", &self.log_level_filter)
             .field("metrics_otel_enabled", &self.metrics_otel_enabled)
             .field("remote_config_enabled", &self.remote_config_enabled)
-            .field("remote_config_poll_interval", &self.remote_config_poll_interval)
+            .field(
+                "remote_config_poll_interval",
+                &self.remote_config_poll_interval,
+            )
             .field("service", &self.service)
             .field("global_tags", &self.global_tags)
-            .field("telemetry_heartbeat_interval", &self.telemetry_heartbeat_interval)
-            .field("telemetry_log_collection_enabled", &self.telemetry_log_collection_enabled)
+            .field(
+                "telemetry_heartbeat_interval",
+                &self.telemetry_heartbeat_interval,
+            )
+            .field(
+                "telemetry_log_collection_enabled",
+                &self.telemetry_log_collection_enabled,
+            )
             .field("trace_agent_port", &self.trace_agent_port)
             .field("trace_agent_url", &self.trace_agent_url)
             .field("enabled", &self.enabled)
-            .field("trace_partial_flush_enabled", &self.trace_partial_flush_enabled)
-            .field("trace_partial_flush_min_spans", &self.trace_partial_flush_min_spans)
-            .field("trace_propagation_extract_first", &self.trace_propagation_extract_first)
+            .field(
+                "trace_partial_flush_enabled",
+                &self.trace_partial_flush_enabled,
+            )
+            .field(
+                "trace_partial_flush_min_spans",
+                &self.trace_partial_flush_min_spans,
+            )
+            .field(
+                "trace_propagation_extract_first",
+                &self.trace_propagation_extract_first,
+            )
             .field("trace_propagation_style", &self.trace_propagation_style)
-            .field("trace_propagation_style_extract", &self.trace_propagation_style_extract)
-            .field("trace_propagation_style_inject", &self.trace_propagation_style_inject)
+            .field(
+                "trace_propagation_style_extract",
+                &self.trace_propagation_style_extract,
+            )
+            .field(
+                "trace_propagation_style_inject",
+                &self.trace_propagation_style_inject,
+            )
             .field("trace_rate_limit", &self.trace_rate_limit)
             .field("trace_sampling_rules", &self.trace_sampling_rules)
-            .field("trace_stats_computation_enabled", &self.trace_stats_computation_enabled)
+            .field(
+                "trace_stats_computation_enabled",
+                &self.trace_stats_computation_enabled,
+            )
             .field("datadog_tags_max_length", &self.datadog_tags_max_length)
             .field("version", &self.version)
             .field("otlp_endpoint", &self.otlp_endpoint)
@@ -640,7 +893,10 @@ impl std::fmt::Debug for Config {
             .field("otlp_metrics_endpoint", &self.otlp_metrics_endpoint)
             .field("otlp_metrics_headers", &self.otlp_metrics_headers)
             .field("otlp_metrics_protocol", &self.otlp_metrics_protocol)
-            .field("otel_metrics_temporality_preference", &self.otel_metrics_temporality_preference)
+            .field(
+                "otel_metrics_temporality_preference",
+                &self.otel_metrics_temporality_preference,
+            )
             .field("otlp_metrics_timeout", &self.otlp_metrics_timeout)
             .field("otlp_protocol", &self.otlp_protocol)
             .field("otlp_timeout", &self.otlp_timeout)
@@ -649,6 +905,18 @@ impl std::fmt::Debug for Config {
             .field("metric_export_interval", &self.metric_export_interval)
             .field("metric_export_timeout", &self.metric_export_timeout)
             .field("otel_resource_attributes", &self.otel_resource_attributes)
+            .field(
+                "trace_writer_synchronous_write",
+                &self.trace_writer_synchronous_write,
+            )
+            .field(
+                "trace_writer_synchronous_timeout",
+                &self.trace_writer_synchronous_timeout,
+            )
+            .field(
+                "trace_writer_max_flush_interval",
+                &self.trace_writer_max_flush_interval,
+            )
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_callbacks", &self.remote_config_callbacks)
             .finish()

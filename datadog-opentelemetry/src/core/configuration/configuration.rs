@@ -968,11 +968,10 @@ impl Config {
                 .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
                     max.min(DATADOG_TAGS_MAX_LENGTH)
                 }),
-            otlp_metrics_protocol: cisu.update_string(
-                default.otlp_metrics_protocol,
-                OtlpProtocol::parse_optional,
-            ),
-            dogstatsd_agent_url: cisu.update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
+            otlp_metrics_protocol: cisu
+                .update_string(default.otlp_metrics_protocol, OtlpProtocol::parse_optional),
+            dogstatsd_agent_url: cisu
+                .update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
             otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
             otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
             otlp_protocol: cisu.update_string(default.otlp_protocol, OtlpProtocol::parse_optional),
@@ -1117,7 +1116,6 @@ impl Config {
     pub(crate) fn trace_writer_max_flush_interval(&self) -> Duration {
         self.trace_writer_max_flush_interval
     }
-
 
     #[cfg(feature = "test-utils")]
     pub(crate) fn __internal_wait_agent_info_ready(&self) -> bool {
