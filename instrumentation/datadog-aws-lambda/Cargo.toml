@@ -1,0 +1,28 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "datadog-aws-lambda"
+description = "Datadog distributed tracing for AWS Lambda."
+version.workspace = true
+edition.workspace = true
+rust-version = "1.85.0"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+base64 = "0.22"
+datadog-opentelemetry = { version = "0.3", path = "../../datadog-opentelemetry" }
+lambda_runtime = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs", "testing"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

@@ -21,7 +21,9 @@ use crate::{
 };
 
 // Traceparent Keys
+/// W3C traceparent header key.
 pub const TRACEPARENT_KEY: &str = "traceparent";
+/// W3C tracestate header key.
 pub const TRACESTATE_KEY: &str = "tracestate";
 
 const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
@@ -75,6 +77,7 @@ fn replace_chars<MatchFn: Fn(u8) -> bool>(
     Cow::Owned(replaced)
 }
 
+/// Inject trace context into a carrier using W3C Trace Context format.
 pub fn inject(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     if context.trace_id != 0 && context.span_id != 0 {
         inject_traceparent(context, carrier);
@@ -263,6 +266,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     carrier.set(TRACESTATE_KEY, tracestate);
 }
 
+/// Extract trace context from a carrier using W3C Trace Context format.
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
@@ -495,6 +499,7 @@ fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
         .map_err(|_| Error::extract("Failed to decode trace_flags", "traceparent"))
 }
 
+/// Returns the header keys used by W3C Trace Context propagation.
 pub fn keys() -> &'static [String] {
     TRACECONTEXT_HEADER_KEYS.as_slice()
 }

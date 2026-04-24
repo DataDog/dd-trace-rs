@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
+use std::fmt::Display;
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
+use std::time::Duration;
+use std::{borrow::Cow, sync::OnceLock};
 
+#[cfg(target_os = "linux")]
+use libdd_library_config::tracer_metadata::TracerMetadata;
+
+use crate::core::configuration::sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -83,89 +89,60 @@ impl Default for RemoteConfigCallbacks {
         Self::new()
     }
 }
-
-/// Configuration for a single sampling rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SamplingRuleConfig {
-    /// The sample rate to apply (0.0-1.0)
-    pub sample_rate: f64,
-
-    /// Optional service name pattern to match
-    #[serde(default)]
-    pub service: Option<String>,
-
-    /// Optional span name pattern to match
-    #[serde(default)]
-    pub name: Option<String>,
-
-    /// Optional resource name pattern to match
-    #[serde(default)]
-    pub resource: Option<String>,
-
-    /// Tags that must match (key-value pairs)
-    #[serde(default)]
-    pub tags: HashMap<String, String>,
-
-    /// Where this rule comes from (customer, dynamic, default)
-    // TODO(paullgdc): this value should not be definable by customers
-    #[serde(default = "default_provenance")]
-    pub provenance: String,
-}
-
-impl Display for SamplingRuleConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::json!(self))
-    }
-}
-
-fn default_provenance() -> String {
-    "default".to_string()
-}
-
 pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
 
-#[derive(Debug, Default, Clone, PartialEq)]
-struct ParsedSamplingRules {
-    rules: Vec<SamplingRuleConfig>,
+/// OTLP protocol types for OTLP export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OtlpProtocol {
+    /// gRPC protocol
+    Grpc,
+    /// HTTP with protobuf encoding
+    HttpProtobuf,
+    /// HTTP with JSON encoding
+    HttpJson,
 }
 
-impl Deref for ParsedSamplingRules {
-    type Target = [SamplingRuleConfig];
-
-    fn deref(&self) -> &Self::Target {
-        &self.rules
-    }
-}
-
-impl From<ParsedSamplingRules> for Vec<SamplingRuleConfig> {
-    fn from(parsed: ParsedSamplingRules) -> Self {
-        parsed.rules
-    }
-}
-
-impl FromStr for ParsedSamplingRules {
-    type Err = serde_json::Error;
+impl FromStr for OtlpProtocol {
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.trim().is_empty() {
-            return Ok(ParsedSamplingRules::default());
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("grpc") {
+            Ok(OtlpProtocol::Grpc)
+        } else if s.eq_ignore_ascii_case("http/protobuf") {
+            Ok(OtlpProtocol::HttpProtobuf)
+        } else if s.eq_ignore_ascii_case("http/json") {
+            Ok(OtlpProtocol::HttpJson)
+        } else {
+            Err(format!("Invalid OTLP protocol: {}", s))
         }
-        // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
-        let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
-        Ok(ParsedSamplingRules { rules: rules_vec })
     }
 }
 
-impl Display for ParsedSamplingRules {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string(&self.rules).unwrap_or_default()
-        )
+impl OtlpProtocol {
+    /// Parse a protocol string, returning None for empty strings
+    pub(crate) fn parse_optional(s: String) -> Option<Self> {
+        if s.trim().is_empty() {
+            None
+        } else {
+            s.parse().ok()
+        }
+    }
+}
+
+/// Parse a temporality preference string to Temporality enum
+fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporality> {
+    let s = s.trim().to_lowercase();
+    if s == "cumulative" {
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative)
+    } else if s == "delta" || s.is_empty() {
+        Some(opentelemetry_sdk::metrics::Temporality::Delta)
+    } else {
+        None
     }
 }
 
@@ -201,9 +178,10 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
 /// It enables the configuration system to report configuration values, their
 /// origins, and associated metadata to Datadog.
 pub trait ConfigurationProvider {
-    /// Returns a telemetry configuration object representing the current state of this
-    /// configuration item.
-    fn get_configuration(&self) -> Configuration;
+    /// Returns all configurations that were set for this configuration item.
+    /// e.g. If set through the environment variable,
+    /// returns the environment variable config and the default config.
+    fn get_all_configurations(&self) -> Vec<Configuration>;
 }
 
 /// A trait for converting configuration values to their string representation for telemetry.
@@ -307,17 +285,52 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
             ConfigSourceOrigin::Default
         }
     }
+
+    fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
+        let mut configurations = Vec::new();
+        // Always include the default value
+        configurations.push(Configuration {
+            name: self.name.as_str().to_string(),
+            value: self.default_value.get_configuration_value(),
+            origin: ConfigSourceOrigin::Default.into(),
+            config_id: self.config_id.clone(),
+            seq_id: Some(ConfigSourceOrigin::Default as u64),
+        });
+        if let Some(calculated_value) = calculated_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: calculated_value,
+                origin: ConfigSourceOrigin::Calculated.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::Calculated as u64),
+            });
+        }
+        if let Some(ref env_value) = self.env_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: env_value.get_configuration_value(),
+                origin: ConfigSourceOrigin::EnvVar.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
+            });
+        }
+        if let Some(ref code_value) = self.code_value {
+            configurations.push(Configuration {
+                name: self.name.as_str().to_string(),
+                value: code_value.get_configuration_value(),
+                origin: ConfigSourceOrigin::Code.into(),
+                config_id: self.config_id.clone(),
+                seq_id: Some(ConfigSourceOrigin::Code as u64),
+            });
+        }
+        configurations
+    }
 }
 
 impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
-    /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self) -> Configuration {
-        Configuration {
-            name: self.name.as_str().to_string(),
-            value: self.value().get_configuration_value(),
-            origin: self.source().into(),
-            config_id: self.config_id.clone(),
-        }
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        self.build_configurations_list(None)
     }
 }
 
@@ -331,6 +344,9 @@ impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
         match source {
             ConfigSourceOrigin::Code => self.code_value = Some(value),
             ConfigSourceOrigin::EnvVar => self.env_value = Some(value),
+            ConfigSourceOrigin::Calculated => {
+                dd_warn!("Cannot set a calculated value");
+            }
             ConfigSourceOrigin::RemoteConfig => {
                 dd_warn!("Cannot set a value from RC");
             }
@@ -340,7 +356,6 @@ impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
         }
     }
 }
-
 /// Configuration item that tracks the value of a setting and where it came from
 /// And allows to update the corresponding value with a ConfigSourceOrigin
 #[derive(Debug)]
@@ -363,11 +378,11 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
 }
 
 impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
-    fn new_code(name: SupportedConfigurations, default: T) -> Self {
+    fn new_calculated(name: SupportedConfigurations, default: T) -> Self {
         Self {
             config_item: ConfigItem::new(name, default),
             override_value: arc_swap::ArcSwapOption::const_empty(),
-            override_origin: ConfigSourceOrigin::Code,
+            override_origin: ConfigSourceOrigin::Calculated,
             config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
@@ -381,11 +396,14 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         }
     }
 
+    /// Gets the source of the current value based on priority:
+    /// remote_config > code > env_var > calculated > default
     fn source(&self) -> ConfigSourceOrigin {
-        if self.override_value.load().is_some() {
-            self.override_origin
+        let config_item_source = self.config_item.source();
+        if self.override_value.load().is_none() {
+            config_item_source
         } else {
-            self.config_item.source()
+            config_item_source.max(self.override_origin)
         }
     }
 
@@ -403,6 +421,12 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         }
     }
 
+    #[cfg(test)]
+    /// Used for testing only
+    fn get_config_id(&self) -> Option<String> {
+        self.config_id.load().as_ref().map(|id| (**id).clone())
+    }
+
     /// Unsets the override value
     fn unset_override_value(&self) {
         self.override_value.store(None);
@@ -413,11 +437,16 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
         self.set_value_source(value, ConfigSourceOrigin::Code);
     }
 
+    /// Sets Calculated value only if source_type is Calculated
+    fn set_calculated(&mut self, value: T) {
+        self.set_value_source(value, ConfigSourceOrigin::Calculated);
+    }
+
     /// Gets the current value based on priority:
-    /// remote_config > code > env_var > default
+    /// remote_config > code > env_var > calculated > default
     fn value(&self) -> ConfigItemRef<'_, T> {
         let override_value = self.override_value.load();
-        if override_value.is_some() {
+        if override_value.is_some() && self.source() == self.override_origin {
             ConfigItemRef::ArcRef(override_value)
         } else {
             ConfigItemRef::Ref(self.config_item.value())
@@ -428,15 +457,29 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     for ConfigItemWithOverride<T>
 {
-    /// Gets a Configuration object used as telemetry payload
-    fn get_configuration(&self) -> Configuration {
-        let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
-        Configuration {
-            name: self.config_item.name.as_str().to_string(),
-            value: self.value().get_configuration_value(),
-            origin: self.source().into(),
-            config_id,
+    /// Returns all configurations that were set for this configuration item.
+    fn get_all_configurations(&self) -> Vec<Configuration> {
+        // Also add override value if set
+        let override_value = self.override_value.load();
+        let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
+            Some(override_value.as_ref().unwrap().get_configuration_value())
+        } else {
+            None
+        };
+        let mut configurations = self
+            .config_item
+            .build_configurations_list(calculated_option);
+        if override_value.is_some() && self.source() != ConfigSourceOrigin::Calculated {
+            let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
+            configurations.push(Configuration {
+                name: self.config_item.name.as_str().to_string(),
+                value: self.value().get_configuration_value(),
+                origin: self.source().into(),
+                config_id,
+                seq_id: Some(self.source() as u64),
+            });
         }
+        configurations
     }
 }
 
@@ -513,6 +556,25 @@ impl ConfigItemSourceUpdater<'_> {
         self.apply_result(default, result, transform)
     }
 
+    /// Updates a ConfigItem from non empty sources string with transformation
+    pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        let result = self.sources.get(default.name());
+        match result.value {
+            Some(ref config_key) if config_key.value.is_empty() => default,
+            Some(_) => self.apply_result(default, result, transform),
+            None => default,
+        }
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -580,30 +642,36 @@ impl ExtraServicesTracker {
         }
     }
 
-    fn add_extra_service(&self, service_name: &str, main_service: &str) {
-        if service_name == main_service {
+    fn add_extra_services(
+        &self,
+        services: impl Iterator<Item = impl Deref<Target = str>>,
+        main_service: &str,
+    ) {
+        // first consume services with the same name as the service set in the config, as it is
+        // already tracked by default before locking
+        let mut services = services.filter(|s| s.deref() != main_service).peekable();
+        if services.peek().is_none() {
             return;
         }
-
         let mut sent = match self.extra_services_sent.lock() {
             Ok(s) => s,
             Err(_) => return,
         };
-
-        if sent.contains(service_name) {
-            return;
-        }
-
         let mut queue = match self.extra_services_queue.lock() {
             Ok(q) => q,
             Err(_) => return,
         };
-
-        // Add to queue and mark as sent
-        if let Some(ref mut q) = *queue {
-            q.push_back(service_name.to_string());
+        for service_name in services {
+            let service_name = service_name.deref();
+            if sent.contains(service_name) {
+                continue;
+            }
+            // Add to queue and mark as sent
+            if let Some(ref mut q) = *queue {
+                q.push_back(service_name.to_string());
+            }
+            sent.insert(service_name.to_string());
         }
-        sent.insert(service_name.to_string());
     }
 
     /// Get all extra services, updating from the queue
@@ -750,18 +818,18 @@ impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
     }
 }
 
-impl ConfigurationValueProvider for crate::metrics_exporter::OtlpProtocol {
+impl ConfigurationValueProvider for OtlpProtocol {
     fn get_configuration_value(&self) -> String {
         match self {
-            crate::metrics_exporter::OtlpProtocol::Grpc => "grpc",
-            crate::metrics_exporter::OtlpProtocol::HttpProtobuf => "http/protobuf",
-            crate::metrics_exporter::OtlpProtocol::HttpJson => "http/json",
+            OtlpProtocol::Grpc => "grpc",
+            OtlpProtocol::HttpProtobuf => "http/protobuf",
+            OtlpProtocol::HttpJson => "http/json",
         }
         .to_string()
     }
 }
 
-impl ConfigurationValueProvider for Option<crate::metrics_exporter::OtlpProtocol> {
+impl ConfigurationValueProvider for Option<OtlpProtocol> {
     fn get_configuration_value(&self) -> String {
         self.as_ref()
             .map(|p| p.get_configuration_value())
@@ -851,7 +919,7 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string(default.service, ServiceName::Configured),
+            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             global_tags: cisu
@@ -862,7 +930,7 @@ impl Config {
             ),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
-                crate::metrics_exporter::parse_temporality,
+                parse_temporality,
             ),
             trace_sampling_rules: sampling_rules_item,
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
@@ -885,6 +953,9 @@ impl Config {
             ),
             trace_partial_flush_min_spans: cisu
                 .update_parsed(default.trace_partial_flush_min_spans),
+            trace_writer_synchronous_write: default.trace_writer_synchronous_write,
+            trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
+            trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
@@ -899,15 +970,12 @@ impl Config {
                 }),
             otlp_metrics_protocol: cisu.update_string(
                 default.otlp_metrics_protocol,
-                crate::metrics_exporter::OtlpProtocol::parse_optional,
+                OtlpProtocol::parse_optional,
             ),
-            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
+            dogstatsd_agent_url: cisu.update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
             otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
             otlp_metrics_headers: cisu.update_string(default.otlp_metrics_headers, Cow::Owned),
-            otlp_protocol: cisu.update_string(
-                default.otlp_protocol,
-                crate::metrics_exporter::OtlpProtocol::parse_optional,
-            ),
+            otlp_protocol: cisu.update_string(default.otlp_protocol, OtlpProtocol::parse_optional),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
             dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
@@ -917,7 +985,7 @@ impl Config {
             telemetry_log_collection_enabled: cisu
                 .update_parsed(default.telemetry_log_collection_enabled),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
-            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
+            trace_agent_url: cisu.update_non_empty_string(default.trace_agent_url, Cow::Owned),
             enabled: cisu.update_parsed(default.enabled),
             trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
             trace_propagation_extract_first: cisu
@@ -931,6 +999,13 @@ impl Config {
             otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
             metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
+            logs_otel_enabled: cisu.update_parsed(default.logs_otel_enabled),
+            otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
+            otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
+            otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
+            otlp_logs_protocol: cisu
+                .update_string(default.otlp_logs_protocol, OtlpProtocol::parse_optional),
+            otlp_logs_timeout: cisu.update_parsed(default.otlp_logs_timeout),
         }
     }
 
@@ -1012,7 +1087,7 @@ impl Config {
     }
 
     /// Returns the full URL of the DogStatsD agent.
-    pub fn dogstatsd_agent_url(&self) -> &Cow<'static, str> {
+    pub fn dogstatsd_agent_url(&self) -> impl Deref<Target = str> + use<'_> {
         self.dogstatsd_agent_url.value()
     }
 
@@ -1030,6 +1105,19 @@ impl Config {
     pub fn log_level_filter(&self) -> &LevelFilter {
         self.log_level_filter.value()
     }
+
+    pub(crate) fn trace_writer_synchronous_write(&self) -> bool {
+        self.trace_writer_synchronous_write
+    }
+
+    pub(crate) fn trace_writer_synchronous_timeout(&self) -> Duration {
+        self.trace_writer_synchronous_timeout
+    }
+
+    pub(crate) fn trace_writer_max_flush_interval(&self) -> Duration {
+        self.trace_writer_max_flush_interval
+    }
+
 
     #[cfg(feature = "test-utils")]
     pub(crate) fn __internal_wait_agent_info_ready(&self) -> bool {
@@ -1054,7 +1142,7 @@ impl Config {
     }
 
     /// Returns the OTLP metrics protocol (gRPC, HTTP/protobuf, or HTTP/JSON).
-    pub fn otlp_metrics_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
+    pub fn otlp_metrics_protocol(&self) -> Option<OtlpProtocol> {
         *self.otlp_metrics_protocol.value()
     }
 
@@ -1064,8 +1152,13 @@ impl Config {
     }
 
     /// Returns the OTLP protocol (fallback for metrics if metrics protocol is not set).
-    pub fn otlp_protocol(&self) -> Option<crate::metrics_exporter::OtlpProtocol> {
+    pub fn otlp_protocol(&self) -> Option<OtlpProtocol> {
         *self.otlp_protocol.value()
+    }
+
+    /// Returns the OTLP logs protocol.
+    pub fn otlp_logs_protocol(&self) -> Option<OtlpProtocol> {
+        *self.otlp_logs_protocol.value()
     }
 
     /// Returns the minimum number of spans required to trigger a partial flush.
@@ -1118,11 +1211,26 @@ impl Config {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn update_service_name(&self, service_name: Option<String>) {
         if let Some(service_name) = service_name {
             self.service.set_override_value(
                 ServiceName::Configured(service_name),
                 ConfigSourceOrigin::Code,
+            );
+        }
+    }
+
+    /// Sets the service name to a value with calculated precedence.
+    /// The value is calculated by the `dd_resource` Otel Resource,
+    /// which is created in `create_dd_resource` function.
+    /// The result will depend on which environment variable was set,
+    /// or if it returns an `unknown_service` name, which is why it is a calculated source.
+    pub(crate) fn set_calculated_service_name(&self, service_name: Option<String>) {
+        if let Some(service_name) = service_name {
+            self.service.set_override_value(
+                ServiceName::Configured(service_name),
+                ConfigSourceOrigin::Calculated,
             );
         }
     }
@@ -1156,12 +1264,15 @@ impl Config {
 
     /// Add an extra service discovered at runtime
     /// This is used for remote configuration
-    pub(crate) fn add_extra_service(&self, service_name: &str) {
+    pub(crate) fn add_extra_services(
+        &self,
+        service_names: impl Iterator<Item = impl Deref<Target = str>>,
+    ) {
         if !self.remote_config_enabled() {
             return;
         }
         self.extra_services_tracker
-            .add_extra_service(service_name, &self.service());
+            .add_extra_services(service_names, self.service().deref());
     }
 
     /// Get all extra services discovered at runtime
@@ -1180,6 +1291,44 @@ impl Config {
     /// Return tags max length
     pub fn datadog_tags_max_length(&self) -> usize {
         *self.datadog_tags_max_length.value()
+    }
+
+    /// Generate tracer metadata from this config.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
+        fn hostname() -> String {
+            let mut buf = vec![0; 256];
+
+            unsafe {
+                // Safety: buf is valid for writes for at most buf.len().
+                if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
+                    // Amusingly (so to speak), if the host name doesn't fit in `buf.len()`,
+                    // gethostname will put a truncated version in the buffer, which isn't
+                    // null-terminated. So the resulting buffer might or might not be a valid C
+                    // string...
+                    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                    buf.truncate(len);
+                    // Note: use from_utf8_lossy_owned once it's stabilized
+                    String::from_utf8(buf)
+                        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
+                } else {
+                    String::new()
+                }
+            }
+        }
+
+        TracerMetadata {
+            runtime_id: Some(self.runtime_id.to_owned()),
+            tracer_language: "rust".to_owned(),
+            tracer_version: self.tracer_version.to_owned(),
+            hostname: hostname(),
+            service_name: Some(self.service().to_owned()),
+            service_env: self.env().map(str::to_owned),
+            service_version: self.version().map(str::to_owned),
+            container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // TODO: add the process tags. For now, we can't easily get them.
+            ..Default::default()
+        }
     }
 }
 
@@ -1201,21 +1350,23 @@ impl ConfigBuilder {
         let mut config = self.config.clone();
 
         // resolve trace_agent_url
+        // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
             let host = &config.agent_host.value();
             let port = *config.trace_agent_port.value();
             config
                 .trace_agent_url
-                .set_code(Cow::Owned(format!("http://{host}:{port}")));
+                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
         }
 
         // resolve dogstatsd_agent_url
+        // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
             let host = &config.dogstatsd_agent_host.value();
             let port = *config.dogstatsd_agent_port.value();
             config
                 .dogstatsd_agent_url
-                .set_code(Cow::Owned(format!("http://{host}:{port}")));
+                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
         }
 
         config
@@ -1301,9 +1452,9 @@ impl ConfigBuilder {
     ///
     /// Env variable: `OTEL_EXPORTER_OTLP_METRICS_PROTOCOL`
     pub fn set_otlp_metrics_protocol(&mut self, protocol: String) -> &mut Self {
-        self.config.otlp_metrics_protocol.set_code(
-            crate::metrics_exporter::OtlpProtocol::parse_optional(protocol),
-        );
+        self.config
+            .otlp_metrics_protocol
+            .set_code(OtlpProtocol::parse_optional(protocol));
         self
     }
 
@@ -1315,9 +1466,19 @@ impl ConfigBuilder {
     pub fn set_otlp_protocol(&mut self, protocol: String) -> &mut Self {
         self.config
             .otlp_protocol
-            .set_code(crate::metrics_exporter::OtlpProtocol::parse_optional(
-                protocol,
-            ));
+            .set_code(OtlpProtocol::parse_optional(protocol));
+        self
+    }
+
+    /// Set the OTLP logs protocol (grpc, http/protobuf, http/json).
+    ///
+    /// **Default**: `None` (falls back to `OTEL_EXPORTER_OTLP_PROTOCOL`)
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`
+    pub fn set_otlp_logs_protocol(&mut self, protocol: String) -> &mut Self {
+        self.config
+            .otlp_logs_protocol
+            .set_code(OtlpProtocol::parse_optional(protocol));
         self
     }
 
@@ -1457,6 +1618,26 @@ impl ConfigBuilder {
     }
 
     #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_trace_writer_synchronous_write(
+        &mut self,
+        trace_writer_synchronous_write: bool,
+    ) -> &mut Self {
+        self.config.trace_writer_synchronous_write = trace_writer_synchronous_write;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_trace_writer_max_flush_interval(
+        &mut self,
+        trace_writer_max_flush_interval: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_max_flush_interval = trace_writer_max_flush_interval;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
     pub(crate) fn __internal_set_wait_agent_info_ready(
         &mut self,
         wait_agent_info_ready: bool,
@@ -1469,6 +1650,7 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use libdd_telemetry::data::ConfigurationOrigin;
+    use std::collections::HashMap;
 
     use super::Config;
     use super::*;
@@ -1781,16 +1963,19 @@ mod tests {
         // Initially empty
         assert_eq!(config.get_extra_services().len(), 0);
 
-        // Add some extra services
-        config.add_extra_service("service-1");
-        config.add_extra_service("service-2");
-        config.add_extra_service("service-3");
-
-        // Should not add the main service
-        config.add_extra_service("main-service");
-
-        // Should not add duplicates
-        config.add_extra_service("service-1");
+        config.add_extra_services(
+            [
+                // Add some extra services
+                "service-1",
+                "service-2",
+                "service-3",
+                // Should not add the main service
+                "main-service",
+                // Should not add duplicates
+                "service-1",
+            ]
+            .into_iter(),
+        );
 
         let services = config.get_extra_services();
         assert_eq!(services.len(), 3);
@@ -1813,8 +1998,7 @@ mod tests {
             .build();
 
         // Add services when remote config is disabled
-        config.add_extra_service("service-1");
-        config.add_extra_service("service-2");
+        config.add_extra_services(["service-1", "service-2"].into_iter());
 
         // Should return empty since remote config is disabled
         let services = config.get_extra_services();
@@ -1827,10 +2011,7 @@ mod tests {
             .set_service("main-service".to_string())
             .build();
 
-        // Add more than 64 services
-        for i in 0..70 {
-            config.add_extra_service(&format!("service-{i}"));
-        }
+        config.add_extra_services((0..70).map(|i| format!("service-{i}")));
 
         // Should be limited to 64
         let services = config.get_extra_services();
@@ -2092,7 +2273,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
+            config.trace_sampling_rules.get_config_id(),
             Some("config_id_1".to_string())
         );
 
@@ -2100,17 +2281,14 @@ mod tests {
             .update_sampling_rules_from_remote(&rules_json, Some("config_id_2".to_string()))
             .unwrap();
         assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
+            config.trace_sampling_rules.get_config_id(),
             Some("config_id_2".to_string())
         );
 
         config
             .update_sampling_rules_from_remote("[]", None)
             .unwrap();
-        assert_eq!(
-            config.trace_sampling_rules.get_configuration().config_id,
-            None
-        );
+        assert_eq!(config.trace_sampling_rules.get_config_id(), None);
     }
 
     #[test]
@@ -2175,7 +2353,7 @@ mod tests {
     fn test_dd_agent_url_default() {
         let config = Config::builder().build();
 
-        assert_eq!(config.trace_agent_url(), "http://localhost:8126");
+        assert_eq!(&*config.trace_agent_url(), "http://localhost:8126");
     }
 
     #[test]
@@ -2190,7 +2368,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2206,7 +2384,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "https://test-host");
+        assert_eq!(&*config.trace_agent_url(), "https://test-host");
     }
 
     #[test]
@@ -2214,7 +2392,6 @@ mod tests {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
-                ("DD_TRACE_AGENT_URL", ""),
                 ("DD_AGENT_HOST", "agent-host"),
                 ("DD_TRACE_AGENT_PORT", "4242"),
             ],
@@ -2222,7 +2399,26 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url_set_to_empty_string() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_AGENT_URL", "")],
+            ConfigSourceOrigin::Calculated,
+        ));
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2232,7 +2428,7 @@ mod tests {
             .set_trace_agent_port(4242)
             .build();
 
-        assert_eq!(config.trace_agent_url(), "http://agent-host:4242");
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
     }
 
     #[test]
@@ -2243,14 +2439,14 @@ mod tests {
             .set_trace_agent_url("https://test-host".into())
             .build();
 
-        assert_eq!(config.trace_agent_url(), "https://test-host");
+        assert_eq!(&*config.trace_agent_url(), "https://test-host");
     }
 
     #[test]
     fn test_dogstatsd_agent_url_default() {
         let config = Config::builder().build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://localhost:8125");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://localhost:8125");
     }
 
     #[test]
@@ -2265,7 +2461,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
     }
 
     #[test]
@@ -2275,7 +2471,7 @@ mod tests {
             .set_dogstatsd_agent_port(4242)
             .build();
 
-        assert_eq!(config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
+        assert_eq!(&*config.dogstatsd_agent_url(), "http://dogstatsd-host:4242");
     }
 
     #[test]
@@ -2354,13 +2550,15 @@ mod tests {
             r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#
         ).unwrap();
 
-        let configuration = &config.trace_sampling_rules.get_configuration();
-        assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
+        let configurations = &config.trace_sampling_rules.get_all_configurations();
+        // active config is the one with highest seq_id
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
 
         // Converting configuration value to json helps with comparison as serialized properties may
         // differ from their original order
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
             expected.clone()
         );
 
@@ -2370,23 +2568,28 @@ mod tests {
             .trace_sampling_rules
             .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);
 
-        let configuration_after_rc = &config.trace_sampling_rules.get_configuration();
+        let configurations_after_rc = &config.trace_sampling_rules.get_all_configurations();
+        let active_configuration_after_rc = configurations_after_rc
+            .iter()
+            .max_by_key(|c| c.seq_id)
+            .unwrap();
         assert_eq!(
-            configuration_after_rc.origin,
+            active_configuration_after_rc.origin,
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration_after_rc.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration_after_rc.value).unwrap(),
             expected_rc
         );
 
         // Reset ConfigItemRc RC previous value
         config.trace_sampling_rules.unset_override_value();
 
-        let configuration = &config.trace_sampling_rules.get_configuration();
-        assert_eq!(configuration.origin, ConfigurationOrigin::EnvVar);
+        let configurations = &config.trace_sampling_rules.get_all_configurations();
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
-            ParsedSamplingRules::from_str(&configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
             expected
         );
     }

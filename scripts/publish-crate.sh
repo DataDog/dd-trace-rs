@@ -418,6 +418,7 @@ main() {
     fi
     
     local sorted_tags
+    # shellcheck disable=SC2207
     sorted_tags=($(sort_tags "${tags[@]}"))
     
     echo "" >&2

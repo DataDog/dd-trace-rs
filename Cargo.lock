@@ -184,9 +184,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 dependencies = [
  "serde",
 ]
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "datadog-opentelemetry"
-version = "0.2.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -470,17 +470,22 @@ dependencies = [
  "base64 0.21.7",
  "criterion",
  "datadog-opentelemetry",
- "foldhash",
+ "foldhash 0.1.5",
  "hashbrown 0.15.5",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "libc",
  "libdd-common",
  "libdd-data-pipeline",
+ "libdd-library-config",
  "libdd-telemetry",
+ "libdd-tinybytes",
  "libdd-trace-utils",
+ "log",
  "lru",
  "opentelemetry",
+ "opentelemetry-appender-log",
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
@@ -541,6 +546,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "event-listener"
 version = "5.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -572,6 +587,12 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
@@ -753,7 +774,7 @@ checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "allocator-api2",
  "equivalent",
- "foldhash",
+ "foldhash 0.1.5",
 ]
 
 [[package]]
@@ -761,6 +782,11 @@ name = "hashbrown"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5419bdc4f6a9207fbeba6d11b604d481addf78ecd10c11ad51e76c2f6482748d"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "headers"
@@ -1130,17 +1156,18 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.177"
+version = "0.2.185"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2874a2af47a2325c2001a6e6fad9b16a53b802102b528163885171cf92b15976"
+checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 
 [[package]]
 name = "libdd-common"
-version = "1.0.0"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee58537655793508cc5282ecf1507f15a8fa4616a08c728e01a29ee2f035e8fa"
+checksum = "c779949577250487179d904508f18750070e9a01eb58dce378409ec5fa066f3b"
 dependencies = [
  "anyhow",
+ "bytes",
  "cc",
  "const_format",
  "futures",
@@ -1166,9 +1193,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "1.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4968820b270b06a326504a491f754e35a014330ce2a56929894df5c531a95a8c"
+checksum = "358411451d99011f13c7628acee25dc144f2bbeade87acf10fa7d5ffce1053dc"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1176,14 +1203,12 @@ dependencies = [
  "either",
  "http",
  "http-body-util",
- "hyper",
- "hyper-util",
  "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1198,18 +1223,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-ddsketch"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22795efb24035b79e86b01a6ca0280adfe9b90b90a8a5d4a621de09a1ee48430"
+checksum = "6b31b2435e2e8eaba0e35a96df3e1407b68f8ef76055383ceb2ba5a09e5a1bb5"
 dependencies = [
- "prost 0.13.5",
+ "prost",
 ]
 
 [[package]]
 name = "libdd-dogstatsd-client"
-version = "1.0.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0767c592eb492456bb8cb7b822cb4f9ac9ae200d4e1962d806310ae04f2fa82"
+checksum = "e6f8eca39d1e2ef6267cf77fc51eb7ebc7d4f44827e150b4d317c29d8c33bf87"
 dependencies = [
  "anyhow",
  "cadence",
@@ -1220,10 +1245,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "libdd-telemetry"
-version = "1.0.0"
+name = "libdd-library-config"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22b77c71009cdc2566357ee7162cbd703c2d707a23e5d3e063c1890ee487461"
+checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+dependencies = [
+ "anyhow",
+ "libdd-trace-protobuf 2.0.0",
+ "memfd",
+ "prost",
+ "rand 0.8.5",
+ "rmp",
+ "rmp-serde",
+ "rustix",
+ "serde",
+ "serde_yaml",
+]
+
+[[package]]
+name = "libdd-telemetry"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "78774ffce79da677602829d7fe27468283e5349010e974257233edf4cd12b783"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1231,8 +1274,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "http",
  "http-body-util",
- "hyper",
- "hyper-util",
  "libc",
  "libdd-common",
  "libdd-ddsketch",
@@ -1248,57 +1289,70 @@ dependencies = [
 
 [[package]]
 name = "libdd-tinybytes"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a046c137739f404448bf5afa25eb07662e572da4371f5148860c83b570fd6d9"
+checksum = "e47838e12ae2665250b4cdba4e3119230b79e3c522bb9f48dd0c87346f5a8f44"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "libdd-trace-normalization"
-version = "1.0.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5bea58cf904bc80045756012b20d2ce9b15480881be47d5fedabdf5a11601a9"
+checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
 ]
 
 [[package]]
 name = "libdd-trace-protobuf"
-version = "1.0.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68085a63d80632644b2135c2102aa2d266103766fe7263911cce7536e07b42f"
+checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
 dependencies = [
- "prost 0.13.5",
+ "prost",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "libdd-trace-protobuf"
+version = "3.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1809242895edc53ac51a21287829f42474e749dbc222ea7f414cb3f0d1f91d4e"
+dependencies = [
+ "prost",
  "serde",
  "serde_bytes",
 ]
 
 [[package]]
 name = "libdd-trace-stats"
-version = "1.0.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ee15203528e63afff238bb49ea3b35e3865d9f137ca6416e79db678da237ef0"
+checksum = "d92b882863f7c531d51e73f7bc5930c705e47829332128d9bdcad0fea3b2b942"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-utils",
 ]
 
 [[package]]
 name = "libdd-trace-utils"
-version = "1.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb7c359bdb49981bd769b89d5891dfe821de95e4f82419613365acdd0cf36257"
+checksum = "870506e9bb79c93ce5bbfe9d715c53c7ea393a177c7299f0bf43745c0adea0c7"
 dependencies = [
  "anyhow",
  "bytes",
  "cargo-platform",
  "cargo_metadata",
  "futures",
+ "http",
+ "http-body",
  "http-body-util",
  "httpmock",
  "hyper",
@@ -1306,8 +1360,8 @@ dependencies = [
  "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf",
- "prost 0.13.5",
+ "libdd-trace-protobuf 3.0.1",
+ "prost",
  "rand 0.8.5",
  "rmp",
  "rmp-serde",
@@ -1318,6 +1372,12 @@ dependencies = [
  "tracing",
  "urlencoding",
 ]
+
+[[package]]
+name = "linux-raw-sys"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "litemap"
@@ -1343,11 +1403,11 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "lru"
-version = "0.12.5"
+version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
 ]
 
 [[package]]
@@ -1364,6 +1424,15 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "memfd"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227"
+dependencies = [
+ "rustix",
+]
 
 [[package]]
 name = "mime"
@@ -1458,6 +1527,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-appender-log"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e50c59a96bd6a723a4329c5db31eb04fa4488c5f141ae7b9d4fd587439e6ee1"
+dependencies = [
+ "log",
+ "opentelemetry",
+]
+
+[[package]]
 name = "opentelemetry-appender-tracing"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1493,7 +1572,7 @@ dependencies = [
  "opentelemetry-http",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "prost 0.14.1",
+ "prost",
  "reqwest",
  "thiserror 2.0.14",
  "tokio",
@@ -1508,7 +1587,7 @@ checksum = "a7175df06de5eaee9909d4805a3d07e28bb752c34cab57fa9cff549da596b30f"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
- "prost 0.14.1",
+ "prost",
  "tonic",
  "tonic-prost",
 ]
@@ -1700,7 +1779,7 @@ dependencies = [
 
 [[package]]
 name = "propagator"
-version = "0.2.1"
+version = "0.3.2"
 dependencies = [
  "datadog-opentelemetry",
  "http-body-util",
@@ -1735,35 +1814,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
-dependencies = [
- "bytes",
- "prost-derive 0.13.5",
-]
-
-[[package]]
-name = "prost"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7231bd9b3d3d33c86b58adbac74b5ec0ad9f496b19d22801d773636feaa95f3d"
 dependencies = [
  "bytes",
- "prost-derive 0.14.1",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn",
+ "prost-derive",
 ]
 
 [[package]]
@@ -1773,7 +1829,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn",
@@ -2027,6 +2083,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
+dependencies = [
+ "bitflags",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2126,6 +2195,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2179,7 +2261,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simple_tracing"
-version = "0.2.1"
+version = "0.3.2"
 dependencies = [
  "datadog-opentelemetry",
  "opentelemetry",
@@ -2486,7 +2568,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66bd50ad6ce1252d87ef024b3d64fe4c3cf54a86fb9ef4c631fdd0ded7aeaa67"
 dependencies = [
  "bytes",
- "prost 0.14.1",
+ "prost",
  "tonic",
 ]
 
@@ -2655,6 +2737,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "url"

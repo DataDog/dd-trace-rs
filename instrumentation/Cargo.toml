@@ -1,0 +1,24 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+members = ["datadog-aws-lambda"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91.1"
+license = "Apache-2.0"
+repository = "https://github.com/DataDog/dd-trace-rs"
+authors = ["Datadog Inc. <info@datadoghq.com>"]
+publish = false
+
+[workspace.dependencies]
+serde = "1.0.194"
+serde_json = "1.0.140"
+opentelemetry = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }
+opentelemetry_sdk = { version = "0.31.0", default-features = false }
+opentelemetry-semantic-conventions = { version = "0.31.0", features = ["semconv_experimental"] }
+tracing = { version = "0.1", default-features = false }
+tokio = { version = "1.44.1" }

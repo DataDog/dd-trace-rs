@@ -4,270 +4,20 @@
 use crate::core::configuration::SamplingRuleConfig;
 use crate::core::constants::{
     RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
-    SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+    SAMPLING_KNUTH_RATE_TAG_KEY, SAMPLING_PRIORITY_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
 };
-use crate::core::sampling::{mechanism, SamplingMechanism, SamplingPriority};
+use crate::core::sampling::{mechanism, priority, SamplingMechanism, SamplingPriority};
 
 /// Type alias for sampling rules update callback
 /// Consolidated callback type used across crates for remote config sampling updates
 pub type SamplingRulesCallback = Box<dyn for<'a> Fn(&'a [SamplingRuleConfig]) + Send + Sync>;
 
-use crate::mappings::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
-    get_otel_service, get_otel_status_code, OtelSpan,
-};
-use opentelemetry::trace::SamplingDecision;
-use opentelemetry::trace::TraceId;
-use opentelemetry::KeyValue;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use crate::sampling::{SamplingData, SpanProperties};
 
 use super::agent_service_sampler::{AgentRates, ServicesSampler};
-// Import the attr constants
-use super::constants::pattern::NO_RULE;
-use super::glob_matcher::GlobMatcher;
-use super::otel_mappings::PreSampledSpan;
 use super::rate_limiter::RateLimiter;
-use super::rate_sampler::RateSampler;
 use super::rules_sampler::RulesSampler;
-use super::utils;
-
-fn matcher_from_rule(rule: &str) -> Option<GlobMatcher> {
-    (rule != NO_RULE).then(|| GlobMatcher::new(rule))
-}
-
-/// Represents a sampling rule with criteria for matching spans
-#[derive(Clone, Debug)]
-pub struct SamplingRule {
-    /// The sample rate to apply when this rule matches (0.0-1.0)
-    sample_rate: f64,
-
-    /// Where this rule comes from (customer, dynamic, default)
-    provenance: String,
-
-    /// Internal rate sampler used when this rule matches
-    rate_sampler: RateSampler,
-
-    /// Glob matchers for pattern matching
-    name_matcher: Option<GlobMatcher>,
-    service_matcher: Option<GlobMatcher>,
-    resource_matcher: Option<GlobMatcher>,
-    tag_matchers: HashMap<String, GlobMatcher>,
-}
-
-impl SamplingRule {
-    /// Converts a vector of SamplingRuleConfig into SamplingRule objects
-    /// Centralizes the conversion logic
-    pub fn from_configs(configs: Vec<SamplingRuleConfig>) -> Vec<Self> {
-        configs
-            .into_iter()
-            .map(|config| {
-                Self::new(
-                    config.sample_rate,
-                    config.service,
-                    config.name,
-                    config.resource,
-                    Some(config.tags),
-                    Some(config.provenance),
-                )
-            })
-            .collect()
-    }
-
-    /// Creates a new sampling rule
-    pub fn new(
-        sample_rate: f64,
-        service: Option<String>,
-        name: Option<String>,
-        resource: Option<String>,
-        tags: Option<HashMap<String, String>>,
-        provenance: Option<String>,
-    ) -> Self {
-        // Create glob matchers for the patterns
-        let name_matcher = name.as_deref().and_then(matcher_from_rule);
-        let service_matcher = service.as_deref().and_then(matcher_from_rule);
-        let resource_matcher = resource.as_deref().and_then(matcher_from_rule);
-
-        // Create matchers for tag values
-        let tag_map = tags.clone().unwrap_or_default();
-        let mut tag_matchers = HashMap::with_capacity(tag_map.len());
-        for (key, value) in &tag_map {
-            if let Some(matcher) = matcher_from_rule(value) {
-                tag_matchers.insert(key.clone(), matcher);
-            }
-        }
-
-        SamplingRule {
-            sample_rate,
-            provenance: provenance.unwrap_or_else(|| "default".to_string()),
-            rate_sampler: RateSampler::new(sample_rate),
-            name_matcher,
-            service_matcher,
-            resource_matcher,
-            tag_matchers,
-        }
-    }
-
-    /// Checks if this rule matches the given span's attributes and name
-    /// The name is derived from the attributes and span kind
-    fn matches(&self, span: &PreSampledSpan) -> bool {
-        // Get the operation name from the attributes and span kind
-        let name: std::borrow::Cow<'_, str> = get_otel_operation_name_v2(span);
-
-        // Check name using glob matcher if specified
-        if let Some(ref matcher) = self.name_matcher {
-            if !matcher.matches(name.as_ref()) {
-                return false;
-            }
-        }
-
-        // Check service if specified using glob matcher
-        if let Some(ref matcher) = self.service_matcher {
-            // Get service directly from the resource
-            let service_from_resource = get_otel_service(span);
-
-            // Match against the service from resource
-            if !matcher.matches(&service_from_resource) {
-                return false;
-            }
-        }
-
-        // Get the resource string for matching
-        let resource_str: std::borrow::Cow<'_, str> = get_otel_resource_v2(span);
-
-        // Check resource if specified using glob matcher
-        if let Some(ref matcher) = self.resource_matcher {
-            // Use the resource generated by get_otel_resource_v2
-            if !matcher.matches(resource_str.as_ref()) {
-                return false;
-            }
-        }
-
-        // Check all tags using glob matchers
-        for (key, matcher) in &self.tag_matchers {
-            let rule_tag_key_str = key.as_str();
-
-            // Special handling for rules defined with "http.status_code" or
-            // "http.response.status_code"
-            if rule_tag_key_str == "http.status_code"
-                || rule_tag_key_str
-                    == opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE
-            {
-                match self.match_http_status_code_rule(matcher, span) {
-                    Some(true) => continue,             // Status code matched
-                    Some(false) | None => return false, // Status code didn't match or wasn't found
-                }
-            } else {
-                // Logic for other tags:
-                // First, try to match directly with the provided tag key
-                let direct_match = span
-                    .attributes
-                    .iter()
-                    .find(|kv| kv.key.as_str() == rule_tag_key_str)
-                    .and_then(|kv| self.match_attribute_value(&kv.value, matcher));
-
-                if direct_match.unwrap_or(false) {
-                    continue;
-                }
-
-                // If no direct match, try to find the corresponding OpenTelemetry attribute that
-                // maps to the Datadog tag key This handles cases where the rule key
-                // is a Datadog key (e.g., "http.method") and the attribute is an
-                // OTel key (e.g., "http.request.method")
-                if rule_tag_key_str.starts_with("http.") {
-                    let tag_match = span.attributes.iter().any(|kv| {
-                        let dd_key_from_otel_attr = get_dd_key_for_otlp_attribute(kv.key.as_str());
-                        if dd_key_from_otel_attr == rule_tag_key_str {
-                            return self
-                                .match_attribute_value(&kv.value, matcher)
-                                .unwrap_or(false);
-                        }
-                        false
-                    });
-
-                    if !tag_match {
-                        return false; // Mapped attribute not found or did not match
-                    }
-                    // If tag_match is true, loop continues to next rule_tag_key.
-                } else {
-                    // For non-HTTP attributes, if we don't have a direct match, the rule doesn't
-                    // match
-                    return false;
-                }
-            }
-        }
-
-        true
-    }
-
-    /// Helper method to specifically match a rule against an HTTP status code extracted from
-    /// attributes. Returns Some(true) if status code found and matches, Some(false) if found
-    /// but not matched, None if not found.
-    fn match_http_status_code_rule(
-        &self,
-        matcher: &GlobMatcher,
-        span: &PreSampledSpan,
-    ) -> Option<bool> {
-        let status_code_u32 = get_otel_status_code(span);
-        if status_code_u32 != 0 {
-            // Assuming 0 means not found
-            let status_value = opentelemetry::Value::I64(i64::from(status_code_u32));
-            self.match_attribute_value(&status_value, matcher)
-        } else {
-            None // Status code not found in attributes
-        }
-    }
-
-    // Helper method to match attribute values considering different value types
-    fn match_attribute_value(
-        &self,
-        value: &opentelemetry::Value,
-        matcher: &GlobMatcher,
-    ) -> Option<bool> {
-        // Floating point values are handled with special rules
-        if let Some(float_val) = utils::extract_float_value(value) {
-            // Check if the float has a non-zero decimal part
-            let has_decimal = float_val != (float_val as i64) as f64;
-
-            // For non-integer floats, only match if it's a wildcard pattern
-            if has_decimal {
-                // All '*' pattern returns true, any other pattern returns false
-                return Some(matcher.pattern().chars().all(|c| c == '*'));
-            }
-
-            // For integer floats, convert to string for matching
-            return Some(matcher.matches(&float_val.to_string()));
-        }
-
-        // For non-float values, use normal matching
-        utils::extract_string_value(value).map(|string_value| matcher.matches(&string_value))
-    }
-
-    /// Samples a trace ID using this rule's sample rate
-    pub fn sample(&self, trace_id: TraceId) -> bool {
-        // Delegate to the internal rate sampler's new sample method
-        self.rate_sampler.sample(trace_id)
-    }
-}
-
-/// Represents a priority for sampling rules
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum RuleProvenance {
-    Customer = 0,
-    Dynamic = 1,
-    Default = 2,
-}
-
-impl From<&str> for RuleProvenance {
-    fn from(s: &str) -> Self {
-        match s {
-            "customer" => RuleProvenance::Customer,
-            "dynamic" => RuleProvenance::Dynamic,
-            _ => RuleProvenance::Default,
-        }
-    }
-}
+use super::sampling_rule::SamplingRule;
 
 /// A composite sampler that applies rules in order of precedence
 #[derive(Clone, Debug)]
@@ -280,18 +30,11 @@ pub struct DatadogSampler {
 
     /// Rate limiter for limiting the number of spans per second
     rate_limiter: RateLimiter,
-
-    /// Resource with service information, wrapped in Arc<RwLock<>> for sharing
-    resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
 }
 
 impl DatadogSampler {
     /// Creates a new DatadogSampler with the given rules
-    pub fn new(
-        rules: Vec<SamplingRule>,
-        rate_limit: i32,
-        resource: Arc<RwLock<opentelemetry_sdk::Resource>>,
-    ) -> Self {
+    pub fn new(rules: Vec<SamplingRule>, rate_limit: i32) -> Self {
         // Create rate limiter with default value of 100 if not provided
         let limiter = RateLimiter::new(rate_limit, None);
 
@@ -299,7 +42,6 @@ impl DatadogSampler {
             rules: RulesSampler::new(rules),
             service_samplers: ServicesSampler::default(),
             rate_limiter: limiter,
-            resource,
         }
     }
 
@@ -335,17 +77,17 @@ impl DatadogSampler {
     }
 
     /// Computes a key for service-based sampling
-    fn service_key<'a>(&self, span: &impl OtelSpan<'a>) -> String {
-        // Get service directly from resource
-        let service = get_otel_service(span).into_owned();
-        // Get env from attributes
-        let env = get_otel_env(span);
+    fn service_key(&self, span: &impl SpanProperties) -> String {
+        // Get service from span
+        let service = span.service().into_owned();
+        // Get env from span
+        let env = span.env();
 
         format!("service:{service},env:{env}")
     }
 
     /// Finds the highest precedence rule that matches the span
-    fn find_matching_rule(&self, span: &PreSampledSpan) -> Option<SamplingRule> {
+    fn find_matching_rule(&self, span: &impl SpanProperties) -> Option<SamplingRule> {
         self.rules.find_matching_rule(|rule| rule.matches(span))
     }
 
@@ -372,44 +114,37 @@ impl DatadogSampler {
     }
 
     /// Sample an incoming span based on the parent context and attributes
-    pub(crate) fn sample(
-        &self,
-        is_parent_sampled: Option<bool>,
-        trace_id: TraceId,
-        _name: &str,
-        span_kind: &opentelemetry::trace::SpanKind,
-        attributes: &[KeyValue],
-    ) -> DdSamplingResult {
-        if let Some(is_parent_sampled) = is_parent_sampled {
+    pub fn sample(&self, data: &impl SamplingData) -> DdSamplingResult {
+        if let Some(is_parent_sampled) = data.is_parent_sampled() {
+            let priority = match is_parent_sampled {
+                false => priority::AUTO_REJECT,
+                true => priority::AUTO_KEEP,
+            };
             // If a parent exists, inherit its sampling decision and trace state
             return DdSamplingResult {
-                is_keep: is_parent_sampled,
+                priority,
                 trace_root_info: None,
             };
         }
 
         // Apply rules-based sampling
-        self.sample_root(trace_id, _name, span_kind, attributes)
+        data.with_span_properties(self, |sampler, span| sampler.sample_root(data, span))
     }
 
     /// Sample the root span of a trace
     fn sample_root(
         &self,
-        trace_id: TraceId,
-        name: &str,
-        span_kind: &opentelemetry::trace::SpanKind,
-        attributes: &[KeyValue],
+        data: &impl SamplingData,
+        span: &impl SpanProperties,
     ) -> DdSamplingResult {
         let mut is_keep = true;
         let mut used_agent_sampler = false;
         let sample_rate;
-        let mut rl_effective_rate: Option<i32> = None;
-
-        let resource_guard = self.resource.read().unwrap();
-        let span = PreSampledSpan::new(name, span_kind.clone(), attributes, &resource_guard);
+        let mut rl_effective_rate: Option<f64> = None;
+        let trace_id = data.trace_id();
 
         // Find a matching rule
-        let matching_rule = self.find_matching_rule(&span);
+        let matching_rule = self.find_matching_rule(span);
 
         // Apply sampling logic
         if let Some(rule) = &matching_rule {
@@ -422,11 +157,11 @@ impl DatadogSampler {
             // If the span should be sampled, then apply rate limiting
             } else if !self.rate_limiter.is_allowed() {
                 is_keep = false;
-                rl_effective_rate = Some(self.rate_limiter.effective_rate() as i32);
+                rl_effective_rate = Some(self.rate_limiter.effective_rate());
             }
         } else {
             // Try service-based sampling from Agent
-            let service_key = self.service_key(&span);
+            let service_key = self.service_key(span);
             if let Some(sampler) = self.service_samplers.get(&service_key) {
                 // Use the service-based sampler
                 used_agent_sampler = true;
@@ -447,10 +182,9 @@ impl DatadogSampler {
         let mechanism = self.get_sampling_mechanism(matching_rule.as_ref(), used_agent_sampler);
 
         DdSamplingResult {
-            is_keep,
+            priority: mechanism.to_priority(is_keep),
             trace_root_info: Some(TraceRootSamplingInfo {
                 mechanism,
-                priority: mechanism.to_priority(is_keep),
                 rate: sample_rate,
                 rl_effective_rate,
             }),
@@ -458,76 +192,144 @@ impl DatadogSampler {
     }
 }
 
-pub(crate) struct DdSamplingResult {
-    pub is_keep: bool,
-    pub trace_root_info: Option<TraceRootSamplingInfo>,
+/// Formats a sampling rate with up to 6 significant digits, stripping trailing zeros.
+///
+/// This matches the Go behavior of `strconv.FormatFloat(rate, 'g', 6, 64)`.
+///
+/// # Examples
+/// - `1.0` → `Some("1")`
+/// - `0.5` → `Some("0.5")`
+/// - `0.7654321` → `Some("0.765432")`
+/// - `0.100000` → `Some("0.1")`
+/// - `-0.1` → `None`
+/// - `1.1` → `None`
+fn format_sampling_rate(rate: f64) -> Option<String> {
+    if rate.is_nan() || !(0.0..=1.0).contains(&rate) {
+        return None;
+    }
+
+    if rate == 0.0 {
+        return Some("0".to_string());
+    }
+
+    let digits = 6_i32;
+    let magnitude = rate.abs().log10().floor() as i32;
+    let scale = 10f64.powi(digits - 1 - magnitude);
+    let rounded = (rate * scale).round() / scale;
+
+    // Determine decimal places needed for 6 significant digits
+    let decimal_places = if magnitude >= digits - 1 {
+        0
+    } else {
+        (digits - 1 - magnitude) as usize
+    };
+
+    let s = format!("{:.prec$}", rounded, prec = decimal_places);
+    // Strip trailing zeros after decimal point
+    Some(if s.contains('.') {
+        let s = s.trim_end_matches('0');
+        let s = s.trim_end_matches('.');
+        s.to_string()
+    } else {
+        s
+    })
 }
 
-pub(crate) struct TraceRootSamplingInfo {
-    pub priority: SamplingPriority,
-    pub mechanism: SamplingMechanism,
-    pub rate: f64,
-    pub rl_effective_rate: Option<i32>,
+pub struct TraceRootSamplingInfo {
+    mechanism: SamplingMechanism,
+    rate: f64,
+    rl_effective_rate: Option<f64>,
+}
+
+impl TraceRootSamplingInfo {
+    /// Returns the sampling mechanism used for this trace root
+    pub fn mechanism(&self) -> SamplingMechanism {
+        self.mechanism
+    }
+
+    /// Returns the sample rate used for this trace root
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    /// Returns the effective rate limit if rate limiting was applied
+    pub fn rl_effective_rate(&self) -> Option<f64> {
+        self.rl_effective_rate
+    }
+}
+
+pub struct DdSamplingResult {
+    priority: SamplingPriority,
+    trace_root_info: Option<TraceRootSamplingInfo>,
 }
 
 impl DdSamplingResult {
+    #[inline(always)]
+    pub fn get_priority(&self) -> SamplingPriority {
+        self.priority
+    }
+
+    pub fn get_trace_root_sampling_info(&self) -> &Option<TraceRootSamplingInfo> {
+        &self.trace_root_info
+    }
+
     /// Returns Datadog-specific sampling tags to be added as attributes
     ///
     /// # Parameters
-    /// * `decision` - The sampling decision (RecordAndSample or Drop)
-    /// * `mechanism` - The sampling mechanism used to make the decision
-    /// * `sample_rate` - The sample rate to use for the decision
-    /// * `rl_effective_rate` - The effective rate limit if rate limiting was applied
+    /// * `factory` - The attribute factory to use for creating attributes
     ///
     /// # Returns
-    /// A vector of attributes to add to the sampling result
-    pub fn to_dd_sampling_tags(&self) -> Vec<KeyValue> {
-        let mut result = Vec::new();
+    /// An optional vector of attributes to add to the sampling result
+    pub fn to_dd_sampling_tags<F>(&self, factory: &F) -> Option<Vec<F::Attribute>>
+    where
+        F: crate::sampling::AttributeFactory,
+    {
         let Some(root_info) = &self.trace_root_info else {
-            return result; // No root info, return empty attributes
+            return None; // No root info, return empty attributes
         };
 
+        let mut result: Vec<F::Attribute>;
         // Add rate limiting tag if applicable
-        if let Some(limit) = root_info.rl_effective_rate {
-            result.push(KeyValue::new(RL_EFFECTIVE_RATE, limit as i64));
+        if let Some(limit) = root_info.rl_effective_rate() {
+            result = Vec::with_capacity(4);
+            result.push(factory.create_f64(RL_EFFECTIVE_RATE, limit));
+        } else {
+            result = Vec::with_capacity(3);
         }
 
         // Add the sampling decision trace tag with the mechanism
-        let mechanism = root_info.mechanism;
-        result.push(KeyValue::new(
-            SAMPLING_DECISION_MAKER_TAG_KEY,
-            mechanism.to_cow(),
-        ));
+        let mechanism = root_info.mechanism();
+        result.push(factory.create_string(SAMPLING_DECISION_MAKER_TAG_KEY, mechanism.to_cow()));
 
         // Add the sample rate tag with the correct key based on the mechanism
         match mechanism {
             mechanism::AGENT_RATE_BY_SERVICE => {
-                result.push(KeyValue::new(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate));
+                result.push(factory.create_f64(SAMPLING_AGENT_RATE_TAG_KEY, root_info.rate()));
+                if let Some(rate_str) = format_sampling_rate(root_info.rate()) {
+                    result.push(factory.create_string(
+                        SAMPLING_KNUTH_RATE_TAG_KEY,
+                        std::borrow::Cow::Owned(rate_str),
+                    ));
+                }
             }
             mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE => {
-                result.push(KeyValue::new(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate));
+                result.push(factory.create_f64(SAMPLING_RULE_RATE_TAG_KEY, root_info.rate()));
+                if let Some(rate_str) = format_sampling_rate(root_info.rate()) {
+                    result.push(factory.create_string(
+                        SAMPLING_KNUTH_RATE_TAG_KEY,
+                        std::borrow::Cow::Owned(rate_str),
+                    ));
+                }
             }
             _ => {}
         }
 
-        let priority = root_info.priority;
-        result.push(KeyValue::new(
-            SAMPLING_PRIORITY_TAG_KEY,
-            priority.into_i8() as i64,
-        ));
+        let priority = self.priority;
+        result.push(factory.create_i64(SAMPLING_PRIORITY_TAG_KEY, priority.into_i8() as i64));
 
-        result
-    }
-
-    /// Converts the sampling result to a SamplingResult for OpenTelemetry
-    pub fn to_otel_decision(&self) -> SamplingDecision {
-        if self.is_keep {
-            SamplingDecision::RecordAndSample
-        } else {
-            SamplingDecision::RecordOnly
-        }
+        Some(result)
     }
 }
 
@@ -538,49 +340,291 @@ mod tests {
         attr::{ENV_TAG, RESOURCE_TAG},
         pattern,
     };
-    use opentelemetry::{trace::SpanKind, Key, KeyValue, Value};
-    use opentelemetry_sdk::Resource as SdkResource;
-    use opentelemetry_semantic_conventions::{
-        attribute::{
-            DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
-        },
-        resource::SERVICE_NAME,
-        trace::{HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME},
-    };
+    use crate::sampling::{AttributeLike, TraceIdLike, ValueLike};
+    use std::borrow::Cow;
+    use std::collections::HashMap;
 
-    fn create_empty_resource() -> opentelemetry_sdk::Resource {
-        opentelemetry_sdk::Resource::builder_empty().build()
+    // Test-only semantic convention constants
+    const HTTP_REQUEST_METHOD: &str = "http.request.method";
+    const SERVICE_NAME: &str = "service.name";
+
+    // HTTP status code attribute constants (for tests)
+    const HTTP_RESPONSE_STATUS_CODE: &str = "http.response.status_code";
+    const HTTP_STATUS_CODE: &str = "http.status_code";
+
+    // ============================================================================
+    // Test-only data structures
+    // ============================================================================
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TestTraceId {
+        bytes: [u8; 16],
     }
 
-    // Helper function to create an empty resource wrapped in Arc<RwLock> for DatadogSampler
-    fn create_empty_resource_arc() -> Arc<RwLock<opentelemetry_sdk::Resource>> {
-        Arc::new(RwLock::new(
-            opentelemetry_sdk::Resource::builder_empty().build(),
-        ))
+    impl TestTraceId {
+        fn from_bytes(bytes: [u8; 16]) -> Self {
+            Self { bytes }
+        }
     }
 
-    fn create_resource(res: String) -> Arc<RwLock<SdkResource>> {
-        let attributes = vec![
-            KeyValue::new(SERVICE_NAME, res), // String `res` is Into<Value>
-        ];
-        let resource: SdkResource = SdkResource::builder_empty()
-            .with_attributes(attributes)
-            .build();
-        Arc::new(RwLock::new(resource))
+    impl TraceIdLike for TestTraceId {
+        fn to_u128(&self) -> u128 {
+            u128::from_be_bytes(self.bytes)
+        }
     }
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestValue {
+        String(String),
+        I64(i64),
+        F64(f64),
+    }
+
+    impl ValueLike for TestValue {
+        fn extract_float(&self) -> Option<f64> {
+            match self {
+                TestValue::I64(i) => Some(*i as f64),
+                TestValue::F64(f) => Some(*f),
+                _ => None,
+            }
+        }
+
+        fn extract_string(&self) -> Option<Cow<'_, str>> {
+            match self {
+                TestValue::String(s) => Some(Cow::Borrowed(s.as_str())),
+                TestValue::I64(i) => Some(Cow::Owned(i.to_string())),
+                TestValue::F64(f) => Some(Cow::Owned(f.to_string())),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct TestAttribute {
+        key: String,
+        value: TestValue,
+    }
+
+    impl TestAttribute {
+        fn new(key: impl Into<String>, value: impl Into<TestValue>) -> Self {
+            Self {
+                key: key.into(),
+                value: value.into(),
+            }
+        }
+    }
+
+    impl AttributeLike for TestAttribute {
+        type Value = TestValue;
+
+        fn key(&self) -> &str {
+            &self.key
+        }
+
+        fn value(&self) -> &Self::Value {
+            &self.value
+        }
+    }
+
+    impl From<&str> for TestValue {
+        fn from(s: &str) -> Self {
+            TestValue::String(s.to_string())
+        }
+    }
+
+    impl From<String> for TestValue {
+        fn from(s: String) -> Self {
+            TestValue::String(s)
+        }
+    }
+
+    struct TestSpan<'a> {
+        name: &'a str,
+        attributes: &'a [TestAttribute],
+    }
+
+    impl<'a> TestSpan<'a> {
+        fn new(name: &'a str, attributes: &'a [TestAttribute]) -> Self {
+            Self { name, attributes }
+        }
+
+        fn get_operation_name(&self) -> Cow<'_, str> {
+            // Check for HTTP spans - label them all as client spans
+            if self
+                .attributes
+                .iter()
+                .any(|attr| attr.key() == HTTP_REQUEST_METHOD)
+            {
+                return Cow::Borrowed("http.client.request");
+            }
+
+            // Default fallback
+            Cow::Borrowed("internal")
+        }
+    }
+
+    impl<'a> SpanProperties for TestSpan<'a> {
+        type Attribute = TestAttribute;
+
+        fn operation_name(&self) -> Cow<'_, str> {
+            self.get_operation_name()
+        }
+
+        fn service(&self) -> Cow<'_, str> {
+            self.attributes
+                .iter()
+                .find(|attr| attr.key() == SERVICE_NAME)
+                .and_then(|attr| attr.value().extract_string())
+                .unwrap_or(Cow::Borrowed(""))
+        }
+
+        fn env(&self) -> Cow<'_, str> {
+            self.attributes
+                .iter()
+                .find(|attr| attr.key() == "datadog.env" || attr.key() == ENV_TAG)
+                .and_then(|attr| attr.value().extract_string())
+                .unwrap_or(Cow::Borrowed(""))
+        }
+
+        fn resource(&self) -> Cow<'_, str> {
+            self.attributes
+                .iter()
+                .find(|attr| attr.key() == RESOURCE_TAG)
+                .and_then(|attr| attr.value().extract_string())
+                .unwrap_or(Cow::Borrowed(self.name))
+        }
+
+        fn status_code(&self) -> Option<u32> {
+            self.attributes
+                .iter()
+                .find(|attr| {
+                    attr.key() == HTTP_RESPONSE_STATUS_CODE || attr.key() == HTTP_STATUS_CODE
+                })
+                .and_then(|attr| match attr.value() {
+                    TestValue::I64(i) => Some(*i as u32),
+                    _ => None,
+                })
+        }
+
+        fn attributes<'b>(&'b self) -> impl Iterator<Item = &'b Self::Attribute>
+        where
+            Self: 'b,
+        {
+            self.attributes.iter()
+        }
+
+        fn get_alternate_key<'b>(&self, key: &'b str) -> Option<Cow<'b, str>> {
+            match key {
+                HTTP_RESPONSE_STATUS_CODE => Some(Cow::Borrowed(HTTP_STATUS_CODE)),
+                HTTP_REQUEST_METHOD => Some(Cow::Borrowed("http.method")),
+                _ => None,
+            }
+        }
+    }
+
+    struct TestSamplingData<'a> {
+        is_parent_sampled: Option<bool>,
+        trace_id: &'a TestTraceId,
+        name: &'a str,
+        attributes: &'a [TestAttribute],
+    }
+
+    impl<'a> TestSamplingData<'a> {
+        fn new(
+            is_parent_sampled: Option<bool>,
+            trace_id: &'a TestTraceId,
+            name: &'a str,
+            attributes: &'a [TestAttribute],
+        ) -> Self {
+            Self {
+                is_parent_sampled,
+                trace_id,
+                name,
+                attributes,
+            }
+        }
+    }
+
+    impl<'a> SamplingData for TestSamplingData<'a> {
+        type TraceId = TestTraceId;
+        type Properties<'b>
+            = TestSpan<'b>
+        where
+            Self: 'b;
+
+        fn is_parent_sampled(&self) -> Option<bool> {
+            self.is_parent_sampled
+        }
+
+        fn trace_id(&self) -> &Self::TraceId {
+            self.trace_id
+        }
+
+        fn with_span_properties<S, T, F>(&self, s: &S, f: F) -> T
+        where
+            F: for<'b> Fn(&S, &TestSpan<'b>) -> T,
+        {
+            let span = TestSpan::new(self.name, self.attributes);
+            f(s, &span)
+        }
+    }
+
+    struct TestAttributeFactory;
+
+    impl crate::sampling::AttributeFactory for TestAttributeFactory {
+        type Attribute = TestAttribute;
+
+        fn create_i64(&self, key: &'static str, value: i64) -> Self::Attribute {
+            TestAttribute::new(key, TestValue::I64(value))
+        }
+
+        fn create_f64(&self, key: &'static str, value: f64) -> Self::Attribute {
+            TestAttribute::new(key, TestValue::F64(value))
+        }
+
+        fn create_string(&self, key: &'static str, value: Cow<'static, str>) -> Self::Attribute {
+            TestAttribute::new(key, TestValue::String(value.into_owned()))
+        }
+    }
+
+    // ============================================================================
+    // Test helper functions
+    // ============================================================================
 
     // Helper function to create a trace ID
-    fn create_trace_id() -> TraceId {
+    fn create_trace_id() -> TestTraceId {
         let bytes = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        TraceId::from_bytes(bytes)
+        TestTraceId::from_bytes(bytes)
     }
 
-    // Helper function to create attributes for testing
-    fn create_attributes(resource: &'static str, env: &'static str) -> Vec<KeyValue> {
+    // Helper function to create attributes for testing (with resource and env)
+    fn create_attributes(resource: &'static str, env: &'static str) -> Vec<TestAttribute> {
         vec![
-            KeyValue::new(RESOURCE_TAG, resource),
-            KeyValue::new("datadog.env", env),
+            TestAttribute::new(RESOURCE_TAG, resource),
+            TestAttribute::new("datadog.env", env),
         ]
+    }
+
+    // Helper function to create attributes with service
+    fn create_attributes_with_service(
+        service: String,
+        resource: &'static str,
+        env: &'static str,
+    ) -> Vec<TestAttribute> {
+        vec![
+            TestAttribute::new(SERVICE_NAME, service),
+            TestAttribute::new(RESOURCE_TAG, resource),
+            TestAttribute::new("datadog.env", env),
+        ]
+    }
+
+    // Helper function to create SamplingData for testing
+    fn create_sampling_data<'a>(
+        is_parent_sampled: Option<bool>,
+        trace_id: &'a TestTraceId,
+        name: &'a str,
+        attributes: &'a [TestAttribute],
+    ) -> TestSamplingData<'a> {
+        TestSamplingData::new(is_parent_sampled, trace_id, name, attributes)
     }
 
     #[test]
@@ -658,11 +702,8 @@ mod tests {
         // Create a span with some attributes
         let attributes = create_attributes("some-resource", "some-env");
 
-        // Empty resource for testing (unwrapped for the test)
-        let empty_resource = create_empty_resource();
-
         // Both rules should match any span since they have no criteria
-        let span = PreSampledSpan::new("", SpanKind::Client, &attributes, &empty_resource);
+        let span = TestSpan::new("", &attributes);
         assert!(rule.matches(&span));
         assert!(rule_with_empty_strings.matches(&span));
     }
@@ -692,63 +733,54 @@ mod tests {
         let trace_id = create_trace_id();
 
         // Rule with rate 1.0 should always sample
-        assert!(rule_always.sample(trace_id));
+        assert!(rule_always.sample(&trace_id));
 
         // Rule with rate 0.0 should never sample
-        assert!(!rule_never.sample(trace_id));
+        assert!(!rule_never.sample(&trace_id));
     }
 
     #[test]
     fn test_datadog_sampler_creation() {
         // Create a sampler with default config
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
         assert!(sampler.rules.is_empty());
         assert!(sampler.service_samplers.is_empty());
 
         // Create a sampler with rules
         let rule = SamplingRule::new(0.5, None, None, None, None, None);
-        let sampler_with_rules = DatadogSampler::new(vec![rule], 200, create_empty_resource_arc());
+        let sampler_with_rules = DatadogSampler::new(vec![rule], 200);
         assert_eq!(sampler_with_rules.rules.len(), 1);
     }
 
     #[test]
     fn test_service_key_generation() {
-        // Use create_resource to initialize the sampler with a service name in its resource
         let test_service_name = "test-service".to_string();
-        let sampler_resource = create_resource(test_service_name.clone());
-        let sampler = DatadogSampler::new(vec![], 100, sampler_resource);
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Test with service and env
-        // The 'service' in create_attributes is not used for the service part of the key,
-        // but ENV_TAG is still correctly picked up from attributes.
-        let attrs = create_attributes("resource", "production");
-        let res = &sampler.resource.read().unwrap();
-        let span = PreSampledSpan::new("test-span", SpanKind::Internal, attrs.as_slice(), res);
+        let attrs =
+            create_attributes_with_service(test_service_name.clone(), "resource", "production");
+        let span = TestSpan::new("test-span", attrs.as_slice());
         assert_eq!(
             sampler.service_key(&span),
-            // Expect the service name from the sampler's resource
             format!("service:{test_service_name},env:production")
         );
 
         // Test with missing env
-        // The 'service' in these attributes is also not used for the service part of the key.
-        let attrs_no_env = vec![KeyValue::new(RESOURCE_TAG, "resource")];
-        let span = PreSampledSpan::new(
-            "test-span",
-            SpanKind::Internal,
-            attrs_no_env.as_slice(),
-            res,
-        );
+        let attrs_no_env = vec![
+            TestAttribute::new(SERVICE_NAME, test_service_name.clone()),
+            TestAttribute::new(RESOURCE_TAG, "resource"),
+        ];
+        let span = TestSpan::new("test-span", attrs_no_env.as_slice());
         assert_eq!(
             sampler.service_key(&span),
-            // Expect the service name from the sampler's resource and an empty env
             format!("service:{test_service_name},env:")
         );
     }
 
     #[test]
     fn test_update_service_rates() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Update with service rates
         let mut rates = HashMap::new();
@@ -812,19 +844,16 @@ mod tests {
             Some("default".to_string()), // Lowest priority
         );
 
-        // Sampler is mutable to allow resource updates
-        let mut sampler = DatadogSampler::new(
-            vec![rule1.clone(), rule2.clone(), rule3.clone()],
-            100,
-            create_empty_resource_arc(), // Initial resource, will be updated before each check
-        );
+        let sampler = DatadogSampler::new(vec![rule1.clone(), rule2.clone(), rule3.clone()], 100);
 
         // Test with a specific service that should match the first rule (rule1)
         {
-            sampler.resource = create_resource("service1".to_string());
-            let attrs1 = create_attributes("resource_val_for_attr1", "prod");
-            let res = sampler.resource.read().unwrap();
-            let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs1.as_slice(), &res);
+            let attrs1 = create_attributes_with_service(
+                "service1".to_string(),
+                "resource_val_for_attr1",
+                "prod",
+            );
+            let span = TestSpan::new("test-span", attrs1.as_slice());
             let matching_rule_for_attrs1 = sampler.find_matching_rule(&span);
             assert!(
                 matching_rule_for_attrs1.is_some(),
@@ -837,10 +866,12 @@ mod tests {
 
         // Test with a specific service that should match the second rule (rule2)
         {
-            sampler.resource = create_resource("service2".to_string());
-            let attrs2 = create_attributes("resource_val_for_attr2", "prod");
-            let res = sampler.resource.read().unwrap();
-            let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs2.as_slice(), &res);
+            let attrs2 = create_attributes_with_service(
+                "service2".to_string(),
+                "resource_val_for_attr2",
+                "prod",
+            );
+            let span = TestSpan::new("test-span", attrs2.as_slice());
             let matching_rule_for_attrs2 = sampler.find_matching_rule(&span);
             assert!(
                 matching_rule_for_attrs2.is_some(),
@@ -853,10 +884,12 @@ mod tests {
 
         // Test with a service that matches the wildcard rule (rule3)
         {
-            sampler.resource = create_resource("service3".to_string());
-            let attrs3 = create_attributes("resource_val_for_attr3", "prod");
-            let res = sampler.resource.read().unwrap();
-            let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs3.as_slice(), &res);
+            let attrs3 = create_attributes_with_service(
+                "service3".to_string(),
+                "resource_val_for_attr3",
+                "prod",
+            );
+            let span = TestSpan::new("test-span", attrs3.as_slice());
             let matching_rule_for_attrs3 = sampler.find_matching_rule(&span);
             assert!(
                 matching_rule_for_attrs3.is_some(),
@@ -869,10 +902,12 @@ mod tests {
 
         // Test with a service that doesn't match any rule's service pattern
         {
-            sampler.resource = create_resource("other_sampler_service".to_string());
-            let attrs4 = create_attributes("resource_val_for_attr4", "prod");
-            let res = sampler.resource.read().unwrap();
-            let span = PreSampledSpan::new("test-span", SpanKind::Client, attrs4.as_slice(), &res);
+            let attrs4 = create_attributes_with_service(
+                "other_sampler_service".to_string(),
+                "resource_val_for_attr4",
+                "prod",
+            );
+            let span = TestSpan::new("test-span", attrs4.as_slice());
             let matching_rule_for_attrs4 = sampler.find_matching_rule(&span);
             assert!(
                 matching_rule_for_attrs4.is_none(),
@@ -883,7 +918,7 @@ mod tests {
 
     #[test]
     fn test_get_sampling_mechanism() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Create rules with different provenances
         let rule_customer =
@@ -921,30 +956,32 @@ mod tests {
         let is_sampled = true;
         let mechanism = mechanism::LOCAL_USER_TRACE_SAMPLING_RULE;
         let sampling_result = DdSamplingResult {
-            is_keep: true,
+            priority: mechanism.to_priority(is_sampled),
             trace_root_info: Some(TraceRootSamplingInfo {
-                priority: mechanism.to_priority(is_sampled),
                 mechanism,
                 rate: 0.5,
                 rl_effective_rate: None,
             }),
         };
 
-        let attrs = sampling_result.to_dd_sampling_tags();
+        let attrs = sampling_result
+            .to_dd_sampling_tags(&TestAttributeFactory)
+            .unwrap_or_default();
 
-        // Verify the number of attributes
-        assert_eq!(attrs.len(), 3);
+        // Verify the number of attributes (decision_maker + priority + rule_rate + ksr)
+        assert_eq!(attrs.len(), 4);
 
         // Check individual attributes
         let mut found_decision_maker = false;
         let mut found_priority = false;
         let mut found_rule_rate = false;
+        let mut found_ksr = false;
 
         for attr in &attrs {
-            match attr.key.as_str() {
+            match attr.key() {
                 SAMPLING_DECISION_MAKER_TAG_KEY => {
-                    let value_str = match &attr.value {
-                        opentelemetry::Value::String(s) => s.to_string(),
+                    let value_str = match attr.value() {
+                        TestValue::String(s) => s.to_string(),
                         _ => panic!("Expected string value for decision maker tag"),
                     };
                     assert_eq!(value_str, mechanism.to_cow());
@@ -954,20 +991,28 @@ mod tests {
                     // For LocalUserTraceSamplingRule with KEEP, it should be USER_KEEP
                     let expected_priority = mechanism.to_priority(true).into_i8() as i64;
 
-                    let value_int = match attr.value {
-                        opentelemetry::Value::I64(i) => i,
+                    let value_int = match attr.value() {
+                        TestValue::I64(i) => *i,
                         _ => panic!("Expected integer value for priority tag"),
                     };
                     assert_eq!(value_int, expected_priority);
                     found_priority = true;
                 }
                 SAMPLING_RULE_RATE_TAG_KEY => {
-                    let value_float = match attr.value {
-                        opentelemetry::Value::F64(f) => f,
+                    let value_float = match attr.value() {
+                        TestValue::F64(f) => *f,
                         _ => panic!("Expected float value for rule rate tag"),
                     };
                     assert_eq!(value_float, sample_rate);
                     found_rule_rate = true;
+                }
+                SAMPLING_KNUTH_RATE_TAG_KEY => {
+                    let value_str = match attr.value() {
+                        TestValue::String(s) => s.to_string(),
+                        _ => panic!("Expected string value for ksr tag"),
+                    };
+                    assert_eq!(value_str, "0.5");
+                    found_ksr = true;
                 }
                 _ => {}
             }
@@ -976,34 +1021,36 @@ mod tests {
         assert!(found_decision_maker, "Missing decision maker tag");
         assert!(found_priority, "Missing priority tag");
         assert!(found_rule_rate, "Missing rule rate tag");
+        assert!(found_ksr, "Missing knuth sampling rate tag");
 
         // Test with rate limiting
-        let rate_limit = 100;
+        let rate_limit = 0.5;
         let is_sampled = false;
         let mechanism = mechanism::LOCAL_USER_TRACE_SAMPLING_RULE;
         let sampling_result = DdSamplingResult {
-            is_keep: false,
+            priority: mechanism.to_priority(is_sampled),
             trace_root_info: Some(TraceRootSamplingInfo {
-                priority: mechanism.to_priority(is_sampled),
                 mechanism,
                 rate: 0.5,
                 rl_effective_rate: Some(rate_limit),
             }),
         };
-        let attrs_with_limit = sampling_result.to_dd_sampling_tags();
+        let attrs_with_limit = sampling_result
+            .to_dd_sampling_tags(&TestAttributeFactory)
+            .unwrap_or_default();
 
         // With rate limiting, there should be one more attribute
-        assert_eq!(attrs_with_limit.len(), 4);
+        assert_eq!(attrs_with_limit.len(), 5);
 
         // Check for rate limit attribute
         let mut found_limit = false;
         for attr in &attrs_with_limit {
-            if attr.key.as_str() == RL_EFFECTIVE_RATE {
-                let value_int = match attr.value {
-                    opentelemetry::Value::I64(i) => i,
-                    _ => panic!("Expected integer value for rate limit tag"),
+            if attr.key() == RL_EFFECTIVE_RATE {
+                let value_float = match attr.value() {
+                    TestValue::F64(f) => *f,
+                    _ => panic!("Expected float value for rate limit tag"),
                 };
-                assert_eq!(value_int, rate_limit as i64);
+                assert_eq!(value_float, rate_limit);
                 found_limit = true;
                 break;
             }
@@ -1017,40 +1064,57 @@ mod tests {
         let is_sampled = false;
         let mechanism = mechanism::AGENT_RATE_BY_SERVICE;
         let sampling_result = DdSamplingResult {
-            is_keep: false,
+            priority: mechanism.to_priority(is_sampled),
             trace_root_info: Some(TraceRootSamplingInfo {
-                priority: mechanism.to_priority(is_sampled),
                 mechanism,
                 rate: agent_rate,
                 rl_effective_rate: None,
             }),
         };
 
-        let agent_attrs = sampling_result.to_dd_sampling_tags();
+        let agent_attrs = sampling_result
+            .to_dd_sampling_tags(&TestAttributeFactory)
+            .unwrap_or_default();
 
-        // Verify the number of attributes (should be 3)
-        assert_eq!(agent_attrs.len(), 3);
+        // Verify the number of attributes (should be 4: decision_maker + priority +
+        // agent_rate + ksr)
+        assert_eq!(agent_attrs.len(), 4);
 
-        // Check for agent rate tag specifically
+        // Check for agent rate tag and ksr tag
         let mut found_agent_rate = false;
+        let mut found_ksr = false;
         for attr in &agent_attrs {
-            if attr.key.as_str() == SAMPLING_AGENT_RATE_TAG_KEY {
-                let value_float = match attr.value {
-                    opentelemetry::Value::F64(f) => f,
-                    _ => panic!("Expected float value for agent rate tag"),
-                };
-                assert_eq!(value_float, agent_rate);
-                found_agent_rate = true;
-                break;
+            match attr.key() {
+                SAMPLING_AGENT_RATE_TAG_KEY => {
+                    let value_float = match attr.value() {
+                        TestValue::F64(f) => *f,
+                        _ => panic!("Expected float value for agent rate tag"),
+                    };
+                    assert_eq!(value_float, agent_rate);
+                    found_agent_rate = true;
+                }
+                SAMPLING_KNUTH_RATE_TAG_KEY => {
+                    let value_str = match attr.value() {
+                        TestValue::String(s) => s.to_string(),
+                        _ => panic!("Expected string value for ksr tag"),
+                    };
+                    assert_eq!(value_str, "0.75");
+                    found_ksr = true;
+                }
+                _ => {}
             }
         }
 
         assert!(found_agent_rate, "Missing agent rate tag");
+        assert!(
+            found_ksr,
+            "Missing knuth sampling rate tag for agent mechanism"
+        );
 
         // Also check that the SAMPLING_RULE_RATE_TAG_KEY is NOT present for agent mechanism
         for attr in &agent_attrs {
             assert_ne!(
-                attr.key.as_str(),
+                attr.key(),
                 SAMPLING_RULE_RATE_TAG_KEY,
                 "Rule rate tag should not be present for agent mechanism"
             );
@@ -1058,44 +1122,69 @@ mod tests {
     }
 
     #[test]
+    fn test_format_sampling_rate() {
+        // Exact values
+        assert_eq!(format_sampling_rate(1.0), Some("1".to_string()));
+        assert_eq!(format_sampling_rate(0.5), Some("0.5".to_string()));
+        assert_eq!(format_sampling_rate(0.1), Some("0.1".to_string()));
+        assert_eq!(format_sampling_rate(0.0), Some("0".to_string()));
+
+        // Trailing zeros should be stripped
+        assert_eq!(format_sampling_rate(0.100000), Some("0.1".to_string()));
+        assert_eq!(format_sampling_rate(0.500000), Some("0.5".to_string()));
+
+        // Truncation to 6 significant digits
+        assert_eq!(
+            format_sampling_rate(0.7654321),
+            Some("0.765432".to_string())
+        );
+        assert_eq!(
+            format_sampling_rate(0.123456789),
+            Some("0.123457".to_string())
+        );
+
+        // Small values
+        assert_eq!(format_sampling_rate(0.001), Some("0.001".to_string()));
+
+        // Boundary values
+        assert_eq!(format_sampling_rate(0.75), Some("0.75".to_string()));
+        assert_eq!(format_sampling_rate(0.999999), Some("0.999999".to_string()));
+
+        // Invalid rates
+        assert_eq!(format_sampling_rate(-0.1), None);
+        assert_eq!(format_sampling_rate(1.1), None);
+        assert_eq!(format_sampling_rate(f64::NAN), None);
+        assert_eq!(format_sampling_rate(f64::INFINITY), None);
+        assert_eq!(format_sampling_rate(f64::NEG_INFINITY), None);
+    }
+
+    #[test]
     fn test_should_sample_parent_context() {
-        let sampler = DatadogSampler::new(vec![], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Create empty slices for attributes and links
-        let empty_attrs: &[KeyValue] = &[];
+        let empty_attrs: &[TestAttribute] = &[];
+        let trace_id = create_trace_id();
 
         // Test with sampled parent context
-        // let parent_sampled = create_parent_context(true);
-        let result_sampled = sampler.sample(
-            Some(true),
-            create_trace_id(),
-            "span",
-            &SpanKind::Client,
-            empty_attrs,
-        );
+        let data_sampled = create_sampling_data(Some(true), &trace_id, "span", empty_attrs);
+        let result_sampled = sampler.sample(&data_sampled);
 
         // Should inherit the sampling decision from parent
-        assert_eq!(
-            result_sampled.to_otel_decision(),
-            SamplingDecision::RecordAndSample
-        );
-        assert!(result_sampled.to_dd_sampling_tags().is_empty());
+        assert!(result_sampled.get_priority().is_keep());
+        assert!(result_sampled
+            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .is_none());
 
         // Test with non-sampled parent context
-        let result_not_sampled = sampler.sample(
-            Some(false),
-            create_trace_id(),
-            "span",
-            &SpanKind::Client,
-            empty_attrs,
-        );
+        let data_not_sampled = create_sampling_data(Some(false), &trace_id, "span", empty_attrs);
+        let result_not_sampled = sampler.sample(&data_not_sampled);
 
         // Should inherit the sampling decision from parent
-        assert_eq!(
-            result_not_sampled.to_otel_decision(),
-            SamplingDecision::RecordOnly
-        );
-        assert!(result_not_sampled.to_dd_sampling_tags().is_empty());
+        assert!(!result_not_sampled.get_priority().is_keep());
+        assert!(result_not_sampled
+            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .is_none());
     }
 
     #[test]
@@ -1110,46 +1199,38 @@ mod tests {
             None,
         );
 
-        let sampler = DatadogSampler::new(vec![rule], 100, create_empty_resource_arc());
+        let sampler = DatadogSampler::new(vec![rule], 100);
+
+        let trace_id = create_trace_id();
 
         // Test with matching attributes
         let attrs = create_attributes("resource", "prod");
-        let result = sampler.sample(
-            None,
-            create_trace_id(),
-            "span",
-            &SpanKind::Client,
-            attrs.as_slice(),
-        );
+        let data = create_sampling_data(None, &trace_id, "span", attrs.as_slice());
+        let result = sampler.sample(&data);
 
         // Should sample and add attributes
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-        assert!(!result.to_dd_sampling_tags().is_empty());
+        assert!(result.get_priority().is_keep());
+        assert!(result
+            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .is_some());
 
         // Test with non-matching attributes
         let attrs_no_match = create_attributes("other-resource", "prod");
-        let result_no_match = sampler.sample(
-            None,
-            create_trace_id(),
-            "span",
-            &SpanKind::Client,
-            attrs_no_match.as_slice(),
-        );
+        let data_no_match =
+            create_sampling_data(None, &trace_id, "span", attrs_no_match.as_slice());
+        let result_no_match = sampler.sample(&data_no_match);
 
         // Should still sample (default behavior when no rules match) and add attributes
-        assert_eq!(
-            result_no_match.to_otel_decision(),
-            SamplingDecision::RecordAndSample
-        );
-        assert!(!result_no_match.to_dd_sampling_tags().is_empty());
+        assert!(result_no_match.get_priority().is_keep());
+        assert!(result_no_match
+            .to_dd_sampling_tags(&crate::sampling::OtelAttributeFactory)
+            .is_some());
     }
 
     #[test]
     fn test_should_sample_with_service_rates() {
-        // Initialize sampler with a default service, e.g., "test-service"
-        // The sampler's own service name will be used for the 'service:' part of the service_key
-        let mut sampler =
-            DatadogSampler::new(vec![], 100, create_resource("test-service".to_string()));
+        // Initialize sampler
+        let sampler = DatadogSampler::new(vec![], 100);
 
         // Add service rates for different service+env combinations
         let mut rates = HashMap::new();
@@ -1158,53 +1239,59 @@ mod tests {
 
         sampler.update_service_rates(rates);
 
+        let trace_id = create_trace_id();
+
         // Test with attributes that should lead to "service:test-service,env:prod" key
-        // Sampler's resource is already for "test-service"
-        let attrs_sample = create_attributes("any_resource_name_matching_env", "prod");
-        let result_sample = sampler.sample(
+        let attrs_sample = create_attributes_with_service(
+            "test-service".to_string(),
+            "any_resource_name_matching_env",
+            "prod",
+        );
+        let data_sample = create_sampling_data(
             None,
-            create_trace_id(),
+            &trace_id,
             "span_for_test_service",
-            &SpanKind::Client,
             attrs_sample.as_slice(),
         );
+        let result_sample = sampler.sample(&data_sample);
         // Expect RecordAndSample because service_key will be "service:test-service,env:prod" ->
         // rate 1.0
-        assert_eq!(
-            result_sample.to_otel_decision(),
-            SamplingDecision::RecordAndSample,
+        assert!(
+            result_sample.get_priority().is_keep(),
             "Span for test-service/prod should be sampled"
         );
 
         // Test with attributes that should lead to "service:other-service,env:prod" key
-        // Update sampler's resource to be "other-service"
-        sampler.resource = create_resource("other-service".to_string());
-        let attrs_no_sample = create_attributes("any_resource_name_matching_env", "prod");
-        let result_no_sample = sampler.sample(
+        let attrs_no_sample = create_attributes_with_service(
+            "other-service".to_string(),
+            "any_resource_name_matching_env",
+            "prod",
+        );
+        let data_no_sample = create_sampling_data(
             None,
-            create_trace_id(),
+            &trace_id,
             "span_for_other_service",
-            &SpanKind::Client,
             attrs_no_sample.as_slice(),
         );
+        let result_no_sample = sampler.sample(&data_no_sample);
         // Expect Drop because service_key will be "service:other-service,env:prod" -> rate 0.0
-        assert_eq!(
-            result_no_sample.to_otel_decision(),
-            SamplingDecision::RecordOnly,
+        assert!(
+            !result_no_sample.get_priority().is_keep(),
             "Span for other-service/prod should be dropped"
         );
     }
 
     #[test]
     fn test_sampling_rule_matches_float_attributes() {
-        use opentelemetry::Value;
-
         // Helper to create attributes with a float value
-        fn create_attributes_with_float(tag_key: &'static str, float_value: f64) -> Vec<KeyValue> {
+        fn create_attributes_with_float(
+            tag_key: &'static str,
+            float_value: f64,
+        ) -> Vec<TestAttribute> {
             vec![
-                KeyValue::new(RESOURCE_TAG, "resource"),
-                KeyValue::new(ENV_TAG, "prod"),
-                KeyValue::new(tag_key, Value::F64(float_value)),
+                TestAttribute::new(RESOURCE_TAG, "resource"),
+                TestAttribute::new(ENV_TAG, "prod"),
+                TestAttribute::new(tag_key, TestValue::F64(float_value)),
             ]
         }
 
@@ -1220,12 +1307,8 @@ mod tests {
 
         // Should match integer float
         let integer_float_attrs = create_attributes_with_float("float_tag", 42.0);
-        assert!(rule_integer.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            integer_float_attrs.as_slice(),
-            &create_empty_resource()
-        )));
+        let span = TestSpan::new("test-span", integer_float_attrs.as_slice());
+        assert!(rule_integer.matches(&span));
 
         // Test case 2: Rule with wildcard pattern and non-integer float
         let rule_wildcard = SamplingRule::new(
@@ -1239,12 +1322,8 @@ mod tests {
 
         // Should match non-integer float with wildcard pattern
         let decimal_float_attrs = create_attributes_with_float("float_tag", 42.5);
-        assert!(rule_wildcard.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            decimal_float_attrs.as_slice(),
-            &create_empty_resource()
-        )));
+        let span = TestSpan::new("test-span", decimal_float_attrs.as_slice());
+        assert!(rule_wildcard.matches(&span));
 
         // Test case 3: Rule with specific pattern and non-integer float
         // With our simplified logic, non-integer floats will never match non-wildcard patterns
@@ -1262,12 +1341,8 @@ mod tests {
 
         // Should NOT match the exact decimal value because non-integer floats only match wildcards
         let decimal_float_attrs = create_attributes_with_float("float_tag", 42.5);
-        assert!(!rule_specific.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            decimal_float_attrs.as_slice(),
-            &create_empty_resource()
-        )));
+        let span = TestSpan::new("test-span", decimal_float_attrs.as_slice());
+        assert!(!rule_specific.matches(&span));
         // Test case 4: Pattern with partial wildcard '*' for suffix
         let rule_prefix = SamplingRule::new(
             0.5,
@@ -1283,434 +1358,37 @@ mod tests {
 
         // Should NOT match decimal values as we don't do partial pattern matching for non-integer
         // floats
-        assert!(!rule_prefix.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            decimal_float_attrs.as_slice(),
-            &create_empty_resource()
-        )));
+        let span = TestSpan::new("test-span", decimal_float_attrs.as_slice());
+        assert!(!rule_prefix.matches(&span));
     }
 
     #[test]
-    fn test_otel_to_datadog_attribute_mapping() {
-        // Test with a rule that matches against a Datadog attribute name
-        let rule = SamplingRule::new(
+    fn test_operation_name() {
+        // Test that the sampler correctly matches rules based on operation names
+        // Operation name generation itself is tested in otel_mappings unit tests
+
+        let http_rule = SamplingRule::new(
             1.0,
             None,
+            Some("http.*.request".to_string()),
             None,
             None,
-            Some(HashMap::from([(
-                "http.response.status_code".to_string(),
-                "5*".to_string(),
-            )])),
-            None,
+            Some("default".to_string()),
         );
 
-        // Create attributes with OpenTelemetry naming convention
-        let otel_attrs = vec![KeyValue::new("http.response.status_code", 500)];
+        let sampler = DatadogSampler::new(vec![http_rule], 100);
 
-        // The rule should match because both use the same OpenTelemetry attribute name
-        assert!(rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            otel_attrs.as_slice(),
-            &create_empty_resource()
-        )));
-
-        // Attributes that don't match the value pattern shouldn't match
-        let non_matching_attrs = vec![KeyValue::new("http.response.status_code", 200)];
-        assert!(!rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            non_matching_attrs.as_slice(),
-            &create_empty_resource()
-        )));
-
-        // Attributes that have no mapping to the rule tag shouldn't match
-        let unrelated_attrs = vec![KeyValue::new("unrelated.attribute", "value")];
-        assert!(!rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            unrelated_attrs.as_slice(),
-            &create_empty_resource()
-        )));
-    }
-
-    #[test]
-    fn test_multiple_otel_attribute_mappings() {
-        // Test with a rule that has multiple tag criteria
-        let mut tags = HashMap::new();
-        tags.insert("http.status_code".to_string(), "5*".to_string());
-        tags.insert("http.method".to_string(), "POST".to_string());
-        tags.insert("http.url".to_string(), "*api*".to_string());
-
-        let rule = SamplingRule::new(1.0, None, None, None, Some(tags), None);
-
-        // Create attributes with mixed OpenTelemetry and Datadog naming
-        let mixed_attrs = vec![
-            // OTel attribute that maps to http.status_code
-            KeyValue::new("http.response.status_code", 503),
-            // OTel attribute that maps to http.method
-            KeyValue::new("http.request.method", "POST"),
-            // OTel attribute that maps to http.url
-            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
-        ];
-
-        // The rule should match because all three criteria are satisfied through mapping
-        assert!(rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &mixed_attrs,
-            &create_empty_resource()
-        ),));
-
-        // If any criteria is not met, the rule shouldn't match
-        let missing_method = vec![
-            KeyValue::new("http.response.status_code", 503),
-            // Missing http.method/http.request.method
-            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
-        ];
-
-        assert!(!rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &missing_method,
-            &create_empty_resource()
-        ),));
-
-        // Wrong value should also not match
-        let wrong_method = vec![
-            KeyValue::new("http.response.status_code", 503),
-            KeyValue::new("http.request.method", "GET"), // Not POST
-            KeyValue::new("url.full", "https://example.com/api/v1/resource"),
-        ];
-
-        assert!(!rule.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &wrong_method,
-            &create_empty_resource()
-        ),));
-    }
-
-    #[test]
-    fn test_direct_and_mapped_mixed_attributes() {
-        // Constants for key names to improve readability and ensure consistency
-        let dd_status_key_str = HTTP_RESPONSE_STATUS_CODE;
-        let otel_response_status_key_str = HTTP_RESPONSE_STATUS_CODE;
-        let custom_tag_key = "custom.tag";
-        let custom_tag_value = "value";
-
-        let empty_resource = create_empty_resource();
-        let span_kind_client = SpanKind::Client;
-
-        // Test with both direct matches and mapped attributes
-        let mut tags_rule1 = HashMap::new();
-        tags_rule1.insert(dd_status_key_str.to_string(), "5*".to_string());
-        tags_rule1.insert(custom_tag_key.to_string(), custom_tag_value.to_string());
-
-        let rule1 = SamplingRule::new(1.0, None, None, None, Some(tags_rule1), None);
-
-        // Case 1: OTel attribute that maps to http.status_code (503 matches "5*") + Direct
-        // custom.tag match
-        let mixed_attrs_match = vec![
-            KeyValue::new(otel_response_status_key_str, 503),
-            KeyValue::new(custom_tag_key, custom_tag_value),
-        ];
-        assert!(rule1.matches(&PreSampledSpan::new(
-            "test-span",
-            span_kind_client,
-            &mixed_attrs_match,
-            &empty_resource
-        )), "Rule with dd_status_key (5*) and custom.tag should match span with otel_response_status_key (503) and custom.tag");
-
-        // Case 2: Datadog convention for status code (503 matches "5*") + Direct custom.tag match
-        let dd_attrs_match = vec![
-            KeyValue::new(dd_status_key_str, 503),
-            KeyValue::new(custom_tag_key, custom_tag_value),
-        ];
-        assert!(rule1.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &dd_attrs_match,
-            &empty_resource
-        )), "Rule with dd_status_key (5*) and custom.tag should match span with dd_status_key (503) and custom.tag");
-
-        // Case 3: Missing the custom tag should fail (status code would match)
-        let missing_custom_tag_attrs = vec![KeyValue::new(otel_response_status_key_str, 503)];
-        assert!(
-            !rule1.matches(&PreSampledSpan::new(
-                "test-span",
-                SpanKind::Client,
-                &missing_custom_tag_attrs,
-                &empty_resource
-            )),
-            "Rule with dd_status_key (5*) and custom.tag should NOT match span missing custom.tag"
-        );
-
-        // Case 4: OTel status code 200 (does NOT match "5*") + custom.tag present
-        let non_matching_otel_status_attrs = vec![
-            KeyValue::new(otel_response_status_key_str, 200),
-            KeyValue::new(custom_tag_key, custom_tag_value),
-        ];
-        assert!(!rule1.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &non_matching_otel_status_attrs,
-            &empty_resource
-        )), "Rule with dd_status_key (5*) and custom.tag should NOT match span with non-matching otel_response_status_key (200)");
-
-        // Case 5: No recognizable status code + custom.tag present
-        let no_status_code_attrs = vec![
-            KeyValue::new("another.tag", "irrelevant"),
-            KeyValue::new(custom_tag_key, custom_tag_value),
-        ];
-        assert!(!rule1.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &no_status_code_attrs,
-            &empty_resource
-        )), "Rule with dd_status_key (5*) and custom.tag should NOT match span with no status code attribute");
-
-        // Case 6: Rule uses OTel key http.response.status_code directly, span has matching OTel
-        // key.
-        let mut tags_rule2 = HashMap::new();
-        tags_rule2.insert(otel_response_status_key_str.to_string(), "200".to_string());
-        tags_rule2.insert(custom_tag_key.to_string(), custom_tag_value.to_string());
-        let rule2 = SamplingRule::new(1.0, None, None, None, Some(tags_rule2), None);
-
-        let otel_key_rule_match_attrs = vec![
-            KeyValue::new(otel_response_status_key_str, 200),
-            KeyValue::new(custom_tag_key, custom_tag_value),
-        ];
-        assert!(rule2.matches(&PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            &otel_key_rule_match_attrs,
-            &empty_resource
-        )), "Rule with otel_response_status_key (200) and custom.tag should match span with otel_response_status_key (200) and custom.tag");
-    }
-
-    #[test]
-    fn test_operation_name_integration() {
-        // Create rules that match different operation name patterns
-        let http_rule = SamplingRule::new(
-            1.0,                                // 100% sample rate
-            None,                               // no service matcher
-            Some("http.*.request".to_string()), // matches both client and server HTTP requests
-            None,                               // no resource matcher
-            None,                               // no tag matchers
-            Some("default".to_string()),        // rule name - default provenance
-        );
-
-        let db_rule = SamplingRule::new(
-            1.0,                                  // 100% sample rate
-            None,                                 // no service matcher
-            Some("postgresql.query".to_string()), // matches database queries
-            None,                                 // no resource matcher
-            None,                                 // no tag matchers
-            Some("default".to_string()),          // rule name - default provenance
-        );
-
-        let messaging_rule = SamplingRule::new(
-            1.0,                               // 100% sample rate
-            None,                              // no service matcher
-            Some("kafka.process".to_string()), // matches Kafka messaging operations
-            None,                              // no resource matcher
-            None,                              // no tag matchers
-            Some("default".to_string()),       // rule name - default provenance
-        );
-
-        // Create a sampler with these rules
-        let sampler = DatadogSampler::new(
-            vec![http_rule, db_rule, messaging_rule],
-            100,
-            create_empty_resource_arc(),
-        );
-
-        // Create a trace ID for testing
         let trace_id = create_trace_id();
 
-        // Test cases for different span kinds and attributes
+        // HTTP client request should match http_rule (operation name: http.client.request)
+        let http_client_attrs = vec![TestAttribute::new(HTTP_REQUEST_METHOD, "GET")];
+        let data = create_sampling_data(None, &trace_id, "test-span", &http_client_attrs);
+        assert!(sampler.sample(&data).get_priority().is_keep());
 
-        // 1. HTTP client request
-        let http_client_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_REQUEST_METHOD),
-            Value::String("GET".into()),
-        )];
-
-        let empty_resource: SdkResource = create_empty_resource();
-        // Print the operation name that will be generated
-        let http_client_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Client,
-            &http_client_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            http_client_op_name, "http.client.request",
-            "HTTP client operation name should be correct"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Client,
-            &http_client_attrs,
-        );
-
-        // Should be sampled due to matching the http_rule
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-
-        // 2. HTTP server request
-        let http_server_attrs = vec![KeyValue::new(
-            Key::from_static_str(HTTP_REQUEST_METHOD),
-            Value::String("POST".into()),
-        )];
-
-        // Print the operation name that will be generated
-        let http_server_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Server,
-            &http_server_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            http_server_op_name, "http.server.request",
-            "HTTP server operation name should be correct"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Server,
-            &http_server_attrs,
-        );
-
-        // Should be sampled due to matching the http_rule
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-
-        // 3. Database query
-        let db_attrs = vec![KeyValue::new(
-            Key::from_static_str(DB_SYSTEM_NAME),
-            Value::String("postgresql".into()),
-        )];
-
-        // Print the operation name that will be generated
-        let db_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Client,
-            &db_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            db_op_name, "postgresql.query",
-            "Database operation name should be correct"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Client, // DB queries use client span kind
-            &db_attrs,
-        );
-
-        // Should be sampled due to matching the db_rule
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-
-        // 4. Messaging operation
-        let messaging_attrs = vec![
-            KeyValue::new(
-                Key::from_static_str(MESSAGING_SYSTEM),
-                Value::String("kafka".into()),
-            ),
-            KeyValue::new(
-                Key::from_static_str(MESSAGING_OPERATION_TYPE),
-                Value::String("process".into()),
-            ),
-        ];
-
-        // Print the operation name that will be generated
-        let messaging_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Consumer,
-            &messaging_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            messaging_op_name, "kafka.process",
-            "Messaging operation name should be correct"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Consumer, // Messaging uses consumer span kind
-            &messaging_attrs,
-        );
-
-        // Should be sampled due to matching the messaging_rule
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-
-        // 5. Generic internal span (should not match any rules)
-        let internal_attrs = vec![KeyValue::new("custom.tag", "value")];
-
-        // Print the operation name that will be generated
-        let internal_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Internal,
-            &internal_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            internal_op_name, "internal",
-            "Internal operation name should be the span kind"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Internal,
-            &internal_attrs,
-        );
-
-        // Should still be sampled (default behavior when no rules match)
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
-
-        // 6. Server with protocol but no HTTP method
-        let server_protocol_attrs = vec![KeyValue::new(
-            Key::from_static_str(NETWORK_PROTOCOL_NAME),
-            Value::String("http".into()),
-        )];
-
-        // Print the operation name that will be generated
-        let server_protocol_op_name = get_otel_operation_name_v2(&PreSampledSpan::new(
-            "",
-            SpanKind::Server,
-            &server_protocol_attrs,
-            &empty_resource,
-        ));
-        assert_eq!(
-            server_protocol_op_name, "http.server.request",
-            "Server with protocol operation name should use protocol"
-        );
-
-        let result = sampler.sample(
-            None,
-            trace_id,
-            "test-span",
-            &SpanKind::Server,
-            &server_protocol_attrs,
-        );
-
-        // Should not match our http rule since operation name would be "http.server.request"
-        // But should still be sampled (default behavior)
-        assert_eq!(result.to_otel_decision(), SamplingDecision::RecordAndSample);
+        // Span that doesn't match the rule should still be sampled (default behavior)
+        let internal_attrs = vec![TestAttribute::new("custom.tag", "value")];
+        let data = create_sampling_data(None, &trace_id, "test-span", &internal_attrs);
+        assert!(sampler.sample(&data).get_priority().is_keep());
     }
 
     #[test]
@@ -1725,14 +1403,7 @@ mod tests {
             Some("default".to_string()),
         );
 
-        // Create a resource with a service name that will match our test rule
-        let test_resource = Arc::new(RwLock::new(
-            opentelemetry_sdk::Resource::builder_empty()
-                .with_attributes(vec![KeyValue::new(SERVICE_NAME, "web-frontend")])
-                .build(),
-        ));
-
-        let sampler = DatadogSampler::new(vec![initial_rule], 100, test_resource);
+        let sampler = DatadogSampler::new(vec![initial_rule], 100);
 
         // Verify initial state
         assert_eq!(sampler.rules.len(), 1);
@@ -1768,17 +1439,13 @@ mod tests {
 
         // Test that the new rules work by finding a matching rule
         // Create attributes that will generate an operation name matching "http.*"
+        // and service matching "web-*"
         let attrs = vec![
-            KeyValue::new(HTTP_REQUEST_METHOD, "GET"), /* This will make operation name
-                                                        * "http.client.request" */
+            TestAttribute::new(SERVICE_NAME, "web-frontend"),
+            TestAttribute::new(HTTP_REQUEST_METHOD, "GET"), /* This will make operation name
+                                                             * "http.client.request" */
         ];
-        let resource_guard = sampler.resource.read().unwrap();
-        let span = PreSampledSpan::new(
-            "test-span",
-            SpanKind::Client,
-            attrs.as_slice(),
-            &resource_guard,
-        );
+        let span = TestSpan::new("test-span", attrs.as_slice());
 
         let matching_rule = sampler.find_matching_rule(&span);
         assert!(matching_rule.is_some(), "Expected to find a matching rule for service 'web-frontend' and name 'http.client.request'");

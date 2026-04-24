@@ -38,7 +38,25 @@ impl SamplingPriority {
         self.value
     }
 
-    pub(crate) fn is_keep(&self) -> bool {
+    /// Returns whether this sampling priority indicates the trace should be kept.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the priority value is positive (indicating the trace should be kept),
+    /// `false` otherwise (indicating the trace should be dropped).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use datadog_opentelemetry::core_pub_hack::sampling::priority;
+    ///
+    /// assert!(priority::AUTO_KEEP.is_keep());
+    /// assert!(priority::USER_KEEP.is_keep());
+    /// assert!(!priority::AUTO_REJECT.is_keep());
+    /// assert!(!priority::USER_REJECT.is_keep());
+    /// ```
+    #[inline(always)]
+    pub fn is_keep(&self) -> bool {
         self.value > 0
     }
 }
@@ -110,9 +128,9 @@ impl SamplingMechanism {
             | mechanism::LOCAL_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_USER_TRACE_SAMPLING_RULE
             | mechanism::REMOTE_DYNAMIC_TRACE_SAMPLING_RULE
-            | mechanism::APPSEC
             | mechanism::SPAN_SAMPLING_RULE
             | mechanism::DATA_JOBS_MONITORING => USER_PAIR,
+            mechanism::APPSEC => AUTO_PAIR,
 
             _ => AUTO_PAIR,
         };

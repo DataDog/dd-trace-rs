@@ -6,7 +6,7 @@ use std::{alloc::System, hint::black_box, thread, time::Duration};
 use criterion::{
     criterion_group, criterion_main, measurement::Measurement, Criterion, PlottingBackend,
 };
-use datadog_opentelemetry::core::test_utils::benchmarks::{
+use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 

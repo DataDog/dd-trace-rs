@@ -22,9 +22,11 @@
 #[allow(clippy::module_inception)]
 mod configuration;
 pub(crate) mod remote_config;
+mod sampling_rule_config;
 mod sources;
 
 #[cfg(test)]
 pub(crate) use configuration::SupportedConfigurations;
-pub use configuration::{Config, ConfigBuilder, SamplingRuleConfig, TracePropagationStyle};
+pub use configuration::{Config, ConfigBuilder, OtlpProtocol, TracePropagationStyle};
 pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};
+pub use sampling_rule_config::SamplingRuleConfig;
