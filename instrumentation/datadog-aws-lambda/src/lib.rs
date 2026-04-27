@@ -73,12 +73,11 @@ pub struct WrappedHandler<S, E, R> {
 }
 
 impl<S, E, R> WrappedHandler<S, E, R> {
-    pub fn new(
-        handler: S,
-        config: datadog_opentelemetry::configuration::ConfigBuilder,
-    ) -> Self {
+    pub fn new(handler: S, config: datadog_opentelemetry::configuration::ConfigBuilder) -> Self {
         let config = apply_lambda_tracing_defaults(config);
-        let provider = datadog_opentelemetry::tracing().with_config(config.build()).init();
+        let provider = datadog_opentelemetry::tracing()
+            .with_config(config.build())
+            .init();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner: handler,
