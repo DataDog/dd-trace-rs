@@ -79,12 +79,16 @@ impl DatadogPropagator {
         let baggage_inject =
             get_injectors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
         let inner = DatadogCompositePropagator::new(config.clone());
-        let mut fields = inner.keys().to_vec();
-        if baggage_inject
-            && !fields
-                .iter()
-                .any(|k| k == crate::propagation::baggage::BAGGAGE_KEY)
-        {
+        // Build fields() from injectors only (per OTel spec, fields() represents what the
+        // propagator *writes*). inner.keys() is extractor-derived, so we strip the baggage key
+        // from it and re-add it solely based on baggage_inject.
+        let mut fields: Vec<String> = inner
+            .keys()
+            .iter()
+            .filter(|k| k.as_str() != crate::propagation::baggage::BAGGAGE_KEY)
+            .cloned()
+            .collect();
+        if baggage_inject {
             fields.push(crate::propagation::baggage::BAGGAGE_KEY.to_owned());
         }
         DatadogPropagator {
@@ -850,6 +854,44 @@ pub mod tests {
         assert!(
             fields.contains(&BAGGAGE_KEY),
             "fields() must include 'baggage' when Baggage is only in inject styles; got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn baggage_excluded_from_fields_when_only_in_extract_styles() {
+        // fields() represents what the propagator *writes* (injection only, per OTel spec).
+        // When Baggage is only in the extract list it should not appear in fields().
+        let propagator = get_propagator_with_separate_styles(
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ],
+            vec![TracePropagationStyle::Datadog],
+        );
+        let fields: Vec<&str> = propagator.fields().collect();
+        assert!(
+            !fields.contains(&BAGGAGE_KEY),
+            "fields() must not include 'baggage' when Baggage is only in extract styles; got {fields:?}"
+        );
+    }
+
+    #[test]
+    fn baggage_not_injected_when_only_in_extract_styles() {
+        let propagator = get_propagator_with_separate_styles(
+            vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ],
+            vec![TracePropagationStyle::Datadog],
+        );
+
+        let cx = Context::current_with_baggage(vec![KeyValue::new("user", "alice")]);
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+
+        assert!(
+            !carrier.contains_key(BAGGAGE_KEY),
+            "baggage header must not be injected when Baggage is only in extract styles; got {carrier:?}"
         );
     }
 
