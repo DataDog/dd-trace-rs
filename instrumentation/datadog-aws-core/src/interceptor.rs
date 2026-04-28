@@ -7,11 +7,10 @@
 //! [`Intercept`] trait. For each request it:
 //! 1. Creates a Datadog client span with base + service-specific tags
 //!    (`modify_before_serialization`).
-//! 2. Injects propagation headers into the outbound request payload via the
-//!    [`ServiceHandler`] implementation (`modify_before_serialization`).
+//! 2. Injects propagation headers into the outbound request payload via the [`ServiceHandler`]
+//!    implementation (`modify_before_serialization`).
 //! 3. Adds HTTP-level tags once the final request is known (`read_before_transmit`).
-//! 4. Records the response status and any error, then ends the span
-//!    (`read_after_execution`).
+//! 4. Records the response status and any error, then ends the span (`read_after_execution`).
 //!
 //! The [`SpanContext`] type ferries the active OTel [`Context`] through the
 //! SDK's [`ConfigBag`] between hooks.

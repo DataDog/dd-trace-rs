@@ -4,10 +4,10 @@
 [workspace]
 members = [
     "datadog-aws-core",
-    "datadog-aws-sqs",
-    "datadog-aws-sns",
     "datadog-aws-eventbridge",
     "datadog-aws-lambda",
+    "datadog-aws-sns",
+    "datadog-aws-sqs",
 ]
 resolver = "2"
 
