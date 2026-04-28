@@ -57,7 +57,7 @@ impl DatadogSampler {
             let Ok(new_rates) = serde_json::de::from_str::<AgentRates>(s) else {
                 return;
             };
-            let Some(new_rates) = new_rates.rates_by_service else {
+            let Some(new_rates) = new_rates.rate_by_service else {
                 return;
             };
             service_samplers.update_rates(new_rates.into_iter().map(|(k, v)| (k.to_string(), v)));
@@ -775,6 +775,34 @@ mod tests {
         assert_eq!(
             sampler.service_key(&span),
             format!("service:{test_service_name},env:")
+        );
+    }
+
+    #[test]
+    fn test_on_agent_response_deserializes_rate_by_service() {
+        let sampler = DatadogSampler::new(vec![], 100);
+        let handler = sampler.on_agent_response();
+
+        handler(
+            r#"{ "rate_by_service": { "service:test,env:staging": 1.0, "service:test,env:prod": 0.3 } }"#,
+        );
+
+        assert_eq!(sampler.service_samplers.len(), 2);
+        assert_eq!(
+            sampler
+                .service_samplers
+                .get("service:test,env:staging")
+                .unwrap()
+                .sample_rate(),
+            1.0
+        );
+        assert_eq!(
+            sampler
+                .service_samplers
+                .get("service:test,env:prod")
+                .unwrap()
+                .sample_rate(),
+            0.3
         );
     }
 
