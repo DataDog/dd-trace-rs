@@ -656,9 +656,6 @@ impl RemoteConfigClient {
                     .decode(&file.raw)
                     .map_err(|e| anyhow::anyhow!("Failed to decode config: {}", e))?;
 
-                let config_str = String::from_utf8(decoded)
-                    .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
-
                 // Determine config id and version for state reporting (do this before applying)
                 let (_, meta_version) = path_to_custom
                     .get(&file.path)
@@ -669,18 +666,18 @@ impl RemoteConfigClient {
                 // Apply the config and record success or failure state
                 // Right now we only support APM_TRACING handler, but in the future we will support
                 // other products
-                match handler.process_config(&config_str, &self.config) {
+                match handler.process_config(&decoded, &self.config) {
                     Ok(_) => {
-                        // Calculate SHA256 hash of the raw content
+                        // Calculate SHA256 hash of the decoded file
                         use sha2::{Digest, Sha256};
                         let mut hasher = Sha256::new();
-                        hasher.update(&file.raw);
+                        hasher.update(&decoded);
                         let hash_result = hasher.finalize();
                         let hash_hex = format!("{hash_result:x}");
 
                         new_cache.push(CachedTargetFile {
                             path: file.path.clone(),
-                            length: file.raw.len() as u64,
+                            length: decoded.len() as u64,
                             hashes: vec![Hash {
                                 algorithm: "sha256".to_string(),
                                 hash: hash_hex,
@@ -775,7 +772,7 @@ impl RemoteConfigClient {
 /// configuration format
 trait ProductHandler {
     /// Process the configuration for this product
-    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()>;
+    fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()>;
 
     /// Get the product name this handler supports
     fn product_name(&self) -> &'static str;
@@ -784,9 +781,9 @@ trait ProductHandler {
 struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
-    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()> {
+    fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()> {
         // Parse the config to extract sampling rules as raw JSON
-        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
+        let tracing_config: ApmTracingConfig = serde_json::from_slice(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
 
         // Extract sampling rules if present
@@ -1313,7 +1310,8 @@ mod tests {
             cached_files[0].path,
             "datadog/2/APM_TRACING/apm-tracing-sampling/config"
         );
-        assert_eq!(cached_files[0].length, 140);
+        // Cached file length is the decoded bytes length (not base64 string length)
+        assert_eq!(cached_files[0].length, 105);
         assert_eq!(cached_files[0].hashes.len(), 1);
         assert_eq!(cached_files[0].hashes[0].algorithm, "sha256");
 
@@ -1838,12 +1836,12 @@ mod tests {
         let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}}"#;
 
         // This should succeed
-        let result = handler.process_config(config_json, &config);
+        let result = handler.process_config(config_json.as_bytes(), &config);
         assert!(result.is_ok());
 
         // Test invalid JSON
         let invalid_json = "invalid json";
-        let result = handler.process_config(invalid_json, &config);
+        let result = handler.process_config(invalid_json.as_bytes(), &config);
         assert!(result.is_err());
     }
 
