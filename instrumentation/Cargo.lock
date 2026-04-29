@@ -692,14 +692,23 @@ dependencies = [
 name = "datadog-aws-core"
 version = "0.1.0"
 dependencies = [
- "aws-credential-types",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "aws-types",
  "opentelemetry",
- "opentelemetry_sdk",
  "serde_json",
  "tracing",
+]
+
+[[package]]
+name = "datadog-aws-core-test-utils"
+version = "0.1.0"
+dependencies = [
+ "aws-credential-types",
+ "aws-smithy-runtime-api",
+ "aws-types",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "wiremock",
 ]
 
@@ -712,6 +721,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "datadog-aws-core",
+ "datadog-aws-core-test-utils",
  "opentelemetry",
  "serde_json",
  "serial_test",
@@ -743,6 +753,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "datadog-aws-core",
+ "datadog-aws-core-test-utils",
  "opentelemetry",
  "serde_json",
  "serial_test",
@@ -758,6 +769,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "datadog-aws-core",
+ "datadog-aws-core-test-utils",
  "opentelemetry",
  "serde_json",
  "serial_test",
@@ -2011,7 +2023,6 @@ dependencies = [
  "js-sys",
  "pin-project-lite",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]

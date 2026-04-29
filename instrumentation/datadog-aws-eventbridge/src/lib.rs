@@ -307,7 +307,7 @@ mod tests {
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use aws_smithy_runtime_api::client::interceptors::context::Input;
-    use datadog_aws_core::test_helpers::{
+    use datadog_aws_core_test_utils::test_helpers::{
         collect_string_tags, sample_trace_headers, DATADOG_TRACE_ID_KEY,
     };
 

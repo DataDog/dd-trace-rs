@@ -2,20 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "datadog-aws-core"
-description = "Internal shared interceptor machinery for Datadog AWS instrumentation crates."
+name = "datadog-aws-core-test-utils"
+description = "Shared test infrastructure for Datadog AWS instrumentation crates."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish.workspace = true
+publish = false
 
 [dependencies]
+aws-credential-types = { version = "1", features = ["test-util"] }
 aws-smithy-runtime-api = { workspace = true }
-aws-smithy-types = { workspace = true }
 aws-types = { workspace = true }
-serde_json = { workspace = true }
 opentelemetry = { workspace = true }
-tracing = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
+wiremock = "0.6"

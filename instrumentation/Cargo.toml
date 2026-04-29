@@ -4,6 +4,7 @@
 [workspace]
 members = [
     "datadog-aws-core",
+    "datadog-aws-core-test-utils",
     "datadog-aws-eventbridge",
     "datadog-aws-lambda",
     "datadog-aws-sns",
@@ -22,6 +23,7 @@ publish = false
 
 [workspace.dependencies]
 datadog-aws-core = { path = "datadog-aws-core" }
+datadog-aws-core-test-utils = { path = "datadog-aws-core-test-utils" }
 serde = "1.0.194"
 serde_json = "1.0.140"
 opentelemetry = { version = "0.31.0", features = ["trace", "metrics", "logs"], default-features = false }

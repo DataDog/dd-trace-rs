@@ -9,7 +9,9 @@
 
 use aws_sdk_eventbridge::types::PutEventsRequestEntry;
 use aws_types::SdkConfig;
-use datadog_aws_core::integration_test_helpers::{span_attrs, split_traceparent, TestHarness};
+use datadog_aws_core_test_utils::integration_test_helpers::{
+    span_attrs, split_traceparent, TestHarness,
+};
 use serial_test::serial;
 
 use datadog_aws_eventbridge::EventBridgeInterceptor;

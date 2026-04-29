@@ -8,7 +8,7 @@
 //! that global state, causing spans to land in the wrong exporter.
 
 use aws_types::SdkConfig;
-use datadog_aws_core::integration_test_helpers::{span_attrs, TestHarness};
+use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
 use serial_test::serial;
 
 use datadog_aws_sns::SnsInterceptor;

@@ -347,7 +347,7 @@ fn build_datadog_attribute(
 mod tests {
     use super::*;
     use aws_sdk_sns::types::PublishBatchRequestEntry;
-    use datadog_aws_core::test_helpers::{
+    use datadog_aws_core_test_utils::test_helpers::{
         sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
         DATADOG_TRACE_ID_KEY,
     };

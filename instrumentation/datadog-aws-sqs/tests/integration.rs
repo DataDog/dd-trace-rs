@@ -9,7 +9,7 @@
 
 use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
 use aws_types::SdkConfig;
-use datadog_aws_core::integration_test_helpers::{
+use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
