@@ -196,20 +196,15 @@ pub(crate) struct TriggerExtraction {
 /// the ambient context rather than accidentally creating a span parented to trace ID 0.
 pub(crate) fn extract_trigger(inferrer: &SpanInferrer, payload: &str) -> TriggerExtraction {
     let result = inferrer.infer_span(payload).unwrap_or_default();
+    let trace_id = result.carrier.get("x-datadog-trace-id").map(String::as_str);
+    let has_upstream_trace = trace_id
+        .and_then(|id| id.parse::<u64>().ok())
+        .is_some_and(|id| id != 0);
 
     let upstream_cx = global::get_text_map_propagator(|p| {
-        if result
-            .carrier
-            .get("x-datadog-trace-id")
-            .and_then(|id| id.parse::<u64>().ok())
-            .is_some_and(|id| id != 0)
-        {
+        if has_upstream_trace {
             tracing::debug!(
-                trace_id = result
-                    .carrier
-                    .get("x-datadog-trace-id")
-                    .map(String::as_str)
-                    .unwrap_or("?"),
+                trace_id = trace_id.unwrap_or("?"),
                 "extracted trace context from trigger"
             );
             p.extract(&result.carrier)
