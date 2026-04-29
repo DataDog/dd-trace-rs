@@ -38,16 +38,8 @@ jobs:
         uses: ./.github/actions/cache
       - name: Install nightly-2026-04-07 toolchain and rustfmt
         run: rustup install nightly-2026-04-07 && rustup default nightly-2026-04-07 && rustup component add rustfmt
-      - name: Run rustfmt in instrumentation workspaces
-        shell: bash
-        run: |
-          mapfile -t workspaces < <(find instrumentation -mindepth 1 -maxdepth 1 -name Cargo.toml -print | sort)
-          test ${#workspaces[@]} -gt 0
-          for manifest in "${workspaces[@]}"; do
-            workspace_dir="$(dirname "$manifest")"
-            echo "Checking rustfmt in $workspace_dir"
-            (cd "$workspace_dir" && cargo fmt --all -- --check)
-          done
+      - name: Run rustfmt in instrumentation workspace
+        run: cd instrumentation && cargo fmt --all -- --check
   clippy:
     name: "clippy #${{ matrix.platform }} ${{ matrix.rust_version }}"
     runs-on: ${{ matrix.platform }}
@@ -90,17 +82,11 @@ jobs:
           rust_version: ${{ matrix.rust_version }}
       - name: Install ${{ matrix.rust_version }} toolchain and clippy
         run: rustup install ${{ matrix.rust_version }} && rustup default ${{ matrix.rust_version }} && rustup component add clippy
-      - name: Run clippy in instrumentation workspaces
+      - name: Run clippy in instrumentation workspace
         shell: bash
         run: |
-          mapfile -t workspaces < <(find instrumentation -mindepth 1 -maxdepth 1 -name Cargo.toml -print | sort)
-          test ${#workspaces[@]} -gt 0
           # shellcheck disable=SC2046
-          for manifest in "${workspaces[@]}"; do
-            workspace_dir="$(dirname "$manifest")"
-            echo "Checking clippy in $workspace_dir"
-            (cd "$workspace_dir" && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.91.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call))
-          done
+          cd instrumentation && cargo clippy --workspace --all-targets -- -D warnings $([ ${{ matrix.rust_version }} = 1.91.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
   shellcheck:
     runs-on: ubuntu-latest
     steps:
