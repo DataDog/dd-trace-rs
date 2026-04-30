@@ -101,8 +101,8 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
             .copied()
             .collect();
 
-        let keys = extractors.iter().fold(Vec::new(), |mut keys, extractor| {
-            <TracePropagationStyle as Propagator<C>>::keys(extractor)
+        let keys = injectors.iter().fold(Vec::new(), |mut keys, injector| {
+            <TracePropagationStyle as Propagator<C>>::keys(injector)
                 .iter()
                 .for_each(|key| keys.push(key.clone()));
             keys
@@ -929,10 +929,11 @@ pub(crate) mod tests {
 
     fn get_config(
         extract: Option<Vec<TracePropagationStyle>>,
-        _: Option<Vec<TracePropagationStyle>>,
+        inject: Option<Vec<TracePropagationStyle>>,
     ) -> Arc<Config> {
         let mut builder = Config::builder();
         builder.set_trace_propagation_style_extract(extract.unwrap_or_default());
+        builder.set_trace_propagation_style_inject(inject.unwrap_or_default());
         Arc::new(builder.build())
     }
 
@@ -1334,11 +1335,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_default_keys() {
-        let extract = Some(vec![
+        let inject = Some(vec![
             TracePropagationStyle::Datadog,
             TracePropagationStyle::TraceContext,
         ]);
-        let config = get_config(extract, None);
+        let config = get_config(None, inject);
 
         let propagator = DatadogCompositePropagator::new(config);
 
@@ -1358,8 +1359,8 @@ pub(crate) mod tests {
 
     #[test]
     fn test_tracecontext_keys() {
-        let extract = Some(vec![TracePropagationStyle::TraceContext]);
-        let config = get_config(extract, None);
+        let inject = Some(vec![TracePropagationStyle::TraceContext]);
+        let config = get_config(None, inject);
 
         let propagator = DatadogCompositePropagator::new(config);
 
@@ -1368,8 +1369,8 @@ pub(crate) mod tests {
 
     #[test]
     fn test_datadog_keys() {
-        let extract = Some(vec![TracePropagationStyle::Datadog]);
-        let config = get_config(extract, None);
+        let inject = Some(vec![TracePropagationStyle::Datadog]);
+        let config = get_config(None, inject);
 
         let propagator = DatadogCompositePropagator::new(config);
 
