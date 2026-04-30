@@ -5,6 +5,7 @@ use libdd_telemetry::data::Configuration;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
 use std::ops::Deref;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -92,6 +93,8 @@ pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
+const DEFAULT_UNIX_TRACE_AGENT_URL: &str = "/var/run/datadog/apm.socket";
+const DEFAULT_UNIX_DOGSTATSD_AGENT_URL: &str = "/var/run/datadog/dsd.socket";
 
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,7 +277,6 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     }
 
     /// Gets the source of the current value
-    #[allow(dead_code)] // Used in tests and will be used for remote configuration
     fn source(&self) -> ConfigSourceOrigin {
         if self.code_value.is_some() {
             ConfigSourceOrigin::Code
@@ -283,6 +285,10 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         } else {
             ConfigSourceOrigin::Default
         }
+    }
+
+    fn is_default_value(&self) -> bool {
+        self.source() == ConfigSourceOrigin::Default
     }
 
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
@@ -1913,21 +1919,43 @@ impl ConfigBuilder {
         // resolve trace_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
-            let host = &config.agent_host.value();
-            let port = *config.trace_agent_port.value();
-            config
-                .trace_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_TRACE_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_TRACE_AGENT_URL}"))
+            } else {
+                let host = &config.agent_host.value();
+                let port = *config.trace_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.trace_agent_url.set_calculated(url);
         }
 
         // resolve dogstatsd_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
-            let host = &config.dogstatsd_agent_host.value();
-            let port = *config.dogstatsd_agent_port.value();
-            config
-                .dogstatsd_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_DOGSTATSD_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_DOGSTATSD_AGENT_URL}"))
+            } else {
+                let host = &config.dogstatsd_agent_host.value();
+                let port = *config.dogstatsd_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.dogstatsd_agent_url.set_calculated(url);
         }
 
         config

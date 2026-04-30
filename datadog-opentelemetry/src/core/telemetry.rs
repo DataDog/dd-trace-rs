@@ -239,8 +239,7 @@ fn make_telemetry_worker(
     custom_handle: Option<Box<dyn TelemetryHandle>>,
 ) -> Result<Box<dyn TelemetryHandle>, Error> {
     if custom_handle.is_none() {
-        let mut builder = worker::TelemetryWorkerBuilder::new(
-            config.trace_agent_url().to_string(),
+        let mut builder = worker::TelemetryWorkerBuilder::new_fetch_host(
             config.service().to_string(),
             config.language().to_string(),
             config.language_version().to_string(),
