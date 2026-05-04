@@ -137,7 +137,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
             .for_each(|propagator| propagator.inject(context, carrier, self.config.as_ref()));
     }
 
-    /// Returns the header keys used by the configured extractors.
+    /// Returns the header keys used by the configured injectors.
     pub fn keys(&self) -> &[String] {
         &self.keys
     }
