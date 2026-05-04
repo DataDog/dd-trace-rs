@@ -72,7 +72,7 @@ pub struct DatadogCompositePropagator<C: PropagationConfig> {
     config: Arc<C>,
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
-    keys: Vec<String>,
+    fields: Vec<String>,
 }
 
 impl<C: PropagationConfig> DatadogCompositePropagator<C> {
@@ -101,18 +101,18 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
             .copied()
             .collect();
 
-        let keys = injectors.iter().fold(Vec::new(), |mut keys, injector| {
+        let fields = injectors.iter().fold(Vec::new(), |mut fields, injector| {
             <TracePropagationStyle as Propagator<C>>::keys(injector)
                 .iter()
-                .for_each(|key| keys.push(key.clone()));
-            keys
+                .for_each(|key| fields.push(key.clone()));
+            fields
         });
 
         Self {
             config,
             extractors,
             injectors,
-            keys,
+            fields,
         }
     }
 
@@ -138,8 +138,8 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     }
 
     /// Returns the header keys used by the configured injectors.
-    pub fn keys(&self) -> &[String] {
-        &self.keys
+    pub fn fields(&self) -> &[String] {
+        &self.fields
     }
 
     fn extract_available_contexts(
@@ -1334,7 +1334,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_default_keys() {
+    fn test_default_fields() {
         let inject = Some(vec![
             TracePropagationStyle::Datadog,
             TracePropagationStyle::TraceContext,
@@ -1353,22 +1353,22 @@ pub(crate) mod tests {
                 "traceparent",
                 "tracestate"
             ],
-            propagator.keys()
+            propagator.fields()
         )
     }
 
     #[test]
-    fn test_tracecontext_keys() {
+    fn test_tracecontext_fields() {
         let inject = Some(vec![TracePropagationStyle::TraceContext]);
         let config = get_config(None, inject);
 
         let propagator = DatadogCompositePropagator::new(config);
 
-        assert_eq!(vec!["traceparent", "tracestate"], propagator.keys())
+        assert_eq!(vec!["traceparent", "tracestate"], propagator.fields())
     }
 
     #[test]
-    fn test_datadog_keys() {
+    fn test_datadog_fields() {
         let inject = Some(vec![TracePropagationStyle::Datadog]);
         let config = get_config(None, inject);
 
@@ -1382,7 +1382,7 @@ pub(crate) mod tests {
                 "x-datadog-sampling-priority",
                 "x-datadog-tags",
             ],
-            propagator.keys()
+            propagator.fields()
         )
     }
 }

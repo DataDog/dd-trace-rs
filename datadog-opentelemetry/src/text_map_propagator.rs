@@ -224,7 +224,7 @@ impl TextMapPropagator for DatadogPropagator {
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
         let fields: &[String] = if self.cfg.enabled() {
-            self.inner.keys()
+            self.inner.fields()
         } else {
             &[]
         };
