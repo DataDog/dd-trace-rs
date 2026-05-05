@@ -7,12 +7,14 @@ use crate::{
     catch_panic,
     core::{configuration::Config, sampling::priority},
     propagation::{
+        baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
         DatadogCompositePropagator, TracePropagationStyle,
     },
 };
 use opentelemetry::{
+    baggage::BaggageExt as _,
     propagation::{text_map_propagator::FieldIter, TextMapPropagator},
     trace::TraceContextExt,
 };
@@ -202,7 +204,11 @@ impl DatadogPropagator {
             .unwrap_or_else(|| cx.clone());
 
         if self.baggage_extract {
-            self.baggage_propagator.extract_with_context(&cx, extractor)
+            if let Some(baggage) = extract_baggage(&extractor) {
+                cx.with_baggage(baggage)
+            } else {
+                cx
+            }
         } else {
             cx
         }
@@ -758,7 +764,7 @@ pub mod tests {
         let mut injector: HashMap<String, String> = HashMap::new();
         propagator.inject_context(&cx, &mut injector);
         assert!(
-            injector.get(BAGGAGE_KEY).is_none(),
+            !injector.contains_key(BAGGAGE_KEY),
             "baggage header must not be injected when Baggage is absent from inject styles"
         );
     }
@@ -990,7 +996,7 @@ pub mod tests {
         propagator.inject_context(&cx, &mut carrier);
 
         assert!(
-            carrier.get(BAGGAGE_KEY).is_none(),
+            !carrier.contains_key(BAGGAGE_KEY),
             "baggage header must NOT be present when Baggage is not in propagation style"
         );
     }
@@ -1005,15 +1011,15 @@ pub mod tests {
         propagator.inject_context(&cx, &mut carrier);
 
         assert!(
-            carrier.get(BAGGAGE_KEY).is_some(),
+            carrier.contains_key(BAGGAGE_KEY),
             "baggage header must be present"
         );
         assert!(
-            carrier.get("traceparent").is_none(),
+            !carrier.contains_key("traceparent"),
             "traceparent must NOT be present when TraceContext is not in propagation style"
         );
         assert!(
-            carrier.get("x-datadog-trace-id").is_none(),
+            !carrier.contains_key("x-datadog-trace-id"),
             "x-datadog-trace-id must NOT be present when Datadog is not in propagation style"
         );
     }
@@ -1036,7 +1042,7 @@ pub mod tests {
         let mut carrier: HashMap<String, String> = HashMap::new();
         propagator.inject_context(&cx, &mut carrier);
         assert!(
-            carrier.get(BAGGAGE_KEY).is_some(),
+            carrier.contains_key(BAGGAGE_KEY),
             "baggage header must be injected with default config"
         );
     }

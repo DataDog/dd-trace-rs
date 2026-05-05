@@ -64,6 +64,7 @@ libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
+percent-encoding = "2.3.1"
 
 [dev-dependencies]
 assert_unordered = "0.3"
