@@ -4,7 +4,7 @@
 [package]
 name = "datadog-aws-core-test-utils"
 description = "Shared test infrastructure for Datadog AWS instrumentation crates."
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -4,7 +4,7 @@
 [package]
 name = "datadog-aws-sns"
 description = "Datadog trace context injection for AWS SDK for Rust SNS operations."
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -21,7 +21,7 @@ serde_json = { workspace = true }
 opentelemetry = { workspace = true }
 
 [dev-dependencies]
-datadog-aws-core-test-utils = { workspace = true }
+datadog-aws-core-test-utils = { path = "../datadog-aws-core-test-utils" }
 aws-types = { workspace = true }
 serial_test = "3"
 tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }
