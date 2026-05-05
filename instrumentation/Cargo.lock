@@ -722,6 +722,7 @@ dependencies = [
  "datadog-aws-core",
  "datadog-aws-core-test-utils",
  "opentelemetry",
+ "serde",
  "serde_json",
  "serial_test",
  "tokio",
