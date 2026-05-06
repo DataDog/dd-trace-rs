@@ -13,7 +13,7 @@
 
 use crate::attribute_keys as attr;
 
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
 
@@ -74,7 +74,7 @@ impl LambdaSpan {
         let err_msg = err.to_string();
         tracing::warn!(request_id = self.request_id, "handler returned error");
         let span = self.cx.span();
-        span.set_status(opentelemetry::trace::Status::Error {
+        span.set_status(Status::Error {
             description: err_msg.clone().into(),
         });
         span.set_attribute(KeyValue::new(attr::ERROR, true));

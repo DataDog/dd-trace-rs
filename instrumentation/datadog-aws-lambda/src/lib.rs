@@ -10,10 +10,11 @@
 mod attribute_keys;
 mod invocation;
 
+use datadog_opentelemetry::DatadogTracingBuilder;
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
-use opentelemetry::trace::FutureExt;
+use opentelemetry::trace::{FutureExt, TracerProvider};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
@@ -41,14 +42,14 @@ pub struct Config {
     ///   environments)
     /// - `trace_writer_synchronous_write = true` (so `force_flush()` blocks until spans reach
     ///   agent)
-    pub tracing: Option<datadog_opentelemetry::DatadogTracingBuilder>,
+    pub tracing: Option<DatadogTracingBuilder>,
 }
 
 fn build_tracing(
     service: Option<String>,
     env: Option<String>,
     version: Option<String>,
-) -> datadog_opentelemetry::DatadogTracingBuilder {
+) -> DatadogTracingBuilder {
     let mut builder = datadog_opentelemetry::configuration::Config::builder();
     // Stats are computed server-side by the extension; client-side computation is redundant.
     builder.set_trace_stats_computation_enabled(false);
@@ -141,7 +142,7 @@ impl<S, E, R> WrappedHandler<S, E, R> {
         let provider = tracing
             .unwrap_or_else(|| build_tracing(service_name, env, version))
             .init();
-        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
             provider,
@@ -221,7 +222,7 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn test_handler() -> WrappedHandler<ReadyService, serde_json::Value, ()> {
         let provider = SdkTracerProvider::builder().build();
-        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         WrappedHandler {
             inner: ReadyService,
             provider,
