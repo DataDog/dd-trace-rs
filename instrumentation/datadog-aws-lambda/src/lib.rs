@@ -18,11 +18,50 @@ use opentelemetry::trace::{FutureExt, TracerProvider};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
+use std::fmt;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::task::{self, Poll};
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+
+/// Error returned by [`TracedService`].
+///
+/// This remains compatible with [`lambda_runtime::run`] by converting into
+/// [`lambda_runtime::Diagnostic`], while also providing a stable display string
+/// for invocation span error reporting.
+#[derive(Debug)]
+pub struct TracedServiceError(lambda_runtime::Diagnostic);
+
+impl fmt::Display for TracedServiceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.error_message)
+    }
+}
+
+impl From<lambda_runtime::Diagnostic> for TracedServiceError {
+    fn from(value: lambda_runtime::Diagnostic) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TracedServiceError> for lambda_runtime::Diagnostic {
+    fn from(value: TracedServiceError) -> Self {
+        value.0
+    }
+}
+
+impl From<lambda_runtime::Error> for TracedServiceError {
+    fn from(value: lambda_runtime::Error) -> Self {
+        Self(value.into())
+    }
+}
+
+impl From<serde_json::Error> for TracedServiceError {
+    fn from(value: serde_json::Error) -> Self {
+        lambda_runtime::Error::from(value).into()
+    }
+}
 
 /// A Lambda service wrapped with Datadog tracing.
 ///
@@ -122,16 +161,18 @@ impl<S, E, R> Service<LambdaEvent<Box<RawValue>>> for TracedService<S, E, R>
 where
     S: Service<LambdaEvent<E>, Response = R>,
     S::Future: Future<Output = Result<R, S::Error>> + Send + 'static,
-    S::Error: Into<lambda_runtime::Error>,
+    S::Error: Into<lambda_runtime::Diagnostic> + fmt::Debug,
     E: DeserializeOwned + Send + 'static,
     R: Send + 'static,
 {
     type Response = R;
-    type Error = lambda_runtime::Error;
-    type Future = BoxFuture<Result<R, lambda_runtime::Error>>;
+    type Error = TracedServiceError;
+    type Future = BoxFuture<Result<R, TracedServiceError>>;
 
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
+        self.inner
+            .poll_ready(cx)
+            .map_err(|err| TracedServiceError::from(err.into()))
     }
 
     fn call(&mut self, event: LambdaEvent<Box<RawValue>>) -> Self::Future {
@@ -142,7 +183,7 @@ where
             Ok(payload) => payload,
             Err(err) => {
                 return Box::pin(async move {
-                    let result: Result<R, lambda_runtime::Error> = Err(err.into());
+                    let result: Result<R, TracedServiceError> = Err(err.into());
                     let result = invocation.finish(result);
                     flush_provider(&provider);
                     result
@@ -153,7 +194,8 @@ where
         let fut = self.inner.call(typed_event);
         Box::pin(async move {
             let result = fut.with_context(invocation.handler_context()).await;
-            let result = invocation.finish(result.map_err(Into::into));
+            let result =
+                invocation.finish(result.map_err(|err| TracedServiceError::from(err.into())));
             flush_provider(&provider);
             result
         })
@@ -213,6 +255,8 @@ mod tests {
         ready_calls: Arc<AtomicUsize>,
     }
 
+    struct StringErrorReadyService;
+
     impl Service<LambdaEvent<serde_json::Value>> for ReadyCountingService {
         type Response = ();
         type Error = lambda_runtime::Error;
@@ -220,6 +264,20 @@ mod tests {
 
         fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
             self.ready_calls.fetch_add(1, Ordering::Relaxed);
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: LambdaEvent<serde_json::Value>) -> Self::Future {
+            std::future::ready(Ok(()))
+        }
+    }
+
+    impl Service<LambdaEvent<serde_json::Value>> for StringErrorReadyService {
+        type Response = ();
+        type Error = String;
+        type Future = std::future::Ready<Result<(), String>>;
+
+        fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
             Poll::Ready(Ok(()))
         }
 
@@ -250,5 +308,10 @@ mod tests {
 
         assert!(wrapped.poll_ready(&mut cx).is_ready());
         assert_eq!(ready_calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn supports_non_lambda_runtime_error_types() {
+        let _wrapped = TracedService::new(StringErrorReadyService);
     }
 }
