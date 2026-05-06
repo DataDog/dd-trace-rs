@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 (May 06, 2026)
+
+- Fix config, use DD_AGENT_HOST and DD_TRACE_AGENT_PORT to derive agent url if it is an empty string in env in https://github.com/DataDog/dd-trace-rs/pull/208
+- Add publication of the tracer metadata upon global init in https://github.com/DataDog/dd-trace-rs/pull/210
+- Fix sampling rate limiter, token count would not be restored if the fraction was smaller than 1 in https://github.com/DataDog/dd-trace-rs/pull/215
+- Add automatic datadog agent unix socket detection in https://github.com/DataDog/dd-trace-rs/pull/204
+- Limit the number of keys parsed from tracestate in https://github.com/DataDog/dd-trace-rs/pull/218
+
 ## 0.3.2 (Mar 27, 2026)
 
 - Change telemetry.sdk.name to datadog and telemetry.sdk.version to our own version in https://github.com/DataDog/dd-trace-rs/pull/196

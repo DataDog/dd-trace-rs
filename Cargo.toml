@@ -14,7 +14,7 @@ resolver = "2"
 [workspace.package]
 rust-version = "1.84.1"
 edition = "2021"
-version = "0.3.2"
+version = "0.3.3"
 license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
