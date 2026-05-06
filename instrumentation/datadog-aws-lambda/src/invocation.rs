@@ -18,6 +18,7 @@ use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
 
 pub(crate) static TRACER_NAME: &str = "datadog-lambda-rs";
+pub(crate) const ROOT_SPAN_NAME: &str = "aws.lambda";
 
 /// The Lambda invocation (`aws.lambda`) root span.
 ///
@@ -46,10 +47,10 @@ impl LambdaSpan {
 
         let parent_cx = Context::current();
 
-        let mut builder = tracer.span_builder(TRACER_NAME);
+        let mut builder = tracer.span_builder(ROOT_SPAN_NAME);
         builder.span_kind = Some(SpanKind::Server);
         let attrs = vec![
-            KeyValue::new(attr::OPERATION_NAME, "aws.lambda"),
+            KeyValue::new(attr::OPERATION_NAME, ROOT_SPAN_NAME),
             KeyValue::new(attr::LANGUAGE, "rust"),
             KeyValue::new(attr::RESOURCE_NAME, function_name.clone()),
             KeyValue::new(attr::SPAN_TYPE, "serverless"),
@@ -182,6 +183,7 @@ mod tests {
 
         let spans = finished_spans(&exporter);
         assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].name.as_ref(), ROOT_SPAN_NAME);
         let attrs = &spans[0].attributes;
 
         assert_eq!(
