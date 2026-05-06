@@ -15,7 +15,7 @@ use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
 use opentelemetry::trace::{FutureExt, TracerProvider};
-use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
+use opentelemetry_sdk::trace::SdkTracer;
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use std::fmt;
@@ -99,7 +99,6 @@ impl From<serde_json::Error> for TracedServiceError {
 /// ```
 pub struct TracedService<S, E, R> {
     inner: S,
-    provider: SdkTracerProvider,
     tracer: SdkTracer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
@@ -134,9 +133,9 @@ impl<S, E, R> TracedService<S, E, R> {
             // Stats are computed server-side by the extension; client-side computation is
             // redundant.
             config.set_trace_stats_computation_enabled(false);
-            // Synchronous writes make force_flush() block until data reaches the agent,
-            // this helps reduce span loss when the Lambda process freezes after the handler
-            // returns.
+            // Synchronous writes make the Datadog exporter wait for the completed trace chunk
+            // to flush when the root span ends, which helps reduce span loss when the Lambda
+            // process freezes after the handler returns.
             config.set_trace_writer_synchronous_write(true);
             datadog_opentelemetry::tracing()
                 .with_config(config.build())
@@ -145,7 +144,6 @@ impl<S, E, R> TracedService<S, E, R> {
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
-            provider,
             tracer,
             cold_start: true,
             _phantom: PhantomData,
@@ -177,16 +175,13 @@ where
 
     fn call(&mut self, event: LambdaEvent<Box<RawValue>>) -> Self::Future {
         let cold_start = self.take_cold_start();
-        let provider = self.provider.clone();
         let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
                 return Box::pin(async move {
                     let result: Result<R, TracedServiceError> = Err(err.into());
-                    let result = invocation.finish(result);
-                    flush_provider(&provider);
-                    result
+                    invocation.finish(result)
                 });
             }
         };
@@ -194,23 +189,15 @@ where
         let fut = self.inner.call(typed_event);
         Box::pin(async move {
             let result = fut.with_context(invocation.handler_context()).await;
-            let result =
-                invocation.finish(result.map_err(|err| TracedServiceError::from(err.into())));
-            flush_provider(&provider);
-            result
+            invocation.finish(result.map_err(|err| TracedServiceError::from(err.into())))
         })
-    }
-}
-
-fn flush_provider(provider: &SdkTracerProvider) {
-    if let Err(err) = provider.force_flush() {
-        tracing::error!("flush failed: {err}");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry_sdk::trace::SdkTracerProvider;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -228,7 +215,6 @@ mod tests {
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         TracedService {
             inner: ReadyService,
-            provider,
             tracer,
             cold_start: true,
             _phantom: PhantomData,
