@@ -10,7 +10,7 @@
 mod attribute_keys;
 mod invocation;
 
-use datadog_opentelemetry::DatadogTracingBuilder;
+use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
@@ -24,50 +24,6 @@ use std::task::{self, Poll};
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-#[derive(Default)]
-pub struct Config {
-    /// Service name. Overrides `DD_SERVICE`. Ignored when [`tracing`](Self::tracing) is `Some`.
-    pub service: Option<String>,
-    /// Deployment environment. Overrides `DD_ENV`. Ignored when [`tracing`](Self::tracing) is
-    /// `Some`.
-    pub env: Option<String>,
-    /// Service version. Overrides `DD_VERSION`. Ignored when [`tracing`](Self::tracing) is `Some`.
-    pub version: Option<String>,
-    /// Full control over the OTel SDK and Datadog tracer config.
-    ///
-    /// When `None` (default), Lambda-appropriate defaults are applied and
-    /// `service`/`env`/`version` above are forwarded. When `Some`, the builder is used as-is;
-    /// `service`/`env`/`version` are ignored and you are responsible for setting:
-    /// - `trace_stats_computation_enabled = false` (the Datadog agent handles stats for serverless
-    ///   environments)
-    /// - `trace_writer_synchronous_write = true` (so `force_flush()` blocks until spans reach
-    ///   agent)
-    pub tracing: Option<DatadogTracingBuilder>,
-}
-
-fn build_tracing(
-    service: Option<String>,
-    env: Option<String>,
-    version: Option<String>,
-) -> DatadogTracingBuilder {
-    let mut builder = datadog_opentelemetry::configuration::Config::builder();
-    // Stats are computed server-side by the extension; client-side computation is redundant.
-    builder.set_trace_stats_computation_enabled(false);
-    // Synchronous writes make force_flush() block until data reaches the agent,
-    // this helps reduce span loss when the Lambda process freezes after the handler returns.
-    builder.set_trace_writer_synchronous_write(true);
-    if let Some(s) = service {
-        builder.set_service(s);
-    }
-    if let Some(e) = env {
-        builder.set_env(e);
-    }
-    if let Some(v) = version {
-        builder.set_version(v);
-    }
-    datadog_opentelemetry::tracing().with_config(builder.build())
-}
-
 /// A Lambda handler wrapped with Datadog tracing.
 ///
 /// Owns the [`SdkTracerProvider`] lifecycle,
@@ -80,30 +36,16 @@ fn build_tracing(
 /// // Zero-config
 /// lambda_runtime::run(WrappedHandler::new(
 ///     lambda_runtime::service_fn(my_handler),
-///     Config::default(),
 /// )).await
 ///
 /// // Set service/env/version
-/// lambda_runtime::run(WrappedHandler::new(
-///     lambda_runtime::service_fn(my_handler),
-///     Config {
-///         service: Some("my-service".into()),
-///         env: Some("prod".into()),
-///         ..Default::default()
-///     },
-/// )).await
+/// let mut config = Config::builder();
+/// config.set_service("my-service".into());
+/// config.set_env("prod".into());
 ///
-/// // Full tracer control
-/// lambda_runtime::run(WrappedHandler::new(
+/// lambda_runtime::run(WrappedHandler::with_config(
 ///     lambda_runtime::service_fn(my_handler),
-///     Config {
-///         tracing: Some(
-///             datadog_opentelemetry::tracing()
-///                 .with_config(builder_config_here)
-///                 .with_span_processor(MyProcessor),
-///         ),
-///         ..Default::default()
-///     },
+///     config,
 /// )).await
 ///
 /// // With tower middleware
@@ -112,7 +54,6 @@ fn build_tracing(
 ///         tower::ServiceBuilder::new()
 ///             .layer(some_middleware)
 ///             .service(lambda_runtime::service_fn(my_handler)),
-///         Config::default(),
 ///     )
 /// ).await
 /// ```
@@ -125,23 +66,42 @@ pub struct WrappedHandler<S, E, R> {
 }
 
 impl<S, E, R> WrappedHandler<S, E, R> {
-    /// Wraps a Tower service with Datadog tracing.
+    /// Wraps a Tower service with Datadog tracing using the default Datadog config sources.
     ///
-    /// Use this constructor when you want to apply Tower middleware after tracing
-    /// has started but before your Lambda handler executes.
-    pub fn new(inner: S, config: Config) -> Self
+    /// This is equivalent to calling [`with_config`](Self::with_config) with
+    /// [`Config::builder()`], then forcing the Lambda-safe tracing defaults.
+    pub fn new(inner: S) -> Self
     where
         S: Service<LambdaEvent<E>, Response = R>,
     {
-        let Config {
-            tracing,
-            service: service_name,
-            env,
-            version,
-        } = config;
-        let provider = tracing
-            .unwrap_or_else(|| build_tracing(service_name, env, version))
-            .init();
+        Self::with_config(inner, Config::builder())
+    }
+
+    /// Wraps a Tower service with Datadog tracing using a caller-provided config builder.
+    ///
+    /// Use this constructor when you want to apply Tower middleware after tracing
+    /// has started but before your Lambda handler executes.
+    ///
+    /// The provided Datadog config builder is always forced to Lambda-safe defaults:
+    /// - `trace_stats_computation_enabled = false`
+    /// - `trace_writer_synchronous_write = true`
+    pub fn with_config(inner: S, config: ConfigBuilder) -> Self
+    where
+        S: Service<LambdaEvent<E>, Response = R>,
+    {
+        let provider = {
+            let mut config = config;
+            // Stats are computed server-side by the extension; client-side computation is
+            // redundant.
+            config.set_trace_stats_computation_enabled(false);
+            // Synchronous writes make force_flush() block until data reaches the agent,
+            // this helps reduce span loss when the Lambda process freezes after the handler
+            // returns.
+            config.set_trace_writer_synchronous_write(true);
+            datadog_opentelemetry::tracing()
+                .with_config(config.build())
+                .init()
+        };
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
@@ -281,12 +241,9 @@ mod tests {
     #[test]
     fn poll_ready_delegates_to_inner_service() {
         let ready_calls = Arc::new(AtomicUsize::new(0));
-        let mut wrapped = WrappedHandler::new(
-            ReadyCountingService {
-                ready_calls: Arc::clone(&ready_calls),
-            },
-            Config::default(),
-        );
+        let mut wrapped = WrappedHandler::new(ReadyCountingService {
+            ready_calls: Arc::clone(&ready_calls),
+        });
         let waker = std::task::Waker::noop();
         let mut cx = task::Context::from_waker(waker);
 
