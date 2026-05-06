@@ -14,6 +14,7 @@ use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
 use opentelemetry::trace::FutureExt;
+use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider};
 use serde::de::DeserializeOwned;
 use serde_json::value::RawValue;
 use std::future::Future;
@@ -68,8 +69,8 @@ fn build_tracing(
 
 /// A Lambda handler wrapped with Datadog tracing.
 ///
-/// Owns the [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider) lifecycle,
-/// applies Lambda-appropriate defaults, and implements [`tower::Service`] so it composes
+/// Owns the [`SdkTracerProvider`] lifecycle,
+/// applies Lambda-appropriate defaults, and implements [`Service`] so it composes
 /// naturally with tower middleware.
 ///
 /// # Examples
@@ -116,8 +117,8 @@ fn build_tracing(
 /// ```
 pub struct WrappedHandler<S, E, R> {
     inner: S,
-    provider: opentelemetry_sdk::trace::SdkTracerProvider,
-    tracer: opentelemetry_sdk::trace::SdkTracer,
+    provider: SdkTracerProvider,
+    tracer: SdkTracer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
 }
@@ -197,7 +198,7 @@ where
     }
 }
 
-fn flush_provider(provider: &opentelemetry_sdk::trace::SdkTracerProvider) {
+fn flush_provider(provider: &SdkTracerProvider) {
     if let Err(err) = provider.force_flush() {
         tracing::error!("flush failed: {err}");
     }
@@ -219,7 +220,7 @@ mod tests {
 
     #[allow(clippy::type_complexity)]
     fn test_handler() -> WrappedHandler<ReadyService, serde_json::Value, ()> {
-        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder().build();
+        let provider = SdkTracerProvider::builder().build();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         WrappedHandler {
             inner: ReadyService,
