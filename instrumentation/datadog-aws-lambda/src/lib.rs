@@ -186,9 +186,12 @@ where
             }
         };
         let typed_event = LambdaEvent::new(typed_payload, event.context);
-        let fut = self.inner.call(typed_event);
+        let fut = {
+            let _guard = invocation.handler_context().attach();
+            self.inner.call(typed_event).with_current_context()
+        };
         Box::pin(async move {
-            let result = fut.with_context(invocation.handler_context()).await;
+            let result = fut.await;
             invocation.finish(result.map_err(|err| TracedServiceError::from(err.into())))
         })
     }
@@ -197,9 +200,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::Context;
     use opentelemetry_sdk::trace::SdkTracerProvider;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     };
 
@@ -241,6 +246,10 @@ mod tests {
         ready_calls: Arc<AtomicUsize>,
     }
 
+    struct ContextRecordingService {
+        saw_active_span_in_call: Arc<AtomicBool>,
+    }
+
     struct StringErrorReadyService;
 
     impl Service<LambdaEvent<serde_json::Value>> for ReadyCountingService {
@@ -272,6 +281,22 @@ mod tests {
         }
     }
 
+    impl Service<LambdaEvent<serde_json::Value>> for ContextRecordingService {
+        type Response = ();
+        type Error = lambda_runtime::Error;
+        type Future = std::future::Ready<Result<(), lambda_runtime::Error>>;
+
+        fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: LambdaEvent<serde_json::Value>) -> Self::Future {
+            self.saw_active_span_in_call
+                .store(Context::current().has_active_span(), Ordering::Relaxed);
+            std::future::ready(Ok(()))
+        }
+    }
+
     #[test]
     fn cold_start_is_tracked_per_handler() {
         let mut first = test_handler();
@@ -299,5 +324,19 @@ mod tests {
     #[test]
     fn supports_non_lambda_runtime_error_types() {
         let _wrapped = TracedService::new(StringErrorReadyService);
+    }
+
+    #[tokio::test]
+    async fn call_runs_sync_phase_under_invocation_context() {
+        let saw_active_span_in_call = Arc::new(AtomicBool::new(false));
+        let mut wrapped = TracedService::new(ContextRecordingService {
+            saw_active_span_in_call: Arc::clone(&saw_active_span_in_call),
+        });
+
+        let payload = RawValue::from_string("null".to_string()).unwrap();
+        let event = LambdaEvent::new(payload, lambda_runtime::Context::default());
+        wrapped.call(event).await.unwrap();
+
+        assert!(saw_active_span_in_call.load(Ordering::Relaxed));
     }
 }
