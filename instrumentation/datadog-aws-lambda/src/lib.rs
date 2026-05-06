@@ -24,7 +24,7 @@ use std::task::{self, Poll};
 
 type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 
-/// A Lambda handler wrapped with Datadog tracing.
+/// A Lambda service wrapped with Datadog tracing.
 ///
 /// Owns the [`SdkTracerProvider`] lifecycle,
 /// applies Lambda-appropriate defaults, and implements [`Service`] so it composes
@@ -34,7 +34,7 @@ type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send
 ///
 /// ```ignore
 /// // Zero-config
-/// lambda_runtime::run(WrappedHandler::new(
+/// lambda_runtime::run(TracedService::new(
 ///     lambda_runtime::service_fn(my_handler),
 /// )).await
 ///
@@ -42,22 +42,23 @@ type BoxFuture<T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send
 /// let mut config = Config::builder();
 /// config.set_service("my-service".into());
 /// config.set_env("prod".into());
+/// config.set_version("1.2.3".into());
 ///
-/// lambda_runtime::run(WrappedHandler::with_config(
+/// lambda_runtime::run(TracedService::with_config(
 ///     lambda_runtime::service_fn(my_handler),
 ///     config,
 /// )).await
 ///
 /// // With tower middleware
 /// lambda_runtime::run(
-///     WrappedHandler::new(
+///     TracedService::new(
 ///         tower::ServiceBuilder::new()
 ///             .layer(some_middleware)
 ///             .service(lambda_runtime::service_fn(my_handler)),
 ///     )
 /// ).await
 /// ```
-pub struct WrappedHandler<S, E, R> {
+pub struct TracedService<S, E, R> {
     inner: S,
     provider: SdkTracerProvider,
     tracer: SdkTracer,
@@ -65,7 +66,7 @@ pub struct WrappedHandler<S, E, R> {
     _phantom: PhantomData<fn(E) -> R>,
 }
 
-impl<S, E, R> WrappedHandler<S, E, R> {
+impl<S, E, R> TracedService<S, E, R> {
     /// Wraps a Tower service with Datadog tracing using the default Datadog config sources.
     ///
     /// This is equivalent to calling [`with_config`](Self::with_config) with
@@ -80,7 +81,7 @@ impl<S, E, R> WrappedHandler<S, E, R> {
     /// Wraps a Tower service with Datadog tracing using a caller-provided config builder.
     ///
     /// Use this constructor when you want to apply Tower middleware after tracing
-    /// has started but before your Lambda handler executes.
+    /// has started but before your Lambda service executes.
     ///
     /// The provided Datadog config builder is always forced to Lambda-safe defaults:
     /// - `trace_stats_computation_enabled = false`
@@ -117,7 +118,7 @@ impl<S, E, R> WrappedHandler<S, E, R> {
     }
 }
 
-impl<S, E, R> Service<LambdaEvent<Box<RawValue>>> for WrappedHandler<S, E, R>
+impl<S, E, R> Service<LambdaEvent<Box<RawValue>>> for TracedService<S, E, R>
 where
     S: Service<LambdaEvent<E>, Response = R>,
     S::Future: Future<Output = Result<R, S::Error>> + Send + 'static,
@@ -180,10 +181,10 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    fn test_handler() -> WrappedHandler<ReadyService, serde_json::Value, ()> {
+    fn test_handler() -> TracedService<ReadyService, serde_json::Value, ()> {
         let provider = SdkTracerProvider::builder().build();
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
-        WrappedHandler {
+        TracedService {
             inner: ReadyService,
             provider,
             tracer,
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn poll_ready_delegates_to_inner_service() {
         let ready_calls = Arc::new(AtomicUsize::new(0));
-        let mut wrapped = WrappedHandler::new(ReadyCountingService {
+        let mut wrapped = TracedService::new(ReadyCountingService {
             ready_calls: Arc::clone(&ready_calls),
         });
         let waker = std::task::Waker::noop();
