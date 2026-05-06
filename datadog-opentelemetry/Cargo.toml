@@ -41,17 +41,8 @@ thiserror = { version = "1.0", default-features = false }
 anyhow = "1.0.97"
 rustc_version_runtime = "0.3.0"
 hyper = { version = "1.6", features = ["client", "http1"] }
-hyper-util = { version = "0.1.16", features = [
-    "client",
-    "client-legacy",
-    "http1",
-    "tokio",
-] }
-http-body-util = "0.1"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = "0.7"
-base64 = "0.21"
-sha2 = "0.10"
 uuid = { version = "1.11.0", features = ["v4"] }
 arc-swap = "1.7.1"
 
@@ -64,6 +55,11 @@ libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
+datadog-remote-config = { workspace = true }
+# Renamed alias for libdd-common from the same libdatadog path datadog-remote-config uses,
+# so we can construct `Tag` / `Endpoint` for `Target` / `ConfigInvariants`. The workspace
+# `libdd-common` (v3.x from crates.io) is a separate major used elsewhere — Cargo keeps both.
+libdd-common-rc = { package = "libdd-common", path = "../../libdatadog/libdd-common", default-features = false }
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true }
