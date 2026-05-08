@@ -139,6 +139,14 @@
         "propertyKeys": ["trace_agent_url"]
       }
     ],
+    "DD_TRACE_BAGGAGE_TAG_KEYS": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "user.id,session.id,account.id",
+        "propertyKeys": ["trace_baggage_tag_keys"]
+      }
+    ],
     "DD_TRACE_ENABLED": [
       {
         "version": "A",
