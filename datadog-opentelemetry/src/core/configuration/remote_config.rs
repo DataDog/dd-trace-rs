@@ -12,12 +12,11 @@ use datadog_remote_config::fetch::{
 use datadog_remote_config::file_change_tracker::Change;
 use datadog_remote_config::file_storage::ParsedFileStorage;
 use datadog_remote_config::{
-    ParserRegistry, ProductParser, RemoteConfigCapabilities, RemoteConfigParsedData,
+    ParserRegistry, RemoteConfigCapabilities, RemoteConfigContent, RemoteConfigParsedData,
     RemoteConfigProduct, Target,
 };
 use libdd_common_rc::Endpoint;
 use serde::Deserialize;
-use std::any::Any;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -57,20 +56,12 @@ where
     Ok(Some(serde_json::Value::deserialize(deserializer)?))
 }
 
-impl RemoteConfigParsedData for ApmTracingConfig {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    fn product(&self) -> RemoteConfigProduct {
-        RemoteConfigProduct::ApmTracing
-    }
-}
+impl RemoteConfigContent for ApmTracingConfig {
+    const PRODUCT: RemoteConfigProduct = RemoteConfigProduct::ApmTracing;
 
-fn apm_tracing_parser() -> ProductParser {
-    Box::new(|data: &[u8]| {
-        let parsed: ApmTracingConfig = serde_json::from_slice(data)?;
-        Ok(Box::new(parsed) as Box<dyn RemoteConfigParsedData>)
-    })
+    fn parse(data: &[u8]) -> anyhow::Result<Self> {
+        Ok(serde_json::from_slice(data)?)
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -232,8 +223,7 @@ fn build_fetcher(
 ) -> Result<SingleChangesFetcher<ParsedFileStorage>, RemoteConfigClientError> {
     let endpoint = build_agent_endpoint(config)?;
 
-    let mut registry = ParserRegistry::new();
-    registry.register(RemoteConfigProduct::ApmTracing, apm_tracing_parser());
+    let registry = ParserRegistry::new().with::<ApmTracingConfig>();
     let storage = ParsedFileStorage::with_registry(Arc::new(registry));
 
     // Tags are intentionally left empty for now: the workspace's `libdd-common` (v3.x from
@@ -267,7 +257,7 @@ fn build_fetcher(
 }
 
 type StoredFile = <ParsedFileStorage as datadog_remote_config::fetch::FileStorage>::StoredFile;
-type Updated = anyhow::Result<Box<dyn RemoteConfigParsedData>>;
+type Updated = anyhow::Result<Option<Box<dyn RemoteConfigParsedData>>>;
 
 fn apply_changes(
     config: &Arc<Config>,
@@ -295,9 +285,12 @@ fn apply_changes(
 fn apply_file(config: &Arc<Config>, file: &Arc<StoredFile>) -> Result<(), String> {
     let contents = file.contents();
     let parsed = contents.as_ref().map_err(|e| format!("parse error: {e}"))?;
+    // `None` means no parser is registered for this product, so treat as a no-op success so the
+    // agent doesn't keep retrying.
+    let Some(parsed) = parsed.as_ref() else {
+        return Ok(());
+    };
     let Some(apm) = parsed.as_any().downcast_ref::<ApmTracingConfig>() else {
-        // Unregistered product (e.g. IgnoredProduct sentinel) — treat as a no-op success so the
-        // agent doesn't keep retrying.
         return Ok(());
     };
     apply_apm_tracing(config, apm)
@@ -311,6 +304,9 @@ fn apply_remove(config: &Arc<Config>, file: &Arc<StoredFile>) {
             crate::dd_debug!("RemoteConfigClient: skipping remove for unparseable config: {e}");
             return;
         }
+    };
+    let Some(parsed) = parsed.as_ref() else {
+        return;
     };
     let Some(apm) = parsed.as_any().downcast_ref::<ApmTracingConfig>() else {
         return;
@@ -420,15 +416,10 @@ mod tests {
 
     #[test]
     fn test_apm_tracing_parser_round_trip() {
-        let parser = apm_tracing_parser();
         let json =
             br#"{"id":"42","lib_config":{"tracing_sampling_rules":[{"sample_rate":1.0,"service":"x"}]}}"#;
-        let parsed = parser(json).expect("parser should accept valid JSON");
-        let apm = parsed
-            .as_any()
-            .downcast_ref::<ApmTracingConfig>()
-            .expect("downcast to ApmTracingConfig");
+        let apm = ApmTracingConfig::parse(json).expect("parser should accept valid JSON");
         assert_eq!(apm.id, "42");
-        assert_eq!(apm.product(), RemoteConfigProduct::ApmTracing);
+        assert_eq!(ApmTracingConfig::PRODUCT, RemoteConfigProduct::ApmTracing);
     }
 }
