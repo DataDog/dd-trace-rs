@@ -1396,11 +1396,13 @@ mod tests {
         fn make_baggage(pairs: &[(&str, &str)]) -> Baggage {
             pairs
                 .iter()
-                .map(|(k, v)| opentelemetry::baggage::KeyValueMetadata::new(
-                    k.to_string(),
-                    v.to_string(),
-                    opentelemetry::baggage::BaggageMetadata::default(),
-                ))
+                .map(|(k, v)| {
+                    opentelemetry::baggage::KeyValueMetadata::new(
+                        k.to_string(),
+                        v.to_string(),
+                        opentelemetry::baggage::BaggageMetadata::default(),
+                    )
+                })
                 .collect::<Baggage>()
         }
 
@@ -1434,10 +1436,8 @@ mod tests {
                 ("session.id", "sess"),
                 ("region", "eu-west"),
             ]);
-            let filter = BaggageTagKeyFilter::Keys(vec![
-                "user.id".to_string(),
-                "session.id".to_string(),
-            ]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string()]);
             let mut tags = baggage_span_tags(&baggage, &filter);
             tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
             assert_eq!(tags.len(), 2);
@@ -1448,10 +1448,8 @@ mod tests {
         #[test]
         fn specific_keys_missing_from_baggage_skipped() {
             let baggage = make_baggage(&[("user.id", "99")]);
-            let filter = BaggageTagKeyFilter::Keys(vec![
-                "user.id".to_string(),
-                "account.id".to_string(),
-            ]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "account.id".to_string()]);
             let tags = baggage_span_tags(&baggage, &filter);
             assert_eq!(tags.len(), 1);
             assert_eq!(tags[0], attr("baggage.user.id", "99"));
@@ -1483,9 +1481,15 @@ mod tests {
             tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
             assert_eq!(tags.len(), 3);
             assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.user.id"));
-            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.session.id"));
-            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.account.id"));
-            assert!(!tags.iter().any(|kv| kv.key.as_str() == "baggage.correlation_id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.session.id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.account.id"));
+            assert!(!tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.correlation_id"));
         }
     }
 
@@ -1534,10 +1538,7 @@ mod tests {
         fn whitespace_around_keys_trimmed() {
             assert_eq!(
                 BaggageTagKeyFilter::from_str(" user.id , session.id ").unwrap(),
-                BaggageTagKeyFilter::Keys(vec![
-                    "user.id".to_string(),
-                    "session.id".to_string(),
-                ])
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string(),])
             );
         }
     }
