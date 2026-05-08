@@ -15,7 +15,7 @@ use datadog_remote_config::{
     ParserRegistry, RemoteConfigCapabilities, RemoteConfigContent, RemoteConfigParsedData,
     RemoteConfigProduct, Target,
 };
-use libdd_common_rc::Endpoint;
+use libdd_common::Endpoint;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::thread;
@@ -208,7 +208,7 @@ impl RemoteConfigClientWorker {
 
 fn build_agent_endpoint(config: &Config) -> Result<Endpoint, RemoteConfigClientError> {
     // Reject obviously-broken URIs early so callers get a typed error before the worker spawns.
-    libdd_common_rc::parse_uri(&config.trace_agent_url())
+    libdd_common::parse_uri(&config.trace_agent_url())
         .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
 
     let url = format!(
@@ -226,10 +226,6 @@ fn build_fetcher(
     let registry = ParserRegistry::new().with::<ApmTracingConfig>();
     let storage = ParsedFileStorage::with_registry(Arc::new(registry));
 
-    // Tags are intentionally left empty for now: the workspace's `libdd-common` (v3.x from
-    // crates.io) and `libdd-common-rc` (v4.x from libdatadog path) are two distinct crates,
-    // so we cannot translate `Config::global_tags()` into v4 `Tag`s without a converter.
-    // The agent's tag-based RC routing still works via `service` / `env` / `app_version`.
     let target = Target {
         service: config.service().to_string(),
         env: config.env().map(str::to_owned).unwrap_or_default(),

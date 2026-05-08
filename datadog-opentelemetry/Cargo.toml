@@ -50,16 +50,13 @@ arc-swap = "1.7.1"
 criterion = { version = "0.5.1", optional = true }
 
 # Libdatadog dependencies
-libdd-data-pipeline = { workspace = true }
+libdd-data-pipeline = { workspace = true, features = ["https", "telemetry"] }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
+libdd-capabilities-impl = { workspace = true }
 datadog-remote-config = { workspace = true }
-# Renamed alias for libdd-common from the same libdatadog path datadog-remote-config uses,
-# so we can construct `Tag` / `Endpoint` for `Target` / `ConfigInvariants`. The workspace
-# `libdd-common` (v3.x from crates.io) is a separate major used elsewhere — Cargo keeps both.
-libdd-common-rc = { package = "libdd-common", path = "../../libdatadog/libdd-common", default-features = false }
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true }

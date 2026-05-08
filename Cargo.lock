@@ -371,7 +371,7 @@ dependencies = [
  "clap",
  "criterion-plot",
  "is-terminal",
- "itertools 0.10.5",
+ "itertools",
  "num-traits",
  "once_cell",
  "oorandom",
@@ -392,7 +392,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools 0.10.5",
+ "itertools",
 ]
 
 [[package]]
@@ -493,8 +493,8 @@ dependencies = [
  "hashbrown 0.15.5",
  "hyper",
  "libc",
- "libdd-common 3.0.2",
- "libdd-common 4.0.0",
+ "libdd-capabilities-impl",
+ "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
  "libdd-telemetry",
@@ -526,13 +526,14 @@ dependencies = [
 [[package]]
 name = "datadog-remote-config"
 version = "0.0.1"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
  "base64",
  "futures-util",
  "http",
  "http-body-util",
- "libdd-common 4.0.0",
+ "libdd-common",
  "libdd-trace-protobuf 3.0.1",
  "manual_future",
  "serde",
@@ -776,8 +777,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1266,15 +1269,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1326,39 +1320,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "libdd-common"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c779949577250487179d904508f18750070e9a01eb58dce378409ec5fa066f3b"
+name = "libdd-capabilities"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
  "bytes",
- "cc",
- "const_format",
- "futures",
- "futures-core",
- "futures-util",
- "hex",
  "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "libc",
- "nix",
- "pin-project",
- "regex",
- "serde",
- "static_assertions",
  "thiserror 1.0.69",
- "tokio",
- "tower-service",
- "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "libdd-capabilities-impl"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "libdd-capabilities",
+ "libdd-common",
 ]
 
 [[package]]
 name = "libdd-common"
 version = "4.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1392,21 +1379,24 @@ dependencies = [
 [[package]]
 name = "libdd-data-pipeline"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "358411451d99011f13c7628acee25dc144f2bbeade87acf10fa7d5ffce1053dc"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "async-trait",
  "bytes",
  "either",
+ "getrandom 0.2.17",
  "http",
  "http-body-util",
- "libdd-common 3.0.2",
- "libdd-ddsketch",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
+ "libdd-common",
  "libdd-dogstatsd-client",
+ "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf 3.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1422,8 +1412,7 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b31b2435e2e8eaba0e35a96df3e1407b68f8ef76055383ceb2ba5a09e5a1bb5"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "prost",
 ]
@@ -1431,13 +1420,12 @@ dependencies = [
 [[package]]
 name = "libdd-dogstatsd-client"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6f8eca39d1e2ef6267cf77fc51eb7ebc7d4f44827e150b4d317c29d8c33bf87"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
  "cadence",
  "http",
- "libdd-common 3.0.2",
+ "libdd-common",
  "serde",
  "tracing",
 ]
@@ -1461,20 +1449,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-shared-runtime"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
+dependencies = [
+ "async-trait",
+ "futures",
+ "libdd-capabilities",
+ "libdd-common",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "libdd-telemetry"
 version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78774ffce79da677602829d7fe27468283e5349010e974257233edf4cd12b783"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
+ "bytes",
  "futures",
  "hashbrown 0.15.5",
  "http",
  "http-body-util",
  "libc",
- "libdd-common 3.0.2",
+ "libdd-common",
  "libdd-ddsketch",
+ "libdd-shared-runtime",
  "serde",
  "serde_json",
  "sys-info",
@@ -1488,8 +1492,7 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e47838e12ae2665250b4cdba4e3119230b79e3c522bb9f48dd0c87346f5a8f44"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "serde",
 ]
@@ -1497,11 +1500,10 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 3.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-trace-protobuf 3.0.1",
 ]
 
 [[package]]
@@ -1518,17 +1520,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-protobuf"
 version = "3.0.1"
-dependencies = [
- "prost",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "libdd-trace-protobuf"
-version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1809242895edc53ac51a21287829f42474e749dbc222ea7f414cb3f0d1f91d4e"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "prost",
  "serde",
@@ -1538,36 +1530,50 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d92b882863f7c531d51e73f7bc5930c705e47829332128d9bdcad0fea3b2b942"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "hashbrown 0.15.5",
+ "http",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
+ "libdd-common",
  "libdd-ddsketch",
- "libdd-trace-protobuf 3.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-shared-runtime",
+ "libdd-trace-protobuf 3.0.1",
  "libdd-trace-utils",
+ "rmp-serde",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
 name = "libdd-trace-utils"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "870506e9bb79c93ce5bbfe9d715c53c7ea393a177c7299f0bf43745c0adea0c7"
+source = "git+https://github.com/DataDog/libdatadog?branch=igor%2Frc%2Fdi-refactor-claude#9b0bd6bc0ff1b04e2f1cf71efd5311e84726a7de"
 dependencies = [
  "anyhow",
+ "base64",
  "bytes",
  "cargo-platform",
  "cargo_metadata",
  "futures",
+ "getrandom 0.2.17",
  "http",
  "http-body",
  "http-body-util",
  "httpmock",
  "hyper",
  "indexmap 2.14.0",
- "libdd-common 3.0.2",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
+ "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-trace-protobuf 3.0.1",
  "prost",
  "rand 0.8.6",
  "rmp",
@@ -2035,7 +2041,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn",
