@@ -632,7 +632,7 @@ type SamplingRulesConfigItem = ConfigItemWithOverride<ParsedSamplingRules>;
 /// This is used to track services beyond the main service for remote configuration
 #[derive(Debug, Clone)]
 struct ExtraServicesTracker {
-    /// Services that have been discovered
+    /// Services that have been discovered.
     extra_services: Arc<Mutex<HashSet<String>>>,
     /// Services that have already been sent to the agent
     extra_services_sent: Arc<Mutex<HashSet<String>>>,
@@ -681,7 +681,7 @@ impl ExtraServicesTracker {
         }
     }
 
-    /// Get all extra services, updating from the queue
+    /// Get all extra services, updating from the queue.
     fn get_extra_services(&self) -> Vec<String> {
         let mut queue = match self.extra_services_queue.lock() {
             Ok(q) => q,
@@ -1614,7 +1614,7 @@ impl Config {
             .add_extra_services(service_names, self.service().deref());
     }
 
-    /// Get all extra services discovered at runtime
+    /// Get all extra services discovered at runtime.
     pub(crate) fn get_extra_services(&self) -> Vec<String> {
         if !self.remote_config_enabled() {
             return Vec::new();

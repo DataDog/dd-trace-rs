@@ -26,9 +26,13 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 libdd-data-pipeline = { version = "3.0.1", default-features = false }
 libdd-trace-utils = { version = "3.0.0", default-features = false }
 libdd-telemetry = { version = "4.0.0", default-features = false }
-libdd-common = { version = "3.0.1", default-features = false }
+libdd-common = { version = "4.0.0", default-features = false }
 libdd-tinybytes = { version = "1.1.0", default-features = false }
 libdd-library-config = { version = "1.1.0", default-features = false }
+libdd-capabilities-impl = { version = "1.0.0", default-features = false }
+
+# TODO: replace with published crate
+datadog-remote-config = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude", default-features = false, features = ["client"] }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
@@ -54,6 +58,20 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
+
+
+# Override crates.io libdd-* sources with the sibling libdatadog checkout so that
+# every libdd-common reference (workspace direct + transitive through datadog-remote-config)
+# resolves to a single crate instance. Drop this section once libdatadog publishes
+# the matching versions to crates.io.
+# TODO: remove!
+[patch.crates-io]
+libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
+libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
+libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
+libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", branch = "igor/rc/di-refactor-claude" }
 
 
 [profile.dev]
