@@ -2,14 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::cell::RefCell;
+use std::sync::OnceLock;
 
-use rand::{Rng, SeedableRng};
+use rand::{rngs::OsRng, Rng, RngCore, SeedableRng};
+
+static SECURE_RANDOM: OnceLock<bool> = OnceLock::new();
+
+fn secure_random() -> bool {
+    *SECURE_RANDOM.get_or_init(|| {
+        std::env::var("DD_TRACE_SECURE_RANDOM").as_deref() == Ok("true")
+    })
+}
 
 #[derive(Debug)]
 pub(crate) struct TraceidGenerator;
 
 thread_local! {
-    /// TODO: Restart entropy in forked thread in case of fork
+    // Used only when DD_TRACE_SECURE_RANDOM is not set.
+    // TODO: Restart entropy in forked thread in case of fork
     static RNG: RefCell<rand::rngs::SmallRng> = RefCell::new(rand::rngs::SmallRng::from_entropy());
 }
 
@@ -19,7 +29,11 @@ impl opentelemetry_sdk::trace::IdGenerator for TraceidGenerator {
         // 32 bits timestamp | 32 bits of zeroes | 64 bits of random
         // The timestamp is the number of seconds since the UNIX epoch
 
-        let lower_half = RNG.with(|rng| rng.borrow_mut().gen::<u64>());
+        let lower_half = if secure_random() {
+            OsRng.next_u64()
+        } else {
+            RNG.with(|rng| rng.borrow_mut().gen::<u64>())
+        };
         let timestamp = std::time::UNIX_EPOCH
             .elapsed()
             .map(|d| d.as_secs())
@@ -33,7 +47,12 @@ impl opentelemetry_sdk::trace::IdGenerator for TraceidGenerator {
     }
 
     fn new_span_id(&self) -> opentelemetry::SpanId {
-        let span_id = RNG.with(|rng| rng.borrow_mut().gen::<u64>()).to_be_bytes();
+        let id = if secure_random() {
+            OsRng.next_u64()
+        } else {
+            RNG.with(|rng| rng.borrow_mut().gen::<u64>())
+        };
+        let span_id = id.to_be_bytes();
         opentelemetry::SpanId::from_bytes(span_id)
     }
 }
@@ -58,5 +77,36 @@ mod tests {
         assert!(now - 120 < ts && ts < now + 120);
         // Check that the lower half is not zero
         assert!(trace_id & 0x0000_0000_0000_0000_FFFF_FFFF_FFFF_FFFF != 0);
+    }
+
+    #[test]
+    fn test_new_trace_id_nonzero() {
+        let gen = TraceidGenerator;
+        let id = gen.new_trace_id();
+        assert_ne!(id, opentelemetry::TraceId::INVALID);
+    }
+
+    #[test]
+    fn test_new_span_id_nonzero() {
+        let gen = TraceidGenerator;
+        let id = gen.new_span_id();
+        assert_ne!(id, opentelemetry::SpanId::INVALID);
+    }
+
+    #[test]
+    fn test_osrng_produces_varied_values() {
+        use std::collections::HashSet;
+        let values: HashSet<u64> = (0..100).map(|_| OsRng.next_u64()).collect();
+        assert!(
+            values.len() > 90,
+            "Expected diverse OsRng values, got {}",
+            values.len()
+        );
+    }
+
+    #[test]
+    fn test_secure_random_flag() {
+        // Just verify it returns a bool without panicking (OnceLock may already be init)
+        let _ = secure_random();
     }
 }
