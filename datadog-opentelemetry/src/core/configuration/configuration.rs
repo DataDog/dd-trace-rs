@@ -2442,20 +2442,43 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
-    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
-        self.config.datadog_tags_max_length.set_code(length);
-        self
-    }
-
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Enable synchronous trace writes.
+    ///
+    /// When `true`, each trace export immediately triggers a flush and waits for the background
+    /// exporter to process that batch. The wait is bounded by
+    /// [`ConfigBuilder::set_trace_writer_synchronous_timeout`]; if that timeout is reached, the
+    /// flush may continue in the background.
+    ///
+    /// Useful for short-lived processes such as AWS Lambda functions where the process may freeze
+    /// before an async write completes, or in tests where reducing buffering improves determinism.
+    ///
+    /// **Default**: `false`
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
     ) -> &mut Self {
         self.config.trace_writer_synchronous_write = trace_writer_synchronous_write;
+        self
+    }
+
+    /// Set the maximum time to wait for synchronous trace writes.
+    ///
+    /// This only applies when [`ConfigBuilder::set_trace_writer_synchronous_write`] is enabled.
+    /// If the timeout is reached, the flush may continue in the background.
+    ///
+    /// **Default**: `2s`
+    pub fn set_trace_writer_synchronous_timeout(
+        &mut self,
+        trace_writer_synchronous_timeout: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_synchronous_timeout = trace_writer_synchronous_timeout;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
+        self.config.datadog_tags_max_length.set_code(length);
         self
     }
 
