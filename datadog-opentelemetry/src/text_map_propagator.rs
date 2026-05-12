@@ -71,7 +71,6 @@ pub struct DatadogPropagator {
     baggage_propagator: BaggagePropagator,
     baggage_extract: bool,
     baggage_inject: bool,
-    fields: Vec<String>,
 }
 
 impl DatadogPropagator {
@@ -81,18 +80,6 @@ impl DatadogPropagator {
         let baggage_inject =
             get_injectors(config.as_ref()).contains(&TracePropagationStyle::Baggage);
         let inner = DatadogCompositePropagator::new(config.clone());
-        // Build fields() from injectors only (per OTel spec, fields() represents what the
-        // propagator *writes*). inner.keys() is extractor-derived, so we strip the baggage key
-        // from it and re-add it solely based on baggage_inject.
-        let mut fields: Vec<String> = inner
-            .keys()
-            .iter()
-            .filter(|k| k.as_str() != crate::propagation::baggage::BAGGAGE_KEY)
-            .cloned()
-            .collect();
-        if baggage_inject {
-            fields.push(crate::propagation::baggage::BAGGAGE_KEY.to_owned());
-        }
         DatadogPropagator {
             inner,
             registry,
@@ -100,7 +87,6 @@ impl DatadogPropagator {
             baggage_propagator: BaggagePropagator::new(),
             baggage_extract,
             baggage_inject,
-            fields,
         }
     }
 
@@ -244,7 +230,7 @@ impl TextMapPropagator for DatadogPropagator {
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
         let fields: &[String] = if self.cfg.enabled() {
-            &self.fields
+            self.inner.fields()
         } else {
             &[]
         };
