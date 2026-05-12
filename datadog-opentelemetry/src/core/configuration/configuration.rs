@@ -722,6 +722,8 @@ pub enum TracePropagationStyle {
     Datadog,
     /// W3C Trace Context propagation format using `traceparent` and `tracestate` headers.
     TraceContext,
+    /// W3C Baggage propagation format using the `baggage` header.
+    Baggage,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -753,6 +755,7 @@ impl FromStr for TracePropagationStyle {
         match s.trim().to_lowercase().as_str() {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
+            "baggage" => Ok(TracePropagationStyle::Baggage),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -764,6 +767,7 @@ impl Display for TracePropagationStyle {
         let style = match self {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
+            TracePropagationStyle::Baggage => "baggage",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -1810,6 +1814,7 @@ fn default_config() -> Config {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ]),
         ),
         trace_propagation_style_extract: ConfigItem::new(
@@ -2737,6 +2742,7 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ])
             .as_deref()
         );
@@ -2746,6 +2752,47 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_style_baggage_parsed_from_env() {
+        // "baggage" is recognised as a valid style value (case-insensitive) in all three env vars.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext,baggage"),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "Baggage,datadog"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "BAGGAGE,tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::Datadog,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]

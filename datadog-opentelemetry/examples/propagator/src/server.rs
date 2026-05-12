@@ -119,7 +119,10 @@ async fn send_request(
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let client = Client::builder(TokioExecutor::new()).build_http();
 
-    let cx = Context::current();
+    let cx = Context::current().with_baggage(vec![
+        KeyValue::new("request-id", "xyz-123"),
+        KeyValue::new("caller", "rust-propagator-example"),
+    ]);
 
     let mut req = hyper::Request::builder().uri(url);
     global::get_text_map_propagator(|propagator| {

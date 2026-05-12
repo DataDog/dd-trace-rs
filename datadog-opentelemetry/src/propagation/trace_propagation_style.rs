@@ -5,6 +5,7 @@ use crate::core::configuration::TracePropagationStyle;
 use serde::{Deserialize, Deserializer};
 
 use crate::propagation::{
+    baggage,
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, SpanContext},
     datadog, tracecontext, PropagationConfig, Propagator,
@@ -17,7 +18,8 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
         match self {
             Self::Datadog => datadog::extract(carrier, config),
             Self::TraceContext => tracecontext::extract(carrier),
-            _ => None,
+            // Baggage extraction operates on OTel Context and is handled by DatadogPropagator.
+            Self::Baggage | Self::None => None,
         }
     }
 
@@ -25,7 +27,8 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
         match self {
             Self::Datadog => datadog::inject(context, carrier, config),
             Self::TraceContext => tracecontext::inject(context, carrier),
-            _ => {}
+            // Baggage injection operates on OTel Context and is handled by DatadogPropagator.
+            Self::Baggage | Self::None => {}
         }
     }
 
@@ -33,7 +36,8 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
         match self {
             Self::Datadog => datadog::keys(),
             Self::TraceContext => tracecontext::keys(),
-            _ => &NONE_KEYS,
+            Self::Baggage => baggage::keys(),
+            Self::None => &NONE_KEYS,
         }
     }
 }
