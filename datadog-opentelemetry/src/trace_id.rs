@@ -129,9 +129,7 @@ mod tests {
     fn test_secure_random_produces_varied_values() {
         use std::collections::HashSet;
         let gen = TraceidGenerator::new(true);
-        let ids: HashSet<[u8; 8]> = (0..100)
-            .map(|_| gen.new_span_id().to_bytes())
-            .collect();
+        let ids: HashSet<[u8; 8]> = (0..100).map(|_| gen.new_span_id().to_bytes()).collect();
         assert!(ids.len() > 90, "Expected diverse IDs, got {}", ids.len());
     }
 }
