@@ -6,7 +6,7 @@
 //! This module exposes the header key so the composite propagator can include it in its `fields()`
 //! list. It contains only extraction code.
 //!
-//! Injections is performed by [`opentelemetry_sdk::propagation::BaggagePropagator`]
+//! Injection is performed by [`opentelemetry_sdk::propagation::BaggagePropagator`]
 //! at the [`DatadogPropagator`](crate::text_map_propagator::DatadogPropagator) layer, which has
 //! access to the OTel [`Context`](opentelemetry::Context) that carries baggage.
 use std::sync::LazyLock;
@@ -19,12 +19,11 @@ use crate::{dd_warn, propagation::carrier::Extractor};
 /// The W3C `baggage` header name.
 pub const BAGGAGE_KEY: &str = "baggage";
 
-/// Extract only the first [`MAX_BAGGAGE_MEMBERS`] entries of the baggage header
-/// members the max entry coming after are ignored
+/// Cap on the number of baggage members extracted. Entries beyond this are dropped.
 const MAX_BAGGAGE_MEMBERS: usize = 32;
 
-/// Extract only the up to [`MAX_BAGGAGE_LENGTH`] entries of the baggage header
-/// members that would make us look at more than the max bytes of the header are ignored
+/// Cap on the cumulative byte length of baggage members parsed. Once exceeded, remaining entries
+/// are dropped.
 const MAX_BAGGAGE_LENGTH: usize = 1024;
 
 static BAGGAGE_HEADER_KEYS: LazyLock<[String; 1]> = LazyLock::new(|| [BAGGAGE_KEY.to_owned()]);
@@ -59,6 +58,7 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
         dd_warn!("Propagator (baggage): empty key or value");
         return None;
     }
+
 
     // decode and trim metadata entries associated with the key-value
     let decoded_props = member
@@ -243,7 +243,7 @@ mod tests {
                 format!("{prefix}{pad}")
             })
             .collect();
-        assert!(members.iter().map(|m| m.len()).sum::<usize>() > MAX_BAGGAGE_MEMBERS);
+        assert!(members.iter().map(|m| m.len()).sum::<usize>() > MAX_BAGGAGE_LENGTH);
         let header_value = members.join(",");
 
         let mut extractor: HashMap<String, String> = HashMap::new();
