@@ -6,6 +6,8 @@ use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
 use core::fmt;
+use libdd_common::http_common::{self};
+use libdd_common::{connector::Connector::Http, Endpoint, HttpClient};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,8 +15,8 @@ use std::thread::{self};
 use std::time::{Duration, Instant};
 
 // HTTP client imports
-use http_body_util::{BodyExt, Full};
-use hyper::{body::Bytes, Method, Request};
+use http_body_util::BodyExt;
+use hyper::Method;
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
 use hyper_util::rt::TokioExecutor;
 
@@ -411,9 +413,7 @@ struct RemoteConfigClient {
     /// Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
     config: Arc<Config>,
-    agent_url: hyper::Uri,
-    // HTTP client timeout configuration
-    client_timeout: Duration,
+    agent_endpoint: Endpoint,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
@@ -421,12 +421,14 @@ struct RemoteConfigClient {
     cached_target_files: Vec<CachedTargetFile>,
     // Registry of product handlers for processing different config types
     product_registry: ProductRegistry,
+    // default http client
+    http_client: HttpClient,
 }
 
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
     pub fn new(config: Arc<Config>) -> Result<Self, RemoteConfigClientError> {
-        let agent_url = hyper::Uri::from_maybe_shared(config.trace_agent_url().to_string())
+        let agent_url = libdd_common::parse_uri(&config.trace_agent_url())
             .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
         let mut parts = agent_url.into_parts();
         parts.path_and_query = Some(
@@ -436,6 +438,8 @@ impl RemoteConfigClient {
         );
         let agent_url =
             hyper::Uri::from_parts(parts).map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
+
+        let agent_endpoint = libdd_common::Endpoint::from_url(agent_url);
 
         let state = Arc::new(Mutex::new(ClientState {
             root_version: 1, // Agent requires >= 1 (base TUF director root)
@@ -448,50 +452,44 @@ impl RemoteConfigClient {
 
         let poll_interval = Duration::from_secs_f64(config.remote_config_poll_interval());
 
+        // Create HTTP connector with timeout configuration
+        let mut connector = HttpConnector::new();
+        connector.set_connect_timeout(Some(DEFAULT_TIMEOUT));
+
         Ok(Self {
             client_id: uuid::Uuid::new_v4().to_string(),
             config,
-            agent_url,
-            client_timeout: DEFAULT_TIMEOUT,
+            agent_endpoint,
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval,
             cached_target_files: Vec::new(),
             product_registry: ProductRegistry::new(),
+            http_client: Client::builder(TokioExecutor::default()).build(Http(connector)),
         })
     }
 
     /// Fetches configuration from the agent and applies it
     async fn fetch_and_apply_config(&mut self) -> Result<()> {
-        // Create HTTP connector with timeout configuration
-        let mut connector = HttpConnector::new();
-        connector.set_connect_timeout(Some(self.client_timeout));
-
-        // Create HTTP client for this request
-        // TODO(paullgdc): this doesn't support UDS
-        //  We should instead use the client in ddcommon::hyper_migration and the helper methods
-        //  to encode the URI the way it expects for UDS
-        let client = Client::builder(TokioExecutor::new()).build(connector);
-
         let request_payload = self.build_request()?;
-
         // Serialize the request to JSON
         let json_body = serde_json::to_string(&request_payload)
             .map_err(|e| anyhow::anyhow!("Failed to serialize request: {}", e))?;
 
-        // Parse the agent URL
+        let req_builder = self
+            .agent_endpoint
+            .to_request_builder("dd-trace-rs")
+            .map_err(|e| anyhow::anyhow!("Failed to build request builder: {}", e))?;
 
-        // Build HTTP request
-        let req = Request::builder()
+        let req = req_builder
             .method(Method::POST)
-            .uri(self.agent_url.clone())
             .header("content-type", "application/json")
-            .header("user-agent", "dd-trace-rs")
-            .body(Full::new(Bytes::from(json_body)))
+            .body(http_common::Body::from(json_body))
             .map_err(|e| anyhow::anyhow!("Failed to build request: {}", e))?;
 
         // Send request to agent
-        let response = client
+        let response = self
+            .http_client
             .request(req)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send request: {}", e))?;
@@ -656,9 +654,6 @@ impl RemoteConfigClient {
                     .decode(&file.raw)
                     .map_err(|e| anyhow::anyhow!("Failed to decode config: {}", e))?;
 
-                let config_str = String::from_utf8(decoded)
-                    .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
-
                 // Determine config id and version for state reporting (do this before applying)
                 let (_, meta_version) = path_to_custom
                     .get(&file.path)
@@ -669,18 +664,18 @@ impl RemoteConfigClient {
                 // Apply the config and record success or failure state
                 // Right now we only support APM_TRACING handler, but in the future we will support
                 // other products
-                match handler.process_config(&config_str, &self.config) {
+                match handler.process_config(&decoded, &self.config) {
                     Ok(_) => {
-                        // Calculate SHA256 hash of the raw content
+                        // Calculate SHA256 hash of the decoded file
                         use sha2::{Digest, Sha256};
                         let mut hasher = Sha256::new();
-                        hasher.update(&file.raw);
+                        hasher.update(&decoded);
                         let hash_result = hasher.finalize();
                         let hash_hex = format!("{hash_result:x}");
 
                         new_cache.push(CachedTargetFile {
                             path: file.path.clone(),
-                            length: file.raw.len() as u64,
+                            length: decoded.len() as u64,
                             hashes: vec![Hash {
                                 algorithm: "sha256".to_string(),
                                 hash: hash_hex,
@@ -775,7 +770,7 @@ impl RemoteConfigClient {
 /// configuration format
 trait ProductHandler {
     /// Process the configuration for this product
-    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()>;
+    fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()>;
 
     /// Get the product name this handler supports
     fn product_name(&self) -> &'static str;
@@ -784,9 +779,9 @@ trait ProductHandler {
 struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
-    fn process_config(&self, config_json: &str, config: &Arc<Config>) -> Result<()> {
+    fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()> {
         // Parse the config to extract sampling rules as raw JSON
-        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json)
+        let tracing_config: ApmTracingConfig = serde_json::from_slice(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
 
         // Extract sampling rules if present
@@ -1313,7 +1308,8 @@ mod tests {
             cached_files[0].path,
             "datadog/2/APM_TRACING/apm-tracing-sampling/config"
         );
-        assert_eq!(cached_files[0].length, 140);
+        // Cached file length is the decoded bytes length (not base64 string length)
+        assert_eq!(cached_files[0].length, 105);
         assert_eq!(cached_files[0].hashes.len(), 1);
         assert_eq!(cached_files[0].hashes[0].algorithm, "sha256");
 
@@ -1838,12 +1834,12 @@ mod tests {
         let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rules": [{"sample_rate": 0.5, "service": "test"}]}}"#;
 
         // This should succeed
-        let result = handler.process_config(config_json, &config);
+        let result = handler.process_config(config_json.as_bytes(), &config);
         assert!(result.is_ok());
 
         // Test invalid JSON
         let invalid_json = "invalid json";
-        let result = handler.process_config(invalid_json, &config);
+        let result = handler.process_config(invalid_json.as_bytes(), &config);
         assert!(result.is_err());
     }
 
