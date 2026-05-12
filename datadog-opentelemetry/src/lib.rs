@@ -553,7 +553,7 @@ fn make_tracer(
 
         let mut tracer_provider_builder = tracer_provider_builder
             .with_sampler(sampler) // Use the sampler created above
-            .with_id_generator(trace_id::TraceidGenerator);
+            .with_id_generator(trace_id::TraceidGenerator::new(config.trace_secure_random()));
         if config.enabled() {
             let span_processor = DatadogSpanProcessor::new(
                 config.clone(),

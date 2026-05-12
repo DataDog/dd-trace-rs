@@ -2,20 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::cell::RefCell;
-use std::sync::OnceLock;
 
 use rand::{rngs::OsRng, Rng, RngCore, SeedableRng};
 
-static SECURE_RANDOM: OnceLock<bool> = OnceLock::new();
-
-fn secure_random() -> bool {
-    *SECURE_RANDOM.get_or_init(|| {
-        std::env::var("DD_TRACE_SECURE_RANDOM").as_deref() == Ok("true")
-    })
+#[derive(Debug)]
+pub(crate) struct TraceidGenerator {
+    secure_random: bool,
 }
 
-#[derive(Debug)]
-pub(crate) struct TraceidGenerator;
+impl TraceidGenerator {
+    pub(crate) fn new(secure_random: bool) -> Self {
+        Self { secure_random }
+    }
+}
 
 thread_local! {
     // Used only when DD_TRACE_SECURE_RANDOM is not set.
@@ -29,7 +28,7 @@ impl opentelemetry_sdk::trace::IdGenerator for TraceidGenerator {
         // 32 bits timestamp | 32 bits of zeroes | 64 bits of random
         // The timestamp is the number of seconds since the UNIX epoch
 
-        let lower_half = if secure_random() {
+        let lower_half = if self.secure_random {
             OsRng.next_u64()
         } else {
             RNG.with(|rng| rng.borrow_mut().gen::<u64>())
@@ -47,7 +46,7 @@ impl opentelemetry_sdk::trace::IdGenerator for TraceidGenerator {
     }
 
     fn new_span_id(&self) -> opentelemetry::SpanId {
-        let id = if secure_random() {
+        let id = if self.secure_random {
             OsRng.next_u64()
         } else {
             RNG.with(|rng| rng.borrow_mut().gen::<u64>())
@@ -64,7 +63,7 @@ mod tests {
 
     #[test]
     fn test_trace_id_generator() {
-        let generator = TraceidGenerator;
+        let generator = TraceidGenerator::new(false);
         let trace_id = u128::from_be_bytes(generator.new_trace_id().to_bytes());
         // Format should be 32 bits timestamp | 32 bits of zeroes | 64 bits of random
         assert!(trace_id & 0x0000_0000_FFFF_FFFF_0000_0000_0000_0000 == 0);
@@ -81,14 +80,14 @@ mod tests {
 
     #[test]
     fn test_new_trace_id_nonzero() {
-        let gen = TraceidGenerator;
+        let gen = TraceidGenerator::new(false);
         let id = gen.new_trace_id();
         assert_ne!(id, opentelemetry::TraceId::INVALID);
     }
 
     #[test]
     fn test_new_span_id_nonzero() {
-        let gen = TraceidGenerator;
+        let gen = TraceidGenerator::new(false);
         let id = gen.new_span_id();
         assert_ne!(id, opentelemetry::SpanId::INVALID);
     }
@@ -105,8 +104,34 @@ mod tests {
     }
 
     #[test]
-    fn test_secure_random_flag() {
-        // Just verify it returns a bool without panicking (OnceLock may already be init)
-        let _ = secure_random();
+    fn test_secure_random_trace_id_format() {
+        let gen = TraceidGenerator::new(true);
+        let trace_id = u128::from_be_bytes(gen.new_trace_id().to_bytes());
+        // Must still follow: 32 bits timestamp | 32 bits zeroes | 64 bits random
+        assert!(trace_id & 0x0000_0000_FFFF_FFFF_0000_0000_0000_0000 == 0);
+        let ts = (trace_id >> 96) as u64;
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("negative timestamp")
+            .as_secs();
+        assert!(now - 120 < ts && ts < now + 120);
+        assert_ne!(trace_id & 0x0000_0000_0000_0000_FFFF_FFFF_FFFF_FFFF, 0);
+    }
+
+    #[test]
+    fn test_secure_random_span_id_nonzero() {
+        let gen = TraceidGenerator::new(true);
+        let id = gen.new_span_id();
+        assert_ne!(id, opentelemetry::SpanId::INVALID);
+    }
+
+    #[test]
+    fn test_secure_random_produces_varied_values() {
+        use std::collections::HashSet;
+        let gen = TraceidGenerator::new(true);
+        let ids: HashSet<[u8; 8]> = (0..100)
+            .map(|_| gen.new_span_id().to_bytes())
+            .collect();
+        assert!(ids.len() > 90, "Expected diverse IDs, got {}", ids.len());
     }
 }
