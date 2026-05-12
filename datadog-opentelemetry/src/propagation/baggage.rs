@@ -53,6 +53,13 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
         return None;
     };
 
+    let name = name.trim();
+    let value = value.trim();
+    if name.is_empty() || value.is_empty() {
+        dd_warn!("Propagator (baggage): empty key or value");
+        return None;
+    }
+
     // decode and trim metadata entries associated with the key-value
     let decoded_props = member
         .flat_map(|prop| percent_decode_str(prop).decode_utf8())
@@ -66,8 +73,8 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
         });
 
     Some(KeyValueMetadata::new(
-        name.trim().to_owned(),
-        value.trim().to_string(),
+        name.to_owned(),
+        value.to_string(),
         decoded_props,
     ))
 }
@@ -85,7 +92,9 @@ pub(crate) fn extract_baggage(extractor: &dyn Extractor) -> Option<Baggage> {
             }
             !drop_entry
         })
-        .filter_map(parse_baggage_member)
+        .map(parse_baggage_member)
+        .take_while(Option::is_some)
+        .flatten()
         .take_while(|_| {
             members +=1;
             let drop_entry = members > MAX_BAGGAGE_MEMBERS;
@@ -140,16 +149,6 @@ mod tests {
                 "key1=val1,key2=val2,a,val3",
                 vec![
                     (Key::new("key1"), StringValue::from("val1")),
-                    (Key::new("key2"), StringValue::from("val2")),
-                ]
-                .into_iter()
-                .collect(),
-            ),
-            // "valid header with no value"
-            (
-                "key1=,key2=val2",
-                vec![
-                    (Key::new("key1"), StringValue::from("")),
                     (Key::new("key2"), StringValue::from("val2")),
                 ]
                 .into_iter()
