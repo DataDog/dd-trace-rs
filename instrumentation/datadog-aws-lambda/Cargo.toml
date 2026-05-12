@@ -13,9 +13,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-# TODO: Drop `test-utils` from this production dependency once
-# `ConfigBuilder::set_trace_writer_synchronous_write` is ungated upstream.
-datadog-opentelemetry = { version = "0.3", path = "../../datadog-opentelemetry", features = ["test-utils"] }
+datadog-opentelemetry = { version = "0.3", path = "../../datadog-opentelemetry" }
 lambda_runtime = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
