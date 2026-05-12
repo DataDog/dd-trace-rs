@@ -54,8 +54,8 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
 
     let name = name.trim();
     let value = value.trim();
-    if name.is_empty() || value.is_empty() {
-        dd_warn!("Propagator (baggage): empty key or value");
+    if name.is_empty() {
+        dd_warn!("Propagator (baggage): empty key");
         return None;
     }
 
