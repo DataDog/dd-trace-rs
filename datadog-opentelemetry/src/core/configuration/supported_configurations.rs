@@ -35,6 +35,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_RATE_LIMIT,
     DD_TRACE_SAMPLING_RULES,
     DD_TRACE_STATS_COMPUTATION_ENABLED,
+    DD_TRACE_STATS_OBFUSCATION_ENABLED,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
     DD_VERSION,
     OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -174,6 +175,9 @@ impl SupportedConfigurations {
             #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
                 "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
+            }
+            SupportedConfigurations::DD_TRACE_STATS_OBFUSCATION_ENABLED => {
+                "DD_TRACE_STATS_OBFUSCATION_ENABLED"
             }
         }
     }

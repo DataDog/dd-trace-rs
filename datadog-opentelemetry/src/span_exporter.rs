@@ -4,6 +4,7 @@
 use std::{sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
+use libdd_capabilities_impl::NativeCapabilities;
 use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
     TraceExporterOutputFormat,
@@ -49,6 +50,10 @@ impl DatadogExporter {
         if config.trace_stats_computation_enabled() {
             builder.enable_stats(Duration::from_secs(10));
         }
+        if config.client_side_stats_obfuscation() {
+            builder.enable_client_side_stats_obfuscation();
+        }
+
         if let Some(env) = config.env() {
             builder.set_env(env);
         }
@@ -120,7 +125,7 @@ impl Exporter<SpanData> for MapperExporter {
     fn trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<SpanData>>,
-        trace_exporter: &TraceExporter,
+        trace_exporter: &TraceExporter<NativeCapabilities>,
     ) -> Result<AgentResponse, TraceExporterError> {
         let resource = self.otel_resource.load();
         let trace_chunks = trace_chunks

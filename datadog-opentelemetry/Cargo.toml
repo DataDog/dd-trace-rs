@@ -60,6 +60,7 @@ criterion = { version = "0.5.1", optional = true }
 
 # Libdatadog dependencies
 libdd-data-pipeline = { workspace = true }
+libdd-capabilities-impl = { workspace = true }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
