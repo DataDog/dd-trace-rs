@@ -59,7 +59,6 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
         return None;
     }
 
-
     // decode and trim metadata entries associated with the key-value
     let decoded_props = member
         .flat_map(|prop| percent_decode_str(prop).decode_utf8())
