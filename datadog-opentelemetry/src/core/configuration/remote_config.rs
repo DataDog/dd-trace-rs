@@ -6,6 +6,8 @@ use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
 use core::fmt;
+use libdd_common::http_common::{self};
+use libdd_common::{connector::Connector::Http, Endpoint, HttpClient};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,8 +15,8 @@ use std::thread::{self};
 use std::time::{Duration, Instant};
 
 // HTTP client imports
-use http_body_util::{BodyExt, Full};
-use hyper::{body::Bytes, Method, Request};
+use http_body_util::BodyExt;
+use hyper::Method;
 use hyper_util::client::legacy::{connect::HttpConnector, Client};
 use hyper_util::rt::TokioExecutor;
 
@@ -411,9 +413,7 @@ struct RemoteConfigClient {
     /// Different from runtime_id - each RemoteConfigClient gets its own UUID
     client_id: String,
     config: Arc<Config>,
-    agent_url: hyper::Uri,
-    // HTTP client timeout configuration
-    client_timeout: Duration,
+    agent_endpoint: Endpoint,
     state: Arc<Mutex<ClientState>>,
     capabilities: ClientCapabilities,
     poll_interval: Duration,
@@ -421,12 +421,14 @@ struct RemoteConfigClient {
     cached_target_files: Vec<CachedTargetFile>,
     // Registry of product handlers for processing different config types
     product_registry: ProductRegistry,
+    // default http client
+    http_client: HttpClient,
 }
 
 impl RemoteConfigClient {
     /// Creates a new remote configuration client
     pub fn new(config: Arc<Config>) -> Result<Self, RemoteConfigClientError> {
-        let agent_url = hyper::Uri::from_maybe_shared(config.trace_agent_url().to_string())
+        let agent_url = libdd_common::parse_uri(&config.trace_agent_url())
             .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
         let mut parts = agent_url.into_parts();
         parts.path_and_query = Some(
@@ -436,6 +438,8 @@ impl RemoteConfigClient {
         );
         let agent_url =
             hyper::Uri::from_parts(parts).map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
+
+        let agent_endpoint = libdd_common::Endpoint::from_url(agent_url);
 
         let state = Arc::new(Mutex::new(ClientState {
             root_version: 1, // Agent requires >= 1 (base TUF director root)
@@ -448,50 +452,44 @@ impl RemoteConfigClient {
 
         let poll_interval = Duration::from_secs_f64(config.remote_config_poll_interval());
 
+        // Create HTTP connector with timeout configuration
+        let mut connector = HttpConnector::new();
+        connector.set_connect_timeout(Some(DEFAULT_TIMEOUT));
+
         Ok(Self {
             client_id: uuid::Uuid::new_v4().to_string(),
             config,
-            agent_url,
-            client_timeout: DEFAULT_TIMEOUT,
+            agent_endpoint,
             state,
             capabilities: ClientCapabilities::new(),
             poll_interval,
             cached_target_files: Vec::new(),
             product_registry: ProductRegistry::new(),
+            http_client: Client::builder(TokioExecutor::default()).build(Http(connector)),
         })
     }
 
     /// Fetches configuration from the agent and applies it
     async fn fetch_and_apply_config(&mut self) -> Result<()> {
-        // Create HTTP connector with timeout configuration
-        let mut connector = HttpConnector::new();
-        connector.set_connect_timeout(Some(self.client_timeout));
-
-        // Create HTTP client for this request
-        // TODO(paullgdc): this doesn't support UDS
-        //  We should instead use the client in ddcommon::hyper_migration and the helper methods
-        //  to encode the URI the way it expects for UDS
-        let client = Client::builder(TokioExecutor::new()).build(connector);
-
         let request_payload = self.build_request()?;
-
         // Serialize the request to JSON
         let json_body = serde_json::to_string(&request_payload)
             .map_err(|e| anyhow::anyhow!("Failed to serialize request: {}", e))?;
 
-        // Parse the agent URL
+        let req_builder = self
+            .agent_endpoint
+            .to_request_builder("dd-trace-rs")
+            .map_err(|e| anyhow::anyhow!("Failed to build request builder: {}", e))?;
 
-        // Build HTTP request
-        let req = Request::builder()
+        let req = req_builder
             .method(Method::POST)
-            .uri(self.agent_url.clone())
             .header("content-type", "application/json")
-            .header("user-agent", "dd-trace-rs")
-            .body(Full::new(Bytes::from(json_body)))
+            .body(http_common::Body::from(json_body))
             .map_err(|e| anyhow::anyhow!("Failed to build request: {}", e))?;
 
         // Send request to agent
-        let response = client
+        let response = self
+            .http_client
             .request(req)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send request: {}", e))?;

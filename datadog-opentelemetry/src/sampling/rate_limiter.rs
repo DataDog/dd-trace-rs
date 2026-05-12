@@ -172,10 +172,13 @@ impl RateLimiter {
             if state.tokens > state.max_tokens {
                 state.tokens = state.max_tokens;
             }
+            // Only advance last_update by the time consumed by whole tokens, preserving
+            // fractional progress toward the next token. Use u128 to avoid overflow in
+            // the intermediate product; integer division guarantees consumed_ns ≤ elapsed.
+            let consumed_ns = (tokens_to_add as u128 * state.time_window_ns as u128
+                / self.rate_limit as u128) as u64;
+            state.last_update += std::time::Duration::from_nanos(consumed_ns);
         }
-        // Always update last_update, even if no tokens were added (e.g., very short elapsed time
-        // yielding tokens_to_add = 0)
-        state.last_update = timestamp;
     }
 
     /// Calculate the current window rate
@@ -241,6 +244,32 @@ mod tests {
 
         // Effective rate should be 0.0 (0%)
         assert_eq!(limiter.effective_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_rate_limiter_accumulates_fractional_tokens() {
+        // With rate=2/s each token takes 500ms. Sleeping 300ms twice (600ms total) must
+        // yield at least one token. Before the fix, each sub-token call reset last_update
+        // to the call time, so the second 300ms window also computed only 0.6 tokens and
+        // the limiter starved indefinitely. Margins: the first assert!(!..) has 200ms of
+        // headroom below 500ms; the final assert!(..) has 100ms of headroom above 500ms.
+        let limiter = RateLimiter::new(2, None);
+
+        // Drain all initial tokens.
+        for _ in 0..2 {
+            assert!(limiter.is_allowed());
+        }
+        assert!(!limiter.is_allowed());
+
+        // First sleep: 300ms → 0.6 tokens, not enough to allow.
+        thread::sleep(Duration::from_millis(300));
+        assert!(!limiter.is_allowed());
+
+        // Second sleep: another 300ms. Total elapsed since drain ≈ 600ms → 1.2 tokens.
+        // The fix preserves fractional progress so this succeeds; the old code reset
+        // last_update on the first call and only saw another 0.6 tokens here.
+        thread::sleep(Duration::from_millis(300));
+        assert!(limiter.is_allowed());
     }
 
     #[test]
