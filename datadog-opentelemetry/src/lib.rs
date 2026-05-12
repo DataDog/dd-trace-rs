@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.3.2" }
+//! datadog-opentelemetry = { version = "0.3.3" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
@@ -274,9 +274,14 @@ pub mod sampling;
 #[cfg(feature = "test-utils")]
 pub mod span_processor;
 
+#[cfg(all(feature = "_unstable_propagation", not(feature = "test-utils")))]
+#[doc(hidden)]
+#[allow(missing_docs)]
+pub mod propagation;
+
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
-#[cfg(not(feature = "test-utils"))]
+#[cfg(not(any(feature = "test-utils", feature = "_unstable_propagation")))]
 pub(crate) mod propagation;
 #[cfg(not(feature = "test-utils"))]
 mod sampler;
@@ -339,10 +344,25 @@ impl DatadogTracingBuilder {
     }
 
     /// Initializes the Tracer Provider, and the Text Map Propagator and install
-    /// them globally
+    /// them globally.
+    ///
+    /// On compatible platforms (currently Linux), [Self::init] (as opposed to [Self::init_local])
+    /// automatically publishes tracer metadata to the [OTel process
+    /// context](https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4719-process-ctx.md).
+    /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
-        let (tracer_provider, propagator) = self.init_local();
+        let config = self.config.unwrap_or_else(|| Config::builder().build());
 
+        // For now, otel process context spec is linux-specific.
+        #[cfg(target_os = "linux")]
+        if let Err(e) = libdd_library_config::otel_process_ctx::linux::publish(
+            &config.to_tracer_metadata().to_otel_process_ctx(),
+        ) {
+            dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
+        }
+
+        let (tracer_provider, propagator) =
+            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
         tracer_provider
@@ -353,6 +373,11 @@ impl DatadogTracingBuilder {
     ///
     /// You will need to set them up yourself, at a latter point if you want to use global tracing
     /// methods and library integrations
+    ///
+    /// # Process context
+    ///
+    /// As opposed as [Self::init], this method won't automatically publish tracer metadata to the
+    /// OTel process context.
     ///
     /// # Example
     ///

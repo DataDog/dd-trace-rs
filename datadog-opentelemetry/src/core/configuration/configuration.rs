@@ -2,15 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
+use std::fmt::Display;
 use std::ops::Deref;
+use std::path::Path;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{borrow::Cow, fmt::Display, str::FromStr, sync::OnceLock};
+use std::{borrow::Cow, sync::OnceLock};
+
+#[cfg(target_os = "linux")]
+use libdd_library_config::tracer_metadata::TracerMetadata;
 
 use rustc_version_runtime::version;
 
+use crate::core::configuration::sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -83,91 +89,12 @@ impl Default for RemoteConfigCallbacks {
         Self::new()
     }
 }
-
-/// Configuration for a single sampling rule
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SamplingRuleConfig {
-    /// The sample rate to apply (0.0-1.0)
-    pub sample_rate: f64,
-
-    /// Optional service name pattern to match
-    #[serde(default)]
-    pub service: Option<String>,
-
-    /// Optional span name pattern to match
-    #[serde(default)]
-    pub name: Option<String>,
-
-    /// Optional resource name pattern to match
-    #[serde(default)]
-    pub resource: Option<String>,
-
-    /// Tags that must match (key-value pairs)
-    #[serde(default)]
-    pub tags: HashMap<String, String>,
-
-    /// Where this rule comes from (customer, dynamic, default)
-    // TODO(paullgdc): this value should not be definable by customers
-    #[serde(default = "default_provenance")]
-    pub provenance: String,
-}
-
-impl Display for SamplingRuleConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", serde_json::json!(self))
-    }
-}
-
-fn default_provenance() -> String {
-    "default".to_string()
-}
-
 pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
-
-#[derive(Debug, Default, Clone, PartialEq)]
-struct ParsedSamplingRules {
-    rules: Vec<SamplingRuleConfig>,
-}
-
-impl Deref for ParsedSamplingRules {
-    type Target = [SamplingRuleConfig];
-
-    fn deref(&self) -> &Self::Target {
-        &self.rules
-    }
-}
-
-impl From<ParsedSamplingRules> for Vec<SamplingRuleConfig> {
-    fn from(parsed: ParsedSamplingRules) -> Self {
-        parsed.rules
-    }
-}
-
-impl FromStr for ParsedSamplingRules {
-    type Err = serde_json::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.trim().is_empty() {
-            return Ok(ParsedSamplingRules::default());
-        }
-        // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
-        let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
-        Ok(ParsedSamplingRules { rules: rules_vec })
-    }
-}
-
-impl Display for ParsedSamplingRules {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            serde_json::to_string(&self.rules).unwrap_or_default()
-        )
-    }
-}
+const DEFAULT_UNIX_TRACE_AGENT_URL: &str = "/var/run/datadog/apm.socket";
+const DEFAULT_UNIX_DOGSTATSD_AGENT_URL: &str = "/var/run/datadog/dsd.socket";
 
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,7 +277,6 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     }
 
     /// Gets the source of the current value
-    #[allow(dead_code)] // Used in tests and will be used for remote configuration
     fn source(&self) -> ConfigSourceOrigin {
         if self.code_value.is_some() {
             ConfigSourceOrigin::Code
@@ -359,6 +285,10 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         } else {
             ConfigSourceOrigin::Default
         }
+    }
+
+    fn is_default_value(&self) -> bool {
+        self.source() == ConfigSourceOrigin::Default
     }
 
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
@@ -629,6 +559,25 @@ impl ConfigItemSourceUpdater<'_> {
     {
         let result = self.sources.get(default.name());
         self.apply_result(default, result, transform)
+    }
+
+    /// Updates a ConfigItem from non empty sources string with transformation
+    pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        let result = self.sources.get(default.name());
+        match result.value {
+            Some(ref config_key) if config_key.value.is_empty() => default,
+            Some(_) => self.apply_result(default, result, transform),
+            None => default,
+        }
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
@@ -1196,7 +1145,7 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_string(default.service, ServiceName::Configured),
+            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -1213,10 +1162,11 @@ impl Config {
             ),
             agent_host: cisu.update_string(default.agent_host, Cow::Owned),
             trace_agent_port: cisu.update_parsed(default.trace_agent_port),
-            trace_agent_url: cisu.update_string(default.trace_agent_url, Cow::Owned),
+            trace_agent_url: cisu.update_non_empty_string(default.trace_agent_url, Cow::Owned),
             dogstatsd_agent_host: cisu.update_string(default.dogstatsd_agent_host, Cow::Owned),
             dogstatsd_agent_port: cisu.update_parsed(default.dogstatsd_agent_port),
-            dogstatsd_agent_url: cisu.update_string(default.dogstatsd_agent_url, Cow::Owned),
+            dogstatsd_agent_url: cisu
+                .update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
 
             trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
             trace_partial_flush_min_spans: cisu
@@ -1742,6 +1692,44 @@ impl Config {
     pub fn datadog_tags_max_length(&self) -> usize {
         *self.datadog_tags_max_length.value()
     }
+
+    /// Generate tracer metadata from this config.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
+        fn hostname() -> String {
+            let mut buf = vec![0; 256];
+
+            unsafe {
+                // Safety: buf is valid for writes for at most buf.len().
+                if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
+                    // Amusingly (so to speak), if the host name doesn't fit in `buf.len()`,
+                    // gethostname will put a truncated version in the buffer, which isn't
+                    // null-terminated. So the resulting buffer might or might not be a valid C
+                    // string...
+                    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+                    buf.truncate(len);
+                    // Note: use from_utf8_lossy_owned once it's stabilized
+                    String::from_utf8(buf)
+                        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
+                } else {
+                    String::new()
+                }
+            }
+        }
+
+        TracerMetadata {
+            runtime_id: Some(self.runtime_id.to_owned()),
+            tracer_language: "rust".to_owned(),
+            tracer_version: self.tracer_version.to_owned(),
+            hostname: hostname(),
+            service_name: Some(self.service().to_owned()),
+            service_env: self.env().map(str::to_owned),
+            service_version: self.version().map(str::to_owned),
+            container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // TODO: add the process tags. For now, we can't easily get them.
+            ..Default::default()
+        }
+    }
 }
 
 impl std::fmt::Debug for Config {
@@ -1997,21 +1985,43 @@ impl ConfigBuilder {
         // resolve trace_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
-            let host = &config.agent_host.value();
-            let port = *config.trace_agent_port.value();
-            config
-                .trace_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_TRACE_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_TRACE_AGENT_URL}"))
+            } else {
+                let host = &config.agent_host.value();
+                let port = *config.trace_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.trace_agent_url.set_calculated(url);
         }
 
         // resolve dogstatsd_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
-            let host = &config.dogstatsd_agent_host.value();
-            let port = *config.dogstatsd_agent_port.value();
-            config
-                .dogstatsd_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_DOGSTATSD_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_DOGSTATSD_AGENT_URL}"))
+            } else {
+                let host = &config.dogstatsd_agent_host.value();
+                let port = *config.dogstatsd_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.dogstatsd_agent_url.set_calculated(url);
         }
 
         config
@@ -2543,6 +2553,7 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use libdd_telemetry::data::ConfigurationOrigin;
+    use std::collections::HashMap;
 
     use super::Config;
     use super::*;
@@ -3324,6 +3335,25 @@ mod tests {
     #[test]
     fn test_dd_agent_url_from_url_empty() {
         let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_AGENT_HOST", "agent-host"),
+                ("DD_TRACE_AGENT_PORT", "4242"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://agent-host:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_url_set_to_empty_string() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_AGENT_URL", "")],
+            ConfigSourceOrigin::Calculated,
+        ));
         sources.add_source(HashMapSource::from_iter(
             [
                 ("DD_AGENT_HOST", "agent-host"),

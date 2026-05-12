@@ -12,16 +12,15 @@ use std::borrow::Cow;
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use opentelemetry::trace::TraceId;
+/// ```
 /// use datadog_opentelemetry::sampling::TraceIdLike;
 ///
 /// #[derive(Clone, PartialEq, Eq)]
-/// struct MyTraceId(TraceId);
+/// struct MyTraceId(u128);
 ///
 /// impl TraceIdLike for MyTraceId {
 ///     fn to_u128(&self) -> u128 {
-///         u128::from_be_bytes(self.0.to_bytes())
+///         self.0
 ///     }
 /// }
 /// ```
@@ -61,28 +60,6 @@ pub trait ValueLike {
     ///
     /// Returns `Some(Cow<str>)` for types that can be converted to strings, `None` otherwise.
     fn extract_string(&self) -> Option<Cow<'_, str>>;
-}
-
-impl AttributeLike for opentelemetry::KeyValue {
-    type Value = opentelemetry::Value;
-
-    fn key(&self) -> &str {
-        self.key.as_str()
-    }
-
-    fn value(&self) -> &Self::Value {
-        &self.value
-    }
-}
-
-impl ValueLike for opentelemetry::Value {
-    fn extract_float(&self) -> Option<f64> {
-        crate::sampling::utils::extract_float_value(self)
-    }
-
-    fn extract_string(&self) -> Option<Cow<'_, str>> {
-        crate::sampling::utils::extract_string_value(self)
-    }
 }
 
 /// A trait for creating sampling attributes.

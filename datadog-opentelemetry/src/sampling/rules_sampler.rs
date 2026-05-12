@@ -3,7 +3,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use super::datadog_sampler::SamplingRule;
+use super::sampling_rule::SamplingRule;
 
 /// Thread-safe container for sampling rules
 #[derive(Debug, Default, Clone)]

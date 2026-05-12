@@ -17,14 +17,14 @@ options.
 ## Rust Toolchain
 
 - **MSRV**: 1.84.1 (set via `rust-version` in `Cargo.toml`)
-- **Formatting**: pinned `nightly-2024-12-16` toolchain
+- **Formatting**: pinned `nightly-2026-04-07` toolchain
 
 Install the required toolchains and components:
 
 ```bash
-rustup install nightly-2024-12-16
-rustup component add rustfmt --toolchain nightly-2024-12-16
-rustup component add clippy --toolchain nightly-2024-12-16
+rustup install nightly-2026-04-07
+rustup component add rustfmt --toolchain nightly-2026-04-07
+rustup component add clippy --toolchain nightly-2026-04-07
 rustup install 1.84.1
 rustup component add clippy --toolchain 1.84.1
 ```
@@ -33,17 +33,17 @@ rustup component add clippy --toolchain 1.84.1
 
 ### Rust formatting
 
-Formatting uses `cargo fmt` with the pinned `nightly-2024-12-16` toolchain to ensure consistent
+Formatting uses `cargo fmt` with the pinned `nightly-2026-04-07` toolchain to ensure consistent
 output across environments:
 
 ```bash
-rustup run nightly-2024-12-16 cargo fmt -p <modified crate>
+rustup run nightly-2026-04-07 cargo fmt -p <modified crate>
 ```
 
 To check without modifying files (as CI does):
 
 ```bash
-rustup run nightly-2024-12-16 cargo fmt --all -- --check
+rustup run nightly-2026-04-07 cargo fmt --all -- --check
 ```
 
 ### Rust linting (clippy)
@@ -86,7 +86,7 @@ cargo install rumdl@0.1.25
 
 ```bash
 # Format code
-rustup run nightly-2024-12-16 cargo fmt --all
+rustup run nightly-2026-04-07 cargo fmt --all
 
 # Lint Rust (all feature combinations)
 cargo hack --each-feature clippy -- -D warnings
