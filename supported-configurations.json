@@ -211,6 +211,14 @@
         "propertyKeys": ["trace_sampling_rules"]
       }
     ],
+    "DD_TRACE_SECURE_RANDOM": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["trace_secure_random"]
+      }
+    ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
       {
         "version": "B",

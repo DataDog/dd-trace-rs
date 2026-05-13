@@ -969,6 +969,9 @@ pub struct Config {
     trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_extract_first: ConfigItem<bool>,
 
+    /// Whether to use cryptographically secure random for trace/span ID generation
+    trace_secure_random: ConfigItem<bool>,
+
     /// Whether remote configuration is enabled
     remote_config_enabled: ConfigItem<bool>,
 
@@ -1162,6 +1165,7 @@ impl Config {
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
+            trace_secure_random: cisu.update_parsed(default.trace_secure_random),
             remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
             remote_config_poll_interval: cisu.update_parsed_with_transform(
                 default.remote_config_poll_interval,
@@ -1231,6 +1235,7 @@ impl Config {
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
             &self.trace_propagation_extract_first,
+            &self.trace_secure_random,
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
@@ -1626,6 +1631,11 @@ impl Config {
         self.extra_services_tracker.get_extra_services()
     }
 
+    /// Returns whether secure random is enabled for trace/span ID generation.
+    pub fn trace_secure_random(&self) -> bool {
+        *self.trace_secure_random.value()
+    }
+
     /// Check if remote configuration is enabled
     pub fn remote_config_enabled(&self) -> bool {
         *self.remote_config_enabled.value()
@@ -1830,6 +1840,10 @@ fn default_config() -> Config {
             false,
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
+        trace_secure_random: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_SECURE_RANDOM,
+            false,
+        ),
         remote_config_enabled: ConfigItem::new(
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
             true,
@@ -3527,5 +3541,39 @@ mod tests {
             .build();
 
         assert_eq!(config.remote_config_poll_interval(), 0.2);
+    }
+
+    #[test]
+    fn test_trace_secure_random_default() {
+        let config = Config::builder().build();
+        assert!(!config.trace_secure_random());
+    }
+
+    #[test]
+    fn test_trace_secure_random_from_env() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_SECURE_RANDOM", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.trace_secure_random());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_SECURE_RANDOM", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.trace_secure_random());
+
+        // Invalid value falls back to the default (false)
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_SECURE_RANDOM", "yes")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(!config.trace_secure_random());
     }
 }

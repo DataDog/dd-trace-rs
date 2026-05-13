@@ -47,7 +47,7 @@ opentelemetry-semantic-conventions = { version = "0.31.0", features = [
     "semconv_experimental",
 ] }
 tokio = { version = "1.44.1" }
-rand = { version = "0.8", features = ["small_rng"] }
+rand = { version = "0.8", features = ["small_rng", "getrandom"] }
 
 serde = { version = "1.0.194" }
 serde_json = { version = "1.0.140" }
