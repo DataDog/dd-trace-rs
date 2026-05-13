@@ -23,12 +23,14 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "3.0.1", default-features = false }
-libdd-trace-utils = { version = "3.0.0", default-features = false }
-libdd-telemetry = { version = "4.0.0", default-features = false }
-libdd-common = { version = "3.0.1", default-features = false }
+libdd-data-pipeline = { version = "3.0.1", default-features = false, features = ["telemetry"] }
+libdd-trace-utils = { version = "3.0.1", default-features = false }
+libdd-telemetry = { version = "5.0.0", default-features = false }
+libdd-common = { version = "4.0.0", default-features = false }
 libdd-tinybytes = { version = "1.1.0", default-features = false }
 libdd-library-config = { version = "1.1.0", default-features = false }
+libdd-shared-runtime = { version = "0.1.0", default-features = false }
+libdd-capabilities-impl = { version = "1.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
@@ -64,4 +66,19 @@ codegen-units = 1
 debug = false
 incremental = false
 opt-level = 3
+
+# FIXME: Remove before merging. These patches point to a local libdatadog checkout so we can
+# develop against the trace_buffer module that hasn't been published to crates.io yet.
+# Before merging, publish libdd-shared-runtime (first release) and a new libdd-data-pipeline
+# version that includes the trace_buffer module, then update the version requirements above
+# and delete this [patch] section.
+[patch.crates-io]
+libdd-data-pipeline = { path = "../libdatadog/libdd-data-pipeline" }
+libdd-trace-utils = { path = "../libdatadog/libdd-trace-utils" }
+libdd-telemetry = { path = "../libdatadog/libdd-telemetry" }
+libdd-common = { path = "../libdatadog/libdd-common" }
+libdd-tinybytes = { path = "../libdatadog/libdd-tinybytes" }
+libdd-library-config = { path = "../libdatadog/libdd-library-config" }
+libdd-shared-runtime = { path = "../libdatadog/libdd-shared-runtime" }
+libdd-capabilities-impl = { path = "../libdatadog/libdd-capabilities-impl" }
 
