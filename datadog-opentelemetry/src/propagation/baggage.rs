@@ -153,6 +153,16 @@ mod tests {
                 .into_iter()
                 .collect(),
             ),
+            // "valid header with no value"
+            (
+                "key1=,key2=val2",
+                vec![
+                    (Key::new("key1"), StringValue::from("")),
+                    (Key::new("key2"), StringValue::from("val2")),
+                ]
+                .into_iter()
+                .collect(),
+            ),
         ]
     }
 
