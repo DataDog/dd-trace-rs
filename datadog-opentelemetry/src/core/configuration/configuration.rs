@@ -722,6 +722,8 @@ pub enum TracePropagationStyle {
     Datadog,
     /// W3C Trace Context propagation format using `traceparent` and `tracestate` headers.
     TraceContext,
+    /// W3C Baggage propagation format using the `baggage` header.
+    Baggage,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -753,6 +755,7 @@ impl FromStr for TracePropagationStyle {
         match s.trim().to_lowercase().as_str() {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
+            "baggage" => Ok(TracePropagationStyle::Baggage),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -764,6 +767,7 @@ impl Display for TracePropagationStyle {
         let style = match self {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
+            TracePropagationStyle::Baggage => "baggage",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -1827,6 +1831,7 @@ fn default_config() -> Config {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ]),
         ),
         trace_propagation_style_extract: ConfigItem::new(
@@ -2454,20 +2459,43 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
-    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
-        self.config.datadog_tags_max_length.set_code(length);
-        self
-    }
-
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Enable synchronous trace writes.
+    ///
+    /// When `true`, each trace export immediately triggers a flush and waits for the background
+    /// exporter to process that batch. The wait is bounded by
+    /// [`ConfigBuilder::set_trace_writer_synchronous_timeout`]; if that timeout is reached, the
+    /// flush may continue in the background.
+    ///
+    /// Useful for short-lived processes such as AWS Lambda functions where the process may freeze
+    /// before an async write completes, or in tests where reducing buffering improves determinism.
+    ///
+    /// **Default**: `false`
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
     ) -> &mut Self {
         self.config.trace_writer_synchronous_write = trace_writer_synchronous_write;
+        self
+    }
+
+    /// Set the maximum time to wait for synchronous trace writes.
+    ///
+    /// This only applies when [`ConfigBuilder::set_trace_writer_synchronous_write`] is enabled.
+    /// If the timeout is reached, the flush may continue in the background.
+    ///
+    /// **Default**: `2s`
+    pub fn set_trace_writer_synchronous_timeout(
+        &mut self,
+        trace_writer_synchronous_timeout: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_synchronous_timeout = trace_writer_synchronous_timeout;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
+        self.config.datadog_tags_max_length.set_code(length);
         self
     }
 
@@ -2754,6 +2782,7 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ])
             .as_deref()
         );
@@ -2763,6 +2792,47 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_style_baggage_parsed_from_env() {
+        // "baggage" is recognised as a valid style value (case-insensitive) in all three env vars.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext,baggage"),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "Baggage,datadog"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "BAGGAGE,tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::Datadog,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]
