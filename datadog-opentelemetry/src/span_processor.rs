@@ -1541,5 +1541,21 @@ mod tests {
                 BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string(),])
             );
         }
+
+        #[test]
+        fn comma_only_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(",").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn all_commas_and_spaces_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(", ,").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
     }
 }

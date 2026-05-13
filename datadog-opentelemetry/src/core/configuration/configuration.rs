@@ -828,13 +828,16 @@ impl std::str::FromStr for BaggageTagKeyFilter {
         } else if trimmed == "*" {
             Ok(BaggageTagKeyFilter::All)
         } else {
-            Ok(BaggageTagKeyFilter::Keys(
-                trimmed
-                    .split(',')
-                    .map(|k| k.trim().to_string())
-                    .filter(|k| !k.is_empty())
-                    .collect(),
-            ))
+            let keys: Vec<String> = trimmed
+                .split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect();
+            if keys.is_empty() {
+                Ok(BaggageTagKeyFilter::Disabled)
+            } else {
+                Ok(BaggageTagKeyFilter::Keys(keys))
+            }
         }
     }
 }
