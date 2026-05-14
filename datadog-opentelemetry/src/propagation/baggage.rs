@@ -206,6 +206,34 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_baggage_stops_at_malformed() {
+        // Per Datadog RFC: on a malformed entry the entire remaining header is dropped.
+        // Valid entries that appear before the malformed one are still returned.
+        for (header, expected_keys) in [
+            // empty value is malformed — first entry is bad, nothing extracted
+            ("user.id=,session.id=mysession", vec![]),
+            // empty key is malformed — stops at it
+            ("key1=val1,=val2,key3=val3", vec!["key1"]),
+            // missing '=' is malformed — stops at it
+            ("key1=val1,key2=val2,badentry,key3=val3", vec!["key1", "key2"]),
+            // empty value mid-header — stops at it, prior entries kept
+            ("key1=val1,key2=,key3=val3", vec!["key1"]),
+        ] {
+            let mut extractor: HashMap<String, String> = HashMap::new();
+            extractor.insert(BAGGAGE_KEY.to_string(), header.to_string());
+            let baggage = extract_baggage(&extractor).expect("baggage extracted");
+            assert_eq!(
+                baggage.len(),
+                expected_keys.len(),
+                "header: {header:?}"
+            );
+            for key in expected_keys {
+                assert!(baggage.get(&Key::new(key)).is_some(), "missing key {key} in {header:?}");
+            }
+        }
+    }
+
+    #[test]
     fn test_extract_baggage_respects_max_members() {
         let total = MAX_BAGGAGE_MEMBERS + 8;
         let header_value = (0..total)
