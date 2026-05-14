@@ -58,6 +58,10 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
         dd_warn!("Propagator (baggage): empty key");
         return None;
     }
+    if value.is_empty() {
+        dd_warn!("Propagator (baggage): empty value");
+        return None;
+    }
 
     // decode and trim metadata entries associated with the key-value
     let decoded_props = member
@@ -148,16 +152,6 @@ mod tests {
                 "key1=val1,key2=val2,a,val3",
                 vec![
                     (Key::new("key1"), StringValue::from("val1")),
-                    (Key::new("key2"), StringValue::from("val2")),
-                ]
-                .into_iter()
-                .collect(),
-            ),
-            // "valid header with no value"
-            (
-                "key1=,key2=val2",
-                vec![
-                    (Key::new("key1"), StringValue::from("")),
                     (Key::new("key2"), StringValue::from("val2")),
                 ]
                 .into_iter()
