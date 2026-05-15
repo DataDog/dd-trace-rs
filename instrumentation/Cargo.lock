@@ -55,6 +55,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -92,6 +103,12 @@ checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "borrow-or-share"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc0b364ead1874514c8c2855ab558056ebfeb775653e7ae45ff72f28f8f3166c"
 
 [[package]]
 name = "bumpalo"
@@ -219,9 +236,11 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libc",
+ "libdd-capabilities-impl",
  "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
+ "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-utils",
@@ -278,6 +297,17 @@ name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+[[package]]
+name = "fluent-uri"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc74ac4d8359ae70623506d512209619e5cf8f347124910440dbc221714b328e"
+dependencies = [
+ "borrow-or-share",
+ "ref-cast",
+ "serde",
+]
 
 [[package]]
 name = "foldhash"
@@ -396,8 +426,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -593,6 +625,8 @@ version = "0.3.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2964e92d1d9dc3364cae4d718d93f227e3abb088e747d92e0395bfdedf1c12ca"
 dependencies = [
+ "cfg-if",
+ "futures-util",
  "once_cell",
  "wasm-bindgen",
 ]
@@ -665,10 +699,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52ff2c0fe9bc6cb6b14a0592c2ff4fa9ceb83eea9db979b0487cd054946a2b8f"
 
 [[package]]
+name = "libdd-capabilities"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "http",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "libdd-capabilities-impl"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "libdd-capabilities",
+ "libdd-common",
+ "tokio",
+]
+
+[[package]]
 name = "libdd-common"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c779949577250487179d904508f18750070e9a01eb58dce378409ec5fa066f3b"
+version = "4.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
  "bytes",
@@ -698,21 +755,25 @@ dependencies = [
 [[package]]
 name = "libdd-data-pipeline"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "358411451d99011f13c7628acee25dc144f2bbeade87acf10fa7d5ffce1053dc"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "async-trait",
  "bytes",
  "either",
+ "getrandom 0.2.17",
  "http",
  "http-body-util",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
  "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
+ "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf 3.0.1",
+ "libdd-trace-protobuf",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -728,8 +789,7 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b31b2435e2e8eaba0e35a96df3e1407b68f8ef76055383ceb2ba5a09e5a1bb5"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "prost",
 ]
@@ -737,8 +797,7 @@ dependencies = [
 [[package]]
 name = "libdd-dogstatsd-client"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6f8eca39d1e2ef6267cf77fc51eb7ebc7d4f44827e150b4d317c29d8c33bf87"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
  "cadence",
@@ -751,29 +810,46 @@ dependencies = [
 [[package]]
 name = "libdd-library-config"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 2.0.0",
+ "libc",
+ "libdd-trace-protobuf",
  "memfd",
  "prost",
  "rand 0.8.5",
  "rmp",
  "rmp-serde",
- "rustix",
  "serde",
  "serde_yaml",
 ]
 
 [[package]]
+name = "libdd-shared-runtime"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
+dependencies = [
+ "async-trait",
+ "futures",
+ "futures-util",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
+ "libdd-common",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "libdd-telemetry"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78774ffce79da677602829d7fe27468283e5349010e974257233edf4cd12b783"
+version = "5.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
+ "bytes",
  "futures",
  "hashbrown 0.15.5",
  "http",
@@ -781,6 +857,7 @@ dependencies = [
  "libc",
  "libdd-common",
  "libdd-ddsketch",
+ "libdd-shared-runtime",
  "serde",
  "serde_json",
  "sys-info",
@@ -794,8 +871,7 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e47838e12ae2665250b4cdba4e3119230b79e3c522bb9f48dd0c87346f5a8f44"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "serde",
 ]
@@ -803,29 +879,32 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 3.0.1",
+ "libdd-trace-protobuf",
 ]
 
 [[package]]
-name = "libdd-trace-protobuf"
+name = "libdd-trace-obfuscation"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
- "prost",
+ "anyhow",
+ "fluent-uri",
+ "libdd-common",
+ "libdd-trace-protobuf",
+ "libdd-trace-utils",
+ "log",
+ "percent-encoding",
  "serde",
- "serde_bytes",
+ "serde_json",
 ]
 
 [[package]]
 name = "libdd-trace-protobuf"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1809242895edc53ac51a21287829f42474e749dbc222ea7f414cb3f0d1f91d4e"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "prost",
  "serde",
@@ -835,32 +914,48 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d92b882863f7c531d51e73f7bc5930c705e47829332128d9bdcad0fea3b2b942"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
+ "anyhow",
+ "arc-swap",
+ "async-trait",
  "hashbrown 0.15.5",
+ "http",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
+ "libdd-common",
  "libdd-ddsketch",
- "libdd-trace-protobuf 3.0.1",
+ "libdd-shared-runtime",
+ "libdd-trace-obfuscation",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
+ "rmp-serde",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
 name = "libdd-trace-utils"
 version = "3.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "870506e9bb79c93ce5bbfe9d715c53c7ea393a177c7299f0bf43745c0adea0c7"
+source = "git+https://github.com/DataDog/libdatadog?branch=jwiriath%2Ftracebuffer-sharedruntime-rusttracer#0fe34d88c20163da9b522badb6c922f214ea93c8"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "futures",
+ "getrandom 0.2.17",
  "http",
  "http-body",
  "http-body-util",
  "indexmap",
+ "libdd-capabilities",
+ "libdd-capabilities-impl",
  "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.1",
+ "libdd-trace-protobuf",
  "prost",
  "rand 0.8.5",
  "rmp",
@@ -1155,6 +1250,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-cast"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
+dependencies = [
+ "ref-cast-impl",
+]
+
+[[package]]
+name = "ref-cast-impl"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,6 +1422,7 @@ version = "1.0.149"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -1697,6 +1813,16 @@ dependencies = [
  "rustversion",
  "wasm-bindgen-macro",
  "wasm-bindgen-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-futures"
+version = "0.4.68"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f371d383f2fb139252e0bfac3b81b265689bf45b6874af544ffa4c975ac1ebf8"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
 ]
 
 [[package]]

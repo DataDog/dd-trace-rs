@@ -122,6 +122,16 @@ impl DatadogExporter {
 
     /// Shut down the trace exporter runtime and wait for the worker to finish.
     pub fn shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+        // Flush any buffered spans synchronously first. This guarantees the trace exporter
+        // has a chance to run `check_agent_info` (which starts the stats worker on the still
+        // alive SharedRuntime) before we tear the runtime down. Without this, fast-finishing
+        // applications would shut the runtime down before the stats worker ever ran, dropping
+        // the stats payload and breaking expectations downstream.
+        if let Err(e) = self.trace_buffer.flush_and_wait(timeout) {
+            dd_debug!(
+                "DatadogExporter.shutdown message='flush_and_wait before shutdown failed' error='{e:?}'"
+            );
+        }
         self.runtime
             .shutdown(Some(timeout))
             .map_err(|_| TraceBufferError::TimedOut(timeout))?;
@@ -160,29 +170,58 @@ impl Export<SpanData> for MapperExporter {
             dyn std::future::Future<Output = Result<AgentResponse, TraceExporterError>> + Send + '_,
         >,
     > {
-        // Do all the OTel->DD conversion synchronously (before the async boundary)
-        // so that borrows into `trace_chunks` don't need to cross an await point.
-        let resource = self.otel_resource.load();
-        let trace_chunks = trace_chunks
-            .iter()
-            .map(|chunk| -> Vec<_> {
-                ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
-                    &self.cached_config,
-                    chunk,
-                    resource,
-                )
-            })
-            .collect::<Vec<_>>();
+        // Snapshot what we need from &mut self up-front. `otel_resource.load()` requires
+        // &mut self, so we cannot do it inside the async block while also holding other
+        // &self borrows. Cloning the `Arc<Resource>` is cheap (just a refcount bump).
+        let resource = self.otel_resource.load().clone();
+        let trace_exporter = &self.trace_exporter;
+        let cached_config = &self.cached_config;
+        let config = self.config.clone();
 
-        let services = trace_chunks
-            .iter()
-            .flatten()
-            .map(|s| s.service.as_str())
-            .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
-        self.config.add_extra_services(services);
+        // Do the OTel->DD conversion inside the async block so the resulting
+        // `Vec<DdSpan<'_>>` (which borrows from `trace_chunks`) is owned by the future
+        // alongside `trace_chunks` itself — no borrows escape the future.
+        //
+        // Use the async send: the buffer worker awaits this future from inside the
+        // SharedRuntime's tokio scheduler, so the synchronous `send_trace_chunks` would
+        // attempt a `block_on` on the same runtime and panic.
+        Box::pin(async move {
+            let dd_chunks = trace_chunks
+                .iter()
+                .map(|chunk| -> Vec<_> {
+                    ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
+                        cached_config,
+                        chunk,
+                        &resource,
+                    )
+                })
+                .collect::<Vec<_>>();
 
-        let agent_response = self.trace_exporter.send_trace_chunks(trace_chunks);
-        Box::pin(async move { agent_response })
+            let services = dd_chunks
+                .iter()
+                .flatten()
+                .map(|s| s.service.as_str())
+                .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
+            config.add_extra_services(services);
+
+            trace_exporter.send_trace_chunks_async(dd_chunks).await
+        })
+    }
+
+    /// Test-only hook: wait for the agent info fetcher to populate the agent capabilities so
+    /// that downstream behaviour (in particular client-side stats and the `_top_level` metric)
+    /// is active before the worker processes its first batch. Without this, snapshot tests
+    /// that produce spans and shutdown immediately race with the agent_info fetch and end up
+    /// asserting against spans missing stats-derived metrics.
+    #[cfg(feature = "test-utils")]
+    fn wait_ready(
+        &mut self,
+    ) -> Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + '_>> {
+        Box::pin(async {
+            self.trace_exporter
+                .wait_agent_info_ready(Duration::from_secs(5))
+                .await
+        })
     }
 }
 
