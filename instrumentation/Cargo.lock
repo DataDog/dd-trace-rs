@@ -229,6 +229,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "percent-encoding",
  "rand 0.8.5",
  "rustc_version_runtime",
  "serde",
