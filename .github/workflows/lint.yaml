@@ -121,51 +121,38 @@ jobs:
         # Exclude symbolizer-ffi from the checks (mostly imported code)
         run: '! find . \( -name "*.rs" -o -name "*.c" -o -name "*.sh" \) -print0 | xargs -0 licensecheck -c ".*" | grep -v "Apache License 2.0"'
 
-  license-3rdparty-csv:
+  license-3rdparty:
     runs-on: ubuntu-latest
     name: "Valid LICENSE-3rdparty.csv"
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - run: stat LICENSE-3rdparty.csv
-      - name: Cache
+      # Keep version in sync with: scripts/update_license_3rdparty.sh (TOOL_VERSION) and scripts/Dockerfile.license (ARG TOOL_VERSION)
+      - name: Cache dd-rust-license-tool
         uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
         with:
           path: |
             ~/.cargo/registry/
             ~/.cargo/git/db/
-            ~/.cargo/bin/
+            ~/.cargo/bin/dd-rust-license-tool
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          # cache key contains current version of dd-rust-license-tool
-          # when upstream version is updated we can bump the cache key version,
-          # to cache the latest version of the tool
-          key: "v1-dd-rust-license-tool-1.0.4"
-      - name: Cache
-        uses: ./.github/actions/cache
-      - name: Install dd-rust-license-tool
-        run: cargo install --list | grep -qF "dd-rust-license-tool v1.0.4" || cargo install --git https://github.com/DataDog/rust-license-tool.git --tag v1.0.4 dd-rust-license-tool
-      - name: "Generate new LICENSE-3rdparty.csv and check against the previous"
+          key: dd-rust-license-tool-1.0.6-v2
+      - run: cargo install --list | grep -qF "dd-rust-license-tool v1.0.6" || cargo install dd-rust-license-tool --version "1.0.6" --locked
+      - name: Generate new LICENSE-3rdparty.csv and check against the previous
         run: |
-          # The LICENSE-3rdparty.csv file must match the output of the tool in the Linux CI environment.
-          # To update the file locally, run the './scripts/generate-licenses.sh' script.
-          echo "Running dd-rust-license-tool dump to generate CSV..."
           if ! dd-rust-license-tool dump > /tmp/CI.csv 2> /tmp/CI.error; then
             echo "ERROR: dd-rust-license-tool dump failed! See error output below:"
             cat /tmp/CI.error
             exit 1
           fi
-
-          # Compare the generated CSV with the current one. If they differ, diff will have a non-zero exit code.
           if ! diff /tmp/CI.csv LICENSE-3rdparty.csv; then
             echo "Differences detected in LICENSE-3rdparty.csv."
-            echo "Please run './scripts/generate-licenses.sh' to update the file and commit the changes."
+            echo "Please run './scripts/update_license_3rdparty.sh' to update the file and commit the changes."
             exit 1
           fi
-
           echo "No differences found."
-
-      - name: export the generated license file on failure
+      - name: Export generated license file on failure
         if: failure()
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:

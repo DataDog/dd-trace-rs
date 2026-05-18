@@ -1,21 +1,21 @@
+# Copyright 2021-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
 FROM rust:1.84-slim
 
-# Set up the workspace directory
-WORKDIR /usr/src/app
+# Keep in sync with: scripts/update_license_3rdparty.sh (TOOL_VERSION) and .github/workflows/lint.yaml (cache key + install step)
+ARG TOOL_VERSION=1.0.6
 
-# Install the license tool with cache mount
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo install --git https://github.com/DataDog/rust-license-tool.git --tag v1.0.4 dd-rust-license-tool
+    cargo install dd-rust-license-tool --version "${TOOL_VERSION}" --locked
 
-# Copy the rest of the project files
+WORKDIR /build
+
 COPY . .
 
-# Generate the license file during build, with caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    dd-rust-license-tool dump > LICENSE-3rdparty.csv
+    dd-rust-license-tool dump > /licenses.csv
 
-# Simply output the pre-generated file at runtime
-ENTRYPOINT ["cat"]
-CMD ["./LICENSE-3rdparty.csv"] 
+ENTRYPOINT ["cat", "/licenses.csv"]
