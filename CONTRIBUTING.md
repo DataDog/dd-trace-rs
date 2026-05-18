@@ -100,7 +100,7 @@ find . -name '*.sh' -print0 | xargs -0 shellcheck
 rumdl check .
 
 # Update licence file if dependencies changed
-./scripts/generate-licenses.sh
+./scripts/update_license_3rdparty.sh
 ```
 
 ## Code Style
@@ -194,7 +194,7 @@ documented.
 
 To update the license file:
 
-1. Run `./scripts/generate-licenses.sh` (requires Docker)
+1. Run `./scripts/update_license_3rdparty.sh` (requires Docker or local tool install)
 2. Review the changes to `LICENSE-3rdparty.csv`
 3. Commit the updated file
 
