@@ -122,24 +122,62 @@ impl DatadogExporter {
 
     /// Shut down the trace exporter runtime and wait for the worker to finish.
     pub fn shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+        let deadline = std::time::Instant::now() + timeout;
+        let remaining = || deadline.saturating_duration_since(std::time::Instant::now());
+
         // Flush any buffered spans synchronously first. This guarantees the trace exporter
         // has a chance to run `check_agent_info` (which starts the stats worker on the still
         // alive SharedRuntime) before we tear the runtime down. Without this, fast-finishing
         // applications would shut the runtime down before the stats worker ever ran, dropping
         // the stats payload and breaking expectations downstream.
-        if let Err(e) = self.trace_buffer.flush_and_wait(timeout) {
-            dd_debug!(
-                "DatadogExporter.shutdown message='flush_and_wait before shutdown failed' error='{e:?}'"
-            );
+        match self.trace_buffer.flush_and_wait(remaining()) {
+            Ok(()) | Err(TraceBufferError::AlreadyShutdown) => {}
+            Err(e) => {
+                dd_debug!(
+                    "DatadogExporter.shutdown message='flush_and_wait before shutdown failed' error='{e:?}'"
+                );
+            }
         }
+
         self.runtime
-            .shutdown(Some(timeout))
+            .shutdown(Some(remaining()))
             .map_err(|_| TraceBufferError::TimedOut(timeout))?;
-        self.trace_buffer.wait_shutdown_done(timeout)
+
+        self.trace_buffer
+            .wait_shutdown_done(remaining())
+            .map_err(|e| match e {
+                // Re-base any TimedOut to the user-facing total budget so the caller sees
+                // the value they passed in, not the residual we ended up with.
+                TraceBufferError::TimedOut(_) => TraceBufferError::TimedOut(timeout),
+                other => other,
+            })
     }
 
     pub fn set_resource(&self, r: Resource) {
         self.otel_resource.store(Arc::new(r));
+    }
+}
+
+/// Fallback shutdown timeout used by [`Drop`] when the caller forgot to invoke
+/// [`DatadogExporter::shutdown`] explicitly. Matches the `trace_exporter_shutdown_timeout`
+/// default used by the previous (pre-libdatadog) `AsyncExporterConfig`.
+const DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+
+impl Drop for DatadogExporter {
+    /// Best-effort shutdown so callers that forget to invoke
+    /// [`DatadogExporter::shutdown`] don't leak the worker / runtime and don't lose any
+    /// buffered spans. Safe to invoke from inside a tokio runtime:
+    /// [`SharedRuntime::shutdown`] detects an active tokio context and runs the blocking
+    /// teardown (including the eventual `Arc<Runtime>` drop) on a scoped OS thread, which
+    /// is exactly the scenario that motivated the runtime-aware fix in libdatadog.
+    ///
+    /// `shutdown` is idempotent — a prior explicit call is a no-op the second time:
+    /// `runtime.shutdown` finds the runtime slot already taken, `flush_and_wait` and
+    /// `wait_shutdown_done` early-return on `AlreadyShutdown`.
+    fn drop(&mut self) {
+        if let Err(e) = self.shutdown(DROP_SHUTDOWN_TIMEOUT) {
+            dd_debug!("DatadogExporter.drop message='fallback shutdown failed' error='{e:?}'");
+        }
     }
 }
 
@@ -278,4 +316,45 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             );
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::DatadogExporter;
+    use crate::configuration::Config;
+
+    /// Regression coverage for the [`Drop`] impl: dropping a `DatadogExporter` from inside
+    /// a tokio runtime must not panic. Under the hood this exercises
+    /// `SharedRuntime::shutdown` from a tokio context — which historically panicked with
+    /// "Cannot start a runtime from within a runtime" before libdatadog's runtime-aware
+    /// `block_on_outside_runtime` was introduced.
+    ///
+    /// We deliberately point the exporter at a port nothing is listening on. The exporter
+    /// creates fine (background workers will fail their HTTP attempts in the background,
+    /// which is irrelevant here); all we want to assert is the Drop teardown path.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_drop_inside_tokio_runtime() {
+        let mut cfg = Config::builder();
+        cfg.set_trace_agent_url("http://127.0.0.1:1".to_string());
+        let cfg = Arc::new(cfg.build());
+
+        let exporter = DatadogExporter::new(cfg, None);
+        drop(exporter);
+    }
+
+    /// Same as above, but exercises the idempotency claim in the Drop doc-comment:
+    /// calling `shutdown` explicitly and *then* letting Drop run should not panic and
+    /// should be a fast no-op for the second teardown.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_drop_after_explicit_shutdown_is_noop() {
+        let mut cfg = Config::builder();
+        cfg.set_trace_agent_url("http://127.0.0.1:1".to_string());
+        let cfg = Arc::new(cfg.build());
+
+        let exporter = DatadogExporter::new(cfg, None);
+        let _ = exporter.shutdown(std::time::Duration::from_millis(500));
+        drop(exporter);
+    }
 }
