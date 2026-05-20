@@ -3,11 +3,10 @@
 
 use std::{borrow::Cow, collections::HashMap, fmt::Write, str::FromStr, sync::LazyLock};
 
+use libdd_sampling::{mechanism, priority, SamplingMechanism, SamplingPriority};
+
 use crate::{
-    core::{
-        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
-    },
+    core::constants::SAMPLING_DECISION_MAKER_TAG_KEY,
     dd_debug, dd_error, dd_warn,
     propagation::{
         carrier::{Extractor, Injector},
@@ -704,10 +703,9 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::core::{
-        configuration::{Config, TracePropagationStyle},
-        sampling::priority,
-    };
+    use libdd_sampling::priority;
+
+    use crate::core::configuration::{Config, TracePropagationStyle};
 
     use crate::propagation::{
         context::{span_context_to_inject, InjectTraceState},

@@ -289,8 +289,9 @@ pub(crate) mod tests {
 
     use assert_unordered::assert_eq_unordered;
 
+    use libdd_sampling::{mechanism, priority};
+
     use crate::core::configuration::Config;
-    use crate::core::sampling::{mechanism, priority};
     use pretty_assertions::assert_eq;
 
     use crate::propagation::context::{Sampling, Tracestate};

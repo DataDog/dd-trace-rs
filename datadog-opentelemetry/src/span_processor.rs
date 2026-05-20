@@ -11,6 +11,8 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use libdd_sampling::SamplingDecision;
+
 use crate::{
     core::{
         configuration::{
@@ -20,7 +22,6 @@ use crate::{
             Config,
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::SamplingDecision,
         telemetry::init_telemetry,
         utils::WorkerError,
     },
@@ -716,10 +717,9 @@ mod tests {
         time::Duration,
     };
 
-    use crate::core::{
-        configuration::Config,
-        sampling::{mechanism, priority, SamplingDecision},
-    };
+    use libdd_sampling::{mechanism, priority, SamplingDecision};
+
+    use crate::core::configuration::Config;
     use opentelemetry::{
         trace::{SpanContext, TraceFlags},
         SpanId, TraceId, {Key, KeyValue, Value},

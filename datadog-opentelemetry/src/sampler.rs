@@ -7,11 +7,10 @@ use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
 
+use libdd_sampling::SamplingDecision;
+
 use crate::{
-    core::{
-        configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::SamplingDecision,
-    },
+    core::{configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY},
     sampling::{DatadogSampler, OtelSamplingData, SamplingRule, SamplingRulesCallback},
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},

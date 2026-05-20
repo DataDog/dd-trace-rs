@@ -12,12 +12,10 @@ use crate::propagation::{
     error::Error,
 };
 
+use libdd_sampling::{SamplingMechanism, SamplingPriority};
+
 use crate::{
-    core::{
-        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::{SamplingMechanism, SamplingPriority},
-    },
-    dd_debug, dd_error, dd_warn,
+    core::constants::SAMPLING_DECISION_MAKER_TAG_KEY, dd_debug, dd_error, dd_warn,
     propagation::PropagationConfig,
 };
 
@@ -383,10 +381,9 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::core::{
-        configuration::{Config, TracePropagationStyle},
-        sampling::{mechanism, priority},
-    };
+    use libdd_sampling::{mechanism, priority};
+
+    use crate::core::configuration::{Config, TracePropagationStyle};
 
     use crate::propagation::{
         context::{span_context_to_inject, split_trace_id},

@@ -2,23 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Datadog sampling logic
+//!
+//! Core sampling types and algorithms are provided by `libdd_sampling`.
+//! This module re-exports the key types and provides OpenTelemetry-specific
+//! adapters (OTel span → sampling trait impls).
 
-pub(crate) mod agent_service_sampler;
-pub(crate) mod constants;
-pub(crate) mod datadog_sampler;
-pub(crate) mod glob_matcher;
 pub(crate) mod otel_mappings;
-pub(crate) mod rate_limiter;
-pub(crate) mod rate_sampler;
-pub(crate) mod rules_sampler;
-pub(crate) mod sampling_rule;
-mod types;
 pub(crate) mod utils;
 
-// Re-export key public types
-pub use datadog_sampler::{DatadogSampler, SamplingRulesCallback};
+// Re-export key public types from libdd-sampling
+pub use libdd_sampling::{DatadogSampler, SamplingRule, SamplingRulesCallback};
 pub use otel_mappings::{OtelAttributeFactory, OtelSamplingData};
-pub use sampling_rule::SamplingRule;
-pub use types::{
-    AttributeFactory, AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike,
-};
+
+// Re-export trait only needed by benchmarks (external to this crate)
+#[cfg(feature = "test-utils")]
+pub use libdd_sampling::SamplingData;

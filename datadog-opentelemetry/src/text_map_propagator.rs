@@ -3,9 +3,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
+use libdd_sampling::priority;
+
 use crate::{
     catch_panic,
-    core::{configuration::Config, sampling::priority},
+    core::configuration::Config,
     propagation::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
@@ -269,10 +271,9 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
-    use crate::core::{
-        configuration::{Config, TracePropagationStyle},
-        sampling::SamplingDecision,
-    };
+    use libdd_sampling::SamplingDecision;
+
+    use crate::core::configuration::{Config, TracePropagationStyle};
     use assert_unordered::assert_eq_unordered;
     use opentelemetry::{
         baggage::BaggageExt,

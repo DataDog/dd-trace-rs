@@ -6,12 +6,9 @@
 
 use std::collections::hash_map;
 
-use crate::{
-    core::sampling,
-    mappings::{
-        otel_span_to_dd_span, CachedConfig, DdSpan, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME,
-        VERSION_KEY,
-    },
+use crate::mappings::{
+    otel_span_to_dd_span, CachedConfig, DdSpan, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME,
+    VERSION_KEY,
 };
 use libdd_trace_utils::span::SpanText;
 use opentelemetry::Key;
@@ -33,9 +30,9 @@ fn otel_sampling_to_dd_sampling(
         .entry(SpanStr::from_static_str("_sampling_priority_v1"))
     {
         if otel_trace_flags.is_sampled() {
-            e.insert(sampling::priority::AUTO_KEEP.into_i8() as f64);
+            e.insert(libdd_sampling::priority::AUTO_KEEP.into_i8() as f64);
         } else {
-            e.insert(sampling::priority::AUTO_REJECT.into_i8() as f64);
+            e.insert(libdd_sampling::priority::AUTO_REJECT.into_i8() as f64);
         }
     }
 }

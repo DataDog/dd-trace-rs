@@ -6,7 +6,6 @@
 pub mod configuration;
 /// Trace propagation and sampling constant keys.
 pub mod constants;
-pub mod sampling;
 
 mod error;
 
