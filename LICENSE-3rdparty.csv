@@ -18,6 +18,7 @@ base64,https://github.com/marshallpierce/rust-base64,MIT OR Apache-2.0,"Alice Ma
 base64,https://github.com/marshallpierce/rust-base64,MIT OR Apache-2.0,Marshall Pierce <marshall@mpierce.org>
 bitflags,https://github.com/bitflags/bitflags,MIT OR Apache-2.0,The Rust Project Developers
 block-buffer,https://github.com/RustCrypto/utils,MIT OR Apache-2.0,RustCrypto Developers
+borrow-or-share,https://github.com/yescallop/borrow-or-share,MIT-0,Scallop Ye <yescallop@gmail.com>
 bumpalo,https://github.com/fitzgen/bumpalo,MIT OR Apache-2.0,Nick Fitzgerald <fitzgen@gmail.com>
 byteorder,https://github.com/BurntSushi/byteorder,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
 bytes,https://github.com/tokio-rs/bytes,MIT,"Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>"
@@ -57,6 +58,7 @@ equivalent,https://github.com/indexmap-rs/equivalent,Apache-2.0 OR MIT,The equiv
 errno,https://github.com/lambda-fairy/rust-errno,MIT OR Apache-2.0,"Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfishcode.online>"
 event-listener,https://github.com/smol-rs/event-listener,Apache-2.0 OR MIT,"Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>"
 event-listener-strategy,https://github.com/smol-rs/event-listener-strategy,Apache-2.0 OR MIT,John Nunley <dev@notgull.net>
+fluent-uri,https://github.com/yescallop/fluent-uri-rs,MIT,Scallop Ye <yescallop@gmail.com>
 fnv,https://github.com/servo/rust-fnv,Apache-2.0  OR  MIT,Alex Crichton <alex@alexcrichton.com>
 foldhash,https://github.com/orlp/foldhash,Zlib,Orson Peters <orsonpeters@gmail.com>
 form_urlencoded,https://github.com/servo/rust-url,MIT OR Apache-2.0,The rust-url developers
@@ -108,14 +110,18 @@ itoa,https://github.com/dtolnay/itoa,MIT OR Apache-2.0,David Tolnay <dtolnay@gma
 js-sys,https://github.com/rustwasm/wasm-bindgen/tree/master/crates/js-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
 libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The Rust Project Developers
+libdd-capabilities,https://github.com/DataDog/libdatadog/tree/main/libdd-capabilities,Apache-2.0,The libdd-capabilities Authors
+libdd-capabilities-impl,https://github.com/DataDog/libdatadog/tree/main/libdd-capabilities-impl,Apache-2.0,The libdd-capabilities-impl Authors
 libdd-common,https://github.com/DataDog/libdatadog/tree/main/datadog-common,Apache-2.0,The libdd-common Authors
 libdd-data-pipeline,https://github.com/DataDog/libdatadog/tree/main/libdd-data-pipeline,Apache-2.0,The libdd-data-pipeline Authors
 libdd-ddsketch,https://github.com/DataDog/libdatadog/tree/main/libdd-ddsketch,Apache-2.0,The libdd-ddsketch Authors
 libdd-dogstatsd-client,https://github.com/DataDog/libdatadog/tree/main/libdd-dogstatsd-client,Apache-2.0,The libdd-dogstatsd-client Authors
 libdd-library-config,https://github.com/DataDog/libdatadog/tree/main/libdd-library-config,Apache-2.0,The libdd-library-config Authors
+libdd-shared-runtime,https://github.com/DataDog/libdatadog/tree/main/libdd-shared-runtime,Apache-2.0,The libdd-shared-runtime Authors
 libdd-telemetry,https://github.com/DataDog/libdatadog/tree/main/libdd-telemetry,Apache-2.0,The libdd-telemetry Authors
 libdd-tinybytes,https://github.com/DataDog/libdatadog/tree/main/libdd-tinybytes,Apache-2.0,The libdd-tinybytes Authors
 libdd-trace-normalization,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-normalization,Apache-2.0,David Lee <david.lee@datadoghq.com>
+libdd-trace-obfuscation,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-obfuscation,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 libdd-trace-protobuf,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-protobuf,Apache-2.0,The libdd-trace-protobuf Authors
 libdd-trace-stats,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-stats,Apache-2.0,The libdd-trace-stats Authors
 libdd-trace-utils,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-utils,Apache-2.0,The libdd-trace-utils Authors
@@ -172,6 +178,8 @@ rand_xorshift,https://github.com/rust-random/rngs,MIT OR Apache-2.0,"The Rand Pr
 rayon,https://github.com/rayon-rs/rayon,MIT OR Apache-2.0,The rayon Authors
 rayon-core,https://github.com/rayon-rs/rayon,MIT OR Apache-2.0,The rayon-core Authors
 redox_syscall,https://gitlab.redox-os.org/redox-os/syscall,MIT,Jeremy Soller <jackpot51@gmail.com>
+ref-cast,https://github.com/dtolnay/ref-cast,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
+ref-cast-impl,https://github.com/dtolnay/ref-cast,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 regex,https://github.com/rust-lang/regex,MIT OR Apache-2.0,"The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>"
 regex-automata,https://github.com/BurntSushi/regex-automata,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
 regex-automata,https://github.com/rust-lang/regex/tree/master/regex-automata,MIT OR Apache-2.0,"The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>"
