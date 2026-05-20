@@ -229,7 +229,7 @@ datadog_opentelemetry::tracing()
 
 ## Support
 
-* MSRV: 1.84
+* MSRV: 1.87
 
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
 * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
