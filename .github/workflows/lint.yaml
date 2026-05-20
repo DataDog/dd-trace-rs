@@ -46,7 +46,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust_version: ["1.84.1", "stable", "nightly-2026-04-07"]
+        rust_version: ["1.87.0", "stable", "nightly-2026-04-07"]
         platform: [windows-latest, ubuntu-latest]
     steps:
       - name: Checkout sources
@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           # shellcheck disable=SC2046
-          cargo hack --each-feature clippy -- -D warnings $([ ${{ matrix.rust_version }} = 1.84.1 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
+          cargo hack --each-feature clippy -- -D warnings $([ ${{ matrix.rust_version }} = 1.87.0 ] || [ ${{ matrix.rust_version }} = stable ] && echo -Aunknown-lints -Ainvalid_reference_casting -Aclippy::redundant-closure-call)
   instrumentation-clippy:
     name: "clippy #instrumentation ${{ matrix.rust_version }}"
     runs-on: ubuntu-latest

@@ -16,7 +16,7 @@ options.
 
 ## Rust Toolchain
 
-- **MSRV**: 1.84.1 (set via `rust-version` in `Cargo.toml`)
+- **MSRV**: 1.87.0 (set via `rust-version` in `Cargo.toml`)
 - **Formatting**: pinned `nightly-2026-04-07` toolchain
 
 Install the required toolchains and components:
@@ -25,8 +25,8 @@ Install the required toolchains and components:
 rustup install nightly-2026-04-07
 rustup component add rustfmt --toolchain nightly-2026-04-07
 rustup component add clippy --toolchain nightly-2026-04-07
-rustup install 1.84.1
-rustup component add clippy --toolchain 1.84.1
+rustup install 1.87.0
+rustup component add clippy --toolchain 1.87.0
 ```
 
 ## Formatting and Linting
