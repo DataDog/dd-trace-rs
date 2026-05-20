@@ -1,7 +1,7 @@
 # Copyright 2021-Present Datadog, Inc. https://www.datadoghq.com/
 # SPDX-License-Identifier: Apache-2.0
 
-FROM rust:1.84-slim
+FROM rust:1.87-slim
 
 # Keep in sync with: scripts/update_license_3rdparty.sh (TOOL_VERSION) and .github/workflows/lint.yaml (cache key + install step)
 ARG TOOL_VERSION=1.0.6
