@@ -3,7 +3,6 @@
 
 [workspace]
 members = [
-    "libdd-sampling",
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
@@ -30,6 +29,7 @@ libdd-telemetry = { version = "4.0.0", default-features = false }
 libdd-common = { version = "3.0.1", default-features = false }
 libdd-tinybytes = { version = "1.1.0", default-features = false }
 libdd-library-config = { version = "1.1.0", default-features = false }
+libdd-sampling = { version = "1.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",

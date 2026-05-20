@@ -42,11 +42,11 @@ impl OtelValue {
 }
 
 impl ValueLike for OtelValue {
-    fn extract_float(&self) -> Option<f64> {
+    fn as_float(&self) -> Option<f64> {
         crate::sampling::utils::extract_float_value(&self.0)
     }
 
-    fn extract_string(&self) -> Option<Cow<'_, str>> {
+    fn as_str(&self) -> Option<Cow<'_, str>> {
         crate::sampling::utils::extract_string_value(&self.0)
     }
 }
@@ -150,7 +150,10 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
 }
 
 impl SpanProperties for PreSampledSpan<'_> {
-    type Attribute = OtelKeyValue;
+    type Attribute<'a>
+        = &'a OtelKeyValue
+    where
+        Self: 'a;
 
     fn operation_name(&self) -> Cow<'_, str> {
         get_otel_operation_name_v2(self)
@@ -172,10 +175,7 @@ impl SpanProperties for PreSampledSpan<'_> {
         get_otel_status_code(self)
     }
 
-    fn attributes<'a>(&'a self) -> impl Iterator<Item = &'a Self::Attribute>
-    where
-        Self: 'a,
-    {
+    fn attributes(&self) -> impl Iterator<Item = &OtelKeyValue> + '_ {
         self.attributes.iter().map(OtelKeyValue::from_ref)
     }
 
