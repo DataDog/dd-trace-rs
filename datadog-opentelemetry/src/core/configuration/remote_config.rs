@@ -2232,4 +2232,49 @@ mod tests {
         assert!(rules[1].service.is_none());
         assert!(rules[1].tags.is_empty());
     }
+
+    #[test]
+    fn test_handler_null_fields_clear_prior_override() {
+        // 1. Install rules via RC.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // 2. Send explicit null for both fields -> override cleared.
+        let clear = br#"{
+            "id": "rc-clear",
+            "lib_config": {
+                "tracing_sampling_rate": null,
+                "tracing_sampling_rules": null
+            }
+        }"#;
+        ApmTracingHandler.process_config(clear, &config).unwrap();
+        // After clearing, trace_sampling_rules() returns the local-config default
+        // (empty unless DD_TRACE_SAMPLING_RULES is set in the test environment).
+        assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
+
+    #[test]
+    fn test_handler_null_rate_only_clears_prior_override() {
+        // Explicit null on tracing_sampling_rate (with tracing_sampling_rules absent)
+        // must clear a prior remote override.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        let clear = br#"{
+            "id": "rc-clear",
+            "lib_config": {"tracing_sampling_rate": null}
+        }"#;
+        ApmTracingHandler.process_config(clear, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
 }
