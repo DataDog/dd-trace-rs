@@ -31,5 +31,6 @@ jobs:
         shell: bash
         env:
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          PUBLISH_TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${{ steps.tag.outputs.tag }}"
+          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${PUBLISH_TAG}"
