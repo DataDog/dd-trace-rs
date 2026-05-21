@@ -9,11 +9,14 @@ use std::{
 };
 
 use crate::{dd_debug, dd_error};
+use libdd_capabilities_impl::NativeCapabilities;
 use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse,
     error::{self as trace_exporter_error, TraceExporterError},
-    TraceExporter, TraceExporterBuilder,
+    TraceExporter as LibddTraceExporter, TraceExporterBuilder,
 };
+
+pub type TraceExporter = LibddTraceExporter<NativeCapabilities>;
 
 #[derive(Clone, Copy)]
 pub struct AsyncExporterConfig {
@@ -583,7 +586,7 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
             move || {
-                let trace_exporter = match builder.build() {
+                let trace_exporter = match builder.build::<NativeCapabilities>() {
                     Ok(exporter) => exporter,
                     Err(e) => {
                         return Err(e);
@@ -607,10 +610,16 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     fn run(mut self) -> Result<(), TraceExporterError> {
         #[cfg(feature = "test-utils")]
         {
-            // Wait for the agent info to be fetched to get deterministic output when deciding
-            // to drop traces or not
-            self.trace_exporter
-                .wait_agent_info_ready(Duration::from_secs(5))
+            // Block on the async `wait_agent_info_ready` from this plain
+            // `thread::spawn`; needed for deterministic sampling in tests.
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("tokio runtime for wait_agent_info_ready")
+                .block_on(
+                    self.trace_exporter
+                        .wait_agent_info_ready(Duration::from_secs(5)),
+                )
                 .unwrap();
         }
         while let Ok((message, data)) = self.rx.receive(self.config.max_flush_interval) {
