@@ -194,11 +194,8 @@ where
 /// Malformed list entries (missing `key` or `value_glob`, or non-string values)
 /// are skipped rather than failing the whole update — RC schema validation is
 /// the agent's job; the tracer should be lenient.
-fn normalize_rc_tags(rules: &mut serde_json::Value) {
-    let Some(arr) = rules.as_array_mut() else {
-        return;
-    };
-    for rule in arr {
+fn normalize_rc_tags(rules: &mut [serde_json::Value]) {
+    for rule in rules {
         let Some(obj) = rule.as_object_mut() else {
             continue;
         };
@@ -858,7 +855,7 @@ impl ProductHandler for ApmTracingHandler {
                 }
             }
             (rules_opt, rate_opt) => {
-                let rules: Vec<serde_json::Value> = match rules_opt {
+                let mut rules: Vec<serde_json::Value> = match rules_opt {
                     Some(serde_json::Value::Array(arr)) => arr,
                     Some(other) => {
                         return Err(anyhow::anyhow!(
@@ -870,13 +867,7 @@ impl ProductHandler for ApmTracingHandler {
                 };
 
                 // Normalize RC list-shape tags into the map shape libdd-sampling accepts.
-                let mut rules_value = serde_json::Value::Array(rules);
-                normalize_rc_tags(&mut rules_value);
-                let mut rules: Vec<serde_json::Value> = match rules_value {
-                    serde_json::Value::Array(arr) => arr,
-                    // Unreachable — normalize_rc_tags never changes the outer type.
-                    _ => unreachable!("normalize_rc_tags preserves the array wrapper"),
-                };
+                normalize_rc_tags(&mut rules);
 
                 if let Some(r) = rate_opt {
                     rules.push(serde_json::json!({ "sample_rate": r, "provenance": "dynamic" }));
@@ -2365,12 +2356,12 @@ mod tests {
     #[test]
     fn test_normalize_rc_tags_passes_through_map_shape() {
         // Map-shape tags must be left untouched.
-        let mut rules = serde_json::json!([
-            {"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}
-        ]);
+        let mut rules: Vec<serde_json::Value> = vec![
+            serde_json::json!({"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}),
+        ];
         normalize_rc_tags(&mut rules);
         assert_eq!(
-            rules,
+            serde_json::Value::Array(rules),
             serde_json::json!([
                 {"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}
             ])
@@ -2379,15 +2370,13 @@ mod tests {
 
     #[test]
     fn test_normalize_rc_tags_converts_list_shape() {
-        let mut rules = serde_json::json!([
-            {
-                "sample_rate": 0.5,
-                "tags": [
-                    {"key": "env", "value_glob": "prod"},
-                    {"key": "region", "value_glob": "us-east-1"}
-                ]
-            }
-        ]);
+        let mut rules: Vec<serde_json::Value> = vec![serde_json::json!({
+            "sample_rate": 0.5,
+            "tags": [
+                {"key": "env", "value_glob": "prod"},
+                {"key": "region", "value_glob": "us-east-1"}
+            ]
+        })];
         normalize_rc_tags(&mut rules);
         let tags = rules[0]["tags"]
             .as_object()
@@ -2404,15 +2393,13 @@ mod tests {
         // A list entry missing `value_glob` or `key` is dropped silently —
         // we trust the agent / RC schema to deliver well-formed entries, but
         // we don't want one bad entry to kill the entire update.
-        let mut rules = serde_json::json!([
-            {
-                "sample_rate": 0.5,
-                "tags": [
-                    {"key": "env", "value_glob": "prod"},
-                    {"key": "region"}
-                ]
-            }
-        ]);
+        let mut rules: Vec<serde_json::Value> = vec![serde_json::json!({
+            "sample_rate": 0.5,
+            "tags": [
+                {"key": "env", "value_glob": "prod"},
+                {"key": "region"}
+            ]
+        })];
         normalize_rc_tags(&mut rules);
         let tags = rules[0]["tags"].as_object().unwrap();
         assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("prod"));
