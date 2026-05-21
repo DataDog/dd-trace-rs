@@ -2209,4 +2209,27 @@ mod tests {
         assert!(rules[0].resource.is_none());
         assert!(rules[0].tags.is_empty());
     }
+
+    #[test]
+    fn test_handler_appends_rate_after_rules() {
+        // RC sends both rules and a rate -> rate becomes the last (wildcard) rule.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-both",
+            "lib_config": {
+                "tracing_sampling_rate": 0.1,
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.9, "service": "auth"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].sample_rate, 0.9);
+        assert_eq!(rules[0].service.as_deref(), Some("auth"));
+        assert_eq!(rules[1].sample_rate, 0.1);
+        assert!(rules[1].service.is_none());
+        assert!(rules[1].tags.is_empty());
+    }
 }
