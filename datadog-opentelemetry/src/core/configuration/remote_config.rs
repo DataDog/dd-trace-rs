@@ -790,18 +790,54 @@ struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
     fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()> {
-        // Parse the config to extract sampling rules as raw JSON
         let tracing_config: ApmTracingConfig = serde_json::from_slice(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
 
-        // Extract sampling rules if present
-        if let Some(rules_value) = tracing_config.lib_config.tracing_sampling_rules {
-            if !rules_value.is_null() {
-                // Convert the raw JSON value to string for the config method
-                let rules_json = serde_json::to_string(&rules_value)
+        let lib = tracing_config.lib_config;
+
+        let any_field_present =
+            lib.tracing_sampling_rules.is_some() || lib.tracing_sampling_rate.is_some();
+        let rate: Option<f64> = lib.tracing_sampling_rate.as_ref().and_then(|v| v.as_f64());
+        let rules_value = match lib.tracing_sampling_rules {
+            Some(v) if !v.is_null() => Some(v),
+            _ => None,
+        };
+
+        match (rules_value, rate) {
+            (None, None) => {
+                if any_field_present {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: APM tracing config received with null sampling fields, clearing remote override"
+                    );
+                    config.clear_remote_sampling_rules(Some(tracing_config.id));
+                } else {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules or tracing_sampling_rate present"
+                    );
+                }
+            }
+            (rules_opt, rate_opt) => {
+                let mut rules: Vec<serde_json::Value> = match rules_opt {
+                    Some(serde_json::Value::Array(arr)) => arr,
+                    Some(other) => {
+                        return Err(anyhow::anyhow!(
+                            "tracing_sampling_rules must be a JSON array, got: {}",
+                            other
+                        ));
+                    }
+                    None => Vec::new(),
+                };
+                if let Some(r) = rate_opt {
+                    rules.push(
+                        serde_json::json!({ "sample_rate": r, "provenance": "dynamic" }),
+                    );
+                }
+
+                let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                match config.update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
+                match config
+                    .update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
                 {
                     Ok(()) => {
                         crate::dd_debug!(
@@ -815,16 +851,7 @@ impl ProductHandler for ApmTracingHandler {
                         );
                     }
                 }
-            } else {
-                crate::dd_debug!(
-                    "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
-                );
-                config.clear_remote_sampling_rules(Some(tracing_config.id));
             }
-        } else {
-            crate::dd_debug!(
-                "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules present"
-            );
         }
 
         Ok(())
@@ -900,6 +927,10 @@ mod tests {
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use test_case::test_case;
+
+    fn build_config_for_handler() -> Arc<Config> {
+        Arc::new(Config::builder().build())
+    }
 
     #[test]
     fn test_client_capabilities() {
@@ -2158,5 +2189,24 @@ mod tests {
         let config_json = r#"{"id": "42", "lib_config": {}}"#;
         let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
         assert!(tracing_config.lib_config.tracing_sampling_rate.is_none());
+    }
+
+    #[test]
+    fn test_handler_applies_only_rate_as_wildcard_rule() {
+        // RC sends only tracing_sampling_rate -> handler installs a single
+        // wildcard rule with provenance "dynamic".
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-rate-only",
+            "lib_config": {"tracing_sampling_rate": 0.25}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 1, "expected exactly one synthesized wildcard rule");
+        assert_eq!(rules[0].sample_rate, 0.25);
+        assert!(rules[0].service.is_none());
+        assert!(rules[0].name.is_none());
+        assert!(rules[0].resource.is_none());
+        assert!(rules[0].tags.is_empty());
     }
 }
