@@ -202,7 +202,17 @@ struct LibConfig {
         rename = "tracing_sampling_rules"
     )]
     tracing_sampling_rules: Option<serde_json::Value>,
-    // Add other APM tracing config fields as needed (e.g., tracing_header_tags, etc.)
+
+    /// Global trace sample rate (0.0–1.0) pushed via Remote Config.
+    /// `None` means the field was absent (no change intended).
+    /// `Some(Value::Null)` means the field was explicitly `null` (clear the override).
+    /// `Some(Value::Number)` means a concrete rate was provided.
+    #[serde(
+        deserialize_with = "missing_field_and_null_value",
+        default,
+        rename = "tracing_sampling_rate"
+    )]
+    tracing_sampling_rate: Option<serde_json::Value>,
 }
 
 /// TUF targets metadata
@@ -2120,5 +2130,33 @@ mod tests {
             serde_json::from_str(config_json).expect("Json should be parsed");
 
         assert!(tracing_config.lib_config.tracing_sampling_rules.is_none());
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_concrete() {
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rate": 0.25}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert_eq!(
+            tracing_config.lib_config.tracing_sampling_rate,
+            Some(serde_json::json!(0.25))
+        );
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_null() {
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rate": null}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert_eq!(
+            tracing_config.lib_config.tracing_sampling_rate,
+            Some(serde_json::Value::Null)
+        );
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_missing() {
+        // Field absent entirely.
+        let config_json = r#"{"id": "42", "lib_config": {}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert!(tracing_config.lib_config.tracing_sampling_rate.is_none());
     }
 }
