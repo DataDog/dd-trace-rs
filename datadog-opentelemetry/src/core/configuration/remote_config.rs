@@ -189,11 +189,14 @@ where
 /// (list of `{key, value_glob}` objects) into the shape `libdd-sampling`'s
 /// `SamplingRuleConfig` accepts (a `{key: value}` map). Map-shape tags are
 /// left untouched. Rules without `tags`, or with `tags` of an unexpected
-/// type, are left untouched.
+/// type, are left untouched (libdatadog's parse will reject if necessary).
 ///
-/// Malformed list entries (missing `key` or `value_glob`, or non-string values)
-/// are skipped rather than failing the whole update — RC schema validation is
-/// the agent's job; the tracer should be lenient.
+/// If any list entry is malformed (missing `key`/`value_glob`, or non-string
+/// values), the rule's tags are left in their original (list) shape. This
+/// fails closed: libdatadog will reject the list-shape parse, the RC update
+/// is dropped, and the agent is informed via apply_state=3. We deliberately
+/// do not drop bad entries silently — doing so could broaden a tag-constrained
+/// rule into a less-constrained (or fully wildcard) rule.
 fn normalize_rc_tags(rules: &mut [serde_json::Value]) {
     for rule in rules {
         let Some(obj) = rule.as_object_mut() else {
@@ -207,19 +210,25 @@ fn normalize_rc_tags(rules: &mut [serde_json::Value]) {
             continue;
         };
         let mut map = serde_json::Map::with_capacity(entries.len());
+        let mut all_ok = true;
         for entry in entries {
             let (Some(key), Some(value)) = (
                 entry.get("key").and_then(|v| v.as_str()),
                 entry.get("value_glob").and_then(|v| v.as_str()),
             ) else {
-                continue;
+                all_ok = false;
+                break;
             };
             map.insert(
                 key.to_string(),
                 serde_json::Value::String(value.to_string()),
             );
         }
-        obj.insert("tags".to_string(), serde_json::Value::Object(map));
+        if all_ok {
+            obj.insert("tags".to_string(), serde_json::Value::Object(map));
+        }
+        // else: leave the original list-shape tags in place; libdatadog's
+        // parse will reject and the RC update is rejected as a whole.
     }
 }
 
@@ -835,7 +844,21 @@ impl ProductHandler for ApmTracingHandler {
 
         let any_field_present =
             lib.tracing_sampling_rules.is_some() || lib.tracing_sampling_rate.is_some();
-        let rate: Option<f64> = lib.tracing_sampling_rate.as_ref().and_then(|v| v.as_f64());
+
+        // tracing_sampling_rate must be either null (clear) or a JSON number.
+        // Any other present-but-non-numeric value (string, bool, object) is a
+        // malformed payload — reject rather than silently treating it as a
+        // clear, which would wipe an active remote sampling policy.
+        let rate: Option<f64> = match &lib.tracing_sampling_rate {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::Number(n)) => n.as_f64(),
+            Some(other) => {
+                return Err(anyhow::anyhow!(
+                    "tracing_sampling_rate must be a JSON number or null, got: {}",
+                    other
+                ));
+            }
+        };
         let rules_value = match lib.tracing_sampling_rules {
             Some(v) if !v.is_null() => Some(v),
             _ => None,
@@ -2389,20 +2412,86 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_rc_tags_drops_malformed_list_entries() {
-        // A list entry missing `value_glob` or `key` is dropped silently —
-        // we trust the agent / RC schema to deliver well-formed entries, but
-        // we don't want one bad entry to kill the entire update.
-        let mut rules: Vec<serde_json::Value> = vec![serde_json::json!({
+    fn test_normalize_rc_tags_leaves_malformed_list_untouched() {
+        // If any list entry is malformed (missing key/value_glob), the rule's
+        // tags are left in their original list shape — libdatadog's parse will
+        // then reject the update as a whole. We must not drop bad entries
+        // silently, which could broaden a tag-constrained rule.
+        let original = serde_json::json!({
             "sample_rate": 0.5,
             "tags": [
                 {"key": "env", "value_glob": "prod"},
                 {"key": "region"}
             ]
-        })];
+        });
+        let mut rules: Vec<serde_json::Value> = vec![original.clone()];
         normalize_rc_tags(&mut rules);
-        let tags = rules[0]["tags"].as_object().unwrap();
-        assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("prod"));
-        assert!(tags.get("region").is_none());
+        // Tags remain in the original (rejected) list shape.
+        assert_eq!(rules[0], original);
+    }
+
+    #[test]
+    fn test_handler_malformed_tags_rejects_update() {
+        // Bug B fail-closed guard: a sampling rule with malformed list-shape
+        // tags must not be installed in a broadened form. With the prior
+        // override of sample_rate=0.5 in place, sending a rule with one bad
+        // tag entry must leave the prior override intact.
+        let config = build_config_for_handler();
+        // 1. Install a working override.
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // 2. Send a rule with a malformed tag entry.
+        let bad = br#"{
+            "id": "rc-bad-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.0,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        // The libdatadog parse rejects list-shape tags, so the update fails
+        // internally and is logged at dd_debug! — process_config still returns
+        // Ok. The key invariant is that the prior remote override is not
+        // overwritten or cleared.
+        ApmTracingHandler.process_config(bad, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 1, "prior override must remain installed");
+        assert_eq!(rules[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_handler_non_numeric_rate_rejects_update() {
+        // A schema-drifted rate (e.g. string) must be rejected as a malformed
+        // payload, not silently treated as a clear that would wipe an active
+        // remote override.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        let bad = br#"{
+            "id": "rc-bad-rate",
+            "lib_config": {"tracing_sampling_rate": "0.5"}
+        }"#;
+        let result = ApmTracingHandler.process_config(bad, &config);
+        assert!(result.is_err(), "non-numeric rate must be rejected");
+        // Prior override survives.
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.5);
     }
 }
