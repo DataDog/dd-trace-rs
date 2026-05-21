@@ -185,6 +185,47 @@ where
     Ok(Some(serde_json::Value::deserialize(deserializer)?))
 }
 
+/// Normalizes the `tags` field on each sampling rule from the RC wire shape
+/// (list of `{key, value_glob}` objects) into the shape `libdd-sampling`'s
+/// `SamplingRuleConfig` accepts (a `{key: value}` map). Map-shape tags are
+/// left untouched. Rules without `tags`, or with `tags` of an unexpected
+/// type, are left untouched.
+///
+/// Malformed list entries (missing `key` or `value_glob`, or non-string values)
+/// are skipped rather than failing the whole update — RC schema validation is
+/// the agent's job; the tracer should be lenient.
+fn normalize_rc_tags(rules: &mut serde_json::Value) {
+    let Some(arr) = rules.as_array_mut() else {
+        return;
+    };
+    for rule in arr {
+        let Some(obj) = rule.as_object_mut() else {
+            continue;
+        };
+        let Some(tags) = obj.get("tags") else {
+            continue;
+        };
+        let serde_json::Value::Array(entries) = tags else {
+            // Map-shape (or null/etc.) — leave it for libdatadog to handle.
+            continue;
+        };
+        let mut map = serde_json::Map::with_capacity(entries.len());
+        for entry in entries {
+            let (Some(key), Some(value)) = (
+                entry.get("key").and_then(|v| v.as_str()),
+                entry.get("value_glob").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            map.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+        obj.insert("tags".to_string(), serde_json::Value::Object(map));
+    }
+}
+
 /// Configuration payload for APM tracing
 /// Based on the apm-tracing.json schema from dd-go
 /// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
@@ -817,7 +858,7 @@ impl ProductHandler for ApmTracingHandler {
                 }
             }
             (rules_opt, rate_opt) => {
-                let mut rules: Vec<serde_json::Value> = match rules_opt {
+                let rules: Vec<serde_json::Value> = match rules_opt {
                     Some(serde_json::Value::Array(arr)) => arr,
                     Some(other) => {
                         return Err(anyhow::anyhow!(
@@ -827,17 +868,24 @@ impl ProductHandler for ApmTracingHandler {
                     }
                     None => Vec::new(),
                 };
+
+                // Normalize RC list-shape tags into the map shape libdd-sampling accepts.
+                let mut rules_value = serde_json::Value::Array(rules);
+                normalize_rc_tags(&mut rules_value);
+                let mut rules: Vec<serde_json::Value> = match rules_value {
+                    serde_json::Value::Array(arr) => arr,
+                    // Unreachable — normalize_rc_tags never changes the outer type.
+                    _ => unreachable!("normalize_rc_tags preserves the array wrapper"),
+                };
+
                 if let Some(r) = rate_opt {
-                    rules.push(
-                        serde_json::json!({ "sample_rate": r, "provenance": "dynamic" }),
-                    );
+                    rules.push(serde_json::json!({ "sample_rate": r, "provenance": "dynamic" }));
                 }
 
                 let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                match config
-                    .update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
+                match config.update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
                 {
                     Ok(()) => {
                         crate::dd_debug!(
@@ -2202,7 +2250,11 @@ mod tests {
         }"#;
         ApmTracingHandler.process_config(payload, &config).unwrap();
         let rules = config.trace_sampling_rules().to_vec();
-        assert_eq!(rules.len(), 1, "expected exactly one synthesized wildcard rule");
+        assert_eq!(
+            rules.len(),
+            1,
+            "expected exactly one synthesized wildcard rule"
+        );
         assert_eq!(rules[0].sample_rate, 0.25);
         assert!(rules[0].service.is_none());
         assert!(rules[0].name.is_none());
@@ -2276,5 +2328,94 @@ mod tests {
         }"#;
         ApmTracingHandler.process_config(clear, &config).unwrap();
         assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
+
+    #[test]
+    fn test_handler_rc_rules_with_list_tags_applied() {
+        // Bug B regression guard: RC sends tags as list-of-objects; the handler
+        // must normalize to a map before passing to libdatadog.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-list-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.5,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region", "value_glob": "us-east-1"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.5);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[0].tags.get("env").map(String::as_str), Some("prod"));
+        assert_eq!(
+            rules[0].tags.get("region").map(String::as_str),
+            Some("us-east-1")
+        );
+    }
+
+    #[test]
+    fn test_normalize_rc_tags_passes_through_map_shape() {
+        // Map-shape tags must be left untouched.
+        let mut rules = serde_json::json!([
+            {"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}
+        ]);
+        normalize_rc_tags(&mut rules);
+        assert_eq!(
+            rules,
+            serde_json::json!([
+                {"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}
+            ])
+        );
+    }
+
+    #[test]
+    fn test_normalize_rc_tags_converts_list_shape() {
+        let mut rules = serde_json::json!([
+            {
+                "sample_rate": 0.5,
+                "tags": [
+                    {"key": "env", "value_glob": "prod"},
+                    {"key": "region", "value_glob": "us-east-1"}
+                ]
+            }
+        ]);
+        normalize_rc_tags(&mut rules);
+        let tags = rules[0]["tags"]
+            .as_object()
+            .expect("tags should be an object after normalization");
+        assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("prod"));
+        assert_eq!(
+            tags.get("region").and_then(|v| v.as_str()),
+            Some("us-east-1")
+        );
+    }
+
+    #[test]
+    fn test_normalize_rc_tags_drops_malformed_list_entries() {
+        // A list entry missing `value_glob` or `key` is dropped silently —
+        // we trust the agent / RC schema to deliver well-formed entries, but
+        // we don't want one bad entry to kill the entire update.
+        let mut rules = serde_json::json!([
+            {
+                "sample_rate": 0.5,
+                "tags": [
+                    {"key": "env", "value_glob": "prod"},
+                    {"key": "region"}
+                ]
+            }
+        ]);
+        normalize_rc_tags(&mut rules);
+        let tags = rules[0]["tags"].as_object().unwrap();
+        assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("prod"));
+        assert!(tags.get("region").is_none());
     }
 }
