@@ -878,6 +878,17 @@ impl ProductHandler for ApmTracingHandler {
                 }
             }
             (rules_opt, rate_opt) => {
+                // An explicit empty `tracing_sampling_rules: []` is treated the
+                // same as null/absent: RC has no rules to deliver, so env-side
+                // rules survive. Operators clear remote rules by sending
+                // `tracing_sampling_rules: null` (the conventional RC clear);
+                // an empty array is an unusual edge case and the lenient
+                // interpretation is safer than wiping env config silently.
+                let rc_has_explicit_rules = matches!(
+                    rules_opt,
+                    Some(serde_json::Value::Array(ref arr)) if !arr.is_empty()
+                );
+
                 let mut rules: Vec<serde_json::Value> = match rules_opt {
                     Some(serde_json::Value::Array(arr)) => arr,
                     Some(other) => {
@@ -892,7 +903,37 @@ impl ProductHandler for ApmTracingHandler {
                 // Normalize RC list-shape tags into the map shape libdd-sampling accepts.
                 normalize_rc_tags(&mut rules);
 
-                if let Some(r) = rate_opt {
+                // Multi-source precedence:
+                // - If RC delivered explicit rules, env rules are replaced.
+                // - If RC delivered only a rate, env rules survive and apply in front of the
+                //   synthetic catch-all.
+                if !rc_has_explicit_rules {
+                    let env_rules = config.local_trace_sampling_rules();
+                    if !env_rules.is_empty() {
+                        let env_json = serde_json::to_value(&*env_rules).map_err(|e| {
+                            anyhow::anyhow!("Failed to serialize env sampling rules: {}", e)
+                        })?;
+                        if let serde_json::Value::Array(env_arr) = env_json {
+                            let mut composed = env_arr;
+                            composed.append(&mut rules);
+                            rules = composed;
+                        }
+                    }
+                }
+
+                // Effective catch-all rate: RC rate wins; otherwise fall back
+                // to DD_TRACE_SAMPLE_RATE if it's non-default (we treat 1.0 as
+                // "no catch-all" since libdd-sampling's no-rule path samples
+                // at 100% by default anyway).
+                let env_rate = config.trace_sample_rate();
+                let catch_all_rate: Option<f64> = match rate_opt {
+                    Some(r) => Some(r),
+                    None if env_rate.is_finite() && (env_rate - 1.0_f64).abs() > f64::EPSILON => {
+                        Some(env_rate)
+                    }
+                    None => None,
+                };
+                if let Some(r) = catch_all_rate {
                     // The global RC rate is a "local-user-like" fallback: it must
                     // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC).
                     // Omit `provenance`; libdd-sampling deserializes it as
@@ -990,6 +1031,7 @@ fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::configuration::SamplingRuleConfig;
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use test_case::test_case;
@@ -2530,5 +2572,137 @@ mod tests {
         // Prior override survives.
         assert_eq!(config.trace_sampling_rules().len(), 1);
         assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_handler_rate_only_preserves_env_rules() {
+        // When RC delivers only tracing_sampling_rate (no rules), env-configured
+        // sampling rules must still apply for matching spans. Composed chain:
+        // [env_rules..., catch_all(rc_rate)].
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-rate-only-with-env-rules",
+            "lib_config": {"tracing_sampling_rate": 0.70}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected env rule + synthetic catch-all");
+        assert_eq!(rules[0].sample_rate, 0.55);
+        assert_eq!(rules[0].name.as_deref(), Some("env_name"));
+        assert_eq!(rules[1].sample_rate, 0.70);
+        assert!(rules[1].name.is_none());
+        assert!(rules[1].service.is_none());
+        assert!(rules[1].resource.is_none());
+        assert!(rules[1].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_rc_rules_replace_env_rules() {
+        // Contract: when RC delivers tracing_sampling_rules (with or without a
+        // rate), env rules are fully replaced. RC rules + catch-all(rc_rate).
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-rules-replace-env",
+            "lib_config": {
+                "tracing_sampling_rate": 0.9,
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.8, "service": "svc", "provenance": "customer"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(
+            rules.len(),
+            2,
+            "env rule must be excluded when RC has rules"
+        );
+        assert_eq!(rules[0].sample_rate, 0.8);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[1].sample_rate, 0.9);
+        assert!(rules[1].service.is_none());
+        assert!(rules.iter().all(|r| r.name.as_deref() != Some("env_name")));
+    }
+
+    #[test]
+    fn test_handler_rc_rules_only_falls_back_to_env_rate_catch_all() {
+        // RC delivers rules without a rate; DD_TRACE_SAMPLE_RATE is set. The
+        // composed chain should be [rc_rules..., catch_all(env_rate)] so
+        // unmatched spans still get sampled at env_rate.
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(0.1);
+        let config = Arc::new(builder.build());
+
+        let payload = br#"{
+            "id": "rc-rules-only-with-env-rate",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.8, "service": "svc", "provenance": "customer"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected rc rule + env-rate catch-all");
+        assert_eq!(rules[0].sample_rate, 0.8);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[1].sample_rate, 0.1);
+        assert!(rules[1].service.is_none());
+    }
+
+    #[test]
+    fn test_handler_empty_rc_rules_array_preserves_env_rules() {
+        // Contract: an explicit empty `tracing_sampling_rules: []` is treated as
+        // "RC has no rules" — env rules survive. Operators clear RC rules by
+        // sending `tracing_sampling_rules: null`. This test locks that behavior.
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-empty-rules",
+            "lib_config": {
+                "tracing_sampling_rate": 0.70,
+                "tracing_sampling_rules": []
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected env rule + synthetic catch-all");
+        assert_eq!(rules[0].sample_rate, 0.55);
+        assert_eq!(rules[0].name.as_deref(), Some("env_name"));
+        assert_eq!(rules[1].sample_rate, 0.70);
+        assert!(rules[1].name.is_none());
     }
 }
