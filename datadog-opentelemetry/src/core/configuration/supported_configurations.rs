@@ -33,6 +33,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_PROPAGATION_STYLE_EXTRACT,
     DD_TRACE_PROPAGATION_STYLE_INJECT,
     DD_TRACE_RATE_LIMIT,
+    DD_TRACE_SAMPLE_RATE,
     DD_TRACE_SAMPLING_RULES,
     DD_TRACE_STATS_COMPUTATION_ENABLED,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
@@ -119,6 +120,7 @@ impl SupportedConfigurations {
                 "DD_TRACE_PROPAGATION_STYLE_INJECT"
             }
             SupportedConfigurations::DD_TRACE_RATE_LIMIT => "DD_TRACE_RATE_LIMIT",
+            SupportedConfigurations::DD_TRACE_SAMPLE_RATE => "DD_TRACE_SAMPLE_RATE",
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES => "DD_TRACE_SAMPLING_RULES",
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => {
                 "DD_TRACE_STATS_COMPUTATION_ENABLED"
