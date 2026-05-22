@@ -27,11 +27,19 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3); // lowest timeout with
 struct ClientCapabilities(u64);
 
 impl ClientCapabilities {
-    /// APM_TRACING_SAMPLE_RULES capability bit position
+    /// APM_TRACING_SAMPLE_RATE — bit 12. Tells the backend the tracer
+    /// honors RC's `tracing_sampling_rate` (global rate). Without this,
+    /// Datadog's APM Sampling UI marks the service as "No remotely
+    /// configurable tracer detected" for rate-only configs even when
+    /// the tracer-side logic is fully wired up.
+    const APM_TRACING_SAMPLE_RATE: u64 = 1 << 12;
+
+    /// APM_TRACING_SAMPLE_RULES — bit 29. Tells the backend the tracer
+    /// honors RC's `tracing_sampling_rules`.
     const APM_TRACING_SAMPLE_RULES: u64 = 1 << 29;
 
     fn new() -> Self {
-        Self(Self::APM_TRACING_SAMPLE_RULES)
+        Self(Self::APM_TRACING_SAMPLE_RATE | Self::APM_TRACING_SAMPLE_RULES)
     }
 
     /// Encode capabilities as base64 string
@@ -1063,8 +1071,17 @@ mod tests {
         bytes[offset..].copy_from_slice(&decoded);
         let value = u64::from_be_bytes(bytes);
 
-        // Verify the capability bit is set
-        assert_eq!(value, ClientCapabilities::APM_TRACING_SAMPLE_RULES);
+        // Both APM_TRACING_SAMPLE_RATE (bit 12) and APM_TRACING_SAMPLE_RULES
+        // (bit 29) must be advertised; the backend uses each independently to
+        // decide which RC config types it will offer in the Datadog UI for
+        // this service.
+        let expected = ClientCapabilities::APM_TRACING_SAMPLE_RATE
+            | ClientCapabilities::APM_TRACING_SAMPLE_RULES;
+        assert_eq!(value, expected);
+        assert_eq!(
+            value & ClientCapabilities::APM_TRACING_SAMPLE_RATE,
+            ClientCapabilities::APM_TRACING_SAMPLE_RATE
+        );
         assert_eq!(
             value & ClientCapabilities::APM_TRACING_SAMPLE_RULES,
             ClientCapabilities::APM_TRACING_SAMPLE_RULES
