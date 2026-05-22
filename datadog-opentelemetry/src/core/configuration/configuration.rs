@@ -5,6 +5,7 @@ use libdd_telemetry::data::Configuration;
 use std::collections::{HashSet, VecDeque};
 use std::fmt::Display;
 use std::ops::Deref;
+use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,7 +16,7 @@ use libdd_library_config::tracer_metadata::TracerMetadata;
 
 use rustc_version_runtime::version;
 
-use crate::core::configuration::sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};
+use super::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
     CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
@@ -27,8 +28,9 @@ use crate::{dd_error, dd_warn};
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
 pub enum RemoteConfigUpdate {
-    /// Sampling rules were updated from remote configuration
-    SamplingRules(Vec<SamplingRuleConfig>),
+    /// Sampling rules were updated from remote configuration.
+    /// Uses the internal type to preserve provenance from remote config.
+    SamplingRules(Vec<libdd_sampling::SamplingRuleConfig>),
     // Future remote config update types should be added here as new variants.
     // E.g.
     // - FeatureFlags(HashMap<String, bool>)
@@ -92,6 +94,8 @@ pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
+const DEFAULT_UNIX_TRACE_AGENT_URL: &str = "/var/run/datadog/apm.socket";
+const DEFAULT_UNIX_DOGSTATSD_AGENT_URL: &str = "/var/run/datadog/dsd.socket";
 
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,7 +278,6 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     }
 
     /// Gets the source of the current value
-    #[allow(dead_code)] // Used in tests and will be used for remote configuration
     fn source(&self) -> ConfigSourceOrigin {
         if self.code_value.is_some() {
             ConfigSourceOrigin::Code
@@ -283,6 +286,10 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         } else {
             ConfigSourceOrigin::Default
         }
+    }
+
+    fn is_default_value(&self) -> bool {
+        self.source() == ConfigSourceOrigin::Default
     }
 
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
@@ -716,6 +723,8 @@ pub enum TracePropagationStyle {
     Datadog,
     /// W3C Trace Context propagation format using `traceparent` and `tracestate` headers.
     TraceContext,
+    /// W3C Baggage propagation format using the `baggage` header.
+    Baggage,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -747,6 +756,7 @@ impl FromStr for TracePropagationStyle {
         match s.trim().to_lowercase().as_str() {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
+            "baggage" => Ok(TracePropagationStyle::Baggage),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -758,6 +768,7 @@ impl Display for TracePropagationStyle {
         let style = match self {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
+            TracePropagationStyle::Baggage => "baggage",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -1519,24 +1530,29 @@ impl Config {
         rules_json: &str,
         config_id: Option<String>,
     ) -> Result<(), String> {
-        // Parse the JSON into SamplingRuleConfig objects
-        let rules: Vec<SamplingRuleConfig> = serde_json::from_str(rules_json)
-            .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
+        // Parse the JSON into the internal type to preserve provenance from remote config.
+        let internal_rules: Vec<libdd_sampling::SamplingRuleConfig> =
+            serde_json::from_str(rules_json)
+                .map_err(|e| format!("Failed to parse sampling rules JSON: {e}"))?;
 
         // If remote config sends empty rules, clear remote config to fall back to local rules
-        if rules.is_empty() {
+        if internal_rules.is_empty() {
             self.clear_remote_sampling_rules(config_id);
         } else {
+            // Convert to public type for storage (provenance is dropped).
+            let rules: Vec<SamplingRuleConfig> =
+                internal_rules.iter().cloned().map(Into::into).collect();
             self.trace_sampling_rules.set_override_value(
                 ParsedSamplingRules { rules },
                 ConfigSourceOrigin::RemoteConfig,
             );
             self.trace_sampling_rules.set_config_id(config_id);
 
-            // Notify callbacks about the sampling rules update
-            self.remote_config_callbacks.lock().unwrap().notify_update(
-                &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
-            );
+            // Notify callbacks with the internal rules (preserves provenance)
+            self.remote_config_callbacks
+                .lock()
+                .unwrap()
+                .notify_update(&RemoteConfigUpdate::SamplingRules(internal_rules));
 
             telemetry::notify_configuration_update(&self.trace_sampling_rules);
         }
@@ -1572,9 +1588,17 @@ impl Config {
         self.trace_sampling_rules.unset_override_value();
         self.trace_sampling_rules.set_config_id(config_id);
 
-        self.remote_config_callbacks.lock().unwrap().notify_update(
-            &RemoteConfigUpdate::SamplingRules(self.trace_sampling_rules().to_vec()),
-        );
+        // Fallback rules are locally defined, so "local" provenance is correct
+        let internal: Vec<libdd_sampling::SamplingRuleConfig> = self
+            .trace_sampling_rules()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect();
+        self.remote_config_callbacks
+            .lock()
+            .unwrap()
+            .notify_update(&RemoteConfigUpdate::SamplingRules(internal));
 
         telemetry::notify_configuration_update(&self.trace_sampling_rules);
     }
@@ -1804,6 +1828,7 @@ fn default_config() -> Config {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ]),
         ),
         trace_propagation_style_extract: ConfigItem::new(
@@ -1913,21 +1938,43 @@ impl ConfigBuilder {
         // resolve trace_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.trace_agent_url.value().is_empty() {
-            let host = &config.agent_host.value();
-            let port = *config.trace_agent_port.value();
-            config
-                .trace_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_TRACE_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_TRACE_AGENT_URL}"))
+            } else {
+                let host = &config.agent_host.value();
+                let port = *config.trace_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.trace_agent_url.set_calculated(url);
         }
 
         // resolve dogstatsd_agent_url
         // this will send the the config through telemetry with `calculated` origin.
         if config.dogstatsd_agent_url.value().is_empty() {
-            let host = &config.dogstatsd_agent_host.value();
-            let port = *config.dogstatsd_agent_port.value();
-            config
-                .dogstatsd_agent_url
-                .set_calculated(Cow::Owned(format!("http://{host}:{port}")));
+            let uds_is_alive = Path::new(DEFAULT_UNIX_DOGSTATSD_AGENT_URL)
+                .try_exists()
+                .unwrap_or(false);
+
+            // if user hasn't provided agent_host nor agent_port and UDS is alive, use it
+            let url = if config.agent_host.is_default_value()
+                && config.trace_agent_port.is_default_value()
+                && uds_is_alive
+            {
+                Cow::Owned(format!("unix://{DEFAULT_UNIX_DOGSTATSD_AGENT_URL}"))
+            } else {
+                let host = &config.dogstatsd_agent_host.value();
+                let port = *config.dogstatsd_agent_port.value();
+                Cow::Owned(format!("http://{host}:{port}"))
+            };
+            config.dogstatsd_agent_url.set_calculated(url);
         }
 
         config
@@ -2409,20 +2456,43 @@ impl ConfigBuilder {
         self
     }
 
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
-    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
-        self.config.datadog_tags_max_length.set_code(length);
-        self
-    }
-
-    #[cfg(feature = "test-utils")]
-    #[allow(missing_docs)]
+    /// Enable synchronous trace writes.
+    ///
+    /// When `true`, each trace export immediately triggers a flush and waits for the background
+    /// exporter to process that batch. The wait is bounded by
+    /// [`ConfigBuilder::set_trace_writer_synchronous_timeout`]; if that timeout is reached, the
+    /// flush may continue in the background.
+    ///
+    /// Useful for short-lived processes such as AWS Lambda functions where the process may freeze
+    /// before an async write completes, or in tests where reducing buffering improves determinism.
+    ///
+    /// **Default**: `false`
     pub fn set_trace_writer_synchronous_write(
         &mut self,
         trace_writer_synchronous_write: bool,
     ) -> &mut Self {
         self.config.trace_writer_synchronous_write = trace_writer_synchronous_write;
+        self
+    }
+
+    /// Set the maximum time to wait for synchronous trace writes.
+    ///
+    /// This only applies when [`ConfigBuilder::set_trace_writer_synchronous_write`] is enabled.
+    /// If the timeout is reached, the flush may continue in the background.
+    ///
+    /// **Default**: `2s`
+    pub fn set_trace_writer_synchronous_timeout(
+        &mut self,
+        trace_writer_synchronous_timeout: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_synchronous_timeout = trace_writer_synchronous_timeout;
+        self
+    }
+
+    #[cfg(feature = "test-utils")]
+    #[allow(missing_docs)]
+    pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
+        self.config.datadog_tags_max_length.set_code(length);
         self
     }
 
@@ -2482,7 +2552,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.5,
                 service: Some("web-api".to_string()),
-                provenance: "customer".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2509,7 +2578,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.5,
                 service: Some("test-service".to_string()),
-                provenance: "customer".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2532,7 +2600,6 @@ mod tests {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                provenance: "manual".to_string(),
             }])
             .set_trace_rate_limit(200)
             .set_service("manual-service".to_string())
@@ -2548,7 +2615,6 @@ mod tests {
             &SamplingRuleConfig {
                 sample_rate: 0.8,
                 service: Some("manual-service".to_string()),
-                provenance: "manual".to_string(),
                 ..SamplingRuleConfig::default()
             }
         );
@@ -2709,6 +2775,7 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
             ])
             .as_deref()
         );
@@ -2718,6 +2785,47 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_style_baggage_parsed_from_env() {
+        // "baggage" is recognised as a valid style value (case-insensitive) in all three env vars.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog,tracecontext,baggage"),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "Baggage,datadog"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "BAGGAGE,tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::Datadog,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]
@@ -2855,16 +2963,15 @@ mod tests {
     fn test_sampling_rules_update_callbacks() {
         let config = Config::builder().build();
 
-        // Track callback invocations
+        // Track callback invocations — uses internal type to verify provenance preservation
         let callback_called = Arc::new(Mutex::new(false));
-        let callback_rules = Arc::new(Mutex::new(Vec::<SamplingRuleConfig>::new()));
+        let callback_rules = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
 
         let callback_called_clone = callback_called.clone();
         let callback_rules_clone = callback_rules.clone();
 
         config.set_sampling_rules_callback(move |update| {
             *callback_called_clone.lock().unwrap() = true;
-            // Store the rules - for now we only have SamplingRules variant
             let RemoteConfigUpdate::SamplingRules(rules) = update;
             *callback_rules_clone.lock().unwrap() = rules.clone();
         });
@@ -2873,22 +2980,20 @@ mod tests {
         assert!(!*callback_called.lock().unwrap());
         assert!(callback_rules.lock().unwrap().is_empty());
 
-        // Update rules from remote config
-        let new_rules = vec![SamplingRuleConfig {
-            sample_rate: 0.5,
-            service: Some("test-service".to_string()),
-            provenance: "remote".to_string(),
-            ..SamplingRuleConfig::default()
-        }];
-
-        let rules_json = serde_json::to_string(&new_rules).unwrap();
+        // Update rules from remote config with provenance "dynamic"
+        let rules_json = r#"[{"sample_rate":0.5,"service":"test-service","provenance":"dynamic"}]"#;
         config
-            .update_sampling_rules_from_remote(&rules_json, None)
+            .update_sampling_rules_from_remote(rules_json, None)
             .unwrap();
 
-        // Callback should be called with the new rules
+        // Callback should be called with the new rules, provenance preserved
         assert!(*callback_called.lock().unwrap());
-        assert_eq!(*callback_rules.lock().unwrap(), new_rules);
+        let received = callback_rules.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].sample_rate, 0.5);
+        assert_eq!(received[0].service, Some("test-service".to_string()));
+        assert_eq!(received[0].provenance, "dynamic");
+        drop(received);
 
         // Test clearing rules
         *callback_called.lock().unwrap() = false;
@@ -2900,6 +3005,55 @@ mod tests {
         // set)
         assert!(*callback_called.lock().unwrap());
         assert!(callback_rules.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_clear_remote_rules_callback_has_local_provenance() {
+        let config = Config::builder()
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                service: Some("local-svc".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+
+        let callback_rules = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = callback_rules.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        // Push remote rules then clear to trigger fallback
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"provenance":"dynamic"}]"#,
+                None,
+            )
+            .unwrap();
+        config.clear_remote_sampling_rules(None);
+
+        // Fallback rules should have "local" provenance
+        let received = callback_rules.lock().unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(received[0].sample_rate, 0.5);
+        assert_eq!(received[0].provenance, "local");
+    }
+
+    #[test]
+    fn test_public_sampling_rule_config_ignores_provenance_in_json() {
+        // The public SamplingRuleConfig should silently ignore a "provenance" field in JSON,
+        // since serde skips unknown fields by default.
+        let json = r#"[{"sample_rate":0.5,"service":"svc","provenance":"dynamic"}]"#;
+        let parsed: ParsedSamplingRules = json.parse().unwrap();
+        assert_eq!(parsed.rules.len(), 1);
+        assert_eq!(parsed.rules[0].sample_rate, 0.5);
+        assert_eq!(parsed.rules[0].service, Some("svc".to_string()));
+        // No provenance field on the public type — it was silently dropped.
+
+        // Round-trip: serialized output should NOT contain provenance
+        let serialized = parsed.to_string();
+        assert!(!serialized.contains("provenance"));
     }
 
     #[test]
@@ -2997,7 +3151,6 @@ mod tests {
             rules: vec![SamplingRuleConfig {
                 sample_rate: 0.3,
                 service: Some("local-service".to_string()),
-                provenance: "local".to_string(),
                 ..SamplingRuleConfig::default()
             }],
         };
@@ -3062,7 +3215,6 @@ mod tests {
         let new_rules = vec![SamplingRuleConfig {
             sample_rate: 0.5,
             service: Some("test-service".to_string()),
-            provenance: "remote".to_string(),
             ..SamplingRuleConfig::default()
         }];
 
@@ -3346,8 +3498,9 @@ mod tests {
         let config = Config::builder_with_sources(&sources).build();
 
         let expected = ParsedSamplingRules::from_str(
-            r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#
-        ).unwrap();
+            r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
+        )
+        .unwrap();
 
         let configurations = &config.trace_sampling_rules.get_all_configurations();
         // active config is the one with highest seq_id
@@ -3362,7 +3515,10 @@ mod tests {
         );
 
         // Update ConfigItemRc via RC
-        let expected_rc = ParsedSamplingRules::from_str(r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{},"provenance":"customer"}]"#).unwrap();
+        let expected_rc = ParsedSamplingRules::from_str(
+            r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
+        )
+        .unwrap();
         config
             .trace_sampling_rules
             .set_override_value(expected_rc.clone(), ConfigSourceOrigin::RemoteConfig);

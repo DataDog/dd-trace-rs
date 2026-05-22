@@ -11,10 +11,7 @@ use crate::{
     dd_debug, dd_error, dd_warn,
     propagation::{
         carrier::{Extractor, Injector},
-        context::{
-            encode_tag_value, InjectSpanContext, Sampling, SpanContext, Traceparent, Tracestate,
-            DATADOG_PROPAGATION_TAG_PREFIX,
-        },
+        context::{InjectSpanContext, Sampling, SpanContext, DATADOG_PROPAGATION_TAG_PREFIX},
         datadog::DATADOG_LAST_PARENT_ID_KEY,
         error::Error,
     },
@@ -25,6 +22,8 @@ use crate::{
 pub const TRACEPARENT_KEY: &str = "traceparent";
 /// W3C tracestate header key.
 pub const TRACESTATE_KEY: &str = "tracestate";
+
+const TRACESTATE_MAX_MEMBERS: usize = 32;
 
 const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
 const TRACESTATE_VALUES_SEPARATOR: &str = ",";
@@ -37,6 +36,202 @@ const INVALID_CHAR_REPLACEMENT: char = '_';
 
 static TRACECONTEXT_HEADER_KEYS: LazyLock<[String; 2]> =
     LazyLock::new(|| [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()]);
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Traceparent {
+    pub sampling_priority: SamplingPriority,
+    pub trace_id: u128,
+    pub span_id: u64,
+}
+
+/// Parsed W3C tracestate header containing Datadog-specific and vendor values.
+///
+/// The tracestate header allows vendors to propagate additional trace context
+/// alongside the standard traceparent header.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct Tracestate {
+    pub(crate) sampling: Option<Sampling>,
+    pub(crate) origin: Option<String>,
+    pub(crate) lower_order_trace_id: Option<String>,
+    pub(crate) propagation_tags: Option<HashMap<String, String>>,
+    pub(crate) additional_values: Option<Vec<(String, String)>>,
+}
+
+/// Code inspired, and copied, by OpenTelemetry Rust project.
+/// <https://github.com/open-telemetry/opentelemetry-rust/blob/main/opentelemetry/src/trace/span_context.rs>
+impl Tracestate {
+    fn valid_key(key: &str) -> bool {
+        if key.len() > 256 {
+            return false;
+        }
+
+        let allowed_special = |b: u8| b == b'_' || b == b'-' || b == b'*' || b == b'/';
+        let mut vendor_start = None;
+        for (i, &b) in key.as_bytes().iter().enumerate() {
+            if !(b.is_ascii_lowercase() || b.is_ascii_digit() || allowed_special(b) || b == b'@') {
+                return false;
+            }
+
+            if i == 0 && (!b.is_ascii_lowercase() && !b.is_ascii_digit()) {
+                return false;
+            } else if b == b'@' {
+                if vendor_start.is_some() || i + 14 < key.len() {
+                    return false;
+                }
+                vendor_start = Some(i);
+            } else if let Some(start) = vendor_start {
+                if i == start + 1 && !(b.is_ascii_lowercase() || b.is_ascii_digit()) {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn valid_value(value: &str) -> bool {
+        if value.len() > 256 {
+            return false;
+        }
+
+        !(value.contains(',') || value.contains('='))
+    }
+}
+
+impl FromStr for Tracestate {
+    type Err = String;
+    fn from_str(tracestate: &str) -> Result<Self, Self::Err> {
+        let ts_v = tracestate.split(',').take(TRACESTATE_MAX_MEMBERS);
+
+        let mut dd: Option<HashMap<String, String>> = None;
+        let mut additional_values = vec![];
+
+        for v in ts_v {
+            let (key, value) = v.split_once('=').unwrap_or(("", ""));
+
+            if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
+                dd_debug!("Tracestate: invalid key or header value: {v}");
+                return Err(String::from("Invalid tracestate"));
+            }
+
+            if key == "dd" {
+                dd = Some(
+                    value
+                        .trim()
+                        .split(';')
+                        .filter_map(|item| {
+                            if !item.as_bytes().iter().all(|c| matches!(c, b' '..=b'~')) {
+                                None
+                            } else {
+                                let mut parts = item.splitn(2, ':');
+                                Some((
+                                    parts.next()?.to_string(),
+                                    decode_tag_value(parts.next()?).to_string(),
+                                ))
+                            }
+                        })
+                        .collect(),
+                );
+            } else {
+                additional_values.push((key.to_string(), value.to_string()));
+            }
+        }
+
+        let mut tracestate = Tracestate {
+            sampling: None,
+            origin: None,
+            lower_order_trace_id: None,
+            propagation_tags: None,
+            additional_values: None,
+        };
+
+        // the original order must be maintained
+        if !additional_values.is_empty() {
+            tracestate.additional_values = Some(additional_values);
+        }
+
+        let propagation_tags = if let Some(dd) = dd {
+            let mut tags = HashMap::new();
+            let mut priority = None;
+            let mut mechanism = None;
+
+            for (k, v) in dd {
+                match k.as_str() {
+                    "s" => {
+                        if let Ok(p_sp) = SamplingPriority::from_str(&v) {
+                            priority = Some(p_sp);
+                        }
+                    }
+                    "o" => tracestate.origin = Some(v),
+                    "p" => tracestate.lower_order_trace_id = Some(v.to_string()),
+                    "t.dm" => {
+                        if let Ok(p_sm) = SamplingMechanism::from_str(&v) {
+                            mechanism = Some(p_sm);
+                        }
+                        tags.insert(k, v);
+                    }
+                    _ => {
+                        tags.insert(k, v);
+                    }
+                }
+            }
+
+            tracestate.sampling = Some(Sampling {
+                priority,
+                mechanism,
+            });
+
+            Some(tags)
+        } else {
+            dd_debug!("No `dd` value found in tracestate");
+            None
+        };
+
+        tracestate.propagation_tags = propagation_tags;
+
+        Ok(tracestate)
+    }
+}
+
+/// Tracestate data to be injected into outgoing requests.
+///
+/// Contains non-Datadog tracestate entries from the parent span that should
+/// be propagated to downstream services.
+pub struct InjectTraceState {
+    header: String,
+}
+
+impl InjectTraceState {
+    pub(crate) fn from_header(header: String) -> Self {
+        Self { header }
+    }
+
+    pub(crate) fn additional_values(&self) -> impl Iterator<Item = &str> {
+        self.header.split(',').filter(|part| {
+            let (key, value) = part.split_once('=').unwrap_or((part, ""));
+            key != "dd"
+                && !value.is_empty()
+                && Tracestate::valid_key(key)
+                && Tracestate::valid_value(value)
+        })
+    }
+}
+
+fn decode_tag_value(value: &str) -> Cow<'_, str> {
+    if value.as_bytes().contains(&b'~') {
+        Cow::Owned(value.replace('~', "="))
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+fn encode_tag_value(tag: &str) -> Cow<'_, str> {
+    if tag.as_bytes().contains(&b'=') {
+        Cow::Owned(tag.replace('=', "~"))
+    } else {
+        Cow::Borrowed(tag)
+    }
+}
 
 /// Replace all characters in s that are either non ascii, or matched by f
 fn replace_chars<MatchFn: Fn(u8) -> bool>(
@@ -252,7 +447,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
 
     // Add additional tracestate values if present
     if let Some(ts) = &context.tracestate {
-        for part in ts.additional_values().take(31) {
+        for part in ts.additional_values().take(TRACESTATE_MAX_MEMBERS - 1) {
             tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
             tracestate.push_str(part)
         }
@@ -280,11 +475,13 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
             let mut mechanism = None;
-            let tracestate: Option<Tracestate> = if let Some(ts) = carrier.get(TRACESTATE_KEY) {
-                if let Ok(tracestate) = Tracestate::from_str(ts) {
+            let tracestate: Option<Tracestate> = if let Some(raw_tracestate) =
+                carrier.get(TRACESTATE_KEY)
+            {
+                if let Ok(tracestate) = Tracestate::from_str(raw_tracestate) {
                     dd_debug!("Propagator (tracecontext): tracestate header parsed successfully");
 
-                    tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
+                    tags.insert(TRACESTATE_KEY.to_string(), raw_tracestate.to_string());
 
                     // Convert from `t.` to `_dd.p.`
                     if let Some(propagation_tags) = &tracestate.propagation_tags {
