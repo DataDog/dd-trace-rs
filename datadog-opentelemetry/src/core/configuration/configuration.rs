@@ -458,6 +458,13 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             ConfigItemRef::Ref(self.config_item.value())
         }
     }
+
+    /// Returns the env/code/default value, ignoring any remote-config override.
+    /// Use this when the caller must compose with RC-delivered values without
+    /// losing the locally-configured value to the override.
+    fn local_value(&self) -> ConfigItemRef<'_, T> {
+        ConfigItemRef::Ref(self.config_item.value())
+    }
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
@@ -1348,6 +1355,15 @@ impl Config {
     /// Returns the configured trace sampling rules.
     pub fn trace_sampling_rules(&self) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
         self.trace_sampling_rules.value()
+    }
+
+    /// Returns the locally-configured (env/code/default) trace sampling rules,
+    /// ignoring any Remote Config override. Used by the RC handler to compose
+    /// env rules with RC-delivered values without losing them.
+    pub(crate) fn local_trace_sampling_rules(
+        &self,
+    ) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
+        self.trace_sampling_rules.local_value()
     }
 
     /// Returns the maximum number of traces per second (rate limit).
@@ -3240,6 +3256,39 @@ mod tests {
             .update_sampling_rules_from_remote("[]", None)
             .unwrap();
         assert_eq!(config.trace_sampling_rules.get_config_id(), None);
+    }
+
+    #[test]
+    fn test_local_trace_sampling_rules_bypasses_remote_override() {
+        let config = Config::builder()
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                name: Some("env_name".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+
+        // With no RC override, local == public.
+        assert_eq!(config.local_trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // Set an RC override.
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"service":"svc","provenance":"customer"}]"#,
+                None,
+            )
+            .unwrap();
+
+        // The public accessor reflects the override; the local one still
+        // returns the env-side value.
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.9);
+
+        let local = config.local_trace_sampling_rules();
+        assert_eq!(local.len(), 1);
+        assert_eq!(local[0].sample_rate, 0.5);
+        assert_eq!(local[0].name.as_deref(), Some("env_name"));
     }
 
     #[test]
