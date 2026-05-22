@@ -934,6 +934,10 @@ pub struct Config {
     /// If a rule matches, the trace is sampled with the associated sample rate.
     trace_sampling_rules: SamplingRulesConfigItem,
 
+    /// Global trace sample rate (DD_TRACE_SAMPLE_RATE). Applied as a catch-all
+    /// sample rate when no explicit sampling rule matches.
+    trace_sample_rate: ConfigItem<f64>,
+
     /// Maximum number of spans to sample per second
     /// Only applied if trace_sampling_rules are matched
     trace_rate_limit: ConfigItem<i32>,
@@ -1137,6 +1141,7 @@ impl Config {
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
+            trace_sample_rate: cisu.update_parsed(default.trace_sample_rate),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
             enabled: cisu.update_parsed(default.enabled),
@@ -1226,6 +1231,7 @@ impl Config {
             &self.dogstatsd_agent_port,
             &self.dogstatsd_agent_url,
             &self.trace_sampling_rules,
+            &self.trace_sample_rate,
             &self.trace_rate_limit,
             &self.enabled,
             &self.log_level_filter,
@@ -1369,6 +1375,12 @@ impl Config {
     /// Returns the maximum number of traces per second (rate limit).
     pub fn trace_rate_limit(&self) -> i32 {
         *self.trace_rate_limit.value()
+    }
+
+    /// Returns the configured global trace sample rate (DD_TRACE_SAMPLE_RATE).
+    /// Applied as a catch-all sample rate when no explicit sampling rule matches.
+    pub fn trace_sample_rate(&self) -> f64 {
+        *self.trace_sample_rate.value()
     }
 
     /// Returns whether tracing is enabled.
@@ -1723,6 +1735,7 @@ impl std::fmt::Debug for Config {
             .field("trace_agent_url", &self.trace_agent_url)
             .field("dogstatsd_agent_url", &self.dogstatsd_agent_url)
             .field("trace_sampling_rules", &self.trace_sampling_rules)
+            .field("trace_sample_rate", &self.trace_sample_rate)
             .field("trace_rate_limit", &self.trace_rate_limit)
             .field("enabled", &self.enabled)
             .field("log_level_filter", &self.log_level_filter)
@@ -1800,6 +1813,7 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
         ),
+        trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, 1.0_f64),
         trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
         enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
         log_level_filter: ConfigItem::new(
@@ -2347,6 +2361,17 @@ impl ConfigBuilder {
     /// Env variable: `DD_TRACE_RATE_LIMIT`
     pub fn set_trace_rate_limit(&mut self, rate_limit: i32) -> &mut Self {
         self.config.trace_rate_limit.set_code(rate_limit);
+        self
+    }
+
+    /// Global trace sample rate. Applied as a catch-all sample rate when no
+    /// explicit sampling rule matches.
+    ///
+    /// **Default**: `1.0`
+    ///
+    /// Env variable: `DD_TRACE_SAMPLE_RATE`
+    pub fn set_trace_sample_rate(&mut self, rate: f64) -> &mut Self {
+        self.config.trace_sample_rate.set_code(rate);
         self
     }
 
@@ -3634,5 +3659,22 @@ mod tests {
             .build();
 
         assert_eq!(config.remote_config_poll_interval(), 0.2);
+    }
+
+    #[test]
+    fn test_trace_sample_rate_defaults_to_one_when_unset() {
+        let config = Config::builder().build();
+        assert_eq!(config.trace_sample_rate(), 1.0);
+    }
+
+    #[test]
+    fn test_trace_sample_rate_parses_from_env() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_SAMPLE_RATE", "0.25")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.trace_sample_rate(), 0.25);
     }
 }
