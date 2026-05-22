@@ -893,7 +893,11 @@ impl ProductHandler for ApmTracingHandler {
                 normalize_rc_tags(&mut rules);
 
                 if let Some(r) = rate_opt {
-                    rules.push(serde_json::json!({ "sample_rate": r, "provenance": "dynamic" }));
+                    // The global RC rate is a "local-user-like" fallback: it must
+                    // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC).
+                    // Omit `provenance`; libdd-sampling deserializes it as
+                    // "default" via its serde default, which maps to DM -3.
+                    rules.push(serde_json::json!({ "sample_rate": r }));
                 }
 
                 let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
@@ -2256,7 +2260,7 @@ mod tests {
     #[test]
     fn test_handler_applies_only_rate_as_wildcard_rule() {
         // RC sends only tracing_sampling_rate -> handler installs a single
-        // wildcard rule with provenance "dynamic".
+        // wildcard rule with the libdd default provenance ("default", DM -3).
         let config = build_config_for_handler();
         let payload = br#"{
             "id": "rc-rate-only",
@@ -2274,6 +2278,39 @@ mod tests {
         assert!(rules[0].name.is_none());
         assert!(rules[0].resource.is_none());
         assert!(rules[0].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_synthetic_rate_rule_uses_default_provenance() {
+        // The synthetic catch-all built from RC's tracing_sampling_rate must
+        // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC). Assert via
+        // the callback path: libdatadog converts the JSON to its internal
+        // SamplingRuleConfig, whose `provenance` must be the libdd default
+        // ("default"), not "dynamic".
+        use crate::core::configuration::RemoteConfigUpdate;
+        let config = build_config_for_handler();
+        let received = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = received.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        let payload = br#"{
+            "id": "rc-rate-only-provenance",
+            "lib_config": {"tracing_sampling_rate": 0.25}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let got = received.lock().unwrap();
+        // The callback receives the full composed chain. The catch-all is the
+        // last entry; it must carry the libdd default provenance ("default").
+        let catch_all = got.last().expect("expected at least one rule");
+        assert_eq!(catch_all.sample_rate, 0.25);
+        assert_eq!(
+            catch_all.provenance, "default",
+            "synthetic catch-all must use default provenance"
+        );
     }
 
     #[test]
