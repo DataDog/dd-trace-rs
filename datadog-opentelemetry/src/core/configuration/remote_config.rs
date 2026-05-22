@@ -913,11 +913,14 @@ impl ProductHandler for ApmTracingHandler {
                         let env_json = serde_json::to_value(&*env_rules).map_err(|e| {
                             anyhow::anyhow!("Failed to serialize env sampling rules: {}", e)
                         })?;
-                        if let serde_json::Value::Array(env_arr) = env_json {
-                            let mut composed = env_arr;
-                            composed.append(&mut rules);
-                            rules = composed;
-                        }
+                        let serde_json::Value::Array(env_arr) = env_json else {
+                            return Err(anyhow::anyhow!(
+                                "BUG: serialized env sampling rules are not a JSON array"
+                            ));
+                        };
+                        let mut composed = env_arr;
+                        composed.append(&mut rules);
+                        rules = composed;
                     }
                 }
 

@@ -1636,9 +1636,10 @@ impl Config {
                 name: None,
                 resource: None,
                 tags: HashMap::new(),
-                // "local" maps to LOCAL_USER_TRACE_SAMPLING_RULE (DM -3) per
-                // libdd-sampling/src/datadog_sampler.rs.
-                provenance: "local".to_string(),
+                // "default" is libdatadog's documented default provenance
+                // (default_provenance() in libdd-sampling) and matches the
+                // value the RC-rate catch-all path produces via serde omission.
+                provenance: "default".to_string(),
             });
         }
         rules
@@ -3144,8 +3145,9 @@ mod tests {
         assert_eq!(got[1].sample_rate, 0.25);
         assert!(got[1].name.is_none());
         assert!(got[1].service.is_none());
-        // env catch-all carries local provenance (default mapping → DM -3).
-        assert_eq!(got[1].provenance, "local");
+        // env catch-all carries "default" provenance (libdatadog's documented
+        // default; maps to DM -3 in libdd-sampling).
+        assert_eq!(got[1].provenance, "default");
     }
 
     #[test]
