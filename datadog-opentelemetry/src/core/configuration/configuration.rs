@@ -876,7 +876,7 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
 }
 
 impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
-impl_config_value_provider!(option: String);
+impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
 /// Configuration for the Datadog Tracer
@@ -934,9 +934,10 @@ pub struct Config {
     /// If a rule matches, the trace is sampled with the associated sample rate.
     trace_sampling_rules: SamplingRulesConfigItem,
 
-    /// Global trace sample rate (DD_TRACE_SAMPLE_RATE). Applied as a catch-all
-    /// sample rate when no explicit sampling rule matches.
-    trace_sample_rate: ConfigItem<f64>,
+    /// Global trace sample rate (DD_TRACE_SAMPLE_RATE). `None` means unset
+    /// (no implicit catch-all; libdatadog's no-rule path samples at 100%).
+    /// `Some(rate)` installs a catch-all rule so the rate limiter applies.
+    trace_sample_rate: ConfigItem<Option<f64>>,
 
     /// Maximum number of spans to sample per second
     /// Only applied if trace_sampling_rules are matched
@@ -1141,7 +1142,8 @@ impl Config {
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_sample_rate: cisu.update_parsed(default.trace_sample_rate),
+            trace_sample_rate: cisu
+                .update_parsed_with_transform(default.trace_sample_rate, |r: f64| Some(r)),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
             enabled: cisu.update_parsed(default.enabled),
@@ -1377,9 +1379,10 @@ impl Config {
         *self.trace_rate_limit.value()
     }
 
-    /// Returns the configured global trace sample rate (DD_TRACE_SAMPLE_RATE).
-    /// Applied as a catch-all sample rate when no explicit sampling rule matches.
-    pub fn trace_sample_rate(&self) -> f64 {
+    /// Returns the configured global trace sample rate (DD_TRACE_SAMPLE_RATE),
+    /// or `None` if unset. Applied as a catch-all sample rate when no explicit
+    /// sampling rule matches.
+    pub fn trace_sample_rate(&self) -> Option<f64> {
         *self.trace_sample_rate.value()
     }
 
@@ -1628,19 +1631,20 @@ impl Config {
             .cloned()
             .map(Into::into)
             .collect();
-        let env_rate = self.trace_sample_rate();
-        if env_rate.is_finite() && (env_rate - 1.0_f64).abs() > f64::EPSILON {
-            rules.push(libdd_sampling::SamplingRuleConfig {
-                sample_rate: env_rate,
-                service: None,
-                name: None,
-                resource: None,
-                tags: HashMap::new(),
-                // "default" is libdatadog's documented default provenance
-                // (default_provenance() in libdd-sampling) and matches the
-                // value the RC-rate catch-all path produces via serde omission.
-                provenance: "default".to_string(),
-            });
+        if let Some(env_rate) = self.trace_sample_rate() {
+            if env_rate.is_finite() {
+                rules.push(libdd_sampling::SamplingRuleConfig {
+                    sample_rate: env_rate,
+                    service: None,
+                    name: None,
+                    resource: None,
+                    tags: HashMap::new(),
+                    // "default" is libdatadog's documented default provenance
+                    // (default_provenance() in libdd-sampling) and matches the
+                    // value the RC-rate catch-all path produces via serde omission.
+                    provenance: "default".to_string(),
+                });
+            }
         }
         rules
     }
@@ -1840,7 +1844,7 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
         ),
-        trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, 1.0_f64),
+        trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, None),
         trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
         enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
         log_level_filter: ConfigItem::new(
@@ -2398,7 +2402,7 @@ impl ConfigBuilder {
     ///
     /// Env variable: `DD_TRACE_SAMPLE_RATE`
     pub fn set_trace_sample_rate(&mut self, rate: f64) -> &mut Self {
-        self.config.trace_sample_rate.set_code(rate);
+        self.config.trace_sample_rate.set_code(Some(rate));
         self
     }
 
@@ -3731,9 +3735,9 @@ mod tests {
     }
 
     #[test]
-    fn test_trace_sample_rate_defaults_to_one_when_unset() {
+    fn test_trace_sample_rate_defaults_to_none_when_unset() {
         let config = Config::builder().build();
-        assert_eq!(config.trace_sample_rate(), 1.0);
+        assert_eq!(config.trace_sample_rate(), None);
     }
 
     #[test]
@@ -3744,6 +3748,25 @@ mod tests {
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
-        assert_eq!(config.trace_sample_rate(), 0.25);
+        assert_eq!(config.trace_sample_rate(), Some(0.25));
+    }
+
+    #[test]
+    fn test_explicit_dd_trace_sample_rate_one_installs_catch_all() {
+        // Codex MEDIUM fix: explicit DD_TRACE_SAMPLE_RATE=1.0 must install a
+        // catch-all rule so the rate limiter applies. Unset is still distinct
+        // (no catch-all, libdatadog's 100% fallback).
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(1.0);
+        let config = builder.build();
+
+        let rules = config.effective_initial_rules();
+        assert_eq!(rules.len(), 1, "explicit 1.0 must install a catch-all");
+        assert_eq!(rules[0].sample_rate, 1.0);
+
+        // Unset: no catch-all.
+        let unset_config = Config::builder().build();
+        let unset_rules = unset_config.effective_initial_rules();
+        assert!(unset_rules.is_empty(), "unset must not install a catch-all");
     }
 }

@@ -851,7 +851,20 @@ impl ProductHandler for ApmTracingHandler {
         // clear, which would wipe an active remote sampling policy.
         let rate: Option<f64> = match &lib.tracing_sampling_rate {
             None | Some(serde_json::Value::Null) => None,
-            Some(serde_json::Value::Number(n)) => n.as_f64(),
+            Some(serde_json::Value::Number(n)) => match n.as_f64() {
+                Some(r) if r.is_finite() && (0.0..=1.0).contains(&r) => Some(r),
+                Some(r) => {
+                    return Err(anyhow::anyhow!(
+                        "tracing_sampling_rate must be in [0.0, 1.0], got: {}",
+                        r
+                    ));
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "tracing_sampling_rate is not representable as f64"
+                    ));
+                }
+            },
             Some(other) => {
                 return Err(anyhow::anyhow!(
                     "tracing_sampling_rate must be a JSON number or null, got: {}",
@@ -925,16 +938,12 @@ impl ProductHandler for ApmTracingHandler {
                 }
 
                 // Effective catch-all rate: RC rate wins; otherwise fall back
-                // to DD_TRACE_SAMPLE_RATE if it's non-default (we treat 1.0 as
-                // "no catch-all" since libdd-sampling's no-rule path samples
-                // at 100% by default anyway).
+                // to DD_TRACE_SAMPLE_RATE if it's set (Option distinguishes
+                // unset from explicit 1.0).
                 let env_rate = config.trace_sample_rate();
                 let catch_all_rate: Option<f64> = match rate_opt {
                     Some(r) => Some(r),
-                    None if env_rate.is_finite() && (env_rate - 1.0_f64).abs() > f64::EPSILON => {
-                        Some(env_rate)
-                    }
-                    None => None,
+                    None => env_rate.filter(|r| r.is_finite()),
                 };
                 if let Some(r) = catch_all_rate {
                     // The global RC rate is a "local-user-like" fallback: it must
@@ -947,20 +956,12 @@ impl ProductHandler for ApmTracingHandler {
                 let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
                     .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
-                match config.update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
-                {
-                    Ok(()) => {
-                        crate::dd_debug!(
-                            "RemoteConfigClient: Applied sampling rules from remote config"
-                        );
-                    }
-                    Err(e) => {
-                        crate::dd_debug!(
-                            "RemoteConfigClient: Failed to update sampling rules: {}",
-                            e
-                        );
-                    }
-                }
+                config
+                    .update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to update sampling rules from remote: {}", e)
+                    })?;
+                crate::dd_debug!("RemoteConfigClient: Applied sampling rules from remote config");
             }
         }
 
@@ -2543,14 +2544,63 @@ mod tests {
                 ]
             }
         }"#;
-        // The libdatadog parse rejects list-shape tags, so the update fails
-        // internally and is logged at dd_debug! — process_config still returns
-        // Ok. The key invariant is that the prior remote override is not
-        // overwritten or cleared.
-        ApmTracingHandler.process_config(bad, &config).unwrap();
+        // The libdatadog parse rejects list-shape tags, so process_config
+        // returns Err (post-Codex HIGH fix). The key invariant is that the
+        // prior remote override is not overwritten or cleared.
+        let result = ApmTracingHandler.process_config(bad, &config);
+        assert!(result.is_err(), "malformed tags must propagate as Err");
         let rules = config.trace_sampling_rules().to_vec();
         assert_eq!(rules.len(), 1, "prior override must remain installed");
         assert_eq!(rules[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_handler_malformed_tags_returns_error_to_dispatcher() {
+        // After the fix for the Codex HIGH finding: when libdatadog rejects the
+        // composed JSON (e.g., because the synthetic catch-all rule's tags were
+        // left in list-shape due to a malformed entry), process_config returns
+        // Err so the RC dispatcher records apply_state=3 and the bad target is
+        // not cached.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-bad-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.5,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "malformed tags must propagate as Err");
+    }
+
+    #[test]
+    fn test_handler_rejects_negative_rate() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-neg-rate",
+            "lib_config": {"tracing_sampling_rate": -0.1}
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "negative rate must be rejected");
+    }
+
+    #[test]
+    fn test_handler_rejects_rate_above_one() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-high-rate",
+            "lib_config": {"tracing_sampling_rate": 1.5}
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "rate > 1.0 must be rejected");
     }
 
     #[test]
