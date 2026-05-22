@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::Path;
@@ -1612,17 +1612,43 @@ impl Config {
         }
     }
 
-    pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
-        self.trace_sampling_rules.unset_override_value();
-        self.trace_sampling_rules.set_config_id(config_id);
-
-        // Fallback rules are locally defined, so "local" provenance is correct
-        let internal: Vec<libdd_sampling::SamplingRuleConfig> = self
-            .trace_sampling_rules()
+    /// Composes the rules that the sampler should see in the absence of any
+    /// active Remote Config override: locally-configured rules followed by an
+    /// implicit catch-all that applies `DD_TRACE_SAMPLE_RATE`.
+    ///
+    /// The catch-all is appended only when the env rate is finite and not the
+    /// default of 1.0 — a 1.0 catch-all would match every unmatched span at
+    /// 100% sampling, which is identical to having no catch-all (libdatadog's
+    /// fallback path samples at 1.0 when no rule matches), so we omit it to
+    /// avoid noisy `_dd.p.dm` tags on the wire.
+    pub(crate) fn effective_initial_rules(&self) -> Vec<libdd_sampling::SamplingRuleConfig> {
+        let mut rules: Vec<libdd_sampling::SamplingRuleConfig> = self
+            .local_trace_sampling_rules()
             .iter()
             .cloned()
             .map(Into::into)
             .collect();
+        let env_rate = self.trace_sample_rate();
+        if env_rate.is_finite() && (env_rate - 1.0_f64).abs() > f64::EPSILON {
+            rules.push(libdd_sampling::SamplingRuleConfig {
+                sample_rate: env_rate,
+                service: None,
+                name: None,
+                resource: None,
+                tags: HashMap::new(),
+                // "local" maps to LOCAL_USER_TRACE_SAMPLING_RULE (DM -3) per
+                // libdd-sampling/src/datadog_sampler.rs.
+                provenance: "local".to_string(),
+            });
+        }
+        rules
+    }
+
+    pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
+        self.trace_sampling_rules.unset_override_value();
+        self.trace_sampling_rules.set_config_id(config_id);
+
+        let internal = self.effective_initial_rules();
         self.remote_config_callbacks
             .lock()
             .unwrap()
@@ -3079,6 +3105,47 @@ mod tests {
         assert_eq!(received.len(), 1);
         assert_eq!(received[0].sample_rate, 0.5);
         assert_eq!(received[0].provenance, "local");
+    }
+
+    #[test]
+    fn test_clear_remote_rules_includes_env_rate_catch_all() {
+        // When DD_TRACE_SAMPLE_RATE is set and the remote override is cleared,
+        // the callback must receive [env_rules..., catch_all(env_rate)] so the
+        // sampler applies the env rate to unmatched spans.
+        let mut config_builder = Config::builder();
+        config_builder.set_trace_sample_rate(0.25);
+        config_builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        }]);
+        let config = config_builder.build();
+
+        let received = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = received.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        // Install a remote override, then clear it.
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"provenance":"customer"}]"#,
+                None,
+            )
+            .unwrap();
+        config.clear_remote_sampling_rules(None);
+
+        let got = received.lock().unwrap();
+        assert_eq!(got.len(), 2, "expected env rule + env catch-all");
+        assert_eq!(got[0].sample_rate, 0.5);
+        assert_eq!(got[0].name.as_deref(), Some("env_name"));
+        assert_eq!(got[1].sample_rate, 0.25);
+        assert!(got[1].name.is_none());
+        assert!(got[1].service.is_none());
+        // env catch-all carries local provenance (default mapping → DM -3).
+        assert_eq!(got[1].provenance, "local");
     }
 
     #[test]
