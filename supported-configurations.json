@@ -205,9 +205,9 @@
     ],
     "DD_TRACE_SAMPLE_RATE": [
       {
-        "version": "A",
+        "version": "B",
         "type": "decimal",
-        "default": "1.0",
+        "default": null,
         "propertyKeys": ["trace_sample_rate"]
       }
     ],
