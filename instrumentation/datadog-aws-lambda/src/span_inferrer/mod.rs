@@ -50,6 +50,8 @@ struct ActiveInferredSpan {
     /// Mirrors [`TriggerContext::is_async`] — determines the end-time passed to
     /// [`InferredSpanScope::end`].
     is_async: bool,
+    /// Source event timestamp for this inferred span, when known.
+    start_time: Option<SystemTime>,
 }
 
 /// Handle for the set of inferred spans created for a trigger.
@@ -92,6 +94,7 @@ impl InferredSpanScope {
                 ActiveInferredSpan {
                     cx: current_cx.clone(),
                     is_async: w.is_async,
+                    start_time: inferred_span_start_time(&w.span_data),
                 }
             });
 
@@ -99,6 +102,7 @@ impl InferredSpanScope {
         let inner = Some(ActiveInferredSpan {
             cx: current_cx,
             is_async: result.is_async,
+            start_time: inferred_span_start_time(&result.span_data),
         });
 
         Self { outer, inner }
@@ -117,21 +121,33 @@ impl InferredSpanScope {
 
     /// End all inferred spans with correct timing.
     ///
-    /// Async spans end at invocation start (propagation delay).
-    /// Sync spans end at invocation end (full request duration).
+    /// Wrapped outer spans end when the inner event begins.
+    /// Inner async spans end at invocation start (propagation delay).
+    /// Inner sync spans end at invocation end (full request duration).
     pub(crate) fn end(&self, invocation_start: SystemTime, invocation_end: SystemTime) {
-        for span in [self.outer.as_ref(), self.inner.as_ref()]
-            .into_iter()
-            .flatten()
-        {
-            let end_time = if span.is_async {
+        if let Some(outer) = self.outer.as_ref() {
+            let outer_end_time = self
+                .inner
+                .as_ref()
+                .and_then(|inner| inner.start_time)
+                .unwrap_or(invocation_start);
+            outer.cx.span().end_with_timestamp(outer_end_time);
+        }
+
+        if let Some(inner) = self.inner.as_ref() {
+            let end_time = if inner.is_async {
                 invocation_start
             } else {
                 invocation_end
             };
-            span.cx.span().end_with_timestamp(end_time);
+            inner.cx.span().end_with_timestamp(end_time);
         }
     }
+}
+
+fn inferred_span_start_time(span_data: &libdd_trace_inferrer::SpanData) -> Option<SystemTime> {
+    let start_ns = u64::try_from(span_data.start).ok()?;
+    (start_ns > 0).then(|| SystemTime::UNIX_EPOCH + Duration::from_nanos(start_ns))
 }
 
 /// Converts a [`libdd_trace_inferrer::SpanData`] into a live OTel span.
@@ -149,9 +165,8 @@ fn build_inferred_span(
     let mut builder = tracer.span_builder(span_data.name.clone());
     builder.span_kind = Some(SpanKind::Server);
 
-    let start_ns = u64::try_from(span_data.start).unwrap_or(0);
-    if start_ns > 0 {
-        builder.start_time = Some(SystemTime::UNIX_EPOCH + Duration::from_nanos(start_ns));
+    if let Some(start_time) = inferred_span_start_time(span_data) {
+        builder.start_time = Some(start_time);
     }
 
     let mut attrs = vec![
