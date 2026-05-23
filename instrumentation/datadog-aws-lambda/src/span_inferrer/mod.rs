@@ -276,6 +276,10 @@ mod tests {
         }
     }
 
+    fn nanos_to_system_time(ns: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_nanos(ns)
+    }
+
     #[test]
     fn sets_expected_attributes_on_inferred_spans() {
         let (provider, exporter) = test_provider();
@@ -336,6 +340,35 @@ mod tests {
                 .span_context
                 .span_id()
         );
+    }
+
+    #[test]
+    fn wrapped_span_ends_when_inner_span_starts() {
+        let (provider, exporter) = test_provider();
+        let tracer = provider.tracer("test");
+
+        let outer_start_ns = 1_000_000_000;
+        let inner_start_ns = 2_000_000_000;
+        let invocation_start = nanos_to_system_time(10_000_000_000);
+        let invocation_end = nanos_to_system_time(20_000_000_000);
+
+        let mut result = make_result("aws.sqs", "my-queue");
+        result.span_data.start = inner_start_ns as i64;
+        result.is_async = true;
+
+        let mut wrapped = make_result("aws.sns", "my-topic");
+        wrapped.span_data.start = outer_start_ns as i64;
+        result.wrapped_span = Some(Box::new(wrapped));
+
+        let scope = InferredSpanScope::start(&tracer, &Context::current(), &result);
+        scope.end(invocation_start, invocation_end);
+        provider.force_flush().ok();
+
+        let spans = finished_spans(&exporter);
+        let outer = spans.iter().find(|s| s.name == "aws.sns").unwrap();
+        let inner = spans.iter().find(|s| s.name == "aws.sqs").unwrap();
+
+        assert_eq!(outer.end_time, inner.start_time);
     }
 
     #[test]
