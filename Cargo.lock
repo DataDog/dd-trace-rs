@@ -507,6 +507,7 @@ dependencies = [
  "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
+ "libdd-sampling",
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-utils",
@@ -1353,6 +1354,18 @@ dependencies = [
  "rustix",
  "serde",
  "serde_yaml",
+]
+
+[[package]]
+name = "libdd-sampling"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ae8728d9d717eb1b648223c4c1da53f77627fecd6045027ccb758a72815b300"
+dependencies = [
+ "libdd-common",
+ "lru",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
