@@ -511,6 +511,12 @@ impl<'a> CowStr<'a> {
     }
 }
 
+impl From<String> for CowStr<'_> {
+    fn from(s: String) -> Self {
+        Self::from_string(s)
+    }
+}
+
 impl std::borrow::Borrow<str> for CowStr<'_> {
     fn borrow(&self) -> &str {
         self.0.as_ref()
