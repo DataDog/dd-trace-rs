@@ -384,11 +384,11 @@ dependencies = [
  "hyper-util",
  "libc",
  "libdd-capabilities-impl",
- "libdd-common 3.0.2",
+ "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
  "libdd-sampling",
- "libdd-telemetry 4.0.0",
+ "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-utils",
  "lru",
@@ -1107,39 +1107,8 @@ dependencies = [
  "http",
  "http-body-util",
  "libdd-capabilities",
- "libdd-common 4.1.0",
+ "libdd-common",
  "tokio",
-]
-
-[[package]]
-name = "libdd-common"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c779949577250487179d904508f18750070e9a01eb58dce378409ec5fa066f3b"
-dependencies = [
- "anyhow",
- "bytes",
- "cc",
- "const_format",
- "futures",
- "futures-core",
- "futures-util",
- "hex",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "libc",
- "nix",
- "pin-project",
- "regex",
- "serde",
- "static_assertions",
- "thiserror 1.0.69",
- "tokio",
- "tower-service",
- "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1193,11 +1162,11 @@ dependencies = [
  "http-body-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 4.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
  "libdd-shared-runtime",
- "libdd-telemetry 5.0.0",
+ "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-protobuf 3.0.2",
  "libdd-trace-stats",
@@ -1230,7 +1199,7 @@ dependencies = [
  "anyhow",
  "cadence",
  "http",
- "libdd-common 4.1.0",
+ "libdd-common",
  "serde",
  "tracing",
 ]
@@ -1259,7 +1228,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ae8728d9d717eb1b648223c4c1da53f77627fecd6045027ccb758a72815b300"
 dependencies = [
- "libdd-common 4.1.0",
+ "libdd-common",
  "lru",
  "serde",
  "serde_json",
@@ -1276,36 +1245,11 @@ dependencies = [
  "futures-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 4.1.0",
+ "libdd-common",
  "tokio",
  "tokio-util",
  "tracing",
  "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "libdd-telemetry"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78774ffce79da677602829d7fe27468283e5349010e974257233edf4cd12b783"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "futures",
- "hashbrown 0.15.5",
- "http",
- "http-body-util",
- "libc",
- "libdd-common 3.0.2",
- "libdd-ddsketch",
- "serde",
- "serde_json",
- "sys-info",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
- "winver",
 ]
 
 [[package]]
@@ -1323,7 +1267,7 @@ dependencies = [
  "http",
  "http-body-util",
  "libc",
- "libdd-common 4.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "serde",
@@ -1363,7 +1307,7 @@ checksum = "6b2feb45760f019fb70338b35e1341605b078c2e56a55e8fdbe3e66f256ad60d"
 dependencies = [
  "anyhow",
  "fluent-uri",
- "libdd-common 4.1.0",
+ "libdd-common",
  "libdd-trace-protobuf 3.0.2",
  "libdd-trace-utils",
  "log",
@@ -1407,7 +1351,7 @@ dependencies = [
  "http",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 4.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "libdd-trace-obfuscation",
@@ -1437,7 +1381,7 @@ dependencies = [
  "indexmap",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 4.1.0",
+ "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
  "libdd-trace-protobuf 3.0.2",
