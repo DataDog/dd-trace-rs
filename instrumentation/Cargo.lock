@@ -1168,7 +1168,7 @@ dependencies = [
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1206,18 +1206,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-library-config"
-version = "1.1.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+checksum = "726e95f0f543da854a24999b16601afd2ca2c6b0c1bdc511bf52c5cd0635f7ad"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 2.0.0",
+ "libc",
+ "libdd-trace-protobuf",
  "memfd",
  "prost",
  "rand 0.8.6",
  "rmp",
  "rmp-serde",
- "rustix",
  "serde",
  "serde_yaml",
 ]
@@ -1296,7 +1296,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
 ]
 
 [[package]]
@@ -1308,23 +1308,12 @@ dependencies = [
  "anyhow",
  "fluent-uri",
  "libdd-common",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "log",
  "percent-encoding",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "libdd-trace-protobuf"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
-dependencies = [
- "prost",
- "serde",
- "serde_bytes",
 ]
 
 [[package]]
@@ -1355,7 +1344,7 @@ dependencies = [
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "rmp-serde",
  "serde",
@@ -1384,7 +1373,7 @@ dependencies = [
  "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "prost",
  "rand 0.8.6",
  "rmp",
