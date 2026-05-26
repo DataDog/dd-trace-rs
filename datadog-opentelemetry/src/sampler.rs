@@ -116,62 +116,63 @@ impl ShouldSample for Sampler {
             self.resource.as_ref(),
         );
         let result = self.sampler.sample(&data);
-        let trace_propagation_data =
-            if let Some(trace_root_info) = result.get_trace_root_sampling_info() {
-                // If the parent was deferred, we try to merge propagation tags with what we extracted
-                let (mut tags, origin) = if is_parent_deferred {
-                    if let Some(DatadogExtractData {
-                        internal_tags,
-                        origin,
-                        ..
-                    }) = parent_context.and_then(|c| c.get())
-                    {
-                        (Some(internal_tags.clone()), origin.clone())
-                    } else {
-                        (None, None)
-                    }
+        let trace_propagation_data = if let Some(trace_root_info) =
+            result.get_trace_root_sampling_info()
+        {
+            // If the parent was deferred, we try to merge propagation tags with what we extracted
+            let (mut tags, origin) = if is_parent_deferred {
+                if let Some(DatadogExtractData {
+                    internal_tags,
+                    origin,
+                    ..
+                }) = parent_context.and_then(|c| c.get())
+                {
+                    (Some(internal_tags.clone()), origin.clone())
                 } else {
                     (None, None)
-                };
-                let mechanism = trace_root_info.mechanism();
-                tags.get_or_insert_default().insert(
-                    SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
-                    mechanism.to_cow().into_owned(),
-                );
-
-                Some(TracePropagationData {
-                    sampling_decision: SamplingDecision {
-                        priority: Some(result.get_priority()),
-                        mechanism: Some(mechanism),
-                    },
-                    origin,
-                    tags,
-                })
-            } else if let Some(remote_ctx) =
-                parent_context.filter(|c| c.span().span_context().is_remote())
-            {
-                if let Some(DatadogExtractData {
-                    sampling,
-                    origin,
-                    internal_tags,
-                    ..
-                }) = remote_ctx.get()
-                {
-                    let sampling_decision = SamplingDecision {
-                        priority: sampling.priority,
-                        mechanism: sampling.mechanism,
-                    };
-                    Some(TracePropagationData {
-                        origin: origin.clone(),
-                        sampling_decision,
-                        tags: Some(internal_tags.clone()),
-                    })
-                } else {
-                    None
                 }
             } else {
-                None
+                (None, None)
             };
+            let mechanism = trace_root_info.mechanism();
+            tags.get_or_insert_default().insert(
+                SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                mechanism.to_cow().into_owned(),
+            );
+
+            Some(TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: Some(result.get_priority()),
+                    mechanism: Some(mechanism),
+                },
+                origin,
+                tags,
+            })
+        } else if let Some(remote_ctx) =
+            parent_context.filter(|c| c.span().span_context().is_remote())
+        {
+            if let Some(DatadogExtractData {
+                sampling,
+                origin,
+                internal_tags,
+                ..
+            }) = remote_ctx.get()
+            {
+                let sampling_decision = SamplingDecision {
+                    priority: sampling.priority,
+                    mechanism: sampling.mechanism,
+                };
+                Some(TracePropagationData {
+                    origin: origin.clone(),
+                    sampling_decision,
+                    tags: Some(internal_tags.clone()),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         if let Some(trace_propagation_data) = trace_propagation_data {
             if let Some(trace_registry) = &self.trace_registry {
                 match trace_registry.register_local_root_trace_propagation_data(
