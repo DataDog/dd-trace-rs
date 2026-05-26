@@ -233,7 +233,6 @@ async fn test_remote_config_sampling_rates() {
         vec![SamplingRuleConfig {
             resource: Some("test-span".into()),
             sample_rate: 1.0,
-            provenance: "customer".into(),
             ..Default::default()
         }]
     );

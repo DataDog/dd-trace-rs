@@ -5,7 +5,7 @@ on:
     tags:
       - '*-v[0-9]+.[0-9]+.[0-9]+'
 env:
-  RUST_VERSION: 1.84.1
+  RUST_VERSION: 1.87.0
 
 jobs:
   publish:
@@ -31,5 +31,6 @@ jobs:
         shell: bash
         env:
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          PUBLISH_TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${{ steps.tag.outputs.tag }}"
+          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${PUBLISH_TAG}"
