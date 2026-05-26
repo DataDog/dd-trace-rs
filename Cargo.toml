@@ -22,15 +22,20 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false, features = ["telemetry"] }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-library-config = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", branch = "jwiriath/tracebuffer-sharedruntime-rusttracer", default-features = false }
+# Libdatadog dependencies.
+#
+# Local development uses sibling path deps so changes in ../libdatadog are picked up
+# without a roundtrip through GitHub. CI / publish must switch this back to the `git`
+# form (see commit `3e5ed24` for the precedent). Once the borrowed-runtime work in
+# libdatadog lands and is pushed, replace these with the corresponding git refs.
+libdd-data-pipeline = { path = "../libdatadog/libdd-data-pipeline", default-features = false, features = ["telemetry"] }
+libdd-trace-utils = { path = "../libdatadog/libdd-trace-utils", default-features = false }
+libdd-telemetry = { path = "../libdatadog/libdd-telemetry", default-features = false }
+libdd-common = { path = "../libdatadog/libdd-common", default-features = false }
+libdd-tinybytes = { path = "../libdatadog/libdd-tinybytes", default-features = false }
+libdd-library-config = { path = "../libdatadog/libdd-library-config", default-features = false }
+libdd-shared-runtime = { path = "../libdatadog/libdd-shared-runtime", default-features = false }
+libdd-capabilities-impl = { path = "../libdatadog/libdd-capabilities-impl", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",

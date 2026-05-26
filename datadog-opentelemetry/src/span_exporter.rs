@@ -31,9 +31,20 @@ impl DatadogExporter {
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Self {
         let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
-        let runtime = Arc::new(
-            SharedRuntime::new().expect("failed to create SharedRuntime for trace exporter"),
-        );
+
+        // Pick the runtime backing based on whether we were constructed from inside an
+        // existing tokio context. If we are (the common case for a Rust web service
+        // booting up dd-trace-rs from its main `#[tokio::main]`), borrow that host
+        // runtime instead of spinning up a second one. Borrowed mode gives up
+        // fork-safety in exchange for letting Drop/shutdown work cleanly from a host
+        // worker thread without `block_on` — see the borrowed-runtime work in
+        // `libdd-shared-runtime`.
+        let runtime = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => Arc::new(SharedRuntime::from_handle(handle)),
+            Err(_) => Arc::new(
+                SharedRuntime::new().expect("failed to create SharedRuntime for trace exporter"),
+            ),
+        };
 
         let mut builder = libdd_data_pipeline::trace_exporter::TraceExporterBuilder::default();
         builder
@@ -68,6 +79,17 @@ impl DatadogExporter {
             });
         }
 
+        // Drive the async builder to completion. The future's only suspension point is
+        // a single non-blocking mpsc `send` into a freshly-created telemetry-worker
+        // channel, which is always Ready on first poll. We deliberately use
+        // [`poll_to_completion`] instead of `SharedRuntime::block_on` (which errors in
+        // borrowed mode) or `tokio::Handle::block_on` (which panics from inside a tokio
+        // worker thread). See [`poll_to_completion`]'s docs for the contract.
+        let trace_exporter = poll_to_completion(
+            builder.build_async::<libdd_capabilities_impl::NativeCapabilities>(),
+        )
+        .expect("failed to build TraceExporter");
+
         // Create the TraceBuffer + worker
         let (trace_buffer, worker) = TraceBuffer::new(
             TraceBufferConfig::new()
@@ -88,9 +110,7 @@ impl DatadogExporter {
             ),
             // Build the export operation
             Box::new(MapperExporter {
-                trace_exporter: builder
-                    .build::<libdd_capabilities_impl::NativeCapabilities>()
-                    .expect("failed to build TraceExporter"),
+                trace_exporter,
                 otel_resource: arc_swap::Cache::new(otel_resource.clone()),
                 cached_config: CachedConfig::new(&config),
                 config: config.clone(),
@@ -121,16 +141,50 @@ impl DatadogExporter {
     }
 
     /// Shut down the trace exporter runtime and wait for the worker to finish.
+    ///
+    /// Safe to call from any sync context, including from inside the host tokio runtime
+    /// when this exporter was constructed in borrowed mode. Internally:
+    /// 1. Flushes buffered spans via [`TraceBuffer::flush_and_wait`].
+    /// 2. Cancels every worker on the underlying [`SharedRuntime`] via
+    ///    [`SharedRuntime::trigger_shutdown_signal`] (non-blocking) and waits for each
+    ///    to finish via [`SharedRuntime::wait_shutdown_done`].
+    /// 3. Waits for the trace-buffer worker's shutdown flag via
+    ///    [`TraceBuffer::wait_shutdown_done`].
+    ///
+    /// # Borrowed-mode threading requirements
+    /// When [`SharedRuntime`] is borrowed (i.e. constructed in [`Self::new`] from inside
+    /// a `tokio::runtime::Handle::try_current`), the worker-shutdown tasks must be
+    /// driven by the host runtime *while* this function is parked on its Condvars.
+    /// That only works if the host has more than one worker thread:
+    ///
+    /// - **`flavor = "multi_thread"` (default for `#[tokio::main]`)**: we detach the
+    ///   calling worker via [`tokio::task::block_in_place`] so the remaining workers
+    ///   drive the shutdown tasks. This is the supported production path.
+    /// - **`flavor = "current_thread"` (default for `#[tokio::test]`)**: the only
+    ///   worker is the one we're about to park, so the shutdown tasks would never get
+    ///   to run. We detect this and fall back to a best-effort
+    ///   `trigger_shutdown_signal` + bounded `wait` strategy that returns within
+    ///   `timeout` even if workers haven't quiesced. Callers running in this mode
+    ///   should prefer the multi-thread test flavor for deterministic shutdown.
     pub fn shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
         let deadline = std::time::Instant::now() + timeout;
         let remaining = || deadline.saturating_duration_since(std::time::Instant::now());
 
         // Flush any buffered spans synchronously first. This guarantees the trace exporter
         // has a chance to run `check_agent_info` (which starts the stats worker on the still
-        // alive SharedRuntime) before we tear the runtime down. Without this, fast-finishing
-        // applications would shut the runtime down before the stats worker ever ran, dropping
+        // alive SharedRuntime) before we tear the workers down. Without this, fast-finishing
+        // applications would shut the workers down before the stats worker ever ran, dropping
         // the stats payload and breaking expectations downstream.
-        match self.trace_buffer.flush_and_wait(remaining()) {
+        let flush_result = if self.runtime.is_borrowed() && tokio_is_multi_thread() {
+            // Detach the current tokio worker so the host's other workers can drive the
+            // trace-buffer worker's flush while we park on the Condvar inside
+            // `flush_and_wait`. Without this, the Condvar wait would block the only
+            // tokio worker thread available to make progress.
+            tokio::task::block_in_place(|| self.trace_buffer.flush_and_wait(remaining()))
+        } else {
+            self.trace_buffer.flush_and_wait(remaining())
+        };
+        match flush_result {
             Ok(()) | Err(TraceBufferError::AlreadyShutdown) => {}
             Err(e) => {
                 dd_debug!(
@@ -139,18 +193,44 @@ impl DatadogExporter {
             }
         }
 
-        self.runtime
-            .shutdown(Some(remaining()))
-            .map_err(|_| TraceBufferError::TimedOut(timeout))?;
+        // Trigger non-blocking cancellation for every worker.
+        if let Err(e) = self.runtime.trigger_shutdown_signal() {
+            dd_debug!(
+                "DatadogExporter.shutdown message='trigger_shutdown_signal failed' error='{e:?}'"
+            );
+        }
 
-        self.trace_buffer
-            .wait_shutdown_done(remaining())
-            .map_err(|e| match e {
-                // Re-base any TimedOut to the user-facing total budget so the caller sees
-                // the value they passed in, not the residual we ended up with.
-                TraceBufferError::TimedOut(_) => TraceBufferError::TimedOut(timeout),
-                other => other,
-            })
+        // Wait for the spawned shutdown tasks to complete. Inside a multi-thread host
+        // runtime, escape the worker via `block_in_place` so the Condvar wait doesn't
+        // starve the executor. Inside a current-thread host (typical for
+        // `#[tokio::test]`), waiting would deadlock — return early with whatever
+        // status `wait_shutdown_done` reports without parking.
+        let runtime_wait_result = if self.runtime.is_borrowed() && tokio_is_multi_thread() {
+            tokio::task::block_in_place(|| self.runtime.wait_shutdown_done(remaining()))
+        } else if self.runtime.is_borrowed() {
+            // Best-effort on current_thread host — see method-level docs.
+            dd_debug!(
+                "DatadogExporter.shutdown message='current_thread host runtime detected — skipping Condvar wait to avoid deadlock'"
+            );
+            Ok(())
+        } else {
+            self.runtime.wait_shutdown_done(remaining())
+        };
+        runtime_wait_result.map_err(|_| TraceBufferError::TimedOut(timeout))?;
+
+        let trace_buffer_wait = if self.runtime.is_borrowed() && tokio_is_multi_thread() {
+            tokio::task::block_in_place(|| self.trace_buffer.wait_shutdown_done(remaining()))
+        } else if self.runtime.is_borrowed() {
+            Ok(())
+        } else {
+            self.trace_buffer.wait_shutdown_done(remaining())
+        };
+        trace_buffer_wait.map_err(|e| match e {
+            // Re-base any TimedOut to the user-facing total budget so the caller sees
+            // the value they passed in, not the residual we ended up with.
+            TraceBufferError::TimedOut(_) => TraceBufferError::TimedOut(timeout),
+            other => other,
+        })
     }
 
     pub fn set_resource(&self, r: Resource) {
@@ -165,18 +245,86 @@ const DROP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl Drop for DatadogExporter {
     /// Best-effort shutdown so callers that forget to invoke
-    /// [`DatadogExporter::shutdown`] don't leak the worker / runtime and don't lose any
-    /// buffered spans. Safe to invoke from inside a tokio runtime:
-    /// [`SharedRuntime::shutdown`] detects an active tokio context and runs the blocking
-    /// teardown (including the eventual `Arc<Runtime>` drop) on a scoped OS thread, which
-    /// is exactly the scenario that motivated the runtime-aware fix in libdatadog.
+    /// [`DatadogExporter::shutdown`] don't leak workers or lose buffered spans.
+    ///
+    /// Safe to invoke from inside a tokio runtime: [`Self::shutdown`] uses
+    /// Condvar-based waits (via [`SharedRuntime::trigger_shutdown_signal`] +
+    /// [`SharedRuntime::wait_shutdown_done`] and [`TraceBuffer::wait_shutdown_done`])
+    /// instead of `block_on`, so there's no risk of "Cannot start a runtime from
+    /// within a runtime" panics from a host worker thread.
     ///
     /// `shutdown` is idempotent — a prior explicit call is a no-op the second time:
-    /// `runtime.shutdown` finds the runtime slot already taken, `flush_and_wait` and
-    /// `wait_shutdown_done` early-return on `AlreadyShutdown`.
+    /// `flush_and_wait` and `wait_shutdown_done` early-return on `AlreadyShutdown`,
+    /// and a second `trigger_shutdown_signal` snapshots an already-empty worker list.
     fn drop(&mut self) {
         if let Err(e) = self.shutdown(DROP_SHUTDOWN_TIMEOUT) {
             dd_debug!("DatadogExporter.drop message='fallback shutdown failed' error='{e:?}'");
+        }
+    }
+}
+
+/// Synchronously drive a future to completion without engaging any tokio runtime.
+///
+/// `DatadogExporter::new` calls this to run [`TraceExporterBuilder::build_async`] from
+/// a sync constructor that may itself be invoked from inside a host tokio worker
+/// thread. The natural choices both fail in that situation:
+/// - [`SharedRuntime::block_on`] returns an error in borrowed mode (where the borrowed
+///   runtime is exactly the one we're already running on).
+/// - [`tokio::runtime::Handle::block_on`] / a freshly-built [`tokio::runtime::Runtime`]
+///   panic with "Cannot start a runtime from within a runtime".
+///
+/// # Contract
+/// This helper polls the future on the current thread and parks the thread between
+/// polls. It is only sound when the future's `.await` points never park on a tokio
+/// I/O / timer source — otherwise nothing would wake the parked thread. The
+/// `build_async` future qualifies: its only suspension point is a single non-blocking
+/// `mpsc::Sender::send` into a freshly-spawned channel that always has capacity, so
+/// the future polls to `Ready` on the first iteration.
+/// Whether the current tokio runtime is configured with more than one worker thread.
+///
+/// Returns `false` when called outside any tokio runtime, or from inside a current-thread
+/// runtime (`#[tokio::main(flavor = "current_thread")]`, default `#[tokio::test]`).
+/// Returns `true` when called from inside a multi-thread runtime
+/// (`#[tokio::main(flavor = "multi_thread")]`, default `#[tokio::main]`).
+///
+/// Used by [`DatadogExporter::shutdown`] to decide whether it is safe to escape the
+/// current tokio worker via [`tokio::task::block_in_place`] before parking on the
+/// shutdown Condvars. `block_in_place` panics in a current-thread runtime, so we must
+/// check first.
+fn tokio_is_multi_thread() -> bool {
+    use tokio::runtime::RuntimeFlavor;
+    match tokio::runtime::Handle::try_current() {
+        // Any flavor other than CurrentThread is multi-worker for our purposes
+        // (`MultiThread`, plus unstable variants like `MultiThreadAlt`). Match
+        // negatively so future tokio versions that add more flavors don't break
+        // borrowed-mode shutdown.
+        Ok(handle) => !matches!(handle.runtime_flavor(), RuntimeFlavor::CurrentThread),
+        Err(_) => false,
+    }
+}
+
+fn poll_to_completion<F: std::future::Future>(future: F) -> F::Output {
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+    use std::thread;
+
+    struct ThreadWaker(thread::Thread);
+    impl Wake for ThreadWaker {
+        fn wake(self: Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+
+    let waker: Waker = Arc::new(ThreadWaker(thread::current())).into();
+    let mut cx = Context::from_waker(&waker);
+    let mut fut = Box::pin(future);
+    loop {
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => thread::park(),
         }
     }
 }
@@ -325,15 +473,11 @@ mod tests {
     use super::DatadogExporter;
     use crate::configuration::Config;
 
-    /// Regression coverage for the [`Drop`] impl: dropping a `DatadogExporter` from inside
-    /// a tokio runtime must not panic. Under the hood this exercises
-    /// `SharedRuntime::shutdown` from a tokio context — which historically panicked with
-    /// "Cannot start a runtime from within a runtime" before libdatadog's runtime-aware
-    /// `block_on_outside_runtime` was introduced.
-    ///
-    /// We deliberately point the exporter at a port nothing is listening on. The exporter
-    /// creates fine (background workers will fail their HTTP attempts in the background,
-    /// which is irrelevant here); all we want to assert is the Drop teardown path.
+    /// Regression coverage for the borrowed-runtime path: dropping a `DatadogExporter`
+    /// from inside a tokio runtime must not panic, and the underlying `SharedRuntime`
+    /// must have been constructed in borrowed mode so that its shutdown uses the
+    /// Condvar-based `wait_shutdown_done` rather than a `block_on` that would deadlock
+    /// or panic on a host worker thread.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_drop_inside_tokio_runtime() {
         let mut cfg = Config::builder();
@@ -341,6 +485,13 @@ mod tests {
         let cfg = Arc::new(cfg.build());
 
         let exporter = DatadogExporter::new(cfg, None);
+        // Inside a `#[tokio::test]` we *must* have picked borrowed mode in `new`. If
+        // we hadn't, Drop teardown would hit `SharedRuntime::block_on` and panic with
+        // "Cannot start a runtime from within a runtime" on the host worker thread.
+        assert!(
+            exporter.runtime.is_borrowed(),
+            "DatadogExporter::new should pick borrowed mode when constructed from inside tokio"
+        );
         drop(exporter);
     }
 
@@ -354,7 +505,26 @@ mod tests {
         let cfg = Arc::new(cfg.build());
 
         let exporter = DatadogExporter::new(cfg, None);
+        assert!(exporter.runtime.is_borrowed());
         let _ = exporter.shutdown(std::time::Duration::from_millis(500));
         drop(exporter);
+    }
+
+    /// Outside of any tokio context, `DatadogExporter::new` should fall back to creating
+    /// an owned [`SharedRuntime`] — that's the path FFI consumers and test/CLI binaries
+    /// hit and the one that preserves the fork-safety guarantees libdatadog gives us.
+    #[test]
+    fn test_new_outside_tokio_picks_owned_runtime() {
+        let mut cfg = Config::builder();
+        cfg.set_trace_agent_url("http://127.0.0.1:1".to_string());
+        let cfg = Arc::new(cfg.build());
+
+        let exporter = DatadogExporter::new(cfg, None);
+        assert!(
+            !exporter.runtime.is_borrowed(),
+            "DatadogExporter::new should pick owned mode outside any tokio context"
+        );
+        // Tear down explicitly so the Drop path is exercised too.
+        let _ = exporter.shutdown(std::time::Duration::from_secs(1));
     }
 }
