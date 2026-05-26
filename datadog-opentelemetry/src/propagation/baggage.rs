@@ -215,20 +215,22 @@ mod tests {
             // empty key is malformed — stops at it
             ("key1=val1,=val2,key3=val3", vec!["key1"]),
             // missing '=' is malformed — stops at it
-            ("key1=val1,key2=val2,badentry,key3=val3", vec!["key1", "key2"]),
+            (
+                "key1=val1,key2=val2,badentry,key3=val3",
+                vec!["key1", "key2"],
+            ),
             // empty value mid-header — stops at it, prior entries kept
             ("key1=val1,key2=,key3=val3", vec!["key1"]),
         ] {
             let mut extractor: HashMap<String, String> = HashMap::new();
             extractor.insert(BAGGAGE_KEY.to_string(), header.to_string());
             let baggage = extract_baggage(&extractor).expect("baggage extracted");
-            assert_eq!(
-                baggage.len(),
-                expected_keys.len(),
-                "header: {header:?}"
-            );
+            assert_eq!(baggage.len(), expected_keys.len(), "header: {header:?}");
             for key in expected_keys {
-                assert!(baggage.get(&Key::new(key)).is_some(), "missing key {key} in {header:?}");
+                assert!(
+                    baggage.get(&Key::new(key)).is_some(),
+                    "missing key {key} in {header:?}"
+                );
             }
         }
     }
