@@ -610,16 +610,13 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
         {
             // Wait for the agent info to be fetched to get deterministic output when deciding
             // to drop traces or not
-            let timeout = Duration::from_secs(5);
             let start = std::time::Instant::now();
-            loop {
-                if std::time::Instant::now().duration_since(start) > timeout {
+            let timeout = Duration::from_secs(5);
+            while libdd_data_pipeline::agent_info::get_agent_info().is_none() {
+                if start.elapsed() > timeout {
                     panic!("Timeout waiting for agent info to be ready");
                 }
-                if libdd_data_pipeline::agent_info::get_agent_info().is_some() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(10));
+                thread::sleep(Duration::from_millis(10));
             }
         }
         while let Ok((message, data)) = self.rx.receive(self.config.max_flush_interval) {
