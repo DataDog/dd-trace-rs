@@ -24,6 +24,7 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
 libdd-data-pipeline = { version = "5.0.0", features = [
+    "stats-obfuscation",
     "telemetry",
 ], default-features = false }
 libdd-trace-utils = { version = "5.0.0", default-features = false }
