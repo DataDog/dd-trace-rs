@@ -613,7 +613,7 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
             let start = std::time::Instant::now();
             let timeout = Duration::from_secs(5);
             while libdd_data_pipeline::agent_info::get_agent_info().is_none() {
-                if std::time::Instant::now().duration_since(start) > timeout {
+                if start.elapsed() > timeout {
                     panic!("Timeout waiting for agent info to be ready");
                 }
                 thread::sleep(Duration::from_millis(10));
