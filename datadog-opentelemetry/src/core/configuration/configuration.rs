@@ -488,12 +488,9 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
-            let raw = override_value.as_ref().unwrap().get_configuration_value();
-            Some(if sensitive {
-                REDACTED_VALUE.to_string()
-            } else {
-                raw
-            })
+            // Pass the raw value; build_configurations_list's make_entry closure
+            // handles redaction uniformly for all origins.
+            Some(override_value.as_ref().unwrap().get_configuration_value())
         } else {
             None
         };
@@ -1110,20 +1107,6 @@ impl Config {
             }
         }
 
-        let parsed_sampling_rules_config = sources
-            .get_parse::<ParsedSamplingRules>(SupportedConfigurations::DD_TRACE_SAMPLING_RULES);
-
-        let mut sampling_rules_item = ConfigItemWithOverride::new_rc(
-            parsed_sampling_rules_config.name,
-            ParsedSamplingRules::default(), // default is empty rules
-            ConfigSensitivity::NonSensitive,
-        );
-
-        // Set env value if it was parsed from environment
-        if let Some(rules) = parsed_sampling_rules_config.value {
-            sampling_rules_item.set_value_source(rules.value, rules.origin);
-        }
-
         let cisu = ConfigItemSourceUpdater { sources };
 
         Self {
@@ -1158,7 +1141,6 @@ impl Config {
             trace_partial_flush_min_spans: cisu
                 .update_parsed(default.trace_partial_flush_min_spans),
 
-            // Use the initialized ConfigItem
             trace_sampling_rules: cisu.update_parsed(default.trace_sampling_rules),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
@@ -1810,6 +1792,9 @@ fn default_config() -> Config {
         trace_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_TRACE_AGENT_URL,
             Cow::Borrowed(""),
+            // The agent is assumed to run on the same host / internal infra as the
+            // application, without authentication, so the URL is safe to expose in
+            // telemetry.
             NonSensitive,
         ),
         dogstatsd_agent_host: ConfigItem::new(
@@ -1825,6 +1810,8 @@ fn default_config() -> Config {
         dogstatsd_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_DOGSTATSD_URL,
             Cow::Borrowed(""),
+            // Same rationale as trace_agent_url: agent is on the same host / internal
+            // infra without auth.
             NonSensitive,
         ),
         trace_sampling_rules: ConfigItemWithOverride::new_rc(
