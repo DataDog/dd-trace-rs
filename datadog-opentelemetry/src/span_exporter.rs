@@ -4,8 +4,9 @@
 use std::{sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
+use libdd_capabilities_impl::NativeCapabilities;
 use libdd_data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig,
+    agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
     TraceExporterOutputFormat,
 };
 
@@ -15,7 +16,7 @@ use crate::{
     configuration::Config,
     core::telemetry_session,
     ddtrace_transform,
-    exporter::{AsyncExporterError, AsyncTraceExporter, Exporter, TraceChunk, TraceExporter},
+    exporter::{AsyncExporterError, AsyncTraceExporter, Exporter, TraceChunk},
     mappings::CachedConfig,
 };
 
@@ -125,7 +126,7 @@ impl Exporter<SpanData> for MapperExporter {
     fn trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<SpanData>>,
-        trace_exporter: &TraceExporter,
+        trace_exporter: &TraceExporter<NativeCapabilities>,
     ) -> Result<AgentResponse, TraceExporterError> {
         let resource = self.otel_resource.load();
         let trace_chunks = trace_chunks

@@ -485,7 +485,7 @@ dependencies = [
  "libdd-sampling",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-utils 4.0.0",
+ "libdd-trace-utils",
  "log",
  "lru",
  "opentelemetry",
@@ -1303,9 +1303,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c0d0fcb6725d8399b46533a7eb023475e8b1be0da5942e25a34ef1efdfb2b43"
+checksum = "1f03752a6f29378a786c6d28121549e1e36dcb48fa2abc760504cdd0e126d83f"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1323,9 +1323,9 @@ dependencies = [
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "libdd-trace-stats",
- "libdd-trace-utils 4.0.0",
+ "libdd-trace-utils",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -1361,18 +1361,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-library-config"
-version = "1.1.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d33082726b20ce7cf364032f3f600f3c24db25928dcde5368f8e25e194c2bf47"
+checksum = "726e95f0f543da854a24999b16601afd2ca2c6b0c1bdc511bf52c5cd0635f7ad"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 2.0.0",
+ "libc",
+ "libdd-trace-protobuf",
  "memfd",
  "prost",
  "rand 0.8.6",
  "rmp",
  "rmp-serde",
- "rustix",
  "serde",
  "serde_yaml",
 ]
@@ -1451,7 +1451,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
 ]
 
 [[package]]
@@ -1463,23 +1463,12 @@ dependencies = [
  "anyhow",
  "fluent-uri",
  "libdd-common",
- "libdd-trace-protobuf 3.0.2",
- "libdd-trace-utils 5.0.0",
+ "libdd-trace-protobuf",
+ "libdd-trace-utils",
  "log",
  "percent-encoding",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "libdd-trace-protobuf"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0a54921e03174f3ff7ad8506ff9e13637e546ef0b1f369ae463eacebda8e88"
-dependencies = [
- "prost",
- "serde",
- "serde_bytes",
 ]
 
 [[package]]
@@ -1495,9 +1484,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "3.0.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f3d860f564da2ad30141a352fe4b924f8cf37dd0b32b3f4b0ef4ee52b9b43fe"
+checksum = "4313c4ce9cd9ea55b46c980164fc41569909c8c2bb6e0320ad1237194bd25a58"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1510,8 +1499,8 @@ dependencies = [
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 3.0.2",
- "libdd-trace-utils 4.0.0",
+ "libdd-trace-protobuf",
+ "libdd-trace-utils",
  "rmp-serde",
  "serde",
  "tokio",
@@ -1521,9 +1510,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-utils"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8442cf9c141da05cd170a6c230cba13b50d0bd3635df16928f296a7ad233b2d8"
+checksum = "166fa5c3998dbaa5412156289e8fb24fee35d9aaf2a4707a17c34e956b20b505"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1543,7 +1532,7 @@ dependencies = [
  "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "prost",
  "rand 0.8.6",
  "rmp",
@@ -1554,38 +1543,6 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
-]
-
-[[package]]
-name = "libdd-trace-utils"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "166fa5c3998dbaa5412156289e8fb24fee35d9aaf2a4707a17c34e956b20b505"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytes",
- "futures",
- "getrandom 0.2.17",
- "http",
- "http-body",
- "http-body-util",
- "indexmap",
- "libdd-capabilities",
- "libdd-capabilities-impl",
- "libdd-common",
- "libdd-tinybytes",
- "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.2",
- "prost",
- "rand 0.8.6",
- "rmp",
- "rmp-serde",
- "rmpv",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]

@@ -13,10 +13,8 @@ use libdd_capabilities_impl::NativeCapabilities;
 use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse,
     error::{self as trace_exporter_error, TraceExporterError},
-    TraceExporter as LibddTraceExporter, TraceExporterBuilder,
+    TraceExporter, TraceExporterBuilder,
 };
-
-pub type TraceExporter = LibddTraceExporter<NativeCapabilities>;
 
 #[derive(Clone, Copy)]
 pub struct AsyncExporterConfig {
@@ -556,12 +554,12 @@ pub trait Exporter<T> {
     fn trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<T>>,
-        trace_exporter: &TraceExporter,
+        trace_exporter: &TraceExporter<NativeCapabilities>,
     ) -> Result<AgentResponse, TraceExporterError>;
 }
 
 struct TraceExporterWorker<T> {
-    trace_exporter: TraceExporter,
+    trace_exporter: TraceExporter<NativeCapabilities>,
     rx: Receiver<T>,
     exporter: Box<dyn Exporter<T>>,
     #[allow(clippy::type_complexity)]
@@ -586,7 +584,7 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
             move || {
-                let trace_exporter = match builder.build::<NativeCapabilities>() {
+                let trace_exporter = match builder.build() {
                     Ok(exporter) => exporter,
                     Err(e) => {
                         return Err(e);
@@ -610,17 +608,16 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     fn run(mut self) -> Result<(), TraceExporterError> {
         #[cfg(feature = "test-utils")]
         {
-            // Block on the async `wait_agent_info_ready` from this plain
-            // `thread::spawn`; needed for deterministic sampling in tests.
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("tokio runtime for wait_agent_info_ready")
-                .block_on(
-                    self.trace_exporter
-                        .wait_agent_info_ready(Duration::from_secs(5)),
-                )
-                .unwrap();
+            // Wait for the agent info to be fetched to get deterministic output when deciding
+            // to drop traces or not
+            let start = std::time::Instant::now();
+            let timeout = Duration::from_secs(5);
+            while libdd_data_pipeline::agent_info::get_agent_info().is_none() {
+                if start.elapsed() > timeout {
+                    panic!("Timeout waiting for agent info to be ready");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
         }
         while let Ok((message, data)) = self.rx.receive(self.config.max_flush_interval) {
             if !data.is_empty() {
