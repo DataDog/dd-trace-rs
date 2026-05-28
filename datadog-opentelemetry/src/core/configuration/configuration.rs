@@ -97,6 +97,17 @@ const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval 
 const DEFAULT_UNIX_TRACE_AGENT_URL: &str = "/var/run/datadog/apm.socket";
 const DEFAULT_UNIX_DOGSTATSD_AGENT_URL: &str = "/var/run/datadog/dsd.socket";
 
+/// Placeholder used in telemetry payloads when a sensitive configuration value
+/// has been set
+const REDACTED_VALUE: &str = "[REDACTED]";
+
+/// Controls whether a configuration item's non-default value is visible in telemetry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigSensitivity {
+    NonSensitive,
+    Sensitive,
+}
+
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -237,6 +248,7 @@ struct ConfigItem<T: ConfigurationValueProvider> {
     env_value: Option<T>,
     code_value: Option<T>,
     config_id: Option<String>,
+    sensitivity: ConfigSensitivity,
 }
 
 impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
@@ -247,19 +259,21 @@ impl<T: Clone + ConfigurationValueProvider> Clone for ConfigItem<T> {
             env_value: self.env_value.clone(),
             code_value: self.code_value.clone(),
             config_id: self.config_id.clone(),
+            sensitivity: self.sensitivity,
         }
     }
 }
 
 impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
-    /// Creates a new ConfigItem with a default value
-    fn new(name: SupportedConfigurations, default: T) -> Self {
+    /// Creates a new ConfigItem with a default value and an explicit sensitivity level.
+    fn new(name: SupportedConfigurations, default: T, sensitivity: ConfigSensitivity) -> Self {
         Self {
             name,
             default_value: default,
             env_value: None,
             code_value: None,
             config_id: None,
+            sensitivity,
         }
     }
 
@@ -293,41 +307,42 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
     }
 
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
-        let mut configurations = Vec::new();
-        // Always include the default value
-        configurations.push(Configuration {
+        let sensitive = self.sensitivity == ConfigSensitivity::Sensitive;
+
+        // Builds a Configuration entry, redacting the value for sensitive items unless
+        // the origin is Default (defaults are known, fixed strings).
+        let make_entry = |value: String, origin: ConfigSourceOrigin| Configuration {
             name: self.name.as_str().to_string(),
-            value: self.default_value.get_configuration_value(),
-            origin: ConfigSourceOrigin::Default.into(),
+            value: if sensitive && origin != ConfigSourceOrigin::Default {
+                REDACTED_VALUE.to_string()
+            } else {
+                value
+            },
+            origin: origin.into(),
             config_id: self.config_id.clone(),
-            seq_id: Some(ConfigSourceOrigin::Default as u64),
-        });
+            seq_id: Some(origin as u64),
+        };
+
+        let mut configurations = Vec::new();
+        // Always include the default value in clear — defaults are known, fixed strings.
+        configurations.push(make_entry(
+            self.default_value.get_configuration_value(),
+            ConfigSourceOrigin::Default,
+        ));
         if let Some(calculated_value) = calculated_value {
-            configurations.push(Configuration {
-                name: self.name.as_str().to_string(),
-                value: calculated_value,
-                origin: ConfigSourceOrigin::Calculated.into(),
-                config_id: self.config_id.clone(),
-                seq_id: Some(ConfigSourceOrigin::Calculated as u64),
-            });
+            configurations.push(make_entry(calculated_value, ConfigSourceOrigin::Calculated));
         }
         if let Some(ref env_value) = self.env_value {
-            configurations.push(Configuration {
-                name: self.name.as_str().to_string(),
-                value: env_value.get_configuration_value(),
-                origin: ConfigSourceOrigin::EnvVar.into(),
-                config_id: self.config_id.clone(),
-                seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
-            });
+            configurations.push(make_entry(
+                env_value.get_configuration_value(),
+                ConfigSourceOrigin::EnvVar,
+            ));
         }
         if let Some(ref code_value) = self.code_value {
-            configurations.push(Configuration {
-                name: self.name.as_str().to_string(),
-                value: code_value.get_configuration_value(),
-                origin: ConfigSourceOrigin::Code.into(),
-                config_id: self.config_id.clone(),
-                seq_id: Some(ConfigSourceOrigin::Code as u64),
-            });
+            configurations.push(make_entry(
+                code_value.get_configuration_value(),
+                ConfigSourceOrigin::Code,
+            ));
         }
         configurations
     }
@@ -384,18 +399,22 @@ impl<T: Clone + ConfigurationValueProvider + Deref> Clone for ConfigItemWithOver
 }
 
 impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
-    fn new_calculated(name: SupportedConfigurations, default: T) -> Self {
+    fn new_calculated(
+        name: SupportedConfigurations,
+        default: T,
+        sensitivity: ConfigSensitivity,
+    ) -> Self {
         Self {
-            config_item: ConfigItem::new(name, default),
+            config_item: ConfigItem::new(name, default, sensitivity),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::Calculated,
             config_id: arc_swap::ArcSwapOption::const_empty(),
         }
     }
 
-    fn new_rc(name: SupportedConfigurations, default: T) -> Self {
+    fn new_rc(name: SupportedConfigurations, default: T, sensitivity: ConfigSensitivity) -> Self {
         Self {
-            config_item: ConfigItem::new(name, default),
+            config_item: ConfigItem::new(name, default, sensitivity),
             override_value: arc_swap::ArcSwapOption::const_empty(),
             override_origin: ConfigSourceOrigin::RemoteConfig,
             config_id: arc_swap::ArcSwapOption::const_empty(),
@@ -465,10 +484,16 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
 {
     /// Returns all configurations that were set for this configuration item.
     fn get_all_configurations(&self) -> Vec<Configuration> {
+        let sensitive = self.config_item.sensitivity == ConfigSensitivity::Sensitive;
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
-            Some(override_value.as_ref().unwrap().get_configuration_value())
+            let raw = override_value.as_ref().unwrap().get_configuration_value();
+            Some(if sensitive {
+                REDACTED_VALUE.to_string()
+            } else {
+                raw
+            })
         } else {
             None
         };
@@ -479,7 +504,11 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
             configurations.push(Configuration {
                 name: self.config_item.name.as_str().to_string(),
-                value: self.value().get_configuration_value(),
+                value: if sensitive {
+                    REDACTED_VALUE.to_string()
+                } else {
+                    self.value().get_configuration_value()
+                },
                 origin: self.source().into(),
                 config_id,
                 seq_id: Some(self.source() as u64),
@@ -1087,6 +1116,7 @@ impl Config {
         let mut sampling_rules_item = ConfigItemWithOverride::new_rc(
             parsed_sampling_rules_config.name,
             ParsedSamplingRules::default(), // default is empty rules
+            ConfigSensitivity::NonSensitive,
         );
 
         // Set env value if it was parsed from environment
@@ -1129,7 +1159,7 @@ impl Config {
                 .update_parsed(default.trace_partial_flush_min_spans),
 
             // Use the initialized ConfigItem
-            trace_sampling_rules: sampling_rules_item,
+            trace_sampling_rules: cisu.update_parsed(default.trace_sampling_rules),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
             enabled: cisu.update_parsed(default.enabled),
@@ -1739,56 +1769,83 @@ impl std::fmt::Debug for Config {
 }
 
 fn default_config() -> Config {
+    use ConfigSensitivity::{NonSensitive, Sensitive};
     Config {
         runtime_id: Config::process_runtime_id(),
-        env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
+        env: ConfigItem::new(SupportedConfigurations::DD_ENV, None, NonSensitive),
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_SERVICE,
             ServiceName::Default,
+            NonSensitive,
         ),
-        version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
-        global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
+        version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None, NonSensitive),
+        global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new(), NonSensitive),
         otel_resource_attributes: ConfigItem::new(
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES,
             Vec::new(),
+            NonSensitive,
         ),
         otel_metrics_exporter: ConfigItem::new(
             SupportedConfigurations::OTEL_METRICS_EXPORTER,
             Cow::Borrowed("otlp"),
+            NonSensitive,
         ),
         otel_metrics_temporality_preference: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE,
             Some(opentelemetry_sdk::metrics::Temporality::Delta),
+            NonSensitive,
         ),
 
         agent_host: ConfigItem::new(
             SupportedConfigurations::DD_AGENT_HOST,
             Cow::Borrowed("localhost"),
+            NonSensitive,
         ),
-        trace_agent_port: ConfigItem::new(SupportedConfigurations::DD_TRACE_AGENT_PORT, 8126),
+        trace_agent_port: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_AGENT_PORT,
+            8126,
+            NonSensitive,
+        ),
         trace_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_TRACE_AGENT_URL,
             Cow::Borrowed(""),
+            NonSensitive,
         ),
         dogstatsd_agent_host: ConfigItem::new(
             SupportedConfigurations::DD_DOGSTATSD_HOST,
             Cow::Borrowed("localhost"),
+            NonSensitive,
         ),
-        dogstatsd_agent_port: ConfigItem::new(SupportedConfigurations::DD_DOGSTATSD_PORT, 8125),
+        dogstatsd_agent_port: ConfigItem::new(
+            SupportedConfigurations::DD_DOGSTATSD_PORT,
+            8125,
+            NonSensitive,
+        ),
         dogstatsd_agent_url: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_DOGSTATSD_URL,
             Cow::Borrowed(""),
+            NonSensitive,
         ),
         trace_sampling_rules: ConfigItemWithOverride::new_rc(
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
+            NonSensitive,
         ),
-        trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
-        enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
+        trace_rate_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_RATE_LIMIT,
+            100,
+            NonSensitive,
+        ),
+        enabled: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_ENABLED,
+            true,
+            NonSensitive,
+        ),
         log_level_filter: ConfigItem::new(
             SupportedConfigurations::DD_LOG_LEVEL,
             LevelFilter::default(),
+            NonSensitive,
         ),
         tracer_version: TRACER_VERSION,
         language: "rust",
@@ -1796,6 +1853,7 @@ fn default_config() -> Config {
         trace_stats_computation_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
+            NonSensitive,
         ),
         trace_writer_synchronous_write: false,
         trace_writer_synchronous_timeout: Duration::from_secs(2),
@@ -1806,22 +1864,27 @@ fn default_config() -> Config {
         telemetry_enabled: ConfigItem::new(
             SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED,
             true,
+            NonSensitive,
         ),
         telemetry_log_collection_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
             true,
+            NonSensitive,
         ),
         telemetry_heartbeat_interval: ConfigItem::new(
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
+            NonSensitive,
         ),
         trace_partial_flush_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED,
             false,
+            NonSensitive,
         ),
         trace_partial_flush_min_spans: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
             300,
+            NonSensitive,
         ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
@@ -1830,94 +1893,124 @@ fn default_config() -> Config {
                 TracePropagationStyle::TraceContext,
                 TracePropagationStyle::Baggage,
             ]),
+            NonSensitive,
         ),
         trace_propagation_style_extract: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT,
             None,
+            NonSensitive,
         ),
         trace_propagation_style_inject: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT,
             None,
+            NonSensitive,
         ),
         trace_propagation_extract_first: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
             false,
+            NonSensitive,
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: ConfigItem::new(
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
             true,
+            NonSensitive,
         ),
         remote_config_poll_interval: ConfigItem::new(
             SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
             RC_DEFAULT_POLL_INTERVAL,
+            NonSensitive,
         ),
         remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
         datadog_tags_max_length: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
             DATADOG_TAGS_MAX_LENGTH,
+            NonSensitive,
         ),
         metrics_otel_enabled: ConfigItem::new(
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED,
             true,
+            NonSensitive,
         ),
         otlp_metrics_endpoint: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT,
             Cow::Borrowed(""),
+            Sensitive, // can expose http auth parameters
         ),
         otlp_endpoint: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT,
             Cow::Borrowed(""),
+            Sensitive, // can expose http auth parameters
         ),
         otlp_headers: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS,
             Cow::Borrowed(""),
+            Sensitive, // often carry API keys or auth tokens.
         ),
         otlp_metrics_protocol: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL,
             None,
+            NonSensitive,
         ),
         otlp_metrics_headers: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS,
             Cow::Borrowed(""),
+            Sensitive, // often carry API keys or auth tokens
         ),
-        otlp_protocol: ConfigItem::new(SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL, None),
+        otlp_protocol: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL,
+            None,
+            NonSensitive,
+        ),
         otlp_metrics_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
             10000u32,
+            NonSensitive,
         ),
         otlp_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT,
             10000u32,
+            NonSensitive,
         ),
         metric_export_interval: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL,
             10000u32,
+            NonSensitive,
         ),
         metric_export_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT,
             7500u32,
+            NonSensitive,
         ),
-        logs_otel_enabled: ConfigItem::new(SupportedConfigurations::DD_LOGS_OTEL_ENABLED, true),
+        logs_otel_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_LOGS_OTEL_ENABLED,
+            true,
+            NonSensitive,
+        ),
         otel_logs_exporter: ConfigItem::new(
             SupportedConfigurations::OTEL_LOGS_EXPORTER,
             Cow::Borrowed("otlp"),
+            NonSensitive,
         ),
         otlp_logs_endpoint: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT,
             Cow::Borrowed(""),
+            Sensitive, // can expose http auth parameters
         ),
         otlp_logs_headers: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS,
             Cow::Borrowed(""),
+            Sensitive, // often carry API keys or auth tokens
         ),
         otlp_logs_protocol: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL,
             None,
+            NonSensitive,
         ),
         otlp_logs_timeout: ConfigItem::new(
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
             10000u32,
+            NonSensitive,
         ),
     }
 }
@@ -3062,6 +3155,7 @@ mod tests {
         let mut config_item = ConfigItemWithOverride::new_rc(
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(),
+            ConfigSensitivity::NonSensitive,
         );
 
         // Default value
@@ -3585,5 +3679,116 @@ mod tests {
             .build();
 
         assert_eq!(config.remote_config_poll_interval(), 0.2);
+    }
+
+    #[test]
+    fn test_non_sensitive_field_shows_real_value() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_RATE_LIMIT", "42")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let configurations = config.trace_rate_limit.get_all_configurations();
+        let env_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::EnvVar)
+            .expect("expected an EnvVar entry");
+
+        assert_eq!(
+            env_entry.value, "42",
+            "non-sensitive env-var value must be visible in telemetry"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_field_at_default_shows_real_default() {
+        // Build with no override so otlp_headers stays at its default ("").
+        let config = Config::builder_with_sources(&CompositeSource::new()).build();
+
+        let configurations = config.otlp_headers.get_all_configurations();
+        let default_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::Default)
+            .expect("expected a Default entry");
+
+        assert_eq!(
+            default_entry.value, "",
+            "default value of a sensitive field must be sent in clear"
+        );
+        // No non-default entries should exist when the value was never overridden.
+        assert!(
+            configurations
+                .iter()
+                .all(|c| c.origin == ConfigurationOrigin::Default),
+            "no non-default entries expected when value is at default"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_field_with_env_var_is_redacted() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "OTEL_EXPORTER_OTLP_HEADERS",
+                "Authorization=Bearer secret-token",
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let configurations = config.otlp_headers.get_all_configurations();
+
+        // Default entry must show the real (empty-string) default.
+        let default_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::Default)
+            .expect("expected a Default entry");
+        assert_eq!(
+            default_entry.value, "",
+            "default value of a sensitive field must always be sent in clear"
+        );
+
+        // The env-var entry must be redacted.
+        let env_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::EnvVar)
+            .expect("expected an EnvVar entry");
+        assert_eq!(
+            env_entry.value, REDACTED_VALUE,
+            "env-var value of a sensitive field must be redacted"
+        );
+    }
+
+    #[test]
+    fn test_sensitive_field_set_via_code_is_redacted() {
+        // otlp_endpoint is sensitive; set it through the builder
+        // (the builder uses Code origin internally).
+        let config = Config::builder()
+            .set_otlp_endpoint("https://internal.corp/otlp".to_string())
+            .build();
+
+        let configurations = config.otlp_endpoint.get_all_configurations();
+
+        // Default entry must be clear.
+        let default_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::Default)
+            .expect("expected a Default entry");
+        assert_eq!(
+            default_entry.value, "",
+            "default value of a sensitive field must always be sent in clear"
+        );
+
+        // The code entry must be redacted.
+        let code_entry = configurations
+            .iter()
+            .find(|c| c.origin == ConfigurationOrigin::Code)
+            .expect("expected a Code entry");
+        assert_eq!(
+            code_entry.value, REDACTED_VALUE,
+            "code-set value of a sensitive field must be redacted"
+        );
     }
 }
