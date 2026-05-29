@@ -1257,9 +1257,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-common"
-version = "4.1.0"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "933c5940905e9a3c8dd8c0439697b3fb327289cef7858370e6a5f440139f6314"
+checksum = "4af81e6953fab2814792b8893a2cee9f16aad1b71cb3f8720b7256f28d6a2d8d"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1368,9 +1368,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "1.0.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ae8728d9d717eb1b648223c4c1da53f77627fecd6045027ccb758a72815b300"
+checksum = "f797cc02108b5c4345454a4e179f05de472e483f4b2acc1981eb97f0ce4f2880"
 dependencies = [
  "libdd-common",
  "lru",
@@ -2343,9 +2343,9 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "security-framework"
-version = "3.6.0"
+version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17b898a6d6948c3a8ee4372c17cb384f90d2e6e912ef00895b14fd7ab54ec38"
+checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
  "bitflags",
  "core-foundation 0.10.1",

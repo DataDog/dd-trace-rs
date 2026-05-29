@@ -29,10 +29,10 @@ libdd-data-pipeline = { version = "5.0.0", features = [
 libdd-trace-utils = { version = "5.0.0", default-features = false }
 libdd-capabilities-impl = { version = "2.0.0", default-features = false }
 libdd-telemetry = { version = "5.0.0", default-features = false }
-libdd-common = { version = "4.1.0", default-features = false }
+libdd-common = { version = "4.2.0", default-features = false }
 libdd-tinybytes = { version = "1.1.1", default-features = false }
 libdd-library-config = { version = "2.0.0", default-features = false }
-libdd-sampling = { version = "1.0.0", default-features = false }
+libdd-sampling = { version = "2.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.31.0", features = [
     "trace",
     "metrics",
