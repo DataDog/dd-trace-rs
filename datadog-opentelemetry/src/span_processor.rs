@@ -17,7 +17,7 @@ use crate::{
             remote_config::{
                 RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
             },
-            Config,
+            BaggageTagKeyFilter, Config,
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
@@ -31,6 +31,7 @@ use crate::{
     text_map_propagator::DatadogExtractData,
 };
 use opentelemetry::{
+    baggage::BaggageExt as _,
     global::ObjectSafeSpan,
     trace::{SpanContext, TraceContextExt, TraceState},
     Key, KeyValue, SpanId, TraceFlags, TraceId,
@@ -530,6 +531,28 @@ impl DatadogSpanProcessor {
     }
 }
 
+fn baggage_span_tags(
+    baggage: &opentelemetry::baggage::Baggage,
+    filter: &BaggageTagKeyFilter,
+) -> Vec<KeyValue> {
+    match filter {
+        BaggageTagKeyFilter::Disabled => vec![],
+        BaggageTagKeyFilter::All => baggage
+            .iter()
+            .map(|(k, (v, _))| KeyValue::new(format!("baggage.{}", k.as_str()), v.clone()))
+            .collect(),
+        BaggageTagKeyFilter::Keys(keys) => keys
+            .iter()
+            .filter_map(|key: &String| {
+                let otel_key = Key::from(key.clone());
+                baggage
+                    .get(&otel_key)
+                    .map(|value| KeyValue::new(format!("baggage.{key}"), value.clone()))
+            })
+            .collect(),
+    }
+}
+
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_start(
         &self,
@@ -546,6 +569,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         if parent_ctx.span().span_context().is_remote() {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);
+            for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())
+            {
+                span.set_attribute(kv);
+            }
         } else if !parent_ctx.has_active_span() {
             self.registry.register_local_root_span(trace_id, span_id);
         } else {
@@ -1359,5 +1386,176 @@ mod tests {
             "Last flush is a complete one"
         );
         assert_eq!(metrics.trace_segments_closed, 1);
+    }
+
+    mod baggage_span_tags_tests {
+        use opentelemetry::{baggage::Baggage, KeyValue, Value};
+
+        use crate::{core::configuration::BaggageTagKeyFilter, span_processor::baggage_span_tags};
+
+        fn make_baggage(pairs: &[(&str, &str)]) -> Baggage {
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    opentelemetry::baggage::KeyValueMetadata::new(
+                        k.to_string(),
+                        v.to_string(),
+                        opentelemetry::baggage::BaggageMetadata::default(),
+                    )
+                })
+                .collect::<Baggage>()
+        }
+
+        fn attr(key: &str, val: &str) -> KeyValue {
+            KeyValue::new(key.to_string(), val.to_string())
+        }
+
+        #[test]
+        fn disabled_returns_empty() {
+            let baggage = make_baggage(&[("user.id", "123"), ("session.id", "abc")]);
+            let tags = baggage_span_tags(&baggage, &BaggageTagKeyFilter::Disabled);
+            assert!(tags.is_empty());
+        }
+
+        #[test]
+        fn wildcard_returns_all_keys() {
+            let baggage = make_baggage(&[("user.id", "123"), ("region", "us-east")]);
+            let mut tags = baggage_span_tags(&baggage, &BaggageTagKeyFilter::All);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 2);
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.user.id"
+                && kv.value == Value::String("123".into())));
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.region"
+                && kv.value == Value::String("us-east".into())));
+        }
+
+        #[test]
+        fn specific_keys_only_matches_listed() {
+            let baggage = make_baggage(&[
+                ("user.id", "42"),
+                ("session.id", "sess"),
+                ("region", "eu-west"),
+            ]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string()]);
+            let mut tags = baggage_span_tags(&baggage, &filter);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 2);
+            assert_eq!(tags[0], attr("baggage.session.id", "sess"));
+            assert_eq!(tags[1], attr("baggage.user.id", "42"));
+        }
+
+        #[test]
+        fn specific_keys_missing_from_baggage_skipped() {
+            let baggage = make_baggage(&[("user.id", "99")]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "account.id".to_string()]);
+            let tags = baggage_span_tags(&baggage, &filter);
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0], attr("baggage.user.id", "99"));
+        }
+
+        #[test]
+        fn keys_are_case_sensitive() {
+            let baggage = make_baggage(&[("user.id", "1"), ("User.Id", "2")]);
+            let filter = BaggageTagKeyFilter::Keys(vec!["user.id".to_string()]);
+            let tags = baggage_span_tags(&baggage, &filter);
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0], attr("baggage.user.id", "1"));
+        }
+
+        #[test]
+        fn default_filter_tags_expected_keys() {
+            let baggage = make_baggage(&[
+                ("user.id", "u1"),
+                ("session.id", "s1"),
+                ("account.id", "a1"),
+                ("correlation_id", "c1"),
+            ]);
+            let filter = BaggageTagKeyFilter::Keys(vec![
+                "user.id".to_string(),
+                "session.id".to_string(),
+                "account.id".to_string(),
+            ]);
+            let mut tags = baggage_span_tags(&baggage, &filter);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 3);
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.user.id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.session.id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.account.id"));
+            assert!(!tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.correlation_id"));
+        }
+    }
+
+    mod baggage_tag_key_filter_parse_tests {
+        use std::str::FromStr;
+
+        use crate::core::configuration::BaggageTagKeyFilter;
+
+        #[test]
+        fn empty_string_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn whitespace_only_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("   ").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn star_is_all() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("*").unwrap(),
+                BaggageTagKeyFilter::All
+            );
+        }
+
+        #[test]
+        fn comma_separated_list_parsed() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("user.id,session.id,account.id").unwrap(),
+                BaggageTagKeyFilter::Keys(vec![
+                    "user.id".to_string(),
+                    "session.id".to_string(),
+                    "account.id".to_string(),
+                ])
+            );
+        }
+
+        #[test]
+        fn whitespace_around_keys_trimmed() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(" user.id , session.id ").unwrap(),
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string(),])
+            );
+        }
+
+        #[test]
+        fn comma_only_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(",").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn all_commas_and_spaces_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(", ,").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
     }
 }
