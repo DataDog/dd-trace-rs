@@ -149,6 +149,23 @@ fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporalit
     }
 }
 
+/// Validates a global trace sample rate (`DD_TRACE_SAMPLE_RATE`). Returns
+/// `Some(rate)` only for finite values in `[0.0, 1.0]`; logs and returns `None`
+/// otherwise so the rate is treated as unset rather than installed as a
+/// catch-all rule that libdd-sampling would clamp (a negative value would drop
+/// all unmatched traffic, a value > 1.0 would keep all of it). Mirrors the
+/// range check applied to RC's `tracing_sampling_rate`.
+fn validate_trace_sample_rate(rate: f64) -> Option<f64> {
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        Some(rate)
+    } else {
+        crate::dd_warn!(
+            "DD_TRACE_SAMPLE_RATE must be in [0.0, 1.0], got {rate}; treating as unset"
+        );
+        None
+    }
+}
+
 enum ConfigItemRef<'a, T> {
     Ref(&'a T),
     ArcRef(arc_swap::Guard<Option<Arc<T>>>),
@@ -1190,8 +1207,10 @@ impl Config {
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_sample_rate: cisu
-                .update_parsed_with_transform(default.trace_sample_rate, |r: f64| Some(r)),
+            trace_sample_rate: cisu.update_parsed_with_transform(
+                default.trace_sample_rate,
+                validate_trace_sample_rate,
+            ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
             enabled: cisu.update_parsed(default.enabled),
@@ -2466,7 +2485,11 @@ impl ConfigBuilder {
     ///
     /// Env variable: `DD_TRACE_SAMPLE_RATE`
     pub fn set_trace_sample_rate(&mut self, rate: f64) -> &mut Self {
-        self.config.trace_sample_rate.set_code(Some(rate));
+        // Only accept finite values in [0.0, 1.0]; an out-of-range value is
+        // logged and left unset rather than installed as a catch-all rule.
+        if let Some(rate) = validate_trace_sample_rate(rate) {
+            self.config.trace_sample_rate.set_code(Some(rate));
+        }
         self
     }
 
@@ -3842,5 +3865,60 @@ mod tests {
         let unset_config = Config::builder().build();
         let unset_rules = unset_config.effective_initial_rules();
         assert!(unset_rules.is_empty(), "unset must not install a catch-all");
+    }
+
+    #[test]
+    fn test_out_of_range_dd_trace_sample_rate_env_is_treated_as_unset() {
+        // Codex fix: a finite-but-out-of-range DD_TRACE_SAMPLE_RATE must be
+        // rejected at ingestion (treated as unset), not installed as a
+        // catch-all that libdd-sampling would clamp (negative -> drop all,
+        // >1.0 -> keep all) while still enabling the rate limiter.
+        for bad in ["1.5", "-0.5", "2", "inf", "-inf", "nan"] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_SAMPLE_RATE", bad)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(
+                config.trace_sample_rate(),
+                None,
+                "DD_TRACE_SAMPLE_RATE={bad} must be treated as unset"
+            );
+            assert!(
+                config.effective_initial_rules().is_empty(),
+                "DD_TRACE_SAMPLE_RATE={bad} must not install a catch-all rule"
+            );
+        }
+    }
+
+    #[test]
+    fn test_in_range_boundary_dd_trace_sample_rate_env_accepted() {
+        // Boundaries 0.0 and 1.0 are valid and must be accepted.
+        for (val, expected) in [("0.0", 0.0), ("1.0", 1.0)] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_SAMPLE_RATE", val)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(config.trace_sample_rate(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_out_of_range_set_trace_sample_rate_is_ignored() {
+        // The programmatic (code) setter must apply the same validation as the
+        // env path: an out-of-range rate is ignored, leaving the rate unset.
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(42.0);
+        let config = builder.build();
+        assert_eq!(config.trace_sample_rate(), None);
+        assert!(config.effective_initial_rules().is_empty());
+
+        // A valid rate is still accepted.
+        let mut ok_builder = Config::builder();
+        ok_builder.set_trace_sample_rate(0.3);
+        assert_eq!(ok_builder.build().trace_sample_rate(), Some(0.3));
     }
 }
