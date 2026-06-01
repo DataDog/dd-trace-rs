@@ -228,7 +228,7 @@ mod tests {
             assert_eq!(baggage.len(), expected_keys.len(), "header: {header:?}");
             for key in expected_keys {
                 assert!(
-                    baggage.get(&Key::new(key)).is_some(),
+                    baggage.get(Key::new(key)).is_some(),
                     "missing key {key} in {header:?}"
                 );
             }
