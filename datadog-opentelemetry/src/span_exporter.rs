@@ -9,10 +9,12 @@ use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
     TraceExporterOutputFormat,
 };
+
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
     configuration::Config,
+    core::telemetry_session,
     ddtrace_transform,
     exporter::{AsyncExporterError, AsyncTraceExporter, Exporter, TraceChunk},
     mappings::CachedConfig,
@@ -62,6 +64,9 @@ impl DatadogExporter {
                 runtime_id: Some(config.runtime_id().to_string()),
                 debug_enabled: false,
             });
+            builder.set_telemetry_instrumentation_sessions(
+                telemetry_session::sessions_from_runtime_id(config.runtime_id()),
+            );
         }
         DatadogExporter {
             exporter: AsyncTraceExporter::new(

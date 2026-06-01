@@ -1507,7 +1507,7 @@ impl Config {
     }
 
     /// Static runtime id if the process
-    fn process_runtime_id() -> &'static str {
+    pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())

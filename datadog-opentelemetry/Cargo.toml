@@ -53,6 +53,8 @@ base64 = "0.21"
 sha2 = "0.10"
 uuid = { version = "1.11.0", features = ["v4"] }
 arc-swap = "1.7.1"
+ctor = "0.2"
+libc = "0.2"
 
 # core Test utils
 criterion = { version = "0.5.1", optional = true }
@@ -69,7 +71,6 @@ percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true }
-libc = "0.2"
 
 [dev-dependencies]
 assert_unordered = "0.3"
