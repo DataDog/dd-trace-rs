@@ -211,6 +211,14 @@
         "propertyKeys": ["trace_rate_limit"]
       }
     ],
+    "DD_TRACE_SAMPLE_RATE": [
+      {
+        "version": "B",
+        "type": "decimal",
+        "default": null,
+        "propertyKeys": ["trace_sample_rate"]
+      }
+    ],
     "DD_TRACE_SAMPLING_RULES": [
       {
         "version": "A",
