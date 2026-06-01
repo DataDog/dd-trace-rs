@@ -674,6 +674,25 @@ impl ExtraServicesTracker {
         }
     }
 
+    /// Returns true if `name` matches any tracked extra service
+    /// (case-insensitively), checking both the resolved set and the pending
+    /// queue. Read-only: does not drain the queue.
+    fn contains_service(&self, name: &str) -> bool {
+        if let Ok(set) = self.extra_services.lock() {
+            if set.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                return true;
+            }
+        }
+        if let Ok(queue) = self.extra_services_queue.lock() {
+            if let Some(ref q) = *queue {
+                if q.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn add_extra_services(
         &self,
         services: impl Iterator<Item = impl Deref<Target = str>>,
@@ -1771,6 +1790,16 @@ impl Config {
             return Vec::new();
         }
         self.extra_services_tracker.get_extra_services()
+    }
+
+    /// Returns true if an RC `service_target.service` value applies to this
+    /// tracer: it matches the primary service or any advertised extra service,
+    /// compared case-insensitively. Used to guard which Remote Config sampling
+    /// payloads this tracer applies (a config that advertised extra service is
+    /// legitimately ours; service-name case can differ from the UI).
+    pub(crate) fn rc_service_target_matches(&self, target_service: &str) -> bool {
+        target_service.eq_ignore_ascii_case(&self.service())
+            || self.extra_services_tracker.contains_service(target_service)
     }
 
     /// Check if remote configuration is enabled

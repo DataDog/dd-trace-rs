@@ -825,20 +825,24 @@ impl ProductHandler for ApmTracingHandler {
         // service's/env's policy. A `*` (or absent) component applies regardless.
         // Mismatch => ignore (no sampler mutation), mirroring dd-trace-py.
         if let Some(target) = &tracing_config.service_target {
-            let tracer_service = config.service();
+            // Only skip a config whose target is specific (non-`*`) AND does not
+            // apply to this tracer. Service matches the primary or any advertised
+            // extra service; both service and env are compared case-insensitively
+            // (the UI warns service-name case can differ). Being lenient here is
+            // deliberate: the guard must skip only configs that are definitely
+            // for another service/env, never a valid one for us.
             if let Some(svc) = target.service.as_deref() {
-                if svc != "*" && svc != &*tracer_service {
+                if svc != "*" && !config.rc_service_target_matches(svc) {
                     crate::dd_debug!(
-                        "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (tracer service is {:?})",
-                        svc,
-                        &*tracer_service
+                        "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (not this tracer's service or extra services)",
+                        svc
                     );
                     return Ok(());
                 }
             }
             if let Some(target_env) = target.env.as_deref() {
                 let tracer_env = config.env().unwrap_or("");
-                if target_env != "*" && target_env != tracer_env {
+                if target_env != "*" && !target_env.eq_ignore_ascii_case(tracer_env) {
                     crate::dd_debug!(
                         "RemoteConfigClient: ignoring APM_TRACING config targeting env {:?} (tracer env is {:?})",
                         target_env,
@@ -2811,6 +2815,44 @@ mod tests {
             config.trace_sampling_rules().len(),
             1,
             "payload without service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_case_insensitive_applies() {
+        // service/env case can differ from what the tracer reports (the UI warns
+        // about this); a case-only difference must still apply, not be skipped.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-case",
+            "service_target": {"service": "SVC-A", "env": "ENV-A"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "case-only service/env difference must still apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_extra_service_applies() {
+        // A config targeting an advertised extra service is legitimately ours and
+        // must apply (the tracer reports extra_services to the backend, which can
+        // deliver a config scoped to one of them).
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        config.add_extra_services(["svc-extra"].into_iter());
+        let payload = br#"{
+            "id": "rc-extra",
+            "service_target": {"service": "svc-extra", "env": "*"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "config for an advertised extra service must apply"
         );
     }
 }
