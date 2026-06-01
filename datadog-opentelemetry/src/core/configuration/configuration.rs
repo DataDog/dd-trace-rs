@@ -1712,11 +1712,13 @@ impl Config {
     /// active Remote Config override: locally-configured rules followed by an
     /// implicit catch-all that applies `DD_TRACE_SAMPLE_RATE`.
     ///
-    /// The catch-all is appended only when the env rate is finite and not the
-    /// default of 1.0 — a 1.0 catch-all would match every unmatched span at
-    /// 100% sampling, which is identical to having no catch-all (libdatadog's
-    /// fallback path samples at 1.0 when no rule matches), so we omit it to
-    /// avoid noisy `_dd.p.dm` tags on the wire.
+    /// The catch-all is appended only when `DD_TRACE_SAMPLE_RATE` is explicitly
+    /// set. Its default is unset (`None`), in which case nothing is appended and
+    /// libdatadog's no-rule fallback samples unmatched spans at 100%. An explicit
+    /// value — including `1.0` — does install the catch-all, so `DD_TRACE_RATE_LIMIT`
+    /// applies to otherwise-unmatched spans. The rate is already validated to a
+    /// finite value in `[0.0, 1.0]` at ingestion; the `is_finite` guard below is
+    /// belt-and-suspenders.
     pub(crate) fn effective_initial_rules(&self) -> Vec<libdd_sampling::SamplingRuleConfig> {
         let mut rules: Vec<libdd_sampling::SamplingRuleConfig> = self
             .local_trace_sampling_rules()
