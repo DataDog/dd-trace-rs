@@ -119,6 +119,8 @@ https = [
     "libdd-trace-utils/https",
     "libdd-telemetry/https",
     "libdd-common/https",
+    "opentelemetry-otlp?/reqwest-rustls",
+    "opentelemetry-otlp?/tls-roots",
 ]
 test-utils = [
     "libdd-data-pipeline/test-utils",
