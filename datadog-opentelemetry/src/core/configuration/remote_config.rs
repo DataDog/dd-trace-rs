@@ -200,6 +200,24 @@ where
 struct ApmTracingConfig {
     id: String,
     lib_config: LibConfig, // lib_config is a required property
+    /// The service/env this config targets. The backend RC predicate already
+    /// filters delivery by target, so this is a defense-in-depth guard: a
+    /// stale or mistargeted payload must never install another service's or
+    /// env's sampling policy on this tracer. A `*` (or absent) component
+    /// applies regardless of the tracer's value. Mirrors dd-trace-py/go.
+    #[serde(default)]
+    service_target: Option<ServiceTarget>,
+}
+
+/// `service_target` block of an APM_TRACING RC payload (apm-tracing.json). Both
+/// fields are optional here so a malformed/partial target degrades to "applies"
+/// for the missing component rather than erroring the whole update.
+#[derive(Debug, Clone, Deserialize)]
+struct ServiceTarget {
+    #[serde(default)]
+    service: Option<String>,
+    #[serde(default)]
+    env: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -800,6 +818,36 @@ impl ProductHandler for ApmTracingHandler {
     fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()> {
         let tracing_config: ApmTracingConfig = serde_json::from_slice(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
+
+        // Defense-in-depth target check: only apply a config whose service_target
+        // matches this tracer's service/env. The backend predicate already scopes
+        // delivery, but a stale or mistargeted payload must never install another
+        // service's/env's policy. A `*` (or absent) component applies regardless.
+        // Mismatch => ignore (no sampler mutation), mirroring dd-trace-py.
+        if let Some(target) = &tracing_config.service_target {
+            let tracer_service = config.service();
+            if let Some(svc) = target.service.as_deref() {
+                if svc != "*" && svc != &*tracer_service {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (tracer service is {:?})",
+                        svc,
+                        &*tracer_service
+                    );
+                    return Ok(());
+                }
+            }
+            if let Some(target_env) = target.env.as_deref() {
+                let tracer_env = config.env().unwrap_or("");
+                if target_env != "*" && target_env != tracer_env {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: ignoring APM_TRACING config targeting env {:?} (tracer env is {:?})",
+                        target_env,
+                        tracer_env
+                    );
+                    return Ok(());
+                }
+            }
+        }
 
         let lib = tracing_config.lib_config;
 
@@ -2672,5 +2720,97 @@ mod tests {
         assert_eq!(rules[0].name.as_deref(), Some("env_name"));
         assert_eq!(rules[1].sample_rate, 0.70);
         assert!(rules[1].name.is_none());
+    }
+
+    fn build_config_for_handler_with_target(service: &str, env: &str) -> Arc<Config> {
+        let mut builder = Config::builder();
+        builder.set_service(service.to_string());
+        builder.set_env(env.to_string());
+        Arc::new(builder.build())
+    }
+
+    #[test]
+    fn test_handler_service_target_match_applies() {
+        // A config whose service_target matches the tracer's service/env applies.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-target-match",
+            "service_target": {"service": "svc-a", "env": "env-a"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "matching service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_service_mismatch_ignored() {
+        // Codex fix: a config targeting a DIFFERENT service must never mutate
+        // this tracer's sampler state.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-other-svc",
+            "service_target": {"service": "svc-b", "env": "env-a"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            0,
+            "config for another service must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_env_mismatch_ignored() {
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-other-env",
+            "service_target": {"service": "svc-a", "env": "env-b"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            0,
+            "config for another env must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_wildcard_applies() {
+        // A wildcard ("*") target applies regardless of the tracer's service/env.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-wildcard",
+            "service_target": {"service": "*", "env": "*"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "wildcard service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_absent_service_target_applies() {
+        // Absent service_target (e.g. older payloads) must still apply — the
+        // target check only gates when a specific, non-wildcard target is set.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-no-target",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "payload without service_target must apply"
+        );
     }
 }
