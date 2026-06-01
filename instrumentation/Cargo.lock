@@ -1188,9 +1188,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f797cc02108b5c4345454a4e179f05de472e483f4b2acc1981eb97f0ce4f2880"
+checksum = "df229b55274db81b8a85a1b9ab14663af070358f39017ab68d26a3aada535db6"
 dependencies = [
  "libdd-common",
  "lru",
