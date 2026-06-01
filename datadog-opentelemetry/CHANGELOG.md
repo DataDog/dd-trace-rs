@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Support adjusting trace sampling from Remote Configuration — sampling rules (including tag-qualified rules) and `tracing_sampling_rate` — in https://github.com/DataDog/dd-trace-rs/pull/227
+
 ## 0.3.3 (May 06, 2026)
 
 - Fix config, use DD_AGENT_HOST and DD_TRACE_AGENT_PORT to derive agent url if it is an empty string in env in https://github.com/DataDog/dd-trace-rs/pull/208

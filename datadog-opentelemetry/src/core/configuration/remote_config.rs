@@ -193,53 +193,6 @@ where
     Ok(Some(serde_json::Value::deserialize(deserializer)?))
 }
 
-/// Normalizes the `tags` field on each sampling rule from the RC wire shape
-/// (list of `{key, value_glob}` objects) into the shape `libdd-sampling`'s
-/// `SamplingRuleConfig` accepts (a `{key: value}` map). Map-shape tags are
-/// left untouched. Rules without `tags`, or with `tags` of an unexpected
-/// type, are left untouched (libdatadog's parse will reject if necessary).
-///
-/// If any list entry is malformed (missing `key`/`value_glob`, or non-string
-/// values), the rule's tags are left in their original (list) shape. This
-/// fails closed: libdatadog will reject the list-shape parse, the RC update
-/// is dropped, and the agent is informed via apply_state=3. We deliberately
-/// do not drop bad entries silently — doing so could broaden a tag-constrained
-/// rule into a less-constrained (or fully wildcard) rule.
-fn normalize_rc_tags(rules: &mut [serde_json::Value]) {
-    for rule in rules {
-        let Some(obj) = rule.as_object_mut() else {
-            continue;
-        };
-        let Some(tags) = obj.get("tags") else {
-            continue;
-        };
-        let serde_json::Value::Array(entries) = tags else {
-            // Map-shape (or null/etc.) — leave it for libdatadog to handle.
-            continue;
-        };
-        let mut map = serde_json::Map::with_capacity(entries.len());
-        let mut all_ok = true;
-        for entry in entries {
-            let (Some(key), Some(value)) = (
-                entry.get("key").and_then(|v| v.as_str()),
-                entry.get("value_glob").and_then(|v| v.as_str()),
-            ) else {
-                all_ok = false;
-                break;
-            };
-            map.insert(
-                key.to_string(),
-                serde_json::Value::String(value.to_string()),
-            );
-        }
-        if all_ok {
-            obj.insert("tags".to_string(), serde_json::Value::Object(map));
-        }
-        // else: leave the original list-shape tags in place; libdatadog's
-        // parse will reject and the RC update is rejected as a whole.
-    }
-}
-
 /// Configuration payload for APM tracing
 /// Based on the apm-tracing.json schema from dd-go
 /// See: https://github.com/DataDog/dd-go/blob/prod/remote-config/apps/rc-schema-validation/schemas/apm-tracing.json
@@ -920,9 +873,6 @@ impl ProductHandler for ApmTracingHandler {
                     }
                     None => Vec::new(),
                 };
-
-                // Normalize RC list-shape tags into the map shape libdd-sampling accepts.
-                normalize_rc_tags(&mut rules);
 
                 // Multi-source precedence:
                 // - If RC delivered explicit rules, env rules are replaced.
@@ -2446,8 +2396,10 @@ mod tests {
 
     #[test]
     fn test_handler_rc_rules_with_list_tags_applied() {
-        // Bug B regression guard: RC sends tags as list-of-objects; the handler
-        // must normalize to a map before passing to libdatadog.
+        // RC sends tags as a list-of-objects ([{key, value_glob}]); libdd-sampling
+        // (>=2.1.0) parses that wire shape natively, so no in-tracer normalization
+        // is needed. Regression guard: a list-shape tagged rule must apply with its
+        // tags preserved as a map.
         let config = build_config_for_handler();
         let payload = br#"{
             "id": "rc-list-tags",
@@ -2474,60 +2426,6 @@ mod tests {
             rules[0].tags.get("region").map(String::as_str),
             Some("us-east-1")
         );
-    }
-
-    #[test]
-    fn test_normalize_rc_tags_passes_through_map_shape() {
-        // Map-shape tags must be left untouched.
-        let mut rules: Vec<serde_json::Value> = vec![
-            serde_json::json!({"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}),
-        ];
-        normalize_rc_tags(&mut rules);
-        assert_eq!(
-            serde_json::Value::Array(rules),
-            serde_json::json!([
-                {"sample_rate": 0.5, "service": "svc", "tags": {"env": "prod"}}
-            ])
-        );
-    }
-
-    #[test]
-    fn test_normalize_rc_tags_converts_list_shape() {
-        let mut rules: Vec<serde_json::Value> = vec![serde_json::json!({
-            "sample_rate": 0.5,
-            "tags": [
-                {"key": "env", "value_glob": "prod"},
-                {"key": "region", "value_glob": "us-east-1"}
-            ]
-        })];
-        normalize_rc_tags(&mut rules);
-        let tags = rules[0]["tags"]
-            .as_object()
-            .expect("tags should be an object after normalization");
-        assert_eq!(tags.get("env").and_then(|v| v.as_str()), Some("prod"));
-        assert_eq!(
-            tags.get("region").and_then(|v| v.as_str()),
-            Some("us-east-1")
-        );
-    }
-
-    #[test]
-    fn test_normalize_rc_tags_leaves_malformed_list_untouched() {
-        // If any list entry is malformed (missing key/value_glob), the rule's
-        // tags are left in their original list shape — libdatadog's parse will
-        // then reject the update as a whole. We must not drop bad entries
-        // silently, which could broaden a tag-constrained rule.
-        let original = serde_json::json!({
-            "sample_rate": 0.5,
-            "tags": [
-                {"key": "env", "value_glob": "prod"},
-                {"key": "region"}
-            ]
-        });
-        let mut rules: Vec<serde_json::Value> = vec![original.clone()];
-        normalize_rc_tags(&mut rules);
-        // Tags remain in the original (rejected) list shape.
-        assert_eq!(rules[0], original);
     }
 
     #[test]
