@@ -808,6 +808,51 @@ impl Display for ServiceName {
     }
 }
 
+/// Controls which baggage keys are promoted to span tags with a `"baggage."` prefix.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BaggageTagKeyFilter {
+    /// Empty string: no baggage keys are added as span tags.
+    Disabled,
+    /// `"*"`: every baggage key is added as a span tag.
+    All,
+    /// A non-empty, non-wildcard list of exact (case-sensitive) baggage key names.
+    Keys(Vec<String>),
+}
+
+impl std::str::FromStr for BaggageTagKeyFilter {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            Ok(BaggageTagKeyFilter::Disabled)
+        } else if trimmed == "*" {
+            Ok(BaggageTagKeyFilter::All)
+        } else {
+            let keys: Vec<String> = trimmed
+                .split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect();
+            if keys.is_empty() {
+                Ok(BaggageTagKeyFilter::Disabled)
+            } else {
+                Ok(BaggageTagKeyFilter::Keys(keys))
+            }
+        }
+    }
+}
+
+impl ConfigurationValueProvider for BaggageTagKeyFilter {
+    fn get_configuration_value(&self) -> String {
+        match self {
+            BaggageTagKeyFilter::Disabled => String::new(),
+            BaggageTagKeyFilter::All => "*".to_string(),
+            BaggageTagKeyFilter::Keys(keys) => keys.join(","),
+        }
+    }
+}
+
 impl ConfigurationValueProvider for Vec<(String, String)> {
     fn get_configuration_value(&self) -> String {
         self.iter()
@@ -972,6 +1017,9 @@ pub struct Config {
     trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_extract_first: ConfigItem<bool>,
+
+    /// Which baggage keys are promoted to span tags with a `"baggage."` prefix.
+    trace_baggage_tag_keys: ConfigItem<BaggageTagKeyFilter>,
 
     /// Whether remote configuration is enabled
     remote_config_enabled: ConfigItem<bool>,
@@ -1163,6 +1211,7 @@ impl Config {
             ),
             trace_propagation_extract_first: cisu
                 .update_parsed(default.trace_propagation_extract_first),
+            trace_baggage_tag_keys: cisu.update_parsed(default.trace_baggage_tag_keys),
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
@@ -1238,6 +1287,7 @@ impl Config {
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
             &self.trace_propagation_extract_first,
+            &self.trace_baggage_tag_keys,
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
@@ -1538,6 +1588,11 @@ impl Config {
         *self.trace_propagation_extract_first.value()
     }
 
+    /// Returns which baggage keys should be promoted to span tags.
+    pub fn trace_baggage_tag_keys(&self) -> &BaggageTagKeyFilter {
+        self.trace_baggage_tag_keys.value()
+    }
+
     pub(crate) fn update_sampling_rules_from_remote(
         &self,
         rules_json: &str,
@@ -1740,6 +1795,7 @@ impl std::fmt::Debug for Config {
                 "trace_propagation_extract_first",
                 &self.trace_propagation_extract_first,
             )
+            .field("trace_baggage_tag_keys", &self.trace_baggage_tag_keys)
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_enabled", &self.remote_config_enabled)
             .field(
@@ -1859,6 +1915,14 @@ fn default_config() -> Config {
         trace_propagation_extract_first: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
             false,
+        ),
+        trace_baggage_tag_keys: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_BAGGAGE_TAG_KEYS,
+            BaggageTagKeyFilter::Keys(vec![
+                "user.id".to_string(),
+                "session.id".to_string(),
+                "account.id".to_string(),
+            ]),
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: ConfigItem::new(
@@ -2401,6 +2465,16 @@ impl ConfigBuilder {
     /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
     pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
         self.config.trace_propagation_extract_first.set_code(first);
+        self
+    }
+
+    /// Controls which baggage keys are promoted to span tags with a `"baggage."` prefix.
+    ///
+    /// **Default**: `BaggageTagKeyFilter::Keys(["user.id", "session.id", "account.id"])`
+    ///
+    /// Env variable: `DD_TRACE_BAGGAGE_TAG_KEYS`
+    pub fn set_trace_baggage_tag_keys(&mut self, filter: BaggageTagKeyFilter) -> &mut Self {
+        self.config.trace_baggage_tag_keys.set_code(filter);
         self
     }
 
