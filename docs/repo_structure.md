@@ -19,7 +19,8 @@ dd-trace-rs/
 │   └── examples/
 │       ├── propagator/          # HTTP server example
 │       └── simple_tracing/      # Minimal tracing example
-├── scripts/                     # Release and license automation
+├── scripts/                     # Release, license, and build automation
+│   └── pack-system-tests-artifact.sh  # Stable entry point for system-test builds
 ├── docs/                        # Architecture documentation
 ├── .config/                     # Tool config (commitlint, nextest profiles)
 └── .github/                     # CI workflows and issue templates
@@ -35,6 +36,28 @@ are always public.
 - `logs-grpc` / `logs-http` — OTLP transport for logs (default: grpc)
 - `test-utils` — exposes internal helpers and pulls in test dependencies; never enable in production
   builds
+
+## System-test build entry point
+
+`scripts/pack-system-tests-artifact.sh` is the stable entry point for packaging workspace source
+for [DataDog/system-tests](https://github.com/DataDog/system-tests).
+
+System tests build `ddtrace-rs-client` inside Docker against a local copy of `datadog-opentelemetry`
+(path dependency, not a published crate). The script reads `[workspace] members` from `Cargo.toml`,
+expands any glob patterns, deduplicates nested paths, and copies the unique root directories along
+with the workspace-level files Cargo needs. New workspace crates are picked up automatically.
+
+```text
+# Pack source into ./binaries/dd-trace-rs (default)
+./scripts/pack-system-tests-artifact.sh
+
+# Specify a custom output directory
+./scripts/pack-system-tests-artifact.sh /path/to/output
+```
+
+CI runs this in the `build-artifacts` job and uploads the result as the `system_tests_binaries`
+artifact. The system-test Dockerfile copies the source into the container and compiles
+`ddtrace-rs-client` against it.
 
 ## datadog-opentelemetry
 

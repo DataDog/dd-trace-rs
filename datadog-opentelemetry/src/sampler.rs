@@ -45,13 +45,7 @@ impl Sampler {
         // This is an Option to allow benchmarking different parts of sampling
         trace_registry: Option<TraceRegistry>,
     ) -> Self {
-        let internal_configs: Vec<libdd_sampling::SamplingRuleConfig> = cfg
-            .trace_sampling_rules()
-            .iter()
-            .cloned()
-            .map(Into::into)
-            .collect();
-        let rules = SamplingRule::from_configs(internal_configs);
+        let rules = SamplingRule::from_configs(cfg.effective_initial_rules());
         let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit());
         Self {
             cfg,

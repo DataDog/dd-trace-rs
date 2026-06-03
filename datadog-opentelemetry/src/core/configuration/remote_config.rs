@@ -27,11 +27,19 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3); // lowest timeout with
 struct ClientCapabilities(u64);
 
 impl ClientCapabilities {
-    /// APM_TRACING_SAMPLE_RULES capability bit position
+    /// APM_TRACING_SAMPLE_RATE — bit 12. Tells the backend the tracer
+    /// honors RC's `tracing_sampling_rate` (global rate). Without this,
+    /// Datadog's APM Sampling UI marks the service as "No remotely
+    /// configurable tracer detected" for rate-only configs even when
+    /// the tracer-side logic is fully wired up.
+    const APM_TRACING_SAMPLE_RATE: u64 = 1 << 12;
+
+    /// APM_TRACING_SAMPLE_RULES — bit 29. Tells the backend the tracer
+    /// honors RC's `tracing_sampling_rules`.
     const APM_TRACING_SAMPLE_RULES: u64 = 1 << 29;
 
     fn new() -> Self {
-        Self(Self::APM_TRACING_SAMPLE_RULES)
+        Self(Self::APM_TRACING_SAMPLE_RATE | Self::APM_TRACING_SAMPLE_RULES)
     }
 
     /// Encode capabilities as base64 string
@@ -192,6 +200,24 @@ where
 struct ApmTracingConfig {
     id: String,
     lib_config: LibConfig, // lib_config is a required property
+    /// The service/env this config targets. The backend RC predicate already
+    /// filters delivery by target, so this is a defense-in-depth guard: a
+    /// stale or mistargeted payload must never install another service's or
+    /// env's sampling policy on this tracer. A `*` (or absent) component
+    /// applies regardless of the tracer's value. Mirrors dd-trace-py/go.
+    #[serde(default)]
+    service_target: Option<ServiceTarget>,
+}
+
+/// `service_target` block of an APM_TRACING RC payload (apm-tracing.json). Both
+/// fields are optional here so a malformed/partial target degrades to "applies"
+/// for the missing component rather than erroring the whole update.
+#[derive(Debug, Clone, Deserialize)]
+struct ServiceTarget {
+    #[serde(default)]
+    service: Option<String>,
+    #[serde(default)]
+    env: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -202,7 +228,17 @@ struct LibConfig {
         rename = "tracing_sampling_rules"
     )]
     tracing_sampling_rules: Option<serde_json::Value>,
-    // Add other APM tracing config fields as needed (e.g., tracing_header_tags, etc.)
+
+    /// Global trace sample rate (0.0–1.0) pushed via Remote Config.
+    /// `None` means the field was absent (no change intended).
+    /// `Some(Value::Null)` means the field was explicitly `null` (clear the override).
+    /// `Some(Value::Number)` means a concrete rate was provided.
+    #[serde(
+        deserialize_with = "missing_field_and_null_value",
+        default,
+        rename = "tracing_sampling_rate"
+    )]
+    tracing_sampling_rate: Option<serde_json::Value>,
 }
 
 /// TUF targets metadata
@@ -780,41 +816,163 @@ struct ApmTracingHandler;
 
 impl ProductHandler for ApmTracingHandler {
     fn process_config(&self, config_json: &[u8], config: &Arc<Config>) -> Result<()> {
-        // Parse the config to extract sampling rules as raw JSON
         let tracing_config: ApmTracingConfig = serde_json::from_slice(config_json)
             .map_err(|e| anyhow::anyhow!("Failed to parse APM tracing config: {}", e))?;
 
-        // Extract sampling rules if present
-        if let Some(rules_value) = tracing_config.lib_config.tracing_sampling_rules {
-            if !rules_value.is_null() {
-                // Convert the raw JSON value to string for the config method
-                let rules_json = serde_json::to_string(&rules_value)
-                    .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
+        // Defense-in-depth target check: only apply a config whose service_target
+        // matches this tracer's service/env. The backend predicate already scopes
+        // delivery, but a stale or mistargeted payload must never install another
+        // service's/env's policy. A `*` (or absent) component applies regardless.
+        // Mismatch => ignore (no sampler mutation), mirroring dd-trace-py.
+        if let Some(target) = &tracing_config.service_target {
+            // Only skip a config whose target is specific (non-`*`) AND does not
+            // apply to this tracer. Service matches the primary or any advertised
+            // extra service; both service and env are compared case-insensitively
+            // (the UI warns service-name case can differ). Being lenient here is
+            // deliberate: the guard must skip only configs that are definitely
+            // for another service/env, never a valid one for us.
+            if let Some(svc) = target.service.as_deref() {
+                if svc != "*" && !config.rc_service_target_matches(svc) {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (not this tracer's service or extra services)",
+                        svc
+                    );
+                    return Ok(());
+                }
+            }
+            if let Some(target_env) = target.env.as_deref() {
+                let tracer_env = config.env().unwrap_or("");
+                if target_env != "*" && !target_env.eq_ignore_ascii_case(tracer_env) {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: ignoring APM_TRACING config targeting env {:?} (tracer env is {:?})",
+                        target_env,
+                        tracer_env
+                    );
+                    return Ok(());
+                }
+            }
+        }
 
-                match config.update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
-                {
-                    Ok(()) => {
-                        crate::dd_debug!(
-                            "RemoteConfigClient: Applied sampling rules from remote config"
-                        );
+        let lib = tracing_config.lib_config;
+
+        let any_field_present =
+            lib.tracing_sampling_rules.is_some() || lib.tracing_sampling_rate.is_some();
+
+        // tracing_sampling_rate must be either null (clear) or a JSON number.
+        // Any other present-but-non-numeric value (string, bool, object) is a
+        // malformed payload — reject rather than silently treating it as a
+        // clear, which would wipe an active remote sampling policy.
+        let rate: Option<f64> = match &lib.tracing_sampling_rate {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::Number(n)) => match n.as_f64() {
+                Some(r) if r.is_finite() && (0.0..=1.0).contains(&r) => Some(r),
+                Some(r) => {
+                    return Err(anyhow::anyhow!(
+                        "tracing_sampling_rate must be in [0.0, 1.0], got: {}",
+                        r
+                    ));
+                }
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "tracing_sampling_rate is not representable as f64"
+                    ));
+                }
+            },
+            Some(other) => {
+                return Err(anyhow::anyhow!(
+                    "tracing_sampling_rate must be a JSON number or null, got: {}",
+                    other
+                ));
+            }
+        };
+        let rules_value = match lib.tracing_sampling_rules {
+            Some(v) if !v.is_null() => Some(v),
+            _ => None,
+        };
+
+        match (rules_value, rate) {
+            (None, None) => {
+                if any_field_present {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: APM tracing config received with null sampling fields, clearing remote override"
+                    );
+                    config.clear_remote_sampling_rules(Some(tracing_config.id));
+                } else {
+                    crate::dd_debug!(
+                        "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules or tracing_sampling_rate present"
+                    );
+                }
+            }
+            (rules_opt, rate_opt) => {
+                // An explicit empty `tracing_sampling_rules: []` is treated the
+                // same as null/absent: RC has no rules to deliver, so env-side
+                // rules survive. Operators clear remote rules by sending
+                // `tracing_sampling_rules: null` (the conventional RC clear);
+                // an empty array is an unusual edge case and the lenient
+                // interpretation is safer than wiping env config silently.
+                let rc_has_explicit_rules = matches!(
+                    rules_opt,
+                    Some(serde_json::Value::Array(ref arr)) if !arr.is_empty()
+                );
+
+                let mut rules: Vec<serde_json::Value> = match rules_opt {
+                    Some(serde_json::Value::Array(arr)) => arr,
+                    Some(other) => {
+                        return Err(anyhow::anyhow!(
+                            "tracing_sampling_rules must be a JSON array, got: {}",
+                            other
+                        ));
                     }
-                    Err(e) => {
-                        crate::dd_debug!(
-                            "RemoteConfigClient: Failed to update sampling rules: {}",
-                            e
-                        );
+                    None => Vec::new(),
+                };
+
+                // Multi-source precedence:
+                // - If RC delivered explicit rules, env rules are replaced.
+                // - If RC delivered only a rate, env rules survive and apply in front of the
+                //   synthetic catch-all.
+                if !rc_has_explicit_rules {
+                    let env_rules = config.local_trace_sampling_rules();
+                    if !env_rules.is_empty() {
+                        let env_json = serde_json::to_value(&*env_rules).map_err(|e| {
+                            anyhow::anyhow!("Failed to serialize env sampling rules: {}", e)
+                        })?;
+                        let serde_json::Value::Array(env_arr) = env_json else {
+                            return Err(anyhow::anyhow!(
+                                "BUG: serialized env sampling rules are not a JSON array"
+                            ));
+                        };
+                        let mut composed = env_arr;
+                        composed.append(&mut rules);
+                        rules = composed;
                     }
                 }
-            } else {
-                crate::dd_debug!(
-                    "RemoteConfigClient: APM tracing config received but tracing_sampling_rules is null"
-                );
-                config.clear_remote_sampling_rules(Some(tracing_config.id));
+
+                // Effective catch-all rate: RC rate wins; otherwise fall back
+                // to DD_TRACE_SAMPLE_RATE if it's set (Option distinguishes
+                // unset from explicit 1.0).
+                let env_rate = config.trace_sample_rate();
+                let catch_all_rate: Option<f64> = match rate_opt {
+                    Some(r) => Some(r),
+                    None => env_rate.filter(|r| r.is_finite()),
+                };
+                if let Some(r) = catch_all_rate {
+                    // The global RC rate is a "local-user-like" fallback: it must
+                    // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC).
+                    // Omit `provenance`; libdd-sampling deserializes it as
+                    // "default" via its serde default, which maps to DM -3.
+                    rules.push(serde_json::json!({ "sample_rate": r }));
+                }
+
+                let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
+
+                config
+                    .update_sampling_rules_from_remote(&rules_json, Some(tracing_config.id))
+                    .map_err(|e| {
+                        anyhow::anyhow!("Failed to update sampling rules from remote: {}", e)
+                    })?;
+                crate::dd_debug!("RemoteConfigClient: Applied sampling rules from remote config");
             }
-        } else {
-            crate::dd_debug!(
-                "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules present"
-            );
         }
 
         Ok(())
@@ -887,9 +1045,14 @@ fn extract_product_and_id_from_path(path: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::configuration::SamplingRuleConfig;
     use pretty_assertions::assert_eq;
     use proptest::prelude::*;
     use test_case::test_case;
+
+    fn build_config_for_handler() -> Arc<Config> {
+        Arc::new(Config::builder().build())
+    }
 
     #[test]
     fn test_client_capabilities() {
@@ -910,8 +1073,17 @@ mod tests {
         bytes[offset..].copy_from_slice(&decoded);
         let value = u64::from_be_bytes(bytes);
 
-        // Verify the capability bit is set
-        assert_eq!(value, ClientCapabilities::APM_TRACING_SAMPLE_RULES);
+        // Both APM_TRACING_SAMPLE_RATE (bit 12) and APM_TRACING_SAMPLE_RULES
+        // (bit 29) must be advertised; the backend uses each independently to
+        // decide which RC config types it will offer in the Datadog UI for
+        // this service.
+        let expected = ClientCapabilities::APM_TRACING_SAMPLE_RATE
+            | ClientCapabilities::APM_TRACING_SAMPLE_RULES;
+        assert_eq!(value, expected);
+        assert_eq!(
+            value & ClientCapabilities::APM_TRACING_SAMPLE_RATE,
+            ClientCapabilities::APM_TRACING_SAMPLE_RATE
+        );
         assert_eq!(
             value & ClientCapabilities::APM_TRACING_SAMPLE_RULES,
             ClientCapabilities::APM_TRACING_SAMPLE_RULES
@@ -2120,5 +2292,567 @@ mod tests {
             serde_json::from_str(config_json).expect("Json should be parsed");
 
         assert!(tracing_config.lib_config.tracing_sampling_rules.is_none());
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_concrete() {
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rate": 0.25}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert_eq!(
+            tracing_config.lib_config.tracing_sampling_rate,
+            Some(serde_json::json!(0.25))
+        );
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_null() {
+        let config_json = r#"{"id": "42", "lib_config": {"tracing_sampling_rate": null}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert_eq!(
+            tracing_config.lib_config.tracing_sampling_rate,
+            Some(serde_json::Value::Null)
+        );
+    }
+
+    #[test]
+    fn test_deserialize_tracing_sampling_rate_missing() {
+        // Field absent entirely.
+        let config_json = r#"{"id": "42", "lib_config": {}}"#;
+        let tracing_config: ApmTracingConfig = serde_json::from_str(config_json).unwrap();
+        assert!(tracing_config.lib_config.tracing_sampling_rate.is_none());
+    }
+
+    #[test]
+    fn test_handler_applies_only_rate_as_wildcard_rule() {
+        // RC sends only tracing_sampling_rate -> handler installs a single
+        // wildcard rule with the libdd default provenance ("default", DM -3).
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-rate-only",
+            "lib_config": {"tracing_sampling_rate": 0.25}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(
+            rules.len(),
+            1,
+            "expected exactly one synthesized wildcard rule"
+        );
+        assert_eq!(rules[0].sample_rate, 0.25);
+        assert!(rules[0].service.is_none());
+        assert!(rules[0].name.is_none());
+        assert!(rules[0].resource.is_none());
+        assert!(rules[0].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_synthetic_rate_rule_uses_default_provenance() {
+        // The synthetic catch-all built from RC's tracing_sampling_rate must
+        // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC). Assert via
+        // the callback path: libdatadog converts the JSON to its internal
+        // SamplingRuleConfig, whose `provenance` must be the libdd default
+        // ("default"), not "dynamic".
+        use crate::core::configuration::RemoteConfigUpdate;
+        let config = build_config_for_handler();
+        let received = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = received.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        let payload = br#"{
+            "id": "rc-rate-only-provenance",
+            "lib_config": {"tracing_sampling_rate": 0.25}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let got = received.lock().unwrap();
+        // The callback receives the full composed chain. The catch-all is the
+        // last entry; it must carry the libdd default provenance ("default").
+        let catch_all = got.last().expect("expected at least one rule");
+        assert_eq!(catch_all.sample_rate, 0.25);
+        assert_eq!(
+            catch_all.provenance, "default",
+            "synthetic catch-all must use default provenance"
+        );
+    }
+
+    #[test]
+    fn test_handler_appends_rate_after_rules() {
+        // RC sends both rules and a rate -> rate becomes the last (wildcard) rule.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-both",
+            "lib_config": {
+                "tracing_sampling_rate": 0.1,
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.9, "service": "auth"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].sample_rate, 0.9);
+        assert_eq!(rules[0].service.as_deref(), Some("auth"));
+        assert_eq!(rules[1].sample_rate, 0.1);
+        assert!(rules[1].service.is_none());
+        assert!(rules[1].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_null_fields_clear_prior_override() {
+        // 1. Install rules via RC.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // 2. Send explicit null for both fields -> override cleared.
+        let clear = br#"{
+            "id": "rc-clear",
+            "lib_config": {
+                "tracing_sampling_rate": null,
+                "tracing_sampling_rules": null
+            }
+        }"#;
+        ApmTracingHandler.process_config(clear, &config).unwrap();
+        // After clearing, trace_sampling_rules() returns the local-config default
+        // (empty unless DD_TRACE_SAMPLING_RULES is set in the test environment).
+        assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
+
+    #[test]
+    fn test_handler_null_rate_only_clears_prior_override() {
+        // Explicit null on tracing_sampling_rate (with tracing_sampling_rules absent)
+        // must clear a prior remote override.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        let clear = br#"{
+            "id": "rc-clear",
+            "lib_config": {"tracing_sampling_rate": null}
+        }"#;
+        ApmTracingHandler.process_config(clear, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
+
+    #[test]
+    fn test_handler_rc_rules_with_list_tags_applied() {
+        // RC sends tags as a list-of-objects ([{key, value_glob}]); libdd-sampling
+        // (>=2.1.0) parses that wire shape natively, so no in-tracer normalization
+        // is needed. Regression guard: a list-shape tagged rule must apply with its
+        // tags preserved as a map.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-list-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.5,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region", "value_glob": "us-east-1"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.5);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[0].tags.get("env").map(String::as_str), Some("prod"));
+        assert_eq!(
+            rules[0].tags.get("region").map(String::as_str),
+            Some("us-east-1")
+        );
+    }
+
+    #[test]
+    fn test_handler_malformed_tags_rejects_update() {
+        // Bug B fail-closed guard: a sampling rule with malformed list-shape
+        // tags must not be installed in a broadened form. With the prior
+        // override of sample_rate=0.5 in place, sending a rule with one bad
+        // tag entry must leave the prior override intact.
+        let config = build_config_for_handler();
+        // 1. Install a working override.
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // 2. Send a rule with a malformed tag entry.
+        let bad = br#"{
+            "id": "rc-bad-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.0,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        // The libdatadog parse rejects list-shape tags, so process_config
+        // returns Err (post-Codex HIGH fix). The key invariant is that the
+        // prior remote override is not overwritten or cleared.
+        let result = ApmTracingHandler.process_config(bad, &config);
+        assert!(result.is_err(), "malformed tags must propagate as Err");
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 1, "prior override must remain installed");
+        assert_eq!(rules[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_handler_malformed_tags_returns_error_to_dispatcher() {
+        // After the fix for the Codex HIGH finding: when libdatadog rejects the
+        // composed JSON (e.g., because the synthetic catch-all rule's tags were
+        // left in list-shape due to a malformed entry), process_config returns
+        // Err so the RC dispatcher records apply_state=3 and the bad target is
+        // not cached.
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-bad-tags",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {
+                        "sample_rate": 0.5,
+                        "service": "svc",
+                        "tags": [
+                            {"key": "env", "value_glob": "prod"},
+                            {"key": "region"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "malformed tags must propagate as Err");
+    }
+
+    #[test]
+    fn test_handler_rejects_negative_rate() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-neg-rate",
+            "lib_config": {"tracing_sampling_rate": -0.1}
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "negative rate must be rejected");
+    }
+
+    #[test]
+    fn test_handler_rejects_rate_above_one() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-high-rate",
+            "lib_config": {"tracing_sampling_rate": 1.5}
+        }"#;
+        let result = ApmTracingHandler.process_config(payload, &config);
+        assert!(result.is_err(), "rate > 1.0 must be rejected");
+    }
+
+    #[test]
+    fn test_handler_non_numeric_rate_rejects_update() {
+        // A schema-drifted rate (e.g. string) must be rejected as a malformed
+        // payload, not silently treated as a clear that would wipe an active
+        // remote override.
+        let config = build_config_for_handler();
+        let install = br#"{
+            "id": "rc-install",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(install, &config).unwrap();
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        let bad = br#"{
+            "id": "rc-bad-rate",
+            "lib_config": {"tracing_sampling_rate": "0.5"}
+        }"#;
+        let result = ApmTracingHandler.process_config(bad, &config);
+        assert!(result.is_err(), "non-numeric rate must be rejected");
+        // Prior override survives.
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.5);
+    }
+
+    #[test]
+    fn test_handler_rate_only_preserves_env_rules() {
+        // When RC delivers only tracing_sampling_rate (no rules), env-configured
+        // sampling rules must still apply for matching spans. Composed chain:
+        // [env_rules..., catch_all(rc_rate)].
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-rate-only-with-env-rules",
+            "lib_config": {"tracing_sampling_rate": 0.70}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected env rule + synthetic catch-all");
+        assert_eq!(rules[0].sample_rate, 0.55);
+        assert_eq!(rules[0].name.as_deref(), Some("env_name"));
+        assert_eq!(rules[1].sample_rate, 0.70);
+        assert!(rules[1].name.is_none());
+        assert!(rules[1].service.is_none());
+        assert!(rules[1].resource.is_none());
+        assert!(rules[1].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_rc_rules_replace_env_rules() {
+        // Contract: when RC delivers tracing_sampling_rules (with or without a
+        // rate), env rules are fully replaced. RC rules + catch-all(rc_rate).
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-rules-replace-env",
+            "lib_config": {
+                "tracing_sampling_rate": 0.9,
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.8, "service": "svc", "provenance": "customer"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(
+            rules.len(),
+            2,
+            "env rule must be excluded when RC has rules"
+        );
+        assert_eq!(rules[0].sample_rate, 0.8);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[1].sample_rate, 0.9);
+        assert!(rules[1].service.is_none());
+        assert!(rules.iter().all(|r| r.name.as_deref() != Some("env_name")));
+    }
+
+    #[test]
+    fn test_handler_rc_rules_only_falls_back_to_env_rate_catch_all() {
+        // RC delivers rules without a rate; DD_TRACE_SAMPLE_RATE is set. The
+        // composed chain should be [rc_rules..., catch_all(env_rate)] so
+        // unmatched spans still get sampled at env_rate.
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(0.1);
+        let config = Arc::new(builder.build());
+
+        let payload = br#"{
+            "id": "rc-rules-only-with-env-rate",
+            "lib_config": {
+                "tracing_sampling_rules": [
+                    {"sample_rate": 0.8, "service": "svc", "provenance": "customer"}
+                ]
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected rc rule + env-rate catch-all");
+        assert_eq!(rules[0].sample_rate, 0.8);
+        assert_eq!(rules[0].service.as_deref(), Some("svc"));
+        assert_eq!(rules[1].sample_rate, 0.1);
+        assert!(rules[1].service.is_none());
+    }
+
+    #[test]
+    fn test_handler_empty_rc_rules_array_preserves_env_rules() {
+        // Contract: an explicit empty `tracing_sampling_rules: []` is treated as
+        // "RC has no rules" — env rules survive. Operators clear RC rules by
+        // sending `tracing_sampling_rules: null`. This test locks that behavior.
+        let env_rule = SamplingRuleConfig {
+            sample_rate: 0.55,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        };
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![env_rule.clone()])
+                .build(),
+        );
+
+        let payload = br#"{
+            "id": "rc-empty-rules",
+            "lib_config": {
+                "tracing_sampling_rate": 0.70,
+                "tracing_sampling_rules": []
+            }
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+
+        let rules = config.trace_sampling_rules().to_vec();
+        assert_eq!(rules.len(), 2, "expected env rule + synthetic catch-all");
+        assert_eq!(rules[0].sample_rate, 0.55);
+        assert_eq!(rules[0].name.as_deref(), Some("env_name"));
+        assert_eq!(rules[1].sample_rate, 0.70);
+        assert!(rules[1].name.is_none());
+    }
+
+    fn build_config_for_handler_with_target(service: &str, env: &str) -> Arc<Config> {
+        let mut builder = Config::builder();
+        builder.set_service(service.to_string());
+        builder.set_env(env.to_string());
+        Arc::new(builder.build())
+    }
+
+    #[test]
+    fn test_handler_service_target_match_applies() {
+        // A config whose service_target matches the tracer's service/env applies.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-target-match",
+            "service_target": {"service": "svc-a", "env": "env-a"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "matching service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_service_mismatch_ignored() {
+        // Codex fix: a config targeting a DIFFERENT service must never mutate
+        // this tracer's sampler state.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-other-svc",
+            "service_target": {"service": "svc-b", "env": "env-a"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            0,
+            "config for another service must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_env_mismatch_ignored() {
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-other-env",
+            "service_target": {"service": "svc-a", "env": "env-b"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            0,
+            "config for another env must be ignored"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_wildcard_applies() {
+        // A wildcard ("*") target applies regardless of the tracer's service/env.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-wildcard",
+            "service_target": {"service": "*", "env": "*"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "wildcard service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_absent_service_target_applies() {
+        // Absent service_target (e.g. older payloads) must still apply — the
+        // target check only gates when a specific, non-wildcard target is set.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-no-target",
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "payload without service_target must apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_case_insensitive_applies() {
+        // service/env case can differ from what the tracer reports (the UI warns
+        // about this); a case-only difference must still apply, not be skipped.
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        let payload = br#"{
+            "id": "rc-case",
+            "service_target": {"service": "SVC-A", "env": "ENV-A"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "case-only service/env difference must still apply"
+        );
+    }
+
+    #[test]
+    fn test_handler_service_target_extra_service_applies() {
+        // A config targeting an advertised extra service is legitimately ours and
+        // must apply (the tracer reports extra_services to the backend, which can
+        // deliver a config scoped to one of them).
+        let config = build_config_for_handler_with_target("svc-a", "env-a");
+        config.add_extra_services(["svc-extra"].into_iter());
+        let payload = br#"{
+            "id": "rc-extra",
+            "service_target": {"service": "svc-extra", "env": "*"},
+            "lib_config": {"tracing_sampling_rate": 0.5}
+        }"#;
+        ApmTracingHandler.process_config(payload, &config).unwrap();
+        assert_eq!(
+            config.trace_sampling_rules().len(),
+            1,
+            "config for an advertised extra service must apply"
+        );
     }
 }

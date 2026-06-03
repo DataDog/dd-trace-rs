@@ -25,6 +25,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TELEMETRY_LOG_COLLECTION_ENABLED,
     DD_TRACE_AGENT_PORT,
     DD_TRACE_AGENT_URL,
+    DD_TRACE_BAGGAGE_TAG_KEYS,
     DD_TRACE_ENABLED,
     DD_TRACE_PARTIAL_FLUSH_ENABLED,
     DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
@@ -33,6 +34,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_PROPAGATION_STYLE_EXTRACT,
     DD_TRACE_PROPAGATION_STYLE_INJECT,
     DD_TRACE_RATE_LIMIT,
+    DD_TRACE_SAMPLE_RATE,
     DD_TRACE_SAMPLING_RULES,
     DD_TRACE_STATS_COMPUTATION_ENABLED,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
@@ -55,6 +57,7 @@ pub(crate) enum SupportedConfigurations {
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
     OTEL_RESOURCE_ATTRIBUTES,
+    _DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
 
     /// Used for testing purposes only
     #[cfg(test)]
@@ -79,83 +82,43 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",
             SupportedConfigurations::DD_ENV => "DD_ENV",
-            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => {
-                "DD_INSTRUMENTATION_TELEMETRY_ENABLED"
-            }
+            SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => "DD_INSTRUMENTATION_TELEMETRY_ENABLED",
             SupportedConfigurations::DD_LOGS_OTEL_ENABLED => "DD_LOGS_OTEL_ENABLED",
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
             SupportedConfigurations::DD_METRICS_OTEL_ENABLED => "DD_METRICS_OTEL_ENABLED",
-            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
-                "DD_REMOTE_CONFIGURATION_ENABLED"
-            }
-            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => {
-                "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS"
-            }
+            SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => "DD_REMOTE_CONFIGURATION_ENABLED",
+            SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
-            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => {
-                "DD_TELEMETRY_HEARTBEAT_INTERVAL"
-            }
-            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => {
-                "DD_TELEMETRY_LOG_COLLECTION_ENABLED"
-            }
+            SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => "DD_TELEMETRY_HEARTBEAT_INTERVAL",
+            SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
             SupportedConfigurations::DD_TRACE_AGENT_PORT => "DD_TRACE_AGENT_PORT",
             SupportedConfigurations::DD_TRACE_AGENT_URL => "DD_TRACE_AGENT_URL",
+            SupportedConfigurations::DD_TRACE_BAGGAGE_TAG_KEYS => "DD_TRACE_BAGGAGE_TAG_KEYS",
             SupportedConfigurations::DD_TRACE_ENABLED => "DD_TRACE_ENABLED",
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED => {
-                "DD_TRACE_PARTIAL_FLUSH_ENABLED"
-            }
-            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS => {
-                "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS"
-            }
-            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => {
-                "DD_TRACE_PROPAGATION_EXTRACT_FIRST"
-            }
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_ENABLED => "DD_TRACE_PARTIAL_FLUSH_ENABLED",
+            SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS => "DD_TRACE_PARTIAL_FLUSH_MIN_SPANS",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST => "DD_TRACE_PROPAGATION_EXTRACT_FIRST",
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE => "DD_TRACE_PROPAGATION_STYLE",
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => {
-                "DD_TRACE_PROPAGATION_STYLE_EXTRACT"
-            }
-            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => {
-                "DD_TRACE_PROPAGATION_STYLE_INJECT"
-            }
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
+            SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => "DD_TRACE_PROPAGATION_STYLE_INJECT",
             SupportedConfigurations::DD_TRACE_RATE_LIMIT => "DD_TRACE_RATE_LIMIT",
+            SupportedConfigurations::DD_TRACE_SAMPLE_RATE => "DD_TRACE_SAMPLE_RATE",
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES => "DD_TRACE_SAMPLING_RULES",
-            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => {
-                "DD_TRACE_STATS_COMPUTATION_ENABLED"
-            }
-            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => {
-                "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH"
-            }
+            SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => "DD_TRACE_STATS_COMPUTATION_ENABLED",
+            SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS => "OTEL_EXPORTER_OTLP_HEADERS",
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => {
-                "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => {
-                "OTEL_EXPORTER_OTLP_LOGS_HEADERS"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => {
-                "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT => {
-                "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => {
-                "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS => {
-                "OTEL_EXPORTER_OTLP_METRICS_HEADERS"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => {
-                "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => {
-                "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"
-            }
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => {
-                "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT"
-            }
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_ENDPOINT => "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS => "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_PROTOCOL => "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT => "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_ENDPOINT => "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS => "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_PROTOCOL => "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE => "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
             SupportedConfigurations::OTEL_LOGS_EXPORTER => "OTEL_LOGS_EXPORTER",
@@ -163,18 +126,15 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES => "OTEL_RESOURCE_ATTRIBUTES",
+            SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED => "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
             #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => "DD_NONEXISTANT_CONFIGURATION",
             #[cfg(test)]
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => {
-                "DD_NONEXISTANT_CONFIGURATION_ALIAS"
-            }
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_ALIAS => "DD_NONEXISTANT_CONFIGURATION_ALIAS",
             #[cfg(test)]
-            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => {
-                "DD_NONEXISTANT_CONFIGURATION_DEPRECATED"
-            }
+            SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => "DD_NONEXISTANT_CONFIGURATION_DEPRECATED",
         }
     }
 
