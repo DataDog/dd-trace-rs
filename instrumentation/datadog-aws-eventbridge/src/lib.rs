@@ -34,7 +34,7 @@ use aws_sdk_eventbridge::operation::remove_targets::RemoveTargetsInput;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextRef,
+    FinalizerInterceptorContextRef, Input,
 };
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
@@ -53,40 +53,6 @@ use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
 
-/// EventBridge operations that this interceptor recognises.
-///
-/// Only `PutEvents` supports trace context injection (via the `detail` JSON payload).
-/// Rule-management operations are tracked to produce accurate `rulename` span tags.
-#[derive(Debug, Clone, Copy)]
-enum EventBridgeOperation {
-    PutEvents,
-    PutRule,
-    DescribeRule,
-    DeleteRule,
-    EnableRule,
-    DisableRule,
-    PutTargets,
-    RemoveTargets,
-}
-
-impl EventBridgeOperation {
-    /// Maps an SDK operation name string to the enum variant, or `None` for
-    /// operations this interceptor does not handle.
-    fn from_name(operation: &str) -> Option<Self> {
-        match operation {
-            "PutEvents" => Some(Self::PutEvents),
-            "PutRule" => Some(Self::PutRule),
-            "DescribeRule" => Some(Self::DescribeRule),
-            "DeleteRule" => Some(Self::DeleteRule),
-            "EnableRule" => Some(Self::EnableRule),
-            "DisableRule" => Some(Self::DisableRule),
-            "PutTargets" => Some(Self::PutTargets),
-            "RemoveTargets" => Some(Self::RemoveTargets),
-            _ => None,
-        }
-    }
-}
-
 /// [`ServiceHandler`] implementation for Amazon EventBridge.
 struct EventBridgeHandler;
 
@@ -101,26 +67,14 @@ impl ServiceHandler for EventBridgeHandler {
 
     fn inject(
         &self,
-        operation: &str,
         trace_headers: &HashMap<String, String>,
-        input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
+        input: &mut Input,
     ) -> Result<(), BoxError> {
-        if let Some(op) = EventBridgeOperation::from_name(operation) {
-            inject(op, trace_headers, input)?;
-        }
-        Ok(())
+        inject(trace_headers, input)
     }
 
-    fn service_tags(
-        &self,
-        operation: &str,
-        input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-        _region: &str,
-        _partition: &str,
-    ) -> Vec<KeyValue> {
-        EventBridgeOperation::from_name(operation)
-            .map(|op| service_tags(op, input))
-            .unwrap_or_default()
+    fn service_tags(&self, input: &Input, _region: &str, _partition: &str) -> Vec<KeyValue> {
+        service_tags(input)
     }
 }
 
@@ -181,32 +135,22 @@ impl Intercept for EventBridgeInterceptor {
     }
 }
 
-/// Dispatches trace context injection to the appropriate per-operation function.
+/// Dispatches trace context injection based on the concrete operation input type.
 ///
 /// Only `PutEvents` carries a `detail` JSON payload that supports injection;
 /// all other operations are no-ops.
-fn inject(
-    operation: EventBridgeOperation,
-    trace_headers: &HashMap<String, String>,
-    input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Result<(), BoxError> {
-    if !matches!(operation, EventBridgeOperation::PutEvents) {
-        return Ok(());
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+    if let Some(put_input) = input.downcast_mut::<PutEventsInput>() {
+        return inject_into_put_events(put_input, trace_headers);
     }
 
-    if let Some(put_input) = input.downcast_mut::<PutEventsInput>() {
-        inject_into_put_events(put_input, trace_headers)?;
-    }
     Ok(())
 }
 
 /// Returns EventBridge-specific span tags: a `rulename` tag when a rule name
 /// can be extracted from the operation input, otherwise an empty list.
-fn service_tags(
-    operation: EventBridgeOperation,
-    input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Vec<KeyValue> {
-    match extract_rule_name(operation, input) {
+fn service_tags(input: &Input) -> Vec<KeyValue> {
+    match extract_rule_name(input) {
         Some(name) => vec![KeyValue::new(RULE_NAME, name.to_owned())],
         None => vec![],
     }
@@ -216,34 +160,36 @@ fn service_tags(
 ///
 /// `PutEvents` has no rule and returns `None`. `PutTargets` and `RemoveTargets`
 /// carry the rule name in the `rule` field; the remaining operations use `name`.
-fn extract_rule_name(
-    operation: EventBridgeOperation,
-    input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Option<&str> {
-    match operation {
-        EventBridgeOperation::PutRule => input
-            .downcast_ref::<PutRuleInput>()
-            .and_then(|i| i.name.as_deref()),
-        EventBridgeOperation::DescribeRule => input
-            .downcast_ref::<DescribeRuleInput>()
-            .and_then(|i| i.name.as_deref()),
-        EventBridgeOperation::DeleteRule => input
-            .downcast_ref::<DeleteRuleInput>()
-            .and_then(|i| i.name.as_deref()),
-        EventBridgeOperation::EnableRule => input
-            .downcast_ref::<EnableRuleInput>()
-            .and_then(|i| i.name.as_deref()),
-        EventBridgeOperation::DisableRule => input
-            .downcast_ref::<DisableRuleInput>()
-            .and_then(|i| i.name.as_deref()),
-        EventBridgeOperation::PutTargets => input
-            .downcast_ref::<PutTargetsInput>()
-            .and_then(|i| i.rule.as_deref()),
-        EventBridgeOperation::RemoveTargets => input
-            .downcast_ref::<RemoveTargetsInput>()
-            .and_then(|i| i.rule.as_deref()),
-        EventBridgeOperation::PutEvents => None,
+fn extract_rule_name(input: &Input) -> Option<&str> {
+    if let Some(input) = input.downcast_ref::<PutRuleInput>() {
+        return input.name.as_deref();
     }
+
+    if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
+        return input.name.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<DeleteRuleInput>() {
+        return input.name.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<EnableRuleInput>() {
+        return input.name.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<DisableRuleInput>() {
+        return input.name.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
+        return input.rule.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
+        return input.rule.as_deref();
+    }
+
+    None
 }
 
 /// Injects Datadog trace context into each entry of a `PutEvents` input.
@@ -381,7 +327,6 @@ impl<'de> Visitor<'de> for JsonObjectReplaceAppendFieldVisitor<'_> {
 mod tests {
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
-    use aws_smithy_runtime_api::client::interceptors::context::Input;
     use datadog_aws_core_test_utils::test_helpers::{
         collect_string_tags, sample_trace_headers, DATADOG_PARENT_ID_KEY,
         DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
@@ -559,12 +504,26 @@ mod tests {
     fn service_tags_for_put_events_returns_empty() {
         let input = Input::erase(PutEventsInput::builder().build().unwrap());
 
-        let tags = collect_string_tags(service_tags(EventBridgeOperation::PutEvents, &input));
+        let tags = collect_string_tags(service_tags(&input));
         assert!(!tags.contains_key(RULE_NAME));
     }
 
     #[test]
-    fn unsupported_eventbridge_operation_returns_none() {
-        assert!(EventBridgeOperation::from_name("ListRules").is_none());
+    fn inject_dispatches_by_input_type() {
+        let trace_headers = sample_trace_headers();
+        let entry = PutEventsRequestEntry::builder()
+            .source("my.source")
+            .detail_type("MyDetailType")
+            .detail(r#"{"existing":"data"}"#)
+            .build();
+        let input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(input);
+
+        inject(&trace_headers, &mut input).unwrap();
+
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
+        let detail = input.entries.as_ref().unwrap()[0].detail.as_ref().unwrap();
+        let dd = parse_detail_datadog(detail);
+        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
     }
 }

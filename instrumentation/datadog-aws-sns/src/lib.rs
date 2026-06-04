@@ -32,7 +32,7 @@ use aws_sdk_sns::types::MessageAttributeValue;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextRef,
+    FinalizerInterceptorContextRef, Input,
 };
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
@@ -45,41 +45,6 @@ use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-sns";
-
-/// SNS operations that this interceptor recognises.
-///
-/// Only `Publish` and `PublishBatch` support trace context injection.
-/// The remaining variants are tracked to produce accurate span tags for
-/// topic/target ARN lookups without injecting into management operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SnsOperation {
-    Publish,
-    PublishBatch,
-    GetTopicAttributes,
-    ListSubscriptionsByTopic,
-    RemovePermission,
-    SetTopicAttributes,
-    Subscribe,
-    CreateTopic,
-}
-
-impl SnsOperation {
-    /// Maps an SDK operation name string to the enum variant, or `None` for
-    /// operations this interceptor does not handle.
-    fn from_name(operation: &str) -> Option<Self> {
-        match operation {
-            "Publish" => Some(Self::Publish),
-            "PublishBatch" => Some(Self::PublishBatch),
-            "GetTopicAttributes" => Some(Self::GetTopicAttributes),
-            "ListSubscriptionsByTopic" => Some(Self::ListSubscriptionsByTopic),
-            "RemovePermission" => Some(Self::RemovePermission),
-            "SetTopicAttributes" => Some(Self::SetTopicAttributes),
-            "Subscribe" => Some(Self::Subscribe),
-            "CreateTopic" => Some(Self::CreateTopic),
-            _ => None,
-        }
-    }
-}
 
 /// [`ServiceHandler`] implementation for Amazon SNS.
 struct SnsHandler;
@@ -95,26 +60,14 @@ impl ServiceHandler for SnsHandler {
 
     fn inject(
         &self,
-        operation: &str,
         trace_headers: &HashMap<String, String>,
-        input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
+        input: &mut Input,
     ) -> Result<(), BoxError> {
-        if let Some(op) = SnsOperation::from_name(operation) {
-            inject(op, trace_headers, input)?;
-        }
-        Ok(())
+        inject(trace_headers, input)
     }
 
-    fn service_tags(
-        &self,
-        operation: &str,
-        input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-        _region: &str,
-        _partition: &str,
-    ) -> Vec<KeyValue> {
-        SnsOperation::from_name(operation)
-            .map(|op| service_tags(op, input))
-            .unwrap_or_default()
+    fn service_tags(&self, input: &Input, _region: &str, _partition: &str) -> Vec<KeyValue> {
+        service_tags(input)
     }
 }
 
@@ -175,69 +128,54 @@ impl Intercept for SnsInterceptor {
     }
 }
 
-/// Dispatches trace context injection to the appropriate per-operation function.
+/// Dispatches trace context injection based on the concrete operation input type.
 ///
 /// Only `Publish` and `PublishBatch` carry a message attributes payload that
 /// supports injection; all other operations are no-ops.
-fn inject(
-    operation: SnsOperation,
-    trace_headers: &HashMap<String, String>,
-    input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Result<(), BoxError> {
-    match operation {
-        SnsOperation::Publish => {
-            if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
-                inject_into_publish(publish_input, trace_headers)?;
-            }
-        }
-        SnsOperation::PublishBatch => {
-            if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
-                inject_into_publish_batch(batch_input, trace_headers)?;
-            }
-        }
-        _ => {}
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+    if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
+        return inject_into_publish(publish_input, trace_headers);
     }
+
+    if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
+        return inject_into_publish_batch(batch_input, trace_headers);
+    }
+
     Ok(())
 }
 
-/// Returns SNS-specific span tags for the given operation.
+/// Returns SNS-specific span tags for the given operation input.
 ///
 /// For `Publish`, includes `topicname` (from `topic_arn`) or `targetname` (from
 /// `target_arn`). For all other topic operations, includes `topicname`.
 /// For `CreateTopic`, uses the `name` parameter directly instead of an ARN.
-fn service_tags(
-    operation: SnsOperation,
-    input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Vec<KeyValue> {
-    match operation {
-        SnsOperation::Publish => {
-            let Some(input) = input.downcast_ref::<PublishInput>() else {
-                return vec![];
-            };
-            if let Some(arn) = input.topic_arn.as_deref() {
-                vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())]
-            } else if let Some(arn) = input.target_arn.as_deref() {
-                vec![KeyValue::new(
-                    TARGET_NAME,
-                    arn_resource_name(arn).to_owned(),
-                )]
-            } else {
-                vec![]
-            }
-        }
-        SnsOperation::PublishBatch => topic_arn_tag::<PublishBatchInput>(input),
-        SnsOperation::GetTopicAttributes => topic_arn_tag::<GetTopicAttributesInput>(input),
-        SnsOperation::ListSubscriptionsByTopic => {
-            topic_arn_tag::<ListSubscriptionsByTopicInput>(input)
-        }
-        SnsOperation::RemovePermission => topic_arn_tag::<RemovePermissionInput>(input),
-        SnsOperation::SetTopicAttributes => topic_arn_tag::<SetTopicAttributesInput>(input),
-        SnsOperation::Subscribe => topic_arn_tag::<SubscribeInput>(input),
-        SnsOperation::CreateTopic => input
-            .downcast_ref::<CreateTopicInput>()
-            .and_then(|i| i.name.as_deref())
-            .map(|name| vec![KeyValue::new(TOPIC_NAME, name.to_owned())])
-            .unwrap_or_default(),
+fn service_tags(input: &Input) -> Vec<KeyValue> {
+    if let Some(input) = input.downcast_ref::<PublishInput>() {
+        return publish_tags(input);
+    }
+
+    if let Some(name) = input
+        .downcast_ref::<CreateTopicInput>()
+        .and_then(|i| i.name.as_deref())
+    {
+        return vec![KeyValue::new(TOPIC_NAME, name.to_owned())];
+    }
+
+    topic_arn(input)
+        .map(|arn| vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())])
+        .unwrap_or_default()
+}
+
+fn publish_tags(input: &PublishInput) -> Vec<KeyValue> {
+    if let Some(arn) = input.topic_arn.as_deref() {
+        vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())]
+    } else if let Some(arn) = input.target_arn.as_deref() {
+        vec![KeyValue::new(
+            TARGET_NAME,
+            arn_resource_name(arn).to_owned(),
+        )]
+    } else {
+        vec![]
     }
 }
 
@@ -289,38 +227,32 @@ fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
 
-/// Helper trait for extracting a topic ARN from SNS input types that carry one.
-trait HasTopicArn: std::fmt::Debug + 'static {
-    fn topic_arn(&self) -> Option<&str>;
-}
+fn topic_arn(input: &Input) -> Option<&str> {
+    if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
+        return input.topic_arn.as_deref();
+    }
 
-macro_rules! impl_has_topic_arn {
-    ($($ty:ty),+ $(,)?) => {
-        $(impl HasTopicArn for $ty {
-            fn topic_arn(&self) -> Option<&str> { self.topic_arn.as_deref() }
-        })+
-    };
-}
+    if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
+        return input.topic_arn.as_deref();
+    }
 
-impl_has_topic_arn!(
-    PublishBatchInput,
-    GetTopicAttributesInput,
-    ListSubscriptionsByTopicInput,
-    RemovePermissionInput,
-    SetTopicAttributesInput,
-    SubscribeInput,
-);
+    if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
+        return input.topic_arn.as_deref();
+    }
 
-/// Extracts the topic ARN from an input implementing [`HasTopicArn`] and returns
-/// a `topicname` tag with the resource name portion of the ARN.
-fn topic_arn_tag<T: HasTopicArn + Send + Sync>(
-    input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Vec<KeyValue> {
-    input
-        .downcast_ref::<T>()
-        .and_then(|i| i.topic_arn())
-        .map(|arn| vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())])
-        .unwrap_or_default()
+    if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
+        return input.topic_arn.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<SetTopicAttributesInput>() {
+        return input.topic_arn.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<SubscribeInput>() {
+        return input.topic_arn.as_deref();
+    }
+
+    None
 }
 
 /// Returns the resource name (last colon-separated segment) from an ARN string.
@@ -532,7 +464,19 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_sns_operation_returns_none() {
-        assert!(SnsOperation::from_name("Puppy").is_none());
+    fn inject_dispatches_by_input_type() {
+        let trace_headers = sample_trace_headers();
+        let input = PublishInput::builder()
+            .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
+            .message("test message")
+            .build()
+            .unwrap();
+        let mut input = Input::erase(input);
+
+        inject(&trace_headers, &mut input).unwrap();
+
+        let input = input.downcast_ref::<PublishInput>().unwrap();
+        let attrs = input.message_attributes.as_ref().unwrap();
+        assert!(attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
     }
 }

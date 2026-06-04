@@ -29,7 +29,7 @@ use aws_sdk_sqs::types::MessageAttributeValue;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextRef,
+    FinalizerInterceptorContextRef, Input,
 };
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
@@ -43,35 +43,6 @@ use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-sqs";
-
-/// SQS operations that this interceptor recognises.
-///
-/// Only `SendMessage` and `SendMessageBatch` support trace context injection.
-/// The remaining variants are tracked to produce accurate `operation.name` and
-/// service tags without injecting into read/delete operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SqsOperation {
-    SendMessage,
-    SendMessageBatch,
-    ReceiveMessage,
-    DeleteMessage,
-    DeleteMessageBatch,
-}
-
-impl SqsOperation {
-    /// Maps an SDK operation name string to the enum variant, or `None` for
-    /// operations this interceptor does not handle.
-    fn from_name(operation: &str) -> Option<Self> {
-        match operation {
-            "SendMessage" => Some(Self::SendMessage),
-            "SendMessageBatch" => Some(Self::SendMessageBatch),
-            "ReceiveMessage" => Some(Self::ReceiveMessage),
-            "DeleteMessage" => Some(Self::DeleteMessage),
-            "DeleteMessageBatch" => Some(Self::DeleteMessageBatch),
-            _ => None,
-        }
-    }
-}
 
 /// [`ServiceHandler`] implementation for Amazon SQS.
 struct SqsHandler;
@@ -87,26 +58,14 @@ impl ServiceHandler for SqsHandler {
 
     fn inject(
         &self,
-        operation: &str,
         trace_headers: &HashMap<String, String>,
-        input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
+        input: &mut Input,
     ) -> Result<(), BoxError> {
-        if let Some(op) = SqsOperation::from_name(operation) {
-            inject(op, trace_headers, input)?;
-        }
-        Ok(())
+        inject(trace_headers, input)
     }
 
-    fn service_tags(
-        &self,
-        operation: &str,
-        input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-        region: &str,
-        partition: &str,
-    ) -> Vec<KeyValue> {
-        SqsOperation::from_name(operation)
-            .map(|op| service_tags(op, input, region, partition))
-            .unwrap_or_default()
+    fn service_tags(&self, input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
+        service_tags(input, region, partition)
     }
 }
 
@@ -167,70 +126,62 @@ impl Intercept for SqsInterceptor {
     }
 }
 
-/// Dispatches trace context injection to the appropriate per-operation function.
+/// Dispatches trace context injection based on the concrete operation input type.
 ///
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
 /// that supports injection; all other operations are no-ops.
-fn inject(
-    operation: SqsOperation,
-    trace_headers: &HashMap<String, String>,
-    input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
-) -> Result<(), BoxError> {
-    match operation {
-        SqsOperation::SendMessage => {
-            if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
-                inject_into_send_message(send_input, trace_headers)?;
-            }
-        }
-        SqsOperation::SendMessageBatch => {
-            if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
-                inject_into_send_message_batch(batch_input, trace_headers)?;
-            }
-        }
-        _ => {}
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+    if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
+        return inject_into_send_message(send_input, trace_headers);
     }
+
+    if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
+        return inject_into_send_message_batch(batch_input, trace_headers);
+    }
+
     Ok(())
 }
 
-/// Returns SQS-specific span tags for the given operation.
+/// Returns SQS-specific span tags for the given operation input.
 ///
 /// Always includes `messaging.system = "amazonsqs"`. When a queue URL is
 /// available on the input, also includes `queuename` and `cloud.resource_id`
 /// (formatted as a full SQS ARN).
-fn service_tags(
-    operation: SqsOperation,
-    input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-    region: &str,
-    partition: &str,
-) -> Vec<KeyValue> {
+fn service_tags(input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
     let mut tags = vec![KeyValue::new(MESSAGING_SYSTEM, "amazonsqs")];
 
-    let queue_url = match operation {
-        SqsOperation::SendMessage => input
-            .downcast_ref::<SendMessageInput>()
-            .and_then(|r| r.queue_url.as_deref()),
-        SqsOperation::SendMessageBatch => input
-            .downcast_ref::<SendMessageBatchInput>()
-            .and_then(|r| r.queue_url.as_deref()),
-        SqsOperation::ReceiveMessage => input
-            .downcast_ref::<ReceiveMessageInput>()
-            .and_then(|r| r.queue_url.as_deref()),
-        SqsOperation::DeleteMessage => input
-            .downcast_ref::<DeleteMessageInput>()
-            .and_then(|r| r.queue_url.as_deref()),
-        SqsOperation::DeleteMessageBatch => input
-            .downcast_ref::<DeleteMessageBatchInput>()
-            .and_then(|r| r.queue_url.as_deref()),
-    };
-
     if let Some((queue_name, cloud_resource_id)) =
-        queue_url.and_then(|url| extract_sqs_metadata(url, region, partition))
+        queue_url(input).and_then(|url| extract_sqs_metadata(url, region, partition))
     {
         tags.push(KeyValue::new(QUEUE_NAME, queue_name));
         tags.push(KeyValue::new(CLOUD_RESOURCE_ID, cloud_resource_id));
     }
 
     tags
+}
+
+fn queue_url(input: &Input) -> Option<&str> {
+    if let Some(input) = input.downcast_ref::<SendMessageInput>() {
+        return input.queue_url.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
+        return input.queue_url.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
+        return input.queue_url.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
+        return input.queue_url.as_deref();
+    }
+
+    if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
+        return input.queue_url.as_deref();
+    }
+
+    None
 }
 
 /// Injects a `_datadog` String message attribute into a `SendMessage` input.
@@ -421,7 +372,19 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_sqs_operation_returns_none() {
-        assert!(SqsOperation::from_name("ListQueues").is_none());
+    fn inject_dispatches_by_input_type() {
+        let trace_headers = sample_trace_headers();
+        let input = SendMessageInput::builder()
+            .queue_url("https://example.com/test-queue")
+            .message_body("test body")
+            .build()
+            .unwrap();
+        let mut input = Input::erase(input);
+
+        inject(&trace_headers, &mut input).unwrap();
+
+        let input = input.downcast_ref::<SendMessageInput>().unwrap();
+        let attrs = input.message_attributes.as_ref().unwrap();
+        assert!(attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
     }
 }

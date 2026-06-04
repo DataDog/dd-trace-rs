@@ -45,18 +45,16 @@ pub trait ServiceHandler: Send + Sync + 'static {
     fn sdk_service_name(&self) -> &'static str;
     /// Short identifier used in span names and `operation.name` (e.g. `"sqs"`).
     fn span_service_id(&self) -> &'static str;
-    /// Inject trace context into the outbound request input for the given operation.
+    /// Inject trace context into the outbound request input.
     /// Errors are swallowed by the caller — injection must never fail an AWS call.
     fn inject(
         &self,
-        operation: &str,
         trace_headers: &HashMap<String, String>,
         input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
     ) -> Result<(), BoxError>;
-    /// Return service-specific span tags for the given operation.
+    /// Return service-specific span tags for the given operation input.
     fn service_tags(
         &self,
-        operation: &str,
         input: &aws_smithy_runtime_api::client::interceptors::context::Input,
         region: &str,
         partition: &str,
@@ -216,7 +214,7 @@ impl<H: ServiceHandler> Intercept for AwsInterceptor<H> {
         let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
         tags.extend(
             self.handler
-                .service_tags(operation, context.input(), region, partition),
+                .service_tags(context.input(), region, partition),
         );
 
         let parent_cx = Context::current();
@@ -231,10 +229,7 @@ impl<H: ServiceHandler> Intercept for AwsInterceptor<H> {
         let trace_headers = extract_trace_headers(&cx);
 
         if !trace_headers.is_empty() {
-            if let Err(err) = self
-                .handler
-                .inject(operation, &trace_headers, context.input_mut())
-            {
+            if let Err(err) = self.handler.inject(&trace_headers, context.input_mut()) {
                 tracing::debug!(
                     error = %err,
                     service = service_id,
