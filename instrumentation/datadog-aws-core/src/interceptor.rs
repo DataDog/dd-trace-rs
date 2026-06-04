@@ -1,14 +1,15 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Generic AWS SDK interceptor and supporting utilities shared by all service crates.
+//! AWS SDK interceptor utilities shared by all service crates.
 //!
-//! [`AwsInterceptor`] hooks into the AWS SDK for Rust request pipeline via the
-//! [`Intercept`] trait. For each request it:
-//! 1. Creates a Datadog client span with base + service-specific tags
-//!    (`modify_before_serialization`).
-//! 2. Injects propagation headers into the outbound request payload via the [`ServiceHandler`]
-//!    implementation (`modify_before_serialization`).
+//! Service interceptors call these helpers from their concrete
+//! [`Intercept`](aws_smithy_runtime_api::client::interceptors::Intercept) implementations.
+//! For each request they:
+//! 1. Create a Datadog client span with base + service-specific tags
+//!    ([`modify_before_serialization`]).
+//! 2. Inject propagation headers into the outbound request payload
+//!    ([`modify_before_serialization`]).
 //! 3. Adds HTTP-level tags once the final request is known (`read_before_transmit`).
 //! 4. Records the response status and any error, then ends the span (`read_after_execution`).
 //!
@@ -21,11 +22,9 @@ use std::fmt;
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextRef,
+    FinalizerInterceptorContextRef, Input,
 };
-use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::orchestrator::Metadata;
-use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_types::region::Region;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
@@ -37,56 +36,6 @@ use crate::attribute_keys::{
     PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E, PARTITION_AWS_ISO_F,
     RESOURCE_NAME, SPAN_KIND,
 };
-
-/// Trait implemented by each service crate to provide service-specific
-/// injection logic and span tags.
-pub trait ServiceHandler: Send + Sync + 'static {
-    /// Short identifier used in span names and `operation.name` (e.g. `"sqs"`).
-    fn span_service_id(&self) -> &'static str;
-    /// Inject trace context into the outbound request input.
-    /// Errors are swallowed by the caller — injection must never fail an AWS call.
-    fn inject(
-        &self,
-        trace_headers: &HashMap<String, String>,
-        input: &mut aws_smithy_runtime_api::client::interceptors::context::Input,
-    ) -> Result<(), BoxError>;
-    /// Return service-specific span tags for the given operation input.
-    fn service_tags(
-        &self,
-        input: &aws_smithy_runtime_api::client::interceptors::context::Input,
-        region: &str,
-        partition: &str,
-    ) -> Vec<KeyValue>;
-}
-
-/// Generic AWS SDK interceptor that creates a Datadog span and injects trace
-/// context for the service described by the provided [`ServiceHandler`].
-///
-/// Not intended to be used directly — each service crate exposes a named
-/// wrapper type (`SqsInterceptor`, `SnsInterceptor`, `EventBridgeInterceptor`).
-pub struct AwsInterceptor<H: ServiceHandler> {
-    handler: H,
-    tracer: global::BoxedTracer,
-}
-
-impl<H: ServiceHandler> AwsInterceptor<H> {
-    /// Creates a new interceptor delegating service-specific behaviour to `handler`,
-    /// using `tracer_name` as the OTel tracer scope name.
-    pub fn new(handler: H, tracer_name: &'static str) -> Self {
-        Self {
-            tracer: global::tracer(tracer_name),
-            handler,
-        }
-    }
-}
-
-impl<H: ServiceHandler> fmt::Debug for AwsInterceptor<H> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AwsInterceptor")
-            .field("service_id", &self.handler.span_service_id())
-            .finish_non_exhaustive()
-    }
-}
 
 /// Carries the OTel [`Context`] (and its active span) through the SDK's [`ConfigBag`]
 /// so that `modify_before_serialization`, `read_before_transmit`, and
@@ -157,7 +106,6 @@ pub(crate) fn partition_from_region(region: &str) -> &'static str {
 ///
 /// Includes `operation.name`, `aws.service`, `aws.operation`, `aws.region`,
 /// `aws.partition`, `resource.name`, and `span.kind`.
-/// Service crates extend this list with their own tags via [`ServiceHandler::service_tags`].
 pub(crate) fn base_tags(
     service_id: &'static str,
     sdk_service_name: &str,
@@ -176,109 +124,96 @@ pub(crate) fn base_tags(
     ]
 }
 
-impl<H: ServiceHandler> Intercept for AwsInterceptor<H> {
-    fn name(&self) -> &'static str {
-        "AwsInterceptor"
+/// Creates the Datadog span and injects trace context into the request payload.
+///
+/// Called before the SDK serializes the request, so the input is still mutable.
+/// The created [`SpanContext`] is stashed in `cfg` for the later hooks.
+/// Injection errors are logged at `debug` level and swallowed — they must never
+/// fail the underlying AWS call.
+pub fn modify_before_serialization(
+    service_id: &'static str,
+    tracer: &global::BoxedTracer,
+    context: &mut BeforeSerializationInterceptorContextMut<'_>,
+    cfg: &mut ConfigBag,
+    service_tags: impl FnOnce(&Input, &str, &str) -> Vec<KeyValue>,
+    inject: impl FnOnce(&HashMap<String, String>, &mut Input) -> Result<(), BoxError>,
+) -> Result<(), BoxError> {
+    let Some(metadata) = cfg.load::<Metadata>() else {
+        return Ok(());
+    };
+    let operation = metadata.name();
+    let region = cfg.load::<Region>().map(|r| r.as_ref()).unwrap_or_default();
+    let partition = partition_from_region(region);
+
+    let sdk_service_name = metadata.service();
+    let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
+    tags.extend(service_tags(context.input(), region, partition));
+
+    let parent_cx = Context::current();
+    let span = tracer
+        .span_builder(format!("{service_id}.request"))
+        .with_kind(SpanKind::Client)
+        .with_attributes(tags)
+        .start_with_context(tracer, &parent_cx);
+    let cx = parent_cx.with_span(span);
+
+    let trace_headers = extract_trace_headers(&cx);
+
+    if !trace_headers.is_empty() {
+        if let Err(err) = inject(&trace_headers, context.input_mut()) {
+            tracing::debug!(
+                error = %err,
+                service = service_id,
+                operation,
+                "failed to inject Datadog trace context"
+            );
+        }
     }
 
-    /// Creates the Datadog span and injects trace context into the request payload.
-    ///
-    /// Called before the SDK serializes the request, so the input is still mutable.
-    /// The created [`SpanContext`] is stashed in `cfg` for the later hooks.
-    /// Injection errors are logged at `debug` level and swallowed — they must never
-    /// fail the underlying AWS call.
-    fn modify_before_serialization(
-        &self,
-        context: &mut BeforeSerializationInterceptorContextMut<'_>,
-        _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let Some(metadata) = cfg.load::<Metadata>() else {
-            return Ok(());
-        };
-        let operation = metadata.name();
-        let region = cfg.load::<Region>().map(|r| r.as_ref()).unwrap_or_default();
-        let partition = partition_from_region(region);
+    cfg.interceptor_state().store_put(SpanContext(cx));
+    Ok(())
+}
 
-        let service_id = self.handler.span_service_id();
-        let sdk_service_name = metadata.service();
-        let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
-        tags.extend(
-            self.handler
-                .service_tags(context.input(), region, partition),
-        );
+/// Adds HTTP-level tags once the final serialized request is available.
+///
+/// Records `http.method`, `http.url`, and `http.useragent` on the span.
+pub fn read_before_transmit(
+    context: &BeforeTransmitInterceptorContextRef<'_>,
+    cfg: &mut ConfigBag,
+) -> Result<(), BoxError> {
+    let Some(span_ctx) = cfg.load::<SpanContext>() else {
+        return Ok(());
+    };
+    let span = span_ctx.0.span();
+    let request = context.request();
+    span.set_attribute(KeyValue::new(HTTP_METHOD, request.method().to_string()));
+    span.set_attribute(KeyValue::new(HTTP_URL, request.uri().to_string()));
+    if let Some(user_agent) = request.headers().get("user-agent") {
+        span.set_attribute(KeyValue::new(AWS_AGENT, user_agent.to_owned()));
+    }
+    Ok(())
+}
 
-        let parent_cx = Context::current();
-        let tracer = &self.tracer;
-        let span = tracer
-            .span_builder(format!("{service_id}.request"))
-            .with_kind(SpanKind::Client)
-            .with_attributes(tags)
-            .start_with_context(tracer, &parent_cx);
-        let cx = parent_cx.with_span(span);
+/// Records the response status and any SDK error, then ends the span.
+pub fn read_after_execution(
+    context: &FinalizerInterceptorContextRef<'_>,
+    cfg: &mut ConfigBag,
+) -> Result<(), BoxError> {
+    let Some(span_ctx) = cfg.load::<SpanContext>() else {
+        return Ok(());
+    };
+    let span = span_ctx.0.span();
 
-        let trace_headers = extract_trace_headers(&cx);
-
-        if !trace_headers.is_empty() {
-            if let Err(err) = self.handler.inject(&trace_headers, context.input_mut()) {
-                tracing::debug!(
-                    error = %err,
-                    service = service_id,
-                    operation,
-                    "failed to inject Datadog trace context"
-                );
-            }
-        }
-
-        cfg.interceptor_state().store_put(SpanContext(cx));
-        Ok(())
+    if let Some(response) = context.response() {
+        set_response_tags(&span, response);
     }
 
-    /// Adds HTTP-level tags once the final serialized request is available.
-    ///
-    /// Records `http.method`, `http.url`, and `http.useragent` on the span.
-    fn read_before_transmit(
-        &self,
-        context: &BeforeTransmitInterceptorContextRef<'_>,
-        _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let Some(span_ctx) = cfg.load::<SpanContext>() else {
-            return Ok(());
-        };
-        let span = span_ctx.0.span();
-        let request = context.request();
-        span.set_attribute(KeyValue::new(HTTP_METHOD, request.method().to_string()));
-        span.set_attribute(KeyValue::new(HTTP_URL, request.uri().to_string()));
-        if let Some(user_agent) = request.headers().get("user-agent") {
-            span.set_attribute(KeyValue::new(AWS_AGENT, user_agent.to_owned()));
-        }
-        Ok(())
+    if let Some(Err(err)) = context.output_or_error() {
+        span.set_status(Status::error(err.to_string()));
     }
 
-    /// Records the response status and any SDK error, then ends the span.
-    fn read_after_execution(
-        &self,
-        context: &FinalizerInterceptorContextRef<'_>,
-        _runtime_components: &RuntimeComponents,
-        cfg: &mut ConfigBag,
-    ) -> Result<(), BoxError> {
-        let Some(span_ctx) = cfg.load::<SpanContext>() else {
-            return Ok(());
-        };
-        let span = span_ctx.0.span();
-
-        if let Some(response) = context.response() {
-            set_response_tags(&span, response);
-        }
-
-        if let Some(Err(err)) = context.output_or_error() {
-            span.set_status(Status::error(err.to_string()));
-        }
-
-        span.end();
-        Ok(())
-    }
+    span.end();
+    Ok(())
 }
 
 #[cfg(test)]

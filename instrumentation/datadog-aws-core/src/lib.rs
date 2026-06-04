@@ -11,4 +11,4 @@ pub mod attribute_keys;
 mod interceptor;
 pub mod limits;
 
-pub use interceptor::{AwsInterceptor, ServiceHandler};
+pub use interceptor::{modify_before_serialization, read_after_execution, read_before_transmit};

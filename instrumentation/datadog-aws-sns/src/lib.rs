@@ -38,47 +38,27 @@ use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Blob;
-use opentelemetry::KeyValue;
+use opentelemetry::{global, KeyValue};
 
+use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
 use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
-use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-sns";
-
-/// [`ServiceHandler`] implementation for Amazon SNS.
-struct SnsHandler;
-
-impl ServiceHandler for SnsHandler {
-    fn span_service_id(&self) -> &'static str {
-        "sns"
-    }
-
-    fn inject(
-        &self,
-        trace_headers: &HashMap<String, String>,
-        input: &mut Input,
-    ) -> Result<(), BoxError> {
-        inject(trace_headers, input)
-    }
-
-    fn service_tags(&self, input: &Input, _region: &str, _partition: &str) -> Vec<KeyValue> {
-        service_tags(input)
-    }
-}
+const SPAN_SERVICE_ID: &str = "sns";
 
 /// AWS SDK interceptor that injects Datadog trace context into SNS requests.
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SNS config builder.
 #[derive(Debug)]
 pub struct SnsInterceptor {
-    inner: AwsInterceptor<SnsHandler>,
+    tracer: global::BoxedTracer,
 }
 
 impl SnsInterceptor {
     fn new() -> Self {
         Self {
-            inner: AwsInterceptor::new(SnsHandler, TRACER_NAME),
+            tracer: global::tracer(TRACER_NAME),
         }
     }
 }
@@ -103,31 +83,35 @@ impl Intercept for SnsInterceptor {
     fn modify_before_serialization(
         &self,
         context: &mut BeforeSerializationInterceptorContextMut<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .modify_before_serialization(context, runtime_components, cfg)
+        aws_core::modify_before_serialization(
+            SPAN_SERVICE_ID,
+            &self.tracer,
+            context,
+            cfg,
+            |input, _, _| service_tags(input),
+            inject,
+        )
     }
 
     fn read_before_transmit(
         &self,
         context: &BeforeTransmitInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .read_before_transmit(context, runtime_components, cfg)
+        aws_core::read_before_transmit(context, cfg)
     }
 
     fn read_after_execution(
         &self,
         context: &FinalizerInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .read_after_execution(context, runtime_components, cfg)
+        aws_core::read_after_execution(context, cfg)
     }
 }
 

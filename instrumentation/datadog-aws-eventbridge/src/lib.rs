@@ -39,53 +39,33 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use opentelemetry::KeyValue;
+use opentelemetry::{global, KeyValue};
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Serializer as _;
 use serde_json::value::RawValue;
 
+use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{
     DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, RULE_NAME, START_TIME_KEY,
 };
 use datadog_aws_core::limits::ONE_MB;
-use datadog_aws_core::{AwsInterceptor, ServiceHandler};
 
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
-
-/// [`ServiceHandler`] implementation for Amazon EventBridge.
-struct EventBridgeHandler;
-
-impl ServiceHandler for EventBridgeHandler {
-    fn span_service_id(&self) -> &'static str {
-        "eventbridge"
-    }
-
-    fn inject(
-        &self,
-        trace_headers: &HashMap<String, String>,
-        input: &mut Input,
-    ) -> Result<(), BoxError> {
-        inject(trace_headers, input)
-    }
-
-    fn service_tags(&self, input: &Input, _region: &str, _partition: &str) -> Vec<KeyValue> {
-        service_tags(input)
-    }
-}
+const SPAN_SERVICE_ID: &str = "eventbridge";
 
 /// AWS SDK interceptor that injects Datadog trace context into EventBridge requests.
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an EventBridge config builder.
 #[derive(Debug)]
 pub struct EventBridgeInterceptor {
-    inner: AwsInterceptor<EventBridgeHandler>,
+    tracer: global::BoxedTracer,
 }
 
 impl EventBridgeInterceptor {
     fn new() -> Self {
         Self {
-            inner: AwsInterceptor::new(EventBridgeHandler, TRACER_NAME),
+            tracer: global::tracer(TRACER_NAME),
         }
     }
 }
@@ -110,31 +90,35 @@ impl Intercept for EventBridgeInterceptor {
     fn modify_before_serialization(
         &self,
         context: &mut BeforeSerializationInterceptorContextMut<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .modify_before_serialization(context, runtime_components, cfg)
+        aws_core::modify_before_serialization(
+            SPAN_SERVICE_ID,
+            &self.tracer,
+            context,
+            cfg,
+            |input, _, _| service_tags(input),
+            inject,
+        )
     }
 
     fn read_before_transmit(
         &self,
         context: &BeforeTransmitInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .read_before_transmit(context, runtime_components, cfg)
+        aws_core::read_before_transmit(context, cfg)
     }
 
     fn read_after_execution(
         &self,
         context: &FinalizerInterceptorContextRef<'_>,
-        runtime_components: &RuntimeComponents,
+        _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        self.inner
-            .read_after_execution(context, runtime_components, cfg)
+        aws_core::read_after_execution(context, cfg)
     }
 }
 
