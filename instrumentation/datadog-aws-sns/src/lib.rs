@@ -10,10 +10,10 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use datadog_aws_sns::SnsInterceptor;
+//! use datadog_aws_sns::ConfigExt as _;
 //!
 //! let config = aws_sdk_sns::config::Builder::from(&sdk_config)
-//!     .interceptor(SnsInterceptor::new())
+//!     .datadog_tracing()
 //!     .build();
 //! let client = aws_sdk_sns::Client::from_conf(config);
 //! ```
@@ -50,10 +50,6 @@ const TRACER_NAME: &str = "datadog-aws-sns";
 struct SnsHandler;
 
 impl ServiceHandler for SnsHandler {
-    fn sdk_service_name(&self) -> &'static str {
-        "SNS"
-    }
-
     fn span_service_id(&self) -> &'static str {
         "sns"
     }
@@ -71,24 +67,31 @@ impl ServiceHandler for SnsHandler {
     }
 }
 
-/// AWS SDK interceptor that injects Datadog trace context into SNS requests
-/// and creates spans representing SNS operations.
+/// AWS SDK interceptor that injects Datadog trace context into SNS requests.
+///
+/// Use [`ConfigExt::datadog_tracing`] to install it on an SNS config builder.
 #[derive(Debug)]
 pub struct SnsInterceptor {
     inner: AwsInterceptor<SnsHandler>,
 }
 
 impl SnsInterceptor {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             inner: AwsInterceptor::new(SnsHandler, TRACER_NAME),
         }
     }
 }
 
-impl Default for SnsInterceptor {
-    fn default() -> Self {
-        Self::new()
+/// Extension methods for installing Datadog tracing on an Amazon SNS config builder.
+pub trait ConfigExt {
+    /// Installs [`SnsInterceptor`] on this SNS config builder.
+    fn datadog_tracing(self) -> Self;
+}
+
+impl ConfigExt for aws_sdk_sns::config::Builder {
+    fn datadog_tracing(self) -> Self {
+        self.interceptor(SnsInterceptor::new())
     }
 }
 

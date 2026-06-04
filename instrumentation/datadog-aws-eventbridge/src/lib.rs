@@ -10,10 +10,10 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use datadog_aws_eventbridge::EventBridgeInterceptor;
+//! use datadog_aws_eventbridge::ConfigExt as _;
 //!
 //! let config = aws_sdk_eventbridge::config::Builder::from(&sdk_config)
-//!     .interceptor(EventBridgeInterceptor::new())
+//!     .datadog_tracing()
 //!     .build();
 //! let client = aws_sdk_eventbridge::Client::from_conf(config);
 //! ```
@@ -57,10 +57,6 @@ const TRACER_NAME: &str = "datadog-aws-eventbridge";
 struct EventBridgeHandler;
 
 impl ServiceHandler for EventBridgeHandler {
-    fn sdk_service_name(&self) -> &'static str {
-        "EventBridge"
-    }
-
     fn span_service_id(&self) -> &'static str {
         "eventbridge"
     }
@@ -78,24 +74,31 @@ impl ServiceHandler for EventBridgeHandler {
     }
 }
 
-/// AWS SDK interceptor that injects Datadog trace context into EventBridge requests
-/// and creates spans representing EventBridge operations.
+/// AWS SDK interceptor that injects Datadog trace context into EventBridge requests.
+///
+/// Use [`ConfigExt::datadog_tracing`] to install it on an EventBridge config builder.
 #[derive(Debug)]
 pub struct EventBridgeInterceptor {
     inner: AwsInterceptor<EventBridgeHandler>,
 }
 
 impl EventBridgeInterceptor {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             inner: AwsInterceptor::new(EventBridgeHandler, TRACER_NAME),
         }
     }
 }
 
-impl Default for EventBridgeInterceptor {
-    fn default() -> Self {
-        Self::new()
+/// Extension methods for installing Datadog tracing on an Amazon EventBridge config builder.
+pub trait ConfigExt {
+    /// Installs [`EventBridgeInterceptor`] on this EventBridge config builder.
+    fn datadog_tracing(self) -> Self;
+}
+
+impl ConfigExt for aws_sdk_eventbridge::config::Builder {
+    fn datadog_tracing(self) -> Self {
+        self.interceptor(EventBridgeInterceptor::new())
     }
 }
 

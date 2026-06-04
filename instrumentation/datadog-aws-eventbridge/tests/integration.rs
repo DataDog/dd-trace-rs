@@ -14,11 +14,11 @@ use datadog_aws_core_test_utils::integration_test_helpers::{
 };
 use serial_test::serial;
 
-use datadog_aws_eventbridge::EventBridgeInterceptor;
+use datadog_aws_eventbridge::ConfigExt as _;
 
 fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
     let config = aws_sdk_eventbridge::config::Builder::from(cfg)
-        .interceptor(EventBridgeInterceptor::new())
+        .datadog_tracing()
         .build();
     aws_sdk_eventbridge::Client::from_conf(config)
 }

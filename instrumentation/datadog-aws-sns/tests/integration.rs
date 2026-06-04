@@ -11,11 +11,11 @@ use aws_types::SdkConfig;
 use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
 use serial_test::serial;
 
-use datadog_aws_sns::SnsInterceptor;
+use datadog_aws_sns::ConfigExt as _;
 
 fn sns_client(cfg: &SdkConfig) -> aws_sdk_sns::Client {
     let config = aws_sdk_sns::config::Builder::from(cfg)
-        .interceptor(SnsInterceptor::new())
+        .datadog_tracing()
         .build();
     aws_sdk_sns::Client::from_conf(config)
 }

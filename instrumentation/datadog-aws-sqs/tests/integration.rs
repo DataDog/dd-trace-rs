@@ -16,11 +16,11 @@ use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context};
 use serial_test::serial;
 
-use datadog_aws_sqs::SqsInterceptor;
+use datadog_aws_sqs::ConfigExt as _;
 
 fn sqs_client(cfg: &SdkConfig) -> aws_sdk_sqs::Client {
     let config = aws_sdk_sqs::config::Builder::from(cfg)
-        .interceptor(SqsInterceptor::new())
+        .datadog_tracing()
         .build();
     aws_sdk_sqs::Client::from_conf(config)
 }

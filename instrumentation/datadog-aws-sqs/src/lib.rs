@@ -10,10 +10,10 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use datadog_aws_sqs::SqsInterceptor;
+//! use datadog_aws_sqs::ConfigExt as _;
 //!
 //! let config = aws_sdk_sqs::config::Builder::from(&sdk_config)
-//!     .interceptor(SqsInterceptor::new())
+//!     .datadog_tracing()
 //!     .build();
 //! let client = aws_sdk_sqs::Client::from_conf(config);
 //! ```
@@ -48,10 +48,6 @@ const TRACER_NAME: &str = "datadog-aws-sqs";
 struct SqsHandler;
 
 impl ServiceHandler for SqsHandler {
-    fn sdk_service_name(&self) -> &'static str {
-        "SQS"
-    }
-
     fn span_service_id(&self) -> &'static str {
         "sqs"
     }
@@ -69,24 +65,31 @@ impl ServiceHandler for SqsHandler {
     }
 }
 
-/// AWS SDK interceptor that injects Datadog trace context into SQS requests
-/// and creates spans representing SQS operations.
+/// AWS SDK interceptor that injects Datadog trace context into SQS requests.
+///
+/// Use [`ConfigExt::datadog_tracing`] to install it on an SQS config builder.
 #[derive(Debug)]
 pub struct SqsInterceptor {
     inner: AwsInterceptor<SqsHandler>,
 }
 
 impl SqsInterceptor {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             inner: AwsInterceptor::new(SqsHandler, TRACER_NAME),
         }
     }
 }
 
-impl Default for SqsInterceptor {
-    fn default() -> Self {
-        Self::new()
+/// Extension methods for installing Datadog tracing on an Amazon SQS config builder.
+pub trait ConfigExt {
+    /// Installs [`SqsInterceptor`] on this SQS config builder.
+    fn datadog_tracing(self) -> Self;
+}
+
+impl ConfigExt for aws_sdk_sqs::config::Builder {
+    fn datadog_tracing(self) -> Self {
+        self.interceptor(SqsInterceptor::new())
     }
 }
 

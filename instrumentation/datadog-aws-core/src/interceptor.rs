@@ -41,8 +41,6 @@ use crate::attribute_keys::{
 /// Trait implemented by each service crate to provide service-specific
 /// injection logic and span tags.
 pub trait ServiceHandler: Send + Sync + 'static {
-    /// The AWS SDK service name as reported by the SDK metadata (e.g. `"SQS"`).
-    fn sdk_service_name(&self) -> &'static str;
     /// Short identifier used in span names and `operation.name` (e.g. `"sqs"`).
     fn span_service_id(&self) -> &'static str;
     /// Inject trace context into the outbound request input.
@@ -85,7 +83,7 @@ impl<H: ServiceHandler> AwsInterceptor<H> {
 impl<H: ServiceHandler> fmt::Debug for AwsInterceptor<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AwsInterceptor")
-            .field("service", &self.handler.sdk_service_name())
+            .field("service_id", &self.handler.span_service_id())
             .finish_non_exhaustive()
     }
 }
@@ -162,14 +160,14 @@ pub(crate) fn partition_from_region(region: &str) -> &'static str {
 /// Service crates extend this list with their own tags via [`ServiceHandler::service_tags`].
 pub(crate) fn base_tags(
     service_id: &'static str,
-    sdk_service_name: &'static str,
+    sdk_service_name: &str,
     operation: &str,
     region: &str,
     partition: &'static str,
 ) -> Vec<KeyValue> {
     vec![
         KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
-        KeyValue::new(AWS_SERVICE, sdk_service_name),
+        KeyValue::new(AWS_SERVICE, sdk_service_name.to_owned()),
         KeyValue::new(AWS_OPERATION, operation.to_owned()),
         KeyValue::new(AWS_REGION, region.to_owned()),
         KeyValue::new(AWS_PARTITION, partition),
@@ -198,19 +196,12 @@ impl<H: ServiceHandler> Intercept for AwsInterceptor<H> {
         let Some(metadata) = cfg.load::<Metadata>() else {
             return Ok(());
         };
-        let service = metadata.service();
-
-        // Skip span creation for services this handler doesn't own.
-        if service != self.handler.sdk_service_name() {
-            return Ok(());
-        }
-
         let operation = metadata.name();
         let region = cfg.load::<Region>().map(|r| r.as_ref()).unwrap_or_default();
         let partition = partition_from_region(region);
 
         let service_id = self.handler.span_service_id();
-        let sdk_service_name = self.handler.sdk_service_name();
+        let sdk_service_name = metadata.service();
         let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
         tags.extend(
             self.handler
