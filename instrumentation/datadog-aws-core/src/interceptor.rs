@@ -102,28 +102,6 @@ pub(crate) fn partition_from_region(region: &str) -> &'static str {
     }
 }
 
-/// Builds the set of span tags shared by every AWS service span.
-///
-/// Includes `operation.name`, `aws.service`, `aws.operation`, `aws.region`,
-/// `aws.partition`, `resource.name`, and `span.kind`.
-pub(crate) fn base_tags(
-    service_id: &'static str,
-    sdk_service_name: &str,
-    operation: &str,
-    region: &str,
-    partition: &'static str,
-) -> Vec<KeyValue> {
-    vec![
-        KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
-        KeyValue::new(AWS_SERVICE, sdk_service_name.to_owned()),
-        KeyValue::new(AWS_OPERATION, operation.to_owned()),
-        KeyValue::new(AWS_REGION, region.to_owned()),
-        KeyValue::new(AWS_PARTITION, partition),
-        KeyValue::new(RESOURCE_NAME, format!("{sdk_service_name}.{operation}")),
-        KeyValue::new(SPAN_KIND, "client"),
-    ]
-}
-
 /// Creates the Datadog span and injects trace context into the request payload.
 ///
 /// Called before the SDK serializes the request, so the input is still mutable.
@@ -146,7 +124,17 @@ pub fn modify_before_serialization(
     let partition = partition_from_region(region);
 
     let sdk_service_name = metadata.service();
-    let mut tags = base_tags(service_id, sdk_service_name, operation, region, partition);
+    let mut tags = {
+        vec![
+            KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
+            KeyValue::new(AWS_SERVICE, sdk_service_name.to_owned()),
+            KeyValue::new(AWS_OPERATION, operation.to_owned()),
+            KeyValue::new(AWS_REGION, region.to_owned()),
+            KeyValue::new(AWS_PARTITION, partition),
+            KeyValue::new(RESOURCE_NAME, format!("{sdk_service_name}.{operation}")),
+            KeyValue::new(SPAN_KIND, "client"),
+        ]
+    };
     tags.extend(service_tags(context.input(), region, partition));
 
     let parent_cx = Context::current();
