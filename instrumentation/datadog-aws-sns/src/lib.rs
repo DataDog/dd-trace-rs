@@ -42,10 +42,10 @@ use opentelemetry::{global, KeyValue};
 
 use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
-use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 
 const TRACER_NAME: &str = "datadog-aws-sns";
 const SPAN_SERVICE_ID: &str = "sns";
+const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SNS requests.
 ///

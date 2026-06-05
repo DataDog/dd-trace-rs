@@ -40,10 +40,10 @@ use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{
     CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_SYSTEM, QUEUE_NAME,
 };
-use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 
 const TRACER_NAME: &str = "datadog-aws-sqs";
 const SPAN_SERVICE_ID: &str = "sqs";
+const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
 ///

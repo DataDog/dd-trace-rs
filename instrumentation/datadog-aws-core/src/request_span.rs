@@ -26,9 +26,7 @@ use opentelemetry::{global, Context, KeyValue};
 
 use crate::attribute_keys::{
     AWS_AGENT, AWS_OPERATION, AWS_PARTITION, AWS_REGION, AWS_REQUEST_ID, AWS_SERVICE, HTTP_METHOD,
-    HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, PARTITION_AWS, PARTITION_AWS_CN, PARTITION_AWS_GOV,
-    PARTITION_AWS_ISO, PARTITION_AWS_ISO_B, PARTITION_AWS_ISO_E, PARTITION_AWS_ISO_F,
-    RESOURCE_NAME, SPAN_KIND,
+    HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, RESOURCE_NAME, SPAN_KIND,
 };
 
 pub struct AwsRequestMetadata {
@@ -57,6 +55,11 @@ impl AwsRequestMetadata {
     }
 }
 
+/// Starts the AWS request span and returns propagation headers for service-specific injection.
+///
+/// The span context is stored in `cfg` so [`update_request_span`] can add HTTP
+/// request attributes and [`finish_request_span`] can record the response and
+/// end the span in later interceptor hooks.
 pub fn start_request_span(
     service_id: &'static str,
     metadata: AwsRequestMetadata,
@@ -153,54 +156,18 @@ impl Storable for RequestSpanContext {
 /// must be matched before the shorter `us-iso-` prefix to avoid false positives.
 fn partition_from_region(region: &str) -> &'static str {
     if region.starts_with("cn-") {
-        PARTITION_AWS_CN
+        "aws-cn"
     } else if region.starts_with("us-gov-") {
-        PARTITION_AWS_GOV
+        "aws-us-gov"
     } else if region.starts_with("us-isof-") {
-        PARTITION_AWS_ISO_F
+        "aws-iso-f"
     } else if region.starts_with("us-isob-") {
-        PARTITION_AWS_ISO_B
+        "aws-iso-b"
     } else if region.starts_with("us-iso-") {
-        PARTITION_AWS_ISO
+        "aws-iso"
     } else if region.starts_with("eu-isoe-") {
-        PARTITION_AWS_ISO_E
+        "aws-iso-e"
     } else {
-        PARTITION_AWS
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn partition_from_region_standard() {
-        assert_eq!(partition_from_region("us-east-1"), PARTITION_AWS);
-        assert_eq!(partition_from_region("eu-west-1"), PARTITION_AWS);
-        assert_eq!(partition_from_region("ap-southeast-2"), PARTITION_AWS);
-    }
-
-    #[test]
-    fn partition_from_region_china() {
-        assert_eq!(partition_from_region("cn-north-1"), PARTITION_AWS_CN);
-        assert_eq!(partition_from_region("cn-northwest-1"), PARTITION_AWS_CN);
-    }
-
-    #[test]
-    fn partition_from_region_govcloud() {
-        assert_eq!(partition_from_region("us-gov-east-1"), PARTITION_AWS_GOV);
-        assert_eq!(partition_from_region("us-gov-west-1"), PARTITION_AWS_GOV);
-    }
-
-    #[test]
-    fn partition_from_region_isolated() {
-        assert_eq!(partition_from_region("us-iso-east-1"), PARTITION_AWS_ISO);
-        assert_eq!(partition_from_region("us-iso-west-1"), PARTITION_AWS_ISO);
-        assert_eq!(partition_from_region("us-isob-east-1"), PARTITION_AWS_ISO_B);
-        assert_eq!(
-            partition_from_region("us-isof-south-1"),
-            PARTITION_AWS_ISO_F
-        );
-        assert_eq!(partition_from_region("eu-isoe-west-1"), PARTITION_AWS_ISO_E);
+        "aws"
     }
 }

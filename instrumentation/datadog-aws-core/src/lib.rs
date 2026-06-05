@@ -8,7 +8,6 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 pub mod attribute_keys;
-pub mod limits;
 mod request_span;
 
 pub use request_span::{

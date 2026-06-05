@@ -49,10 +49,10 @@ use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{
     DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, RULE_NAME, START_TIME_KEY,
 };
-use datadog_aws_core::limits::ONE_MB;
 
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
 const SPAN_SERVICE_ID: &str = "eventbridge";
+const MAX_EVENT_DETAIL_BYTES: usize = 1024 * 1024;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into EventBridge
 /// requests.
@@ -201,7 +201,7 @@ fn inject_into_put_events(input: &mut PutEventsInput, trace_headers: &HashMap<St
         let trace_ctx = serde_json::Value::Object(entry_ctx);
 
         let detail = entry.detail.as_deref().unwrap_or("{}");
-        if detail.len() > ONE_MB {
+        if detail.len() > MAX_EVENT_DETAIL_BYTES {
             continue;
         }
 
@@ -212,7 +212,7 @@ fn inject_into_put_events(input: &mut PutEventsInput, trace_headers: &HashMap<St
         };
 
         // EventBridge entries have a 1 MB detail size limit.
-        if new_detail.len() > ONE_MB {
+        if new_detail.len() > MAX_EVENT_DETAIL_BYTES {
             continue;
         }
 
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn skips_injection_when_put_events_detail_would_exceed_size_limit() {
         let trace_headers = sample_trace_headers();
-        let large_value = "x".repeat(ONE_MB);
+        let large_value = "x".repeat(MAX_EVENT_DETAIL_BYTES);
         let detail = format!("{{\"big\":\"{large_value}\"}}");
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn skips_only_entries_that_exceed_put_events_detail_size_limit() {
         let trace_headers = sample_trace_headers();
-        let oversized_detail_value = "x".repeat(ONE_MB);
+        let oversized_detail_value = "x".repeat(MAX_EVENT_DETAIL_BYTES);
         let oversized_detail = format!("{{\"big\":\"{oversized_detail_value}\"}}");
         let oversized_entry = PutEventsRequestEntry::builder()
             .source("my.source")
