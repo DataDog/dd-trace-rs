@@ -1033,6 +1033,9 @@ pub struct Config {
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
 
+    /// Whether to enable stats obfuscation for the tracer (for internal testing)
+    trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem<bool>,
+
     /// Whether we wait for trace chunk to have been flushed to the agent before returning to
     /// the critical path of the app
     trace_writer_synchronous_write: bool,
@@ -1236,6 +1239,9 @@ impl Config {
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
                 .update_parsed(default.trace_stats_computation_enabled),
+            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_parsed(
+                default.trace_stats_computation_experimental_client_obfuscation_enabled,
+            ),
             telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
                 .update_parsed(default.telemetry_log_collection_enabled),
@@ -1482,6 +1488,13 @@ impl Config {
     /// Returns the configured log level filter.
     pub fn log_level_filter(&self) -> &LevelFilter {
         self.log_level_filter.value()
+    }
+
+    /// Returns whether client-side trace stats obfuscation is enabled.
+    pub fn trace_stats_computation_experimental_client_obfuscation_enabled(&self) -> bool {
+        *self
+            .trace_stats_computation_experimental_client_obfuscation_enabled
+            .value()
     }
 
     /// Returns whether client-side trace stats computation is enabled.
@@ -1963,6 +1976,10 @@ fn default_config() -> Config {
         trace_stats_computation_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
+        ),
+        trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem::new(
+            SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
+            false,
         ),
         trace_writer_synchronous_write: false,
         trace_writer_synchronous_timeout: Duration::from_secs(2),

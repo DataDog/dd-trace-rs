@@ -6,6 +6,7 @@ members = [
     "datadog-opentelemetry",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
+    "tools",
 ]
 
 # https://doc.rust-lang.org/cargo/reference/resolver.html#feature-resolver-version-2
@@ -24,6 +25,7 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 [workspace.dependencies]
 # Libdatadog dependencies - change to a stable version once we release
 libdd-data-pipeline = { version = "5.0.0", features = [
+    "stats-obfuscation",
     "telemetry",
 ], default-features = false }
 libdd-trace-utils = { version = "5.0.0", default-features = false }

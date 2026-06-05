@@ -50,6 +50,10 @@ impl DatadogExporter {
         if config.trace_stats_computation_enabled() {
             builder.enable_stats(Duration::from_secs(10));
         }
+        if config.trace_stats_computation_experimental_client_obfuscation_enabled() {
+            builder.enable_client_side_stats_obfuscation();
+        }
+
         if let Some(env) = config.env() {
             builder.set_env(env);
         }
