@@ -137,46 +137,29 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<
 /// Returns EventBridge-specific span tags: a `rulename` tag when a rule name
 /// can be extracted from the operation input, otherwise an empty list.
 fn service_tags(input: &Input) -> Vec<KeyValue> {
-    match extract_rule_name(input) {
-        Some(name) => vec![KeyValue::new(RULE_NAME, name.to_owned())],
-        None => vec![],
-    }
-}
+    let mut rule_name = None;
 
-/// Extracts the rule name from an operation input for rule-management operations.
-///
-/// `PutEvents` has no rule and returns `None`. `PutTargets` and `RemoveTargets`
-/// carry the rule name in the `rule` field; the remaining operations use `name`.
-fn extract_rule_name(input: &Input) -> Option<&str> {
     if let Some(input) = input.downcast_ref::<PutRuleInput>() {
-        return input.name.as_deref();
+        rule_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
+        rule_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<DeleteRuleInput>() {
+        rule_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<EnableRuleInput>() {
+        rule_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<DisableRuleInput>() {
+        rule_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
+        rule_name = input.rule.as_deref();
+    } else if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
+        rule_name = input.rule.as_deref();
     }
 
-    if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
-        return input.name.as_deref();
+    if let Some(rule_name) = rule_name {
+        vec![KeyValue::new(RULE_NAME, rule_name.to_owned())]
+    } else {
+        Vec::new()
     }
-
-    if let Some(input) = input.downcast_ref::<DeleteRuleInput>() {
-        return input.name.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<EnableRuleInput>() {
-        return input.name.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<DisableRuleInput>() {
-        return input.name.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
-        return input.rule.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
-        return input.rule.as_deref();
-    }
-
-    None
 }
 
 /// Injects Datadog trace context into each entry of a `PutEvents` input.
