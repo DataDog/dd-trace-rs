@@ -21,7 +21,7 @@
 
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
-      "telemetry.sdk.version": "0.3.3",
+      "telemetry.sdk.version": "0.4.0",
       "thread.name": "integration_tests::tracing_api::test_remote_span_extraction_propagation"
     },
     "metrics": {
@@ -56,7 +56,7 @@
 
          "telemetry.sdk.language": "rust",
          "telemetry.sdk.name": "datadog",
-         "telemetry.sdk.version": "0.3.3",
+         "telemetry.sdk.version": "0.4.0",
          "thread.name": "integration_tests::tracing_api::test_remote_span_extraction_propagation"
        },
        "metrics": {
