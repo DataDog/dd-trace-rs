@@ -51,7 +51,7 @@ const SPAN_SERVICE_ID: &str = "sns";
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SNS config builder.
 #[derive(Debug)]
-pub struct SnsInterceptor {
+struct SnsInterceptor {
     tracer: global::BoxedTracer,
 }
 
@@ -65,7 +65,7 @@ impl SnsInterceptor {
 
 /// Extension methods for installing Datadog tracing on an Amazon SNS config builder.
 pub trait ConfigExt {
-    /// Installs [`SnsInterceptor`] on this SNS config builder.
+    /// Installs Datadog tracing on this SNS config builder.
     fn datadog_tracing(self) -> Self;
 }
 

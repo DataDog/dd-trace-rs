@@ -58,7 +58,7 @@ const SPAN_SERVICE_ID: &str = "eventbridge";
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an EventBridge config builder.
 #[derive(Debug)]
-pub struct EventBridgeInterceptor {
+struct EventBridgeInterceptor {
     tracer: global::BoxedTracer,
 }
 
@@ -72,7 +72,7 @@ impl EventBridgeInterceptor {
 
 /// Extension methods for installing Datadog tracing on an Amazon EventBridge config builder.
 pub trait ConfigExt {
-    /// Installs [`EventBridgeInterceptor`] on this EventBridge config builder.
+    /// Installs Datadog tracing on this EventBridge config builder.
     fn datadog_tracing(self) -> Self;
 }
 

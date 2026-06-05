@@ -49,7 +49,7 @@ const SPAN_SERVICE_ID: &str = "sqs";
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SQS config builder.
 #[derive(Debug)]
-pub struct SqsInterceptor {
+struct SqsInterceptor {
     tracer: global::BoxedTracer,
 }
 
@@ -63,7 +63,7 @@ impl SqsInterceptor {
 
 /// Extension methods for installing Datadog tracing on an Amazon SQS config builder.
 pub trait ConfigExt {
-    /// Installs [`SqsInterceptor`] on this SQS config builder.
+    /// Installs Datadog tracing on this SQS config builder.
     fn datadog_tracing(self) -> Self;
 }
 
