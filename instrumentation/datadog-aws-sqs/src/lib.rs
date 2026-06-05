@@ -152,18 +152,16 @@ fn service_tags(input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
     let mut tags = Vec::with_capacity(3);
     tags.push(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs"));
 
-    if let Some((queue_name, cloud_resource_id)) =
-        queue_url.and_then(|url| {
-            let queue_url = url.trim_end_matches('/');
-            let mut parts = queue_url.rsplitn(3, '/');
-            let queue_name = parts.next()?;
-            let account_id = parts.next()?;
-            let cloud_resource_id = format!("arn:{partition}:sqs:{region}:{account_id}:{queue_name}");
-            Some((queue_name.to_string(), cloud_resource_id))
-        })
-    {
-        tags.push(KeyValue::new(QUEUE_NAME, queue_name));
-        tags.push(KeyValue::new(CLOUD_RESOURCE_ID, cloud_resource_id));
+    if let Some(url) = queue_url {
+        let url = url.trim_end_matches('/');
+        let mut parts = url.rsplit('/');
+        if let (Some(name), Some(account_id)) = (parts.next(), parts.next()) {
+            tags.push(KeyValue::new(QUEUE_NAME, name.to_string()));
+            tags.push(KeyValue::new(
+                CLOUD_RESOURCE_ID,
+                format!("arn:{partition}:sqs:{region}:{account_id}:{name}"),
+            ));
+        }
     }
 
     tags
