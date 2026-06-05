@@ -135,41 +135,38 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<
 /// available on the input, also includes `queuename` and `cloud.resource_id`
 /// (formatted as a full SQS ARN).
 fn service_tags(input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
+    let mut queue_url = None;
+
+    if let Some(input) = input.downcast_ref::<SendMessageInput>() {
+        queue_url = input.queue_url.as_deref();
+    } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
+        queue_url = input.queue_url.as_deref();
+    } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
+        queue_url = input.queue_url.as_deref();
+    } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
+        queue_url = input.queue_url.as_deref();
+    } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
+        queue_url = input.queue_url.as_deref();
+    }
+
     let mut tags = Vec::with_capacity(3);
     tags.push(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs"));
 
     if let Some((queue_name, cloud_resource_id)) =
-        queue_url(input).and_then(|url| extract_sqs_metadata(url, region, partition))
+        queue_url.and_then(|url| {
+            let queue_url = url.trim_end_matches('/');
+            let mut parts = queue_url.rsplitn(3, '/');
+            let queue_name = parts.next()?;
+            let account_id = parts.next()?;
+            let cloud_resource_id = format!("arn:{partition}:sqs:{region}:{account_id}:{queue_name}");
+            Some((queue_name.to_string(), cloud_resource_id))
+        })
     {
         tags.push(KeyValue::new(QUEUE_NAME, queue_name));
         tags.push(KeyValue::new(CLOUD_RESOURCE_ID, cloud_resource_id));
     }
 
     tags
-}
-
-fn queue_url(input: &Input) -> Option<&str> {
-    if let Some(input) = input.downcast_ref::<SendMessageInput>() {
-        return input.queue_url.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
-        return input.queue_url.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
-        return input.queue_url.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
-        return input.queue_url.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
-        return input.queue_url.as_deref();
-    }
-
-    None
 }
 
 /// Injects a `_datadog` String message attribute into a message attributes map.
@@ -213,20 +210,6 @@ fn inject_into_send_message_batch(
         inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
     }
     Ok(())
-}
-
-/// Returns `(queue_name, cloud_resource_id)` parsed from a SQS queue URL.
-fn extract_sqs_metadata(
-    queue_url: &str,
-    region: &str,
-    partition: &str,
-) -> Option<(String, String)> {
-    let queue_url = queue_url.trim_end_matches('/');
-    let mut parts = queue_url.rsplitn(3, '/');
-    let queue_name = parts.next()?;
-    let account_id = parts.next()?;
-    let cloud_resource_id = format!("arn:{partition}:sqs:{region}:{account_id}:{queue_name}");
-    Some((queue_name.to_string(), cloud_resource_id))
 }
 
 /// Serialises `trace_headers` as a JSON String-typed SQS message attribute.
