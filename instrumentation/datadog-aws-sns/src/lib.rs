@@ -137,32 +137,42 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<
 /// `target_arn`). For all other topic operations, includes `topicname`.
 /// For `CreateTopic`, uses the `name` parameter directly instead of an ARN.
 fn service_tags(input: &Input) -> Vec<KeyValue> {
+    let mut direct_topic_name = None;
+    let mut topic_arn = None;
+    let mut target_arn = None;
+
     if let Some(input) = input.downcast_ref::<PublishInput>() {
-        return publish_tags(input);
+        topic_arn = input.topic_arn.as_deref();
+        target_arn = input.target_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<CreateTopicInput>() {
+        direct_topic_name = input.name.as_deref();
+    } else if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
+        topic_arn = input.topic_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
+        topic_arn = input.topic_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
+        topic_arn = input.topic_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
+        topic_arn = input.topic_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<SetTopicAttributesInput>() {
+        topic_arn = input.topic_arn.as_deref();
+    } else if let Some(input) = input.downcast_ref::<SubscribeInput>() {
+        topic_arn = input.topic_arn.as_deref();
     }
 
-    if let Some(name) = input
-        .downcast_ref::<CreateTopicInput>()
-        .and_then(|i| i.name.as_deref())
-    {
-        return vec![KeyValue::new(TOPIC_NAME, name.to_owned())];
-    }
-
-    topic_arn(input)
-        .map(|arn| vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())])
-        .unwrap_or_default()
-}
-
-fn publish_tags(input: &PublishInput) -> Vec<KeyValue> {
-    if let Some(arn) = input.topic_arn.as_deref() {
-        vec![KeyValue::new(TOPIC_NAME, arn_resource_name(arn).to_owned())]
-    } else if let Some(arn) = input.target_arn.as_deref() {
-        vec![KeyValue::new(
-            TARGET_NAME,
-            arn_resource_name(arn).to_owned(),
-        )]
+    let topic_name = direct_topic_name.or_else(|| topic_arn.map(arn_resource_name));
+    let target_name = if topic_name.is_none() {
+        target_arn.map(arn_resource_name)
     } else {
-        vec![]
+        None
+    };
+
+    if let Some(topic_name) = topic_name {
+        vec![KeyValue::new(TOPIC_NAME, topic_name.to_owned())]
+    } else if let Some(target_name) = target_name {
+        vec![KeyValue::new(TARGET_NAME, target_name.to_owned())]
+    } else {
+        Vec::new()
     }
 }
 
@@ -212,34 +222,6 @@ fn inject_into_publish_batch(
 /// is only enforced when `_datadog` is absent.
 fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
-}
-
-fn topic_arn(input: &Input) -> Option<&str> {
-    if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<SetTopicAttributesInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    if let Some(input) = input.downcast_ref::<SubscribeInput>() {
-        return input.topic_arn.as_deref();
-    }
-
-    None
 }
 
 /// Returns the resource name (last colon-separated segment) from an ARN string.
