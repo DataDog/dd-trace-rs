@@ -65,20 +65,6 @@ fn extract_trace_headers(cx: &Context) -> HashMap<String, String> {
     })
 }
 
-/// Adds HTTP response tags to `span`: status code and, when present, the AWS request ID.
-fn set_response_tags(
-    span: &opentelemetry::trace::SpanRef<'_>,
-    response: &aws_smithy_runtime_api::http::Response,
-) {
-    span.set_attribute(KeyValue::new(
-        HTTP_STATUS_CODE,
-        response.status().as_u16() as i64,
-    ));
-    if let Some(request_id) = response.headers().get("x-amzn-requestid") {
-        span.set_attribute(KeyValue::new(AWS_REQUEST_ID, request_id.to_owned()));
-    }
-}
-
 /// Derives the AWS partition identifier from a region string.
 ///
 /// The AWS SDK for Rust does not expose partition publicly, so we infer it from
@@ -174,11 +160,14 @@ pub fn read_before_transmit(
     };
     let span = span_ctx.0.span();
     let request = context.request();
-    span.set_attribute(KeyValue::new(HTTP_METHOD, request.method().to_string()));
-    span.set_attribute(KeyValue::new(HTTP_URL, request.uri().to_string()));
-    if let Some(user_agent) = request.headers().get("user-agent") {
-        span.set_attribute(KeyValue::new(AWS_AGENT, user_agent.to_owned()));
-    }
+    let method = KeyValue::new(HTTP_METHOD, request.method().to_string());
+    let url = KeyValue::new(HTTP_URL, request.uri().to_string());
+    let user_agent = request
+        .headers()
+        .get("user-agent")
+        .map(|user_agent| KeyValue::new(AWS_AGENT, user_agent.to_owned()));
+
+    span.set_attributes([Some(method), Some(url), user_agent].into_iter().flatten());
     Ok(())
 }
 
@@ -193,7 +182,10 @@ pub fn read_after_execution(
     let span = span_ctx.0.span();
 
     if let Some(response) = context.response() {
-        set_response_tags(&span, response);
+        let status_code = KeyValue::new(HTTP_STATUS_CODE, response.status().as_u16() as i64);
+        let request_id = response.headers().get("x-amzn-requestid");
+        let request_id = request_id.map(|id| KeyValue::new(AWS_REQUEST_ID, id.to_owned()));
+        span.set_attributes([Some(status_code), request_id].into_iter().flatten());
     }
 
     if let Some(Err(err)) = context.output_or_error() {
