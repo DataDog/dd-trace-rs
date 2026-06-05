@@ -135,7 +135,8 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<
 /// available on the input, also includes `queuename` and `cloud.resource_id`
 /// (formatted as a full SQS ARN).
 fn service_tags(input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
-    let mut tags = vec![KeyValue::new(MESSAGING_SYSTEM, "amazonsqs")];
+    let mut tags = Vec::with_capacity(3);
+    tags.push(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs"));
 
     if let Some((queue_name, cloud_resource_id)) =
         queue_url(input).and_then(|url| extract_sqs_metadata(url, region, partition))
@@ -171,20 +172,27 @@ fn queue_url(input: &Input) -> Option<&str> {
     None
 }
 
-/// Injects a `_datadog` String message attribute into a `SendMessage` input.
+/// Injects a `_datadog` String message attribute into a message attributes map.
 ///
 /// Skipped when the message already has 10 attributes and none is `_datadog`
 /// (replacing an existing `_datadog` key is always allowed).
+fn inject_message_attribute(
+    message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
+    datadog_attr: MessageAttributeValue,
+) {
+    let attrs = message_attributes.get_or_insert_with(HashMap::new);
+    if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
+        attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
+    }
+}
+
+/// Injects a `_datadog` String message attribute into a `SendMessage` input.
 fn inject_into_send_message(
     input: &mut SendMessageInput,
     trace_headers: &HashMap<String, String>,
 ) -> Result<(), BoxError> {
-    let attrs = input.message_attributes.get_or_insert_with(HashMap::new);
-    if should_skip_injection(attrs) {
-        return Ok(());
-    }
-    attrs.insert(
-        DATADOG_ATTRIBUTE_KEY.to_string(),
+    inject_message_attribute(
+        &mut input.message_attributes,
         build_datadog_attribute(trace_headers)?,
     );
     Ok(())
@@ -192,7 +200,7 @@ fn inject_into_send_message(
 
 /// Injects a `_datadog` String message attribute into each entry of a `SendMessageBatch` input.
 ///
-/// The same skip/overwrite rules as [`inject_into_send_message`] apply per entry.
+/// The same skip/overwrite rules as [`inject_message_attribute`] apply per entry.
 fn inject_into_send_message_batch(
     input: &mut SendMessageBatchInput,
     trace_headers: &HashMap<String, String>,
@@ -200,24 +208,11 @@ fn inject_into_send_message_batch(
     let Some(entries) = input.entries.as_mut() else {
         return Ok(());
     };
-    let dd_key = DATADOG_ATTRIBUTE_KEY.to_string();
     let dd_attr = build_datadog_attribute(trace_headers)?;
     for entry in entries.iter_mut() {
-        let attrs = entry.message_attributes.get_or_insert_with(HashMap::new);
-        if should_skip_injection(attrs) {
-            continue;
-        }
-        attrs.insert(dd_key.clone(), dd_attr.clone());
+        inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
     }
     Ok(())
-}
-
-/// Returns `true` when injection should be skipped to respect the 10-attribute cap.
-///
-/// An existing `_datadog` attribute counts as a slot we can reuse, so the cap
-/// is only enforced when `_datadog` is absent.
-fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
-    attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
 }
 
 /// Returns `(queue_name, cloud_resource_id)` parsed from a SQS queue URL.
