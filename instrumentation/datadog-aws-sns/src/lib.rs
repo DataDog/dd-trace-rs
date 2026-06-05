@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-//! Datadog trace context injection for AWS SDK for Rust SNS operations.
+//! Datadog tracing for AWS SDK for Rust SNS operations.
 //!
 //! # Usage
 //!
@@ -47,7 +47,7 @@ use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 const TRACER_NAME: &str = "datadog-aws-sns";
 const SPAN_SERVICE_ID: &str = "sns";
 
-/// AWS SDK interceptor that injects Datadog trace context into SNS requests.
+/// AWS SDK interceptor that creates Datadog spans and injects trace context into SNS requests.
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SNS config builder.
 #[derive(Debug)]
@@ -86,14 +86,60 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::modify_before_serialization(
+        let Some(metadata) = aws_core::AwsRequestMetadata::from_config_bag(cfg) else {
+            return Ok(());
+        };
+
+        let input = context.input();
+        let mut direct_topic_name = None;
+        let mut topic_arn = None;
+        let mut target_arn = None;
+        if let Some(input) = input.downcast_ref::<PublishInput>() {
+            topic_arn = input.topic_arn.as_deref();
+            target_arn = input.target_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<CreateTopicInput>() {
+            direct_topic_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<SetTopicAttributesInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<SubscribeInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        }
+
+        fn arn_resource_name(arn: &str) -> &str {
+            arn.rsplit(':').next().unwrap_or(arn)
+        }
+        let topic_name = direct_topic_name.or_else(|| topic_arn.map(arn_resource_name));
+        let target_name = if topic_name.is_none() {
+            target_arn.map(arn_resource_name)
+        } else {
+            None
+        };
+        let service_tags = [
+            topic_name.map(|name| KeyValue::new(TOPIC_NAME, name.to_owned())),
+            target_name.map(|name| KeyValue::new(TARGET_NAME, name.to_owned())),
+        ]
+        .into_iter()
+        .flatten();
+        let trace_headers = aws_core::start_request_span(
             SPAN_SERVICE_ID,
+            metadata,
+            service_tags,
             &self.tracer,
-            context,
             cfg,
-            |input, _, _| service_tags(input),
-            inject,
-        )
+        );
+        if !trace_headers.is_empty() {
+            inject(&trace_headers, context.input_mut());
+        }
+
+        Ok(())
     }
 
     fn read_before_transmit(
@@ -102,7 +148,8 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_before_transmit(context, cfg)
+        aws_core::update_request_span(context, cfg);
+        Ok(())
     }
 
     fn read_after_execution(
@@ -111,7 +158,8 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_after_execution(context, cfg)
+        aws_core::finish_request_span(context, cfg);
+        Ok(())
     }
 }
 
@@ -119,79 +167,29 @@ impl Intercept for SnsInterceptor {
 ///
 /// Only `Publish` and `PublishBatch` carry a message attributes payload that
 /// supports injection; all other operations are no-ops.
-fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
     if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
-        return inject_into_publish(publish_input, trace_headers);
+        inject_into_publish(publish_input, trace_headers);
+        return;
     }
 
     if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
-        return inject_into_publish_batch(batch_input, trace_headers);
-    }
-
-    Ok(())
-}
-
-/// Returns SNS-specific span tags for the given operation input.
-///
-/// For `Publish`, includes `topicname` (from `topic_arn`) or `targetname` (from
-/// `target_arn`). For all other topic operations, includes `topicname`.
-/// For `CreateTopic`, uses the `name` parameter directly instead of an ARN.
-fn service_tags(input: &Input) -> Vec<KeyValue> {
-    let mut direct_topic_name = None;
-    let mut topic_arn = None;
-    let mut target_arn = None;
-
-    if let Some(input) = input.downcast_ref::<PublishInput>() {
-        topic_arn = input.topic_arn.as_deref();
-        target_arn = input.target_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<CreateTopicInput>() {
-        direct_topic_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<SetTopicAttributesInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    } else if let Some(input) = input.downcast_ref::<SubscribeInput>() {
-        topic_arn = input.topic_arn.as_deref();
-    }
-
-    let topic_name = direct_topic_name.or_else(|| topic_arn.map(arn_resource_name));
-    let target_name = if topic_name.is_none() {
-        target_arn.map(arn_resource_name)
-    } else {
-        None
-    };
-
-    if let Some(topic_name) = topic_name {
-        vec![KeyValue::new(TOPIC_NAME, topic_name.to_owned())]
-    } else if let Some(target_name) = target_name {
-        vec![KeyValue::new(TARGET_NAME, target_name.to_owned())]
-    } else {
-        Vec::new()
+        inject_into_publish_batch(batch_input, trace_headers);
     }
 }
 
 /// Injects a `_datadog` Binary message attribute into a `Publish` input.
 ///
 /// Skipped when the message already has 10 attributes and none is `_datadog`.
-fn inject_into_publish(
-    input: &mut PublishInput,
-    trace_headers: &HashMap<String, String>,
-) -> Result<(), BoxError> {
+fn inject_into_publish(input: &mut PublishInput, trace_headers: &HashMap<String, String>) {
     let attrs = input.message_attributes.get_or_insert_with(HashMap::new);
     if should_skip_injection(attrs) {
-        return Ok(());
+        return;
     }
-    attrs.insert(
-        DATADOG_ATTRIBUTE_KEY.to_string(),
-        build_datadog_attribute(trace_headers)?,
-    );
-    Ok(())
+    let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
+        return;
+    };
+    attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
 }
 
 /// Injects a `_datadog` Binary message attribute into each entry of a `PublishBatch` input.
@@ -200,12 +198,14 @@ fn inject_into_publish(
 fn inject_into_publish_batch(
     input: &mut PublishBatchInput,
     trace_headers: &HashMap<String, String>,
-) -> Result<(), BoxError> {
+) {
     let Some(entries) = input.publish_batch_request_entries.as_mut() else {
-        return Ok(());
+        return;
+    };
+    let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
+        return;
     };
     let dd_key = DATADOG_ATTRIBUTE_KEY.to_string();
-    let dd_attr = build_datadog_attribute(trace_headers)?;
     for entry in entries.iter_mut() {
         let attrs = entry.message_attributes.get_or_insert_with(HashMap::new);
         if should_skip_injection(attrs) {
@@ -213,7 +213,6 @@ fn inject_into_publish_batch(
         }
         attrs.insert(dd_key.clone(), dd_attr.clone());
     }
-    Ok(())
 }
 
 /// Returns `true` when injection should be skipped to respect the 10-attribute cap.
@@ -222,11 +221,6 @@ fn inject_into_publish_batch(
 /// is only enforced when `_datadog` is absent.
 fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
     attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
-}
-
-/// Returns the resource name (last colon-separated segment) from an ARN string.
-fn arn_resource_name(arn: &str) -> &str {
-    arn.rsplit(':').next().unwrap_or(arn)
 }
 
 /// Serialises `trace_headers` as a Binary-typed SNS message attribute.
@@ -275,7 +269,7 @@ mod tests {
         }
         let mut input = builder.build().unwrap();
 
-        inject_into_publish(&mut input, &trace_headers).unwrap();
+        inject_into_publish(&mut input, &trace_headers);
 
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
@@ -304,7 +298,7 @@ mod tests {
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = builder.build().unwrap();
 
-        inject_into_publish(&mut input, &trace_headers).unwrap();
+        inject_into_publish(&mut input, &trace_headers);
 
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
@@ -346,7 +340,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_publish_batch(&mut input, &trace_headers).unwrap();
+        inject_into_publish_batch(&mut input, &trace_headers);
 
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
         let full = &entries[0];
@@ -399,7 +393,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_publish_batch(&mut input, &trace_headers).unwrap();
+        inject_into_publish_batch(&mut input, &trace_headers);
 
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
         let attrs = entries[0].message_attributes.as_ref().unwrap();
@@ -425,7 +419,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_publish(&mut input, &trace_headers).unwrap();
+        inject_into_publish(&mut input, &trace_headers);
 
         let attrs = input.message_attributes.as_ref().unwrap();
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
@@ -442,7 +436,7 @@ mod tests {
             .unwrap();
         let mut input = Input::erase(input);
 
-        inject(&trace_headers, &mut input).unwrap();
+        inject(&trace_headers, &mut input);
 
         let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();

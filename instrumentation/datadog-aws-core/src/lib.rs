@@ -8,7 +8,9 @@
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
 pub mod attribute_keys;
-mod interceptor;
 pub mod limits;
+mod request_span;
 
-pub use interceptor::{modify_before_serialization, read_after_execution, read_before_transmit};
+pub use request_span::{
+    finish_request_span, start_request_span, update_request_span, AwsRequestMetadata,
+};

@@ -45,6 +45,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
     assert_eq!(attrs["aws.operation"], "PutEvents");
     assert_eq!(attrs["operation.name"], "aws.eventbridge.request");
     assert_eq!(attrs["resource.name"], "EventBridge.PutEvents");
+    assert!(!attrs.contains_key("rulename"));
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);

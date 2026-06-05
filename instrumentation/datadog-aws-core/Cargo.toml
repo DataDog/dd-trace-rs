@@ -3,7 +3,7 @@
 
 [package]
 name = "datadog-aws-core"
-description = "Internal shared interceptor machinery for Datadog AWS instrumentation crates."
+description = "Shared AWS request span utilities for Datadog AWS instrumentation crates."
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true

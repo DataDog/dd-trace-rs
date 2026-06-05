@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-//! Datadog trace context injection for AWS SDK for Rust EventBridge operations.
+//! Datadog tracing for AWS SDK for Rust EventBridge operations.
 //!
 //! # Usage
 //!
@@ -54,7 +54,8 @@ use datadog_aws_core::limits::ONE_MB;
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
 const SPAN_SERVICE_ID: &str = "eventbridge";
 
-/// AWS SDK interceptor that injects Datadog trace context into EventBridge requests.
+/// AWS SDK interceptor that creates Datadog spans and injects trace context into EventBridge
+/// requests.
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an EventBridge config builder.
 #[derive(Debug)]
@@ -93,14 +94,43 @@ impl Intercept for EventBridgeInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::modify_before_serialization(
+        let Some(metadata) = aws_core::AwsRequestMetadata::from_config_bag(cfg) else {
+            return Ok(());
+        };
+
+        let input = context.input();
+        let mut rule_name = None;
+        if let Some(input) = input.downcast_ref::<PutRuleInput>() {
+            rule_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
+            rule_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DeleteRuleInput>() {
+            rule_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<EnableRuleInput>() {
+            rule_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DisableRuleInput>() {
+            rule_name = input.name.as_deref();
+        } else if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
+            rule_name = input.rule.as_deref();
+        } else if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
+            rule_name = input.rule.as_deref();
+        }
+
+        let service_tags = [rule_name.map(|name| KeyValue::new(RULE_NAME, name.to_owned()))]
+            .into_iter()
+            .flatten();
+        let trace_headers = aws_core::start_request_span(
             SPAN_SERVICE_ID,
+            metadata,
+            service_tags,
             &self.tracer,
-            context,
             cfg,
-            |input, _, _| service_tags(input),
-            inject,
-        )
+        );
+        if !trace_headers.is_empty() {
+            inject(&trace_headers, context.input_mut());
+        }
+
+        Ok(())
     }
 
     fn read_before_transmit(
@@ -109,7 +139,8 @@ impl Intercept for EventBridgeInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_before_transmit(context, cfg)
+        aws_core::update_request_span(context, cfg);
+        Ok(())
     }
 
     fn read_after_execution(
@@ -118,7 +149,8 @@ impl Intercept for EventBridgeInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_after_execution(context, cfg)
+        aws_core::finish_request_span(context, cfg);
+        Ok(())
     }
 }
 
@@ -126,39 +158,9 @@ impl Intercept for EventBridgeInterceptor {
 ///
 /// Only `PutEvents` carries a `detail` JSON payload that supports injection;
 /// all other operations are no-ops.
-fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
     if let Some(put_input) = input.downcast_mut::<PutEventsInput>() {
-        return inject_into_put_events(put_input, trace_headers);
-    }
-
-    Ok(())
-}
-
-/// Returns EventBridge-specific span tags: a `rulename` tag when a rule name
-/// can be extracted from the operation input, otherwise an empty list.
-fn service_tags(input: &Input) -> Vec<KeyValue> {
-    let mut rule_name = None;
-
-    if let Some(input) = input.downcast_ref::<PutRuleInput>() {
-        rule_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
-        rule_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<DeleteRuleInput>() {
-        rule_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<EnableRuleInput>() {
-        rule_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<DisableRuleInput>() {
-        rule_name = input.name.as_deref();
-    } else if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
-        rule_name = input.rule.as_deref();
-    } else if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
-        rule_name = input.rule.as_deref();
-    }
-
-    if let Some(rule_name) = rule_name {
-        vec![KeyValue::new(RULE_NAME, rule_name.to_owned())]
-    } else {
-        Vec::new()
+        inject_into_put_events(put_input, trace_headers);
     }
 }
 
@@ -172,12 +174,9 @@ fn service_tags(input: &Input) -> Vec<KeyValue> {
 /// Entries with non-object JSON detail, invalid JSON, serialization failures, or a
 /// resulting detail that would exceed the 1 MB EventBridge per-entry limit are
 /// silently skipped.
-fn inject_into_put_events(
-    input: &mut PutEventsInput,
-    trace_headers: &HashMap<String, String>,
-) -> Result<(), BoxError> {
+fn inject_into_put_events(input: &mut PutEventsInput, trace_headers: &HashMap<String, String>) {
     let Some(entries) = input.entries.as_mut() else {
-        return Ok(());
+        return;
     };
 
     let start_time = SystemTime::now()
@@ -186,8 +185,8 @@ fn inject_into_put_events(
         .as_millis()
         .to_string();
 
-    let serde_json::Value::Object(mut ctx) = serde_json::to_value(trace_headers)? else {
-        return Ok(());
+    let Ok(serde_json::Value::Object(mut ctx)) = serde_json::to_value(trace_headers) else {
+        return;
     };
     ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
     for entry in entries.iter_mut() {
@@ -219,7 +218,6 @@ fn inject_into_put_events(
 
         entry.detail = Some(new_detail);
     }
-    Ok(())
 }
 
 fn rewrite_json_object_field(
@@ -298,8 +296,8 @@ mod tests {
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        collect_string_tags, sample_trace_headers, DATADOG_PARENT_ID_KEY,
-        DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        DATADOG_TRACE_ID_KEY,
     };
 
     fn parse_detail_datadog(detail: &str) -> HashMap<String, String> {
@@ -324,7 +322,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some("not json"));
@@ -340,7 +338,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(
@@ -361,7 +359,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some(detail.as_str()));
@@ -388,7 +386,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(
@@ -416,7 +414,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -439,7 +437,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -459,7 +457,7 @@ mod tests {
             .build();
         let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
 
-        inject_into_put_events(&mut input, &trace_headers).unwrap();
+        inject_into_put_events(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
@@ -468,14 +466,6 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();
         assert_eq!(parsed["existing"], "data");
         assert_eq!(parsed["nested"]["_datadog"], "keep-me");
-    }
-
-    #[test]
-    fn service_tags_for_put_events_returns_empty() {
-        let input = Input::erase(PutEventsInput::builder().build().unwrap());
-
-        let tags = collect_string_tags(service_tags(&input));
-        assert!(!tags.contains_key(RULE_NAME));
     }
 
     #[test]
@@ -489,7 +479,7 @@ mod tests {
         let input = PutEventsInput::builder().entries(entry).build().unwrap();
         let mut input = Input::erase(input);
 
-        inject(&trace_headers, &mut input).unwrap();
+        inject(&trace_headers, &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let detail = input.entries.as_ref().unwrap()[0].detail.as_ref().unwrap();

@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
-//! Datadog trace context injection for AWS SDK for Rust SQS operations.
+//! Datadog tracing for AWS SDK for Rust SQS operations.
 //!
 //! # Usage
 //!
@@ -45,7 +45,7 @@ use datadog_aws_core::limits::MAX_MESSAGE_ATTRIBUTES;
 const TRACER_NAME: &str = "datadog-aws-sqs";
 const SPAN_SERVICE_ID: &str = "sqs";
 
-/// AWS SDK interceptor that injects Datadog trace context into SQS requests.
+/// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SQS config builder.
 #[derive(Debug)]
@@ -84,14 +84,56 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::modify_before_serialization(
+        let Some(metadata) = aws_core::AwsRequestMetadata::from_config_bag(cfg) else {
+            return Ok(());
+        };
+
+        let input = context.input();
+        let mut queue_url = None;
+        if let Some(input) = input.downcast_ref::<SendMessageInput>() {
+            queue_url = input.queue_url.as_deref();
+        } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
+            queue_url = input.queue_url.as_deref();
+        } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
+            queue_url = input.queue_url.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
+            queue_url = input.queue_url.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
+            queue_url = input.queue_url.as_deref();
+        }
+        let mut queue_name = None;
+        let mut cloud_resource_id = None;
+        if let Some(url) = queue_url {
+            let url = url.trim_end_matches('/');
+            let mut parts = url.rsplit('/');
+            if let (Some(name), Some(account_id)) = (parts.next(), parts.next()) {
+                queue_name = Some(name);
+                let region = &metadata.region;
+                let partition = metadata.partition;
+                cloud_resource_id =
+                    Some(format!("arn:{partition}:sqs:{region}:{account_id}:{name}"));
+            }
+        }
+        let service_tags = [
+            Some(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs")),
+            queue_name.map(|name| KeyValue::new(QUEUE_NAME, name.to_string())),
+            cloud_resource_id.map(|id| KeyValue::new(CLOUD_RESOURCE_ID, id)),
+        ]
+        .into_iter()
+        .flatten();
+
+        let trace_headers = aws_core::start_request_span(
             SPAN_SERVICE_ID,
-            &self.tracer,
-            context,
-            cfg,
+            metadata,
             service_tags,
-            inject,
-        )
+            &self.tracer,
+            cfg,
+        );
+        if !trace_headers.is_empty() {
+            inject(&trace_headers, context.input_mut());
+        }
+
+        Ok(())
     }
 
     fn read_before_transmit(
@@ -100,7 +142,8 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_before_transmit(context, cfg)
+        aws_core::update_request_span(context, cfg);
+        Ok(())
     }
 
     fn read_after_execution(
@@ -109,7 +152,8 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::read_after_execution(context, cfg)
+        aws_core::finish_request_span(context, cfg);
+        Ok(())
     }
 }
 
@@ -117,54 +161,15 @@ impl Intercept for SqsInterceptor {
 ///
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
 /// that supports injection; all other operations are no-ops.
-fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) -> Result<(), BoxError> {
+fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
     if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
-        return inject_into_send_message(send_input, trace_headers);
+        inject_into_send_message(send_input, trace_headers);
+        return;
     }
 
     if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
-        return inject_into_send_message_batch(batch_input, trace_headers);
+        inject_into_send_message_batch(batch_input, trace_headers);
     }
-
-    Ok(())
-}
-
-/// Returns SQS-specific span tags for the given operation input.
-///
-/// Always includes `messaging.system = "amazonsqs"`. When a queue URL is
-/// available on the input, also includes `queuename` and `cloud.resource_id`
-/// (formatted as a full SQS ARN).
-fn service_tags(input: &Input, region: &str, partition: &str) -> Vec<KeyValue> {
-    let mut queue_url = None;
-
-    if let Some(input) = input.downcast_ref::<SendMessageInput>() {
-        queue_url = input.queue_url.as_deref();
-    } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
-        queue_url = input.queue_url.as_deref();
-    } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
-        queue_url = input.queue_url.as_deref();
-    } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
-        queue_url = input.queue_url.as_deref();
-    } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
-        queue_url = input.queue_url.as_deref();
-    }
-
-    let mut tags = Vec::with_capacity(3);
-    tags.push(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs"));
-
-    if let Some(url) = queue_url {
-        let url = url.trim_end_matches('/');
-        let mut parts = url.rsplit('/');
-        if let (Some(name), Some(account_id)) = (parts.next(), parts.next()) {
-            tags.push(KeyValue::new(QUEUE_NAME, name.to_string()));
-            tags.push(KeyValue::new(
-                CLOUD_RESOURCE_ID,
-                format!("arn:{partition}:sqs:{region}:{account_id}:{name}"),
-            ));
-        }
-    }
-
-    tags
 }
 
 /// Injects a `_datadog` String message attribute into a message attributes map.
@@ -182,15 +187,11 @@ fn inject_message_attribute(
 }
 
 /// Injects a `_datadog` String message attribute into a `SendMessage` input.
-fn inject_into_send_message(
-    input: &mut SendMessageInput,
-    trace_headers: &HashMap<String, String>,
-) -> Result<(), BoxError> {
-    inject_message_attribute(
-        &mut input.message_attributes,
-        build_datadog_attribute(trace_headers)?,
-    );
-    Ok(())
+fn inject_into_send_message(input: &mut SendMessageInput, trace_headers: &HashMap<String, String>) {
+    let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
+        return;
+    };
+    inject_message_attribute(&mut input.message_attributes, datadog_attr);
 }
 
 /// Injects a `_datadog` String message attribute into each entry of a `SendMessageBatch` input.
@@ -199,15 +200,16 @@ fn inject_into_send_message(
 fn inject_into_send_message_batch(
     input: &mut SendMessageBatchInput,
     trace_headers: &HashMap<String, String>,
-) -> Result<(), BoxError> {
+) {
     let Some(entries) = input.entries.as_mut() else {
-        return Ok(());
+        return;
     };
-    let dd_attr = build_datadog_attribute(trace_headers)?;
+    let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
+        return;
+    };
     for entry in entries.iter_mut() {
         inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
     }
-    Ok(())
 }
 
 /// Serialises `trace_headers` as a JSON String-typed SQS message attribute.
@@ -246,7 +248,7 @@ mod tests {
         }
         let mut input = builder.build().unwrap();
 
-        inject_into_send_message(&mut input, &trace_headers).unwrap();
+        inject_into_send_message(&mut input, &trace_headers);
 
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
@@ -275,7 +277,7 @@ mod tests {
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = builder.build().unwrap();
 
-        inject_into_send_message(&mut input, &trace_headers).unwrap();
+        inject_into_send_message(&mut input, &trace_headers);
 
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
@@ -321,7 +323,7 @@ mod tests {
             .build()
             .unwrap();
 
-        inject_into_send_message_batch(&mut input, &trace_headers).unwrap();
+        inject_into_send_message_batch(&mut input, &trace_headers);
 
         let entries = input.entries.as_ref().unwrap();
         let attrs = entries[0].message_attributes.as_ref().unwrap();
@@ -344,7 +346,7 @@ mod tests {
             .unwrap();
         let mut input = Input::erase(input);
 
-        inject(&trace_headers, &mut input).unwrap();
+        inject(&trace_headers, &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
