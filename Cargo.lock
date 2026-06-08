@@ -1365,9 +1365,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "5.0.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f03752a6f29378a786c6d28121549e1e36dcb48fa2abc760504cdd0e126d83f"
+checksum = "8bda4a989dc3fc0ebd0523521f52d18ee72172d9f275762b65a205ec9b960eb9"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1442,9 +1442,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "2.1.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df229b55274db81b8a85a1b9ab14663af070358f39017ab68d26a3aada535db6"
+checksum = "6e4a7bf5fe62282784cd6ae4c805b2e35f0520c3464ca090f49b3c9794d4fd4d"
 dependencies = [
  "libdd-common",
  "lru",
@@ -1472,9 +1472,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-telemetry"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1662c33b446eed81b610b5d567ddb9c45c5b7587c6c23c5f5545a98b451cc0ba"
+checksum = "9626d441cee43418a080cb2fae694d86f62eb965282ff9d0a1c99058658eb3ad"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1519,9 +1519,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-obfuscation"
-version = "3.1.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2feb45760f019fb70338b35e1341605b078c2e56a55e8fdbe3e66f256ad60d"
+checksum = "44197ef58464bd75d002d10e02f702096dc52d68d08b7355860b534a30f8ac5b"
 dependencies = [
  "anyhow",
  "fluent-uri",
@@ -1547,9 +1547,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4313c4ce9cd9ea55b46c980164fc41569909c8c2bb6e0320ad1237194bd25a58"
+checksum = "d32bfbd154a6d6a5b452458850adfa1dd3e36d567ad6ae606b16b8bfeb97fa7a"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1573,9 +1573,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-utils"
-version = "5.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "166fa5c3998dbaa5412156289e8fb24fee35d9aaf2a4707a17c34e956b20b505"
+checksum = "58340581c2d7f02782e5e0ace77cd42bca18938761f359079a7ff534a24bca99"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
