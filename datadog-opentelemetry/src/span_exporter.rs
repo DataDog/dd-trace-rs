@@ -146,7 +146,7 @@ impl Exporter<SpanData> for MapperExporter {
             .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
         self.config.add_extra_services(services);
 
-        let agent_response = trace_exporter.send_trace_chunks(trace_chunks)?;
+        let agent_response = trace_exporter.send_trace_chunks(trace_chunks, None)?;
         Ok(agent_response)
     }
 }

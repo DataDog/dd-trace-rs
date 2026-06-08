@@ -68,6 +68,10 @@ jobs:
         run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
+      - name: Add file attributes to JUnit XML
+        if: success() || failure()
+        shell: bash
+        run: cargo run -p tools --bin add_junit_file_attributes -- target/nextest/ci/junit.xml
       - name: Report Test Results
         if: success() || failure()
         uses: mikepenz/action-junit-report@db71d41eb79864e25ab0337e395c352e84523afe # v4.3.1
