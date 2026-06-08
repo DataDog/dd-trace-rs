@@ -162,65 +162,45 @@ impl Intercept for SqsInterceptor {
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
 /// that supports injection; all other operations are no-ops.
 fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
+    fn build_datadog_attribute(
+        trace_headers: &HashMap<String, String>,
+    ) -> Result<MessageAttributeValue, BoxError> {
+        let json = serde_json::to_string(trace_headers)?;
+        Ok(MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value(json)
+            .build()?)
+    }
+
+    fn inject_message_attribute(
+        message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
+        datadog_attr: MessageAttributeValue,
+    ) {
+        let attrs = message_attributes.get_or_insert_with(HashMap::new);
+        if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
+            attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
+        }
+    }
+
     if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
-        inject_into_send_message(send_input, trace_headers);
+        let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
+            return;
+        };
+        inject_message_attribute(&mut send_input.message_attributes, datadog_attr);
         return;
     }
 
     if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
-        inject_into_send_message_batch(batch_input, trace_headers);
+        let Some(entries) = batch_input.entries.as_mut() else {
+            return;
+        };
+        let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
+            return;
+        };
+        for entry in entries.iter_mut() {
+            inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
+        }
     }
-}
-
-/// Injects a `_datadog` String message attribute into a message attributes map.
-///
-/// Skipped when the message already has 10 attributes and none is `_datadog`
-/// (replacing an existing `_datadog` key is always allowed).
-fn inject_message_attribute(
-    message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
-    datadog_attr: MessageAttributeValue,
-) {
-    let attrs = message_attributes.get_or_insert_with(HashMap::new);
-    if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
-        attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
-    }
-}
-
-/// Injects a `_datadog` String message attribute into a `SendMessage` input.
-fn inject_into_send_message(input: &mut SendMessageInput, trace_headers: &HashMap<String, String>) {
-    let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
-        return;
-    };
-    inject_message_attribute(&mut input.message_attributes, datadog_attr);
-}
-
-/// Injects a `_datadog` String message attribute into each entry of a `SendMessageBatch` input.
-///
-/// The same skip/overwrite rules as [`inject_message_attribute`] apply per entry.
-fn inject_into_send_message_batch(
-    input: &mut SendMessageBatchInput,
-    trace_headers: &HashMap<String, String>,
-) {
-    let Some(entries) = input.entries.as_mut() else {
-        return;
-    };
-    let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
-        return;
-    };
-    for entry in entries.iter_mut() {
-        inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
-    }
-}
-
-/// Serialises `trace_headers` as a JSON String-typed SQS message attribute.
-fn build_datadog_attribute(
-    trace_headers: &HashMap<String, String>,
-) -> Result<MessageAttributeValue, BoxError> {
-    let json = serde_json::to_string(trace_headers)?;
-    Ok(MessageAttributeValue::builder()
-        .data_type("String")
-        .string_value(json)
-        .build()?)
 }
 
 #[cfg(test)]
@@ -246,10 +226,11 @@ mod tests {
                 .unwrap();
             builder = builder.message_attributes(format!("attr{}", i), attr);
         }
-        let mut input = builder.build().unwrap();
+        let mut input = Input::erase(builder.build().unwrap());
 
-        inject_into_send_message(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         assert!(!attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
@@ -275,10 +256,11 @@ mod tests {
             .build()
             .unwrap();
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
-        let mut input = builder.build().unwrap();
+        let mut input = Input::erase(builder.build().unwrap());
 
-        inject_into_send_message(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         let dd_attr = &attrs[DATADOG_ATTRIBUTE_KEY];
@@ -317,14 +299,17 @@ mod tests {
             .set_message_attributes(Some(full_attrs))
             .build()
             .unwrap();
-        let mut input = SendMessageBatchInput::builder()
-            .queue_url("https://example.com/test-queue")
-            .entries(entry)
-            .build()
-            .unwrap();
+        let mut input = Input::erase(
+            SendMessageBatchInput::builder()
+                .queue_url("https://example.com/test-queue")
+                .entries(entry)
+                .build()
+                .unwrap(),
+        );
 
-        inject_into_send_message_batch(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<SendMessageBatchInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let attrs = entries[0].message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);

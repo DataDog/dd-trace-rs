@@ -159,22 +159,10 @@ impl Intercept for EventBridgeInterceptor {
 /// Only `PutEvents` carries a `detail` JSON payload that supports injection;
 /// all other operations are no-ops.
 fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
-    if let Some(put_input) = input.downcast_mut::<PutEventsInput>() {
-        inject_into_put_events(put_input, trace_headers);
-    }
-}
+    let Some(input) = input.downcast_mut::<PutEventsInput>() else {
+        return;
+    };
 
-/// Injects Datadog trace context into each entry of a `PutEvents` input.
-///
-/// Context is inserted into each entry's `detail` JSON object under the `_datadog`
-/// key, replacing any existing top-level `_datadog` value, along with a `start`
-/// timestamp (milliseconds since epoch) and, when set, `resource.name` from
-/// `event_bus_name`.
-///
-/// Entries with non-object JSON detail, invalid JSON, serialization failures, or a
-/// resulting detail that would exceed the 1 MB EventBridge per-entry limit are
-/// silently skipped.
-fn inject_into_put_events(input: &mut PutEventsInput, trace_headers: &HashMap<String, String>) {
     let Some(entries) = input.entries.as_mut() else {
         return;
     };
@@ -320,10 +308,11 @@ mod tests {
             .detail_type("MyDetailType")
             .detail("not json")
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some("not json"));
     }
@@ -336,10 +325,11 @@ mod tests {
             .detail_type("MyDetailType")
             .detail(r#"["not","an","object"]"#)
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(
             entries[0].detail.as_deref(),
@@ -357,10 +347,11 @@ mod tests {
             .detail_type("MyDetailType")
             .detail(&detail)
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(entries[0].detail.as_deref(), Some(detail.as_str()));
     }
@@ -380,14 +371,17 @@ mod tests {
             .detail_type("MyDetailType")
             .detail(r#"{"small":"payload"}"#)
             .build();
-        let mut input = PutEventsInput::builder()
-            .entries(oversized_entry)
-            .entries(small_entry)
-            .build()
-            .unwrap();
+        let mut input = Input::erase(
+            PutEventsInput::builder()
+                .entries(oversized_entry)
+                .entries(small_entry)
+                .build()
+                .unwrap(),
+        );
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         assert_eq!(
             entries[0].detail.as_deref(),
@@ -412,10 +406,11 @@ mod tests {
                 r#"{"_datadog":{"x-datadog-trace-id":"1","x-datadog-parent-id":"2","x-datadog-sampling-priority":"0","stale":"context"},"existing":"data"}"#,
             )
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
@@ -435,10 +430,11 @@ mod tests {
             .detail_type("MyDetailType")
             .detail(r#"{"existing":"data"}"#)
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
@@ -455,10 +451,11 @@ mod tests {
             .detail_type("MyDetailType")
             .detail(r#"{"nested":{"_datadog":"keep-me"},"existing":"data"}"#)
             .build();
-        let mut input = PutEventsInput::builder().entries(entry).build().unwrap();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject_into_put_events(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);

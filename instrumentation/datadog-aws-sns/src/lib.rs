@@ -168,74 +168,42 @@ impl Intercept for SnsInterceptor {
 /// Only `Publish` and `PublishBatch` carry a message attributes payload that
 /// supports injection; all other operations are no-ops.
 fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
-    if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
-        inject_into_publish(publish_input, trace_headers);
-        return;
+    fn build_datadog_attribute(
+        trace_headers: &HashMap<String, String>,
+    ) -> Result<MessageAttributeValue, BoxError> {
+        let json_bytes = serde_json::to_vec(trace_headers)?;
+        Ok(MessageAttributeValue::builder()
+            .data_type("Binary")
+            .binary_value(Blob::new(json_bytes))
+            .build()?)
     }
 
-    if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
-        inject_into_publish_batch(batch_input, trace_headers);
-    }
-}
-
-/// Injects a `_datadog` Binary message attribute into a `Publish` input.
-///
-/// Skipped when the message already has 10 attributes and none is `_datadog`.
-fn inject_into_publish(input: &mut PublishInput, trace_headers: &HashMap<String, String>) {
-    let attrs = input.message_attributes.get_or_insert_with(HashMap::new);
-    if should_skip_injection(attrs) {
-        return;
-    }
-    let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
-        return;
-    };
-    attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
-}
-
-/// Injects a `_datadog` Binary message attribute into each entry of a `PublishBatch` input.
-///
-/// The same skip/overwrite rules as [`inject_into_publish`] apply per entry.
-fn inject_into_publish_batch(
-    input: &mut PublishBatchInput,
-    trace_headers: &HashMap<String, String>,
-) {
-    let Some(entries) = input.publish_batch_request_entries.as_mut() else {
-        return;
-    };
-    let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
-        return;
-    };
-    let dd_key = DATADOG_ATTRIBUTE_KEY.to_string();
-    for entry in entries.iter_mut() {
-        let attrs = entry.message_attributes.get_or_insert_with(HashMap::new);
-        if should_skip_injection(attrs) {
-            continue;
+    fn inject_message_attribute(
+        message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
+        datadog_attr: MessageAttributeValue,
+    ) {
+        let attrs = message_attributes.get_or_insert_with(HashMap::new);
+        if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
+            attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
         }
-        attrs.insert(dd_key.clone(), dd_attr.clone());
     }
-}
 
-/// Returns `true` when injection should be skipped to respect the 10-attribute cap.
-///
-/// An existing `_datadog` attribute counts as a slot we can reuse, so the cap
-/// is only enforced when `_datadog` is absent.
-fn should_skip_injection(attrs: &HashMap<String, MessageAttributeValue>) -> bool {
-    attrs.len() >= MAX_MESSAGE_ATTRIBUTES && !attrs.contains_key(DATADOG_ATTRIBUTE_KEY)
-}
-
-/// Serialises `trace_headers` as a Binary-typed SNS message attribute.
-///
-/// SNS uses Binary (not String) so that SNS subscription filter policies do not
-/// attempt to parse the Datadog JSON payload. String-typed attributes are
-/// inspected by filter policies and silently drop messages they cannot parse.
-fn build_datadog_attribute(
-    trace_headers: &HashMap<String, String>,
-) -> Result<MessageAttributeValue, BoxError> {
-    let json_bytes = serde_json::to_vec(trace_headers)?;
-    Ok(MessageAttributeValue::builder()
-        .data_type("Binary")
-        .binary_value(Blob::new(json_bytes))
-        .build()?)
+    if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
+        let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
+            return;
+        };
+        inject_message_attribute(&mut publish_input.message_attributes, datadog_attr);
+    } else if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
+        let Some(entries) = batch_input.publish_batch_request_entries.as_mut() else {
+            return;
+        };
+        let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
+            return;
+        };
+        for entry in entries.iter_mut() {
+            inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -267,10 +235,11 @@ mod tests {
                 .unwrap();
             builder = builder.message_attributes(format!("attr{i}"), attr);
         }
-        let mut input = builder.build().unwrap();
+        let mut input = Input::erase(builder.build().unwrap());
 
-        inject_into_publish(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         assert!(!attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
@@ -296,10 +265,11 @@ mod tests {
             .build()
             .unwrap();
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
-        let mut input = builder.build().unwrap();
+        let mut input = Input::erase(builder.build().unwrap());
 
-        inject_into_publish(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
@@ -333,15 +303,18 @@ mod tests {
             .message("body")
             .build()
             .unwrap();
-        let mut input = PublishBatchInput::builder()
-            .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
-            .publish_batch_request_entries(full_entry)
-            .publish_batch_request_entries(empty_entry)
-            .build()
-            .unwrap();
+        let mut input = Input::erase(
+            PublishBatchInput::builder()
+                .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
+                .publish_batch_request_entries(full_entry)
+                .publish_batch_request_entries(empty_entry)
+                .build()
+                .unwrap(),
+        );
 
-        inject_into_publish_batch(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PublishBatchInput>().unwrap();
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
         let full = &entries[0];
         assert_eq!(full.message_attributes.as_ref().unwrap().len(), 10);
@@ -387,14 +360,17 @@ mod tests {
             .set_message_attributes(Some(full_attrs))
             .build()
             .unwrap();
-        let mut input = PublishBatchInput::builder()
-            .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
-            .publish_batch_request_entries(entry)
-            .build()
-            .unwrap();
+        let mut input = Input::erase(
+            PublishBatchInput::builder()
+                .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
+                .publish_batch_request_entries(entry)
+                .build()
+                .unwrap(),
+        );
 
-        inject_into_publish_batch(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PublishBatchInput>().unwrap();
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
         let attrs = entries[0].message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
@@ -412,15 +388,18 @@ mod tests {
             .binary_value(Blob::new(b"old".to_vec()))
             .build()
             .unwrap();
-        let mut input = PublishInput::builder()
-            .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
-            .message("test message")
-            .message_attributes(DATADOG_ATTRIBUTE_KEY, existing)
-            .build()
-            .unwrap();
+        let mut input = Input::erase(
+            PublishInput::builder()
+                .topic_arn("arn:aws:sns:us-east-1:123456789012:test-topic")
+                .message("test message")
+                .message_attributes(DATADOG_ATTRIBUTE_KEY, existing)
+                .build()
+                .unwrap(),
+        );
 
-        inject_into_publish(&mut input, &trace_headers);
+        inject(&trace_headers, &mut input);
 
+        let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
         assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
