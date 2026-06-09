@@ -123,6 +123,8 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        // ignore: ignore the entire incoming trace context. Creates new trace with no parent.
+        // Baggage is discarded.
         if self.config.trace_propagation_behavior_extract()
             == TracePropagationBehaviorExtract::Ignore
         {
@@ -137,20 +139,24 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
             TracePropagationBehaviorExtract::Continue => {
                 Some(Self::resolve_contexts(contexts, carrier))
             }
+            // restart: starts a new trace with a fresh trace ID and sampling decision. Incoming
+            // context is referenced via a span link with reason=propagation_behavior_extract.
+            // Baggage is propagated.
             TracePropagationBehaviorExtract::Restart => {
-                let mut baggage_ctx = contexts
+                let baggage_ctx = contexts
                     .iter()
                     .find(|(_, style)| *style == TracePropagationStyle::Baggage)
                     .map(|x| x.0.clone());
                 let style = contexts[0].1;
                 let context = Self::resolve_contexts(contexts, carrier);
 
-                let ctx = baggage_ctx.get_or_insert(SpanContext::default());
+                let mut ctx = baggage_ctx.unwrap_or(SpanContext::default());
                 ctx.links.push(SpanLink::restart(&context, style));
-                Some(ctx.clone())
+                Some(ctx)
             }
-            // unreachable
-            TracePropagationBehaviorExtract::Ignore => None,
+            TracePropagationBehaviorExtract::Ignore => {
+                unreachable!("`ignore` behavior treated beforehand")
+            }
         }
     }
 
