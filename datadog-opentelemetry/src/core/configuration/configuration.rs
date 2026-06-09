@@ -23,7 +23,7 @@ use crate::core::configuration::sources::{
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
-use crate::{dd_error, dd_warn};
+use crate::{dd_error, dd_info, dd_warn};
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -96,6 +96,82 @@ const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
 const DEFAULT_UNIX_TRACE_AGENT_URL: &str = "/var/run/datadog/apm.socket";
 const DEFAULT_UNIX_DOGSTATSD_AGENT_URL: &str = "/var/run/datadog/dsd.socket";
+/// Default OTLP HTTP port used to build the computed default traces endpoint.
+const OTLP_HTTP_DEFAULT_PORT: u16 = 4318;
+
+/// Parses an OTLP headers string (`key=value` comma-separated) into `(key, value)` pairs.
+///
+/// Entries without a `=` separator are skipped. Keys and values are trimmed and percent-decoded
+/// is not applied (values are passed through as-is, matching the OpenTelemetry environment-variable
+/// specification for simple header lists).
+fn parse_otlp_headers(headers: &str) -> Vec<(String, String)> {
+    headers
+        .split(',')
+        .filter_map(|entry| {
+            entry
+                .split_once('=')
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        })
+        .filter(|(k, _)| !k.is_empty())
+        .collect()
+}
+
+/// Maps an `OTEL_TRACES_SAMPLER` value (with its `OTEL_TRACES_SAMPLER_ARG`) to a Datadog trace
+/// sample rate in `[0.0, 1.0]`.
+///
+/// Parent-based samplers map directly. Non-parent-based variants (`always_on`, `always_off`,
+/// `traceidratio`) are mapped to their parent-based equivalent and a warning is logged, because
+/// Datadog tracing is always parent-based. Unknown values fall back to `parentbased_always_on`
+/// (rate `1.0`) with a warning.
+///
+/// For the ratio-based samplers, an out-of-range or non-finite `OTEL_TRACES_SAMPLER_ARG` is
+/// invalid: per the OpenTelemetry environment-variable spec, invalid sampler arguments are logged
+/// and ignored (here: treated as `parentbased_always_on`, rate `1.0`) rather than silently clamped
+/// — clamping a negative arg to `0.0` would drop every root trace.
+pub(crate) fn otel_sampler_to_sample_rate(sampler: &str, sampler_arg: f64) -> f64 {
+    match sampler.trim().to_ascii_lowercase().as_str() {
+        "parentbased_always_on" => 1.0,
+        "parentbased_always_off" => 0.0,
+        "parentbased_traceidratio" => validated_ratio(sampler_arg),
+        "always_on" => {
+            dd_warn!(
+                "OTEL_TRACES_SAMPLER=always_on is not supported; Datadog tracing is parent-based. Mapping to parentbased_always_on."
+            );
+            1.0
+        }
+        "always_off" => {
+            dd_warn!(
+                "OTEL_TRACES_SAMPLER=always_off is not supported; Datadog tracing is parent-based. Mapping to parentbased_always_off."
+            );
+            0.0
+        }
+        "traceidratio" => {
+            dd_warn!(
+                "OTEL_TRACES_SAMPLER=traceidratio is not supported; Datadog tracing is parent-based. Mapping to parentbased_traceidratio."
+            );
+            validated_ratio(sampler_arg)
+        }
+        other => {
+            dd_warn!(
+                "Unknown OTEL_TRACES_SAMPLER value '{other}'; defaulting to parentbased_always_on (sample rate 1.0)."
+            );
+            1.0
+        }
+    }
+}
+
+/// Validates an `OTEL_TRACES_SAMPLER_ARG` ratio. Returns the ratio when it is finite and in
+/// `[0.0, 1.0]`; otherwise logs a warning and returns `1.0` (treat invalid as unset, i.e.
+/// always-on), matching the OpenTelemetry spec's "log and ignore invalid values" requirement.
+fn validated_ratio(arg: f64) -> f64 {
+    if arg.is_finite() && (0.0..=1.0).contains(&arg) {
+        return arg;
+    }
+    dd_warn!(
+        "OTEL_TRACES_SAMPLER_ARG must be a ratio in [0.0, 1.0], got {arg}; ignoring it and using sample rate 1.0."
+    );
+    1.0
+}
 
 /// OTLP protocol types for OTLP export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1223,6 +1299,24 @@ pub struct Config {
     otlp_logs_protocol: ConfigItem<Option<OtlpProtocol>>,
     /// OTLP logs timeout in milliseconds
     otlp_logs_timeout: ConfigItem<u32>,
+
+    // # OpenTelemetry Traces (OTLP trace export)
+    /// OTEL traces exporter type (`otlp` enables OTLP trace export, `none` disables tracing).
+    otel_traces_exporter: ConfigItem<Option<String>>,
+    /// OTLP traces endpoint (full URL, used as-is).
+    otlp_traces_endpoint: ConfigItem<Cow<'static, str>>,
+    /// OTLP traces headers (`key=value` comma-separated). Sensitive: excluded from telemetry.
+    otlp_traces_headers: ConfigItem<Cow<'static, str>>,
+    /// OTLP traces protocol (only `http/json` is honored this phase).
+    otlp_traces_protocol: ConfigItem<Option<OtlpProtocol>>,
+    /// OTLP traces timeout in milliseconds.
+    otlp_traces_timeout: ConfigItem<u32>,
+    /// OTEL traces sampler (e.g. `parentbased_always_on`).
+    otel_traces_sampler: ConfigItem<Cow<'static, str>>,
+    /// OTEL traces sampler argument (ratio for `*traceidratio` samplers).
+    otel_traces_sampler_arg: ConfigItem<f64>,
+    /// Datadog agent protocol version. When set, OTLP trace export is disabled.
+    trace_agent_protocol_version: ConfigItem<Option<String>>,
 }
 
 impl Config {
@@ -1403,6 +1497,32 @@ impl Config {
             otlp_logs_protocol: cisu
                 .update_string(default.otlp_logs_protocol, OtlpProtocol::parse_optional),
             otlp_logs_timeout: cisu.update_parsed(default.otlp_logs_timeout),
+            otel_traces_exporter: cisu.update_string(default.otel_traces_exporter, |s| {
+                let s = s.trim();
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            }),
+            otlp_traces_endpoint: cisu.update_string(default.otlp_traces_endpoint, Cow::Owned),
+            otlp_traces_headers: cisu.update_string(default.otlp_traces_headers, Cow::Owned),
+            otlp_traces_protocol: cisu
+                .update_string(default.otlp_traces_protocol, OtlpProtocol::parse_optional),
+            otlp_traces_timeout: cisu.update_parsed(default.otlp_traces_timeout),
+            otel_traces_sampler: cisu.update_string(default.otel_traces_sampler, Cow::Owned),
+            otel_traces_sampler_arg: cisu.update_parsed(default.otel_traces_sampler_arg),
+            trace_agent_protocol_version: cisu.update_string(
+                default.trace_agent_protocol_version,
+                |s| {
+                    let s = s.trim();
+                    if s.is_empty() {
+                        None
+                    } else {
+                        Some(s.to_string())
+                    }
+                },
+            ),
         }
     }
 
@@ -1465,6 +1585,14 @@ impl Config {
             &self.otlp_logs_headers,
             &self.otlp_logs_protocol,
             &self.otlp_logs_timeout,
+            &self.otel_traces_exporter,
+            &self.otlp_traces_endpoint,
+            // otlp_traces_headers is intentionally excluded: it is sensitive.
+            &self.otlp_traces_protocol,
+            &self.otlp_traces_timeout,
+            &self.otel_traces_sampler,
+            &self.otel_traces_sampler_arg,
+            &self.trace_agent_protocol_version,
         ]
     }
 
@@ -1586,8 +1714,11 @@ impl Config {
     }
 
     /// Returns whether tracing is enabled.
+    ///
+    /// Tracing is disabled when `DD_TRACE_ENABLED=false` or when `OTEL_TRACES_EXPORTER=none`
+    /// (the OpenTelemetry spec uses the `none` exporter to disable tracing).
     pub fn enabled(&self) -> bool {
-        *self.enabled.value()
+        *self.enabled.value() && !self.otel_traces_exporter_is_none()
     }
 
     /// Returns the configured log level filter.
@@ -1732,6 +1863,165 @@ impl Config {
         *self.otlp_logs_timeout.value()
     }
 
+    /// The only OTLP protocol supported for trace export in this phase (`http/json`).
+    pub const OTLP_TRACES_SUPPORTED_PROTOCOL: OtlpProtocol = OtlpProtocol::HttpJson;
+
+    /// Returns the OTEL traces exporter type (`otlp`, `none`, or `None` if unset).
+    pub fn otel_traces_exporter(&self) -> Option<&str> {
+        self.otel_traces_exporter.value().as_deref()
+    }
+
+    /// Returns the raw OTLP traces endpoint (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), or empty if
+    /// unset. Use [`Config::resolved_otlp_traces_endpoint`] for the fully resolved URL.
+    pub fn otlp_traces_endpoint(&self) -> &str {
+        self.otlp_traces_endpoint.value().as_ref()
+    }
+
+    /// Returns the raw OTLP traces headers string (`key=value` comma-separated), or empty if unset.
+    pub fn otlp_traces_headers(&self) -> &str {
+        self.otlp_traces_headers.value().as_ref()
+    }
+
+    /// Returns the OTLP traces protocol, or `None` if unset.
+    pub fn otlp_traces_protocol(&self) -> Option<OtlpProtocol> {
+        *self.otlp_traces_protocol.value()
+    }
+
+    /// Returns the raw OTLP traces timeout in milliseconds (`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`).
+    pub fn otlp_traces_timeout_raw(&self) -> u32 {
+        *self.otlp_traces_timeout.value()
+    }
+
+    /// Returns the configured OTEL traces sampler name.
+    pub fn otel_traces_sampler(&self) -> &str {
+        self.otel_traces_sampler.value().as_ref()
+    }
+
+    /// Returns the OTEL traces sampler argument (ratio used by `*traceidratio` samplers).
+    pub fn otel_traces_sampler_arg(&self) -> f64 {
+        *self.otel_traces_sampler_arg.value()
+    }
+
+    /// Returns the sample rate implied by `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG`, or
+    /// `None` when neither is explicitly set (i.e. both at their defaults). When `None`, the
+    /// default parent-based-always-on behavior is preserved by leaving libdatadog's no-rule
+    /// 100% fallback in place rather than installing a catch-all rule.
+    ///
+    /// Explicit `DD_TRACE_SAMPLE_RATE` / `DD_TRACE_SAMPLING_RULES` take precedence over this and
+    /// are applied independently in [`Config::effective_initial_rules`].
+    pub fn otel_traces_sampler_rate(&self) -> Option<f64> {
+        let sampler_set = !self.otel_traces_sampler.is_default_value();
+        let arg_set = !self.otel_traces_sampler_arg.is_default_value();
+        if !sampler_set && !arg_set {
+            return None;
+        }
+        Some(otel_sampler_to_sample_rate(
+            self.otel_traces_sampler(),
+            self.otel_traces_sampler_arg(),
+        ))
+    }
+
+    /// Returns the configured Datadog agent protocol version (`DD_TRACE_AGENT_PROTOCOL_VERSION`),
+    /// or `None` if unset.
+    pub fn trace_agent_protocol_version(&self) -> Option<&str> {
+        self.trace_agent_protocol_version.value().as_deref()
+    }
+
+    /// Returns whether the `OTEL_TRACES_EXPORTER` is explicitly set to `none`, which disables
+    /// tracing entirely (per the OpenTelemetry spec).
+    pub fn otel_traces_exporter_is_none(&self) -> bool {
+        self.otel_traces_exporter()
+            .is_some_and(|e| e.eq_ignore_ascii_case("none"))
+    }
+
+    /// Returns whether OTLP trace export should be enabled.
+    ///
+    /// OTLP trace export is enabled only when `OTEL_TRACES_EXPORTER == otlp`. It is force-disabled
+    /// when `DD_TRACE_AGENT_PROTOCOL_VERSION` is set (matching Python/JS/Java/Go); a notice is
+    /// logged in that case.
+    pub fn otlp_traces_enabled(&self) -> bool {
+        let requested = self
+            .otel_traces_exporter()
+            .is_some_and(|e| e.eq_ignore_ascii_case("otlp"));
+        if !requested {
+            return false;
+        }
+        if let Some(version) = self.trace_agent_protocol_version() {
+            dd_info!(
+                "OTEL_TRACES_EXPORTER=otlp is ignored because DD_TRACE_AGENT_PROTOCOL_VERSION is set ({version}). Traces will be sent to the Datadog agent."
+            );
+            return false;
+        }
+        true
+    }
+
+    /// Resolves the OTLP traces endpoint URL.
+    ///
+    /// Resolution order:
+    /// 1. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (used as-is).
+    /// 2. `OTEL_EXPORTER_OTLP_ENDPOINT` (strip trailing `/`, append `/v1/traces`).
+    /// 3. Computed default `http://<agent_host>:4318/v1/traces`.
+    ///
+    /// For the computed default, the host is taken from the resolved trace-agent URL (so a
+    /// `DD_TRACE_AGENT_URL=http://dd-agent:8126` deployment points OTLP at `dd-agent`, not
+    /// `localhost`), falling back to `DD_AGENT_HOST`/`localhost`. This mirrors how the metrics and
+    /// logs OTLP helpers derive their host.
+    pub fn resolved_otlp_traces_endpoint(&self) -> String {
+        let traces_endpoint = self.otlp_traces_endpoint();
+        if !traces_endpoint.is_empty() {
+            return traces_endpoint.to_string();
+        }
+
+        let base_endpoint = self.otlp_endpoint();
+        if !base_endpoint.is_empty() {
+            let trimmed = base_endpoint.trim_end_matches('/');
+            return format!("{trimmed}/v1/traces");
+        }
+
+        let host = self.otlp_default_host();
+        format!("http://{host}:{OTLP_HTTP_DEFAULT_PORT}/v1/traces")
+    }
+
+    /// Returns the host to use for the computed default OTLP endpoint: the host of the resolved
+    /// trace-agent URL when parseable, otherwise the configured `DD_AGENT_HOST` (default
+    /// `localhost`).
+    fn otlp_default_host(&self) -> String {
+        let agent_url = self.trace_agent_url();
+        agent_url
+            .parse::<hyper::http::Uri>()
+            .ok()
+            .and_then(|uri| uri.host().map(|h| h.to_string()))
+            .unwrap_or_else(|| self.agent_host.value().to_string())
+    }
+
+    /// Resolves OTLP traces headers as a list of `(key, value)` pairs.
+    ///
+    /// Falls back from `OTEL_EXPORTER_OTLP_TRACES_HEADERS` to `OTEL_EXPORTER_OTLP_HEADERS`.
+    /// The header string is `key=value` comma-separated; malformed entries are skipped.
+    pub fn resolved_otlp_traces_headers(&self) -> Vec<(String, String)> {
+        let headers = self.otlp_traces_headers();
+        let headers = if headers.is_empty() {
+            self.otlp_headers()
+        } else {
+            headers
+        };
+        parse_otlp_headers(headers)
+    }
+
+    /// Resolves the OTLP traces timeout in milliseconds.
+    ///
+    /// Falls back from `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` to `OTEL_EXPORTER_OTLP_TIMEOUT`, using
+    /// the default (10000 ms) only when neither is explicitly set.
+    pub fn resolved_otlp_traces_timeout(&self) -> u32 {
+        if !self.otlp_traces_timeout.is_default_value() {
+            return *self.otlp_traces_timeout.value();
+        }
+        if !self.otlp_timeout.is_default_value() {
+            return *self.otlp_timeout.value();
+        }
+        *self.otlp_traces_timeout.value()
+    }
+
     /// Returns whether partial trace flushing is enabled.
     pub fn trace_partial_flush_enabled(&self) -> bool {
         *self.trace_partial_flush_enabled.value()
@@ -1849,10 +2139,16 @@ impl Config {
             .cloned()
             .map(Into::into)
             .collect();
-        if let Some(env_rate) = self.trace_sample_rate() {
-            if env_rate.is_finite() {
+        // `DD_TRACE_SAMPLE_RATE` takes precedence over `OTEL_TRACES_SAMPLER`. The OTEL sampler
+        // only contributes a catch-all when `DD_TRACE_SAMPLE_RATE` is unset and the OTEL sampler
+        // was explicitly configured.
+        let catch_all_rate = self
+            .trace_sample_rate()
+            .or_else(|| self.otel_traces_sampler_rate());
+        if let Some(rate) = catch_all_rate {
+            if rate.is_finite() {
                 rules.push(libdd_sampling::SamplingRuleConfig {
-                    sample_rate: env_rate,
+                    sample_rate: rate,
                     service: None,
                     name: None,
                     resource: None,
@@ -2229,6 +2525,35 @@ fn default_config() -> Config {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_TIMEOUT,
             10000u32,
         ),
+        otel_traces_exporter: ConfigItem::new(SupportedConfigurations::OTEL_TRACES_EXPORTER, None),
+        otlp_traces_endpoint: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+            Cow::Borrowed(""),
+        ),
+        otlp_traces_headers: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_HEADERS,
+            Cow::Borrowed(""),
+        ),
+        otlp_traces_protocol: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_PROTOCOL,
+            None,
+        ),
+        otlp_traces_timeout: ConfigItem::new(
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_TIMEOUT,
+            10000u32,
+        ),
+        otel_traces_sampler: ConfigItem::new(
+            SupportedConfigurations::OTEL_TRACES_SAMPLER,
+            Cow::Borrowed("parentbased_always_on"),
+        ),
+        otel_traces_sampler_arg: ConfigItem::new(
+            SupportedConfigurations::OTEL_TRACES_SAMPLER_ARG,
+            1.0,
+        ),
+        trace_agent_protocol_version: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_AGENT_PROTOCOL_VERSION,
+            None,
+        ),
     }
 }
 
@@ -2538,6 +2863,106 @@ impl ConfigBuilder {
     /// Env variable: `OTEL_EXPORTER_OTLP_LOGS_TIMEOUT`
     pub fn set_otlp_logs_timeout(&mut self, timeout: u32) -> &mut Self {
         self.config.otlp_logs_timeout.set_code(timeout);
+        self
+    }
+
+    /// Set the OTEL traces exporter. `otlp` enables OTLP trace export; `none` disables tracing.
+    ///
+    /// **Default**: `(unset)`
+    ///
+    /// Env variable: `OTEL_TRACES_EXPORTER`
+    pub fn set_otel_traces_exporter(&mut self, exporter: String) -> &mut Self {
+        let exporter = exporter.trim();
+        let value = if exporter.is_empty() {
+            None
+        } else {
+            Some(exporter.to_string())
+        };
+        self.config.otel_traces_exporter.set_code(value);
+        self
+    }
+
+    /// Set the OTLP traces endpoint URL (used as-is when set).
+    ///
+    /// **Default**: `(empty, falls back to OTEL_EXPORTER_OTLP_ENDPOINT or computed agent URL)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+    pub fn set_otlp_traces_endpoint(&mut self, endpoint: String) -> &mut Self {
+        self.config
+            .otlp_traces_endpoint
+            .set_code(Cow::Owned(endpoint));
+        self
+    }
+
+    /// Set the OTLP traces headers (`key=value` comma-separated).
+    ///
+    /// **Default**: `(empty, falls back to OTEL_EXPORTER_OTLP_HEADERS)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TRACES_HEADERS`
+    pub fn set_otlp_traces_headers(&mut self, headers: String) -> &mut Self {
+        self.config
+            .otlp_traces_headers
+            .set_code(Cow::Owned(headers));
+        self
+    }
+
+    /// Set the OTLP traces protocol. Only `http/json` is honored this phase.
+    ///
+    /// **Default**: `(unset, treated as http/json)`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`
+    pub fn set_otlp_traces_protocol(&mut self, protocol: String) -> &mut Self {
+        self.config
+            .otlp_traces_protocol
+            .set_code(OtlpProtocol::parse_optional(protocol));
+        self
+    }
+
+    /// Set the OTLP traces timeout in milliseconds.
+    ///
+    /// **Default**: `10000`
+    ///
+    /// Env variable: `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`
+    pub fn set_otlp_traces_timeout(&mut self, timeout: u32) -> &mut Self {
+        self.config.otlp_traces_timeout.set_code(timeout);
+        self
+    }
+
+    /// Set the OTEL traces sampler name (e.g. `parentbased_traceidratio`).
+    ///
+    /// **Default**: `parentbased_always_on`
+    ///
+    /// Env variable: `OTEL_TRACES_SAMPLER`
+    pub fn set_otel_traces_sampler(&mut self, sampler: String) -> &mut Self {
+        self.config
+            .otel_traces_sampler
+            .set_code(Cow::Owned(sampler));
+        self
+    }
+
+    /// Set the OTEL traces sampler argument (ratio for `*traceidratio` samplers).
+    ///
+    /// **Default**: `1.0`
+    ///
+    /// Env variable: `OTEL_TRACES_SAMPLER_ARG`
+    pub fn set_otel_traces_sampler_arg(&mut self, arg: f64) -> &mut Self {
+        self.config.otel_traces_sampler_arg.set_code(arg);
+        self
+    }
+
+    /// Set the Datadog agent protocol version. When set, OTLP trace export is disabled.
+    ///
+    /// **Default**: `(unset)`
+    ///
+    /// Env variable: `DD_TRACE_AGENT_PROTOCOL_VERSION`
+    pub fn set_trace_agent_protocol_version(&mut self, version: String) -> &mut Self {
+        let version = version.trim();
+        let value = if version.is_empty() {
+            None
+        } else {
+            Some(version.to_string())
+        };
+        self.config.trace_agent_protocol_version.set_code(value);
         self
     }
 
@@ -4323,6 +4748,66 @@ mod tests {
         );
     }
 
+    // ----- OTLP trace export configuration -----
+
+    fn config_from_env<'a, I>(env: I) -> Config
+    where
+        I: IntoIterator<Item = (&'a str, &'a str)>,
+    {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(env, ConfigSourceOrigin::EnvVar));
+        Config::builder_with_sources(&sources).build()
+    }
+
+    #[test]
+    fn test_otlp_traces_disabled_by_default() {
+        let config = Config::builder().build();
+        assert!(!config.otlp_traces_enabled());
+        assert_eq!(config.otel_traces_exporter(), None);
+    }
+
+    #[test]
+    fn test_otlp_traces_enabled_when_exporter_is_otlp() {
+        let config = config_from_env([("OTEL_TRACES_EXPORTER", "otlp")]);
+        assert!(config.otlp_traces_enabled());
+    }
+
+    #[test]
+    fn test_otlp_traces_exporter_none_disables_tracing() {
+        let config = config_from_env([("OTEL_TRACES_EXPORTER", "none")]);
+        assert!(!config.otlp_traces_enabled());
+        assert!(config.otel_traces_exporter_is_none());
+        // `none` disables tracing entirely even though DD_TRACE_ENABLED defaults to true.
+        assert!(!config.enabled());
+    }
+
+    #[test]
+    fn test_agent_protocol_version_disables_otlp() {
+        // The gate: even with OTEL_TRACES_EXPORTER=otlp, a set protocol version disables OTLP.
+        let config = config_from_env([
+            ("OTEL_TRACES_EXPORTER", "otlp"),
+            ("DD_TRACE_AGENT_PROTOCOL_VERSION", "v0.4"),
+        ]);
+        assert_eq!(config.trace_agent_protocol_version(), Some("v0.4"));
+        assert!(!config.otlp_traces_enabled());
+    }
+
+    #[test]
+    fn test_otlp_traces_endpoint_uses_traces_endpoint_as_is() {
+        let config = config_from_env([
+            ("OTEL_TRACES_EXPORTER", "otlp"),
+            (
+                "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+                "http://collector:4318/v1/traces",
+            ),
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://ignored:4318"),
+        ]);
+        assert_eq!(
+            config.resolved_otlp_traces_endpoint(),
+            "http://collector:4318/v1/traces"
+        );
+    }
+
     #[test]
     fn test_sensitive_config_item_get_all_configurations_is_empty() {
         // The reusable mechanism applies at the ConfigItem level: a sensitive
@@ -4344,5 +4829,205 @@ mod tests {
             !config.otlp_endpoint.get_all_configurations().is_empty(),
             "non-sensitive ConfigItem should still report configuration entries"
         );
+    }
+
+    #[test]
+    fn test_otlp_traces_endpoint_falls_back_to_base_endpoint() {
+        let config = config_from_env([
+            ("OTEL_TRACES_EXPORTER", "otlp"),
+            ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/"),
+        ]);
+        // Trailing slash stripped, `/v1/traces` appended.
+        assert_eq!(
+            config.resolved_otlp_traces_endpoint(),
+            "http://collector:4318/v1/traces"
+        );
+    }
+
+    #[test]
+    fn test_otlp_traces_endpoint_computed_default() {
+        let config = config_from_env([("OTEL_TRACES_EXPORTER", "otlp")]);
+        assert_eq!(
+            config.resolved_otlp_traces_endpoint(),
+            "http://localhost:4318/v1/traces"
+        );
+    }
+
+    #[test]
+    fn test_otlp_traces_endpoint_computed_default_uses_agent_host() {
+        let config = config_from_env([
+            ("OTEL_TRACES_EXPORTER", "otlp"),
+            ("DD_AGENT_HOST", "dd-agent"),
+        ]);
+        assert_eq!(
+            config.resolved_otlp_traces_endpoint(),
+            "http://dd-agent:4318/v1/traces"
+        );
+    }
+
+    #[test]
+    fn test_otlp_traces_endpoint_computed_default_uses_trace_agent_url_host() {
+        // A DD_TRACE_AGENT_URL deployment must point the computed OTLP endpoint at the agent host
+        // (port 4318), not localhost.
+        let config = config_from_env([
+            ("OTEL_TRACES_EXPORTER", "otlp"),
+            ("DD_TRACE_AGENT_URL", "http://dd-agent:8126"),
+        ]);
+        assert_eq!(
+            config.resolved_otlp_traces_endpoint(),
+            "http://dd-agent:4318/v1/traces"
+        );
+    }
+
+    #[test]
+    fn test_otlp_traces_headers_parsing_and_fallback() {
+        // Traces-specific headers win over the generic OTLP headers.
+        let config = config_from_env([
+            (
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+                "api-key=secret,team = intake",
+            ),
+            ("OTEL_EXPORTER_OTLP_HEADERS", "ignored=yes"),
+        ]);
+        let headers = config.resolved_otlp_traces_headers();
+        assert_eq!(
+            headers,
+            vec![
+                ("api-key".to_string(), "secret".to_string()),
+                ("team".to_string(), "intake".to_string()),
+            ]
+        );
+
+        // Falls back to the generic headers when traces headers are unset.
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_HEADERS", "x=1")]);
+        assert_eq!(
+            config.resolved_otlp_traces_headers(),
+            vec![("x".to_string(), "1".to_string())]
+        );
+
+        // Malformed entries (no `=`) are skipped.
+        assert_eq!(
+            parse_otlp_headers("novalue,k=v"),
+            vec![("k".to_string(), "v".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_otlp_traces_timeout_resolution() {
+        // Default when neither set.
+        let config = config_from_env([("OTEL_TRACES_EXPORTER", "otlp")]);
+        assert_eq!(config.resolved_otlp_traces_timeout(), 10000);
+
+        // Falls back to the generic timeout.
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_TIMEOUT", "5000")]);
+        assert_eq!(config.resolved_otlp_traces_timeout(), 5000);
+
+        // Traces-specific timeout wins.
+        let config = config_from_env([
+            ("OTEL_EXPORTER_OTLP_TRACES_TIMEOUT", "3000"),
+            ("OTEL_EXPORTER_OTLP_TIMEOUT", "5000"),
+        ]);
+        assert_eq!(config.resolved_otlp_traces_timeout(), 3000);
+    }
+
+    #[test]
+    fn test_otlp_traces_protocol_parsing() {
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/json")]);
+        assert_eq!(config.otlp_traces_protocol(), Some(OtlpProtocol::HttpJson));
+    }
+
+    // ----- OTEL_TRACES_SAMPLER mapping -----
+
+    #[test]
+    fn test_sampler_mapping_parentbased_variants() {
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_always_on", 1.0),
+            1.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_always_off", 1.0),
+            0.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", 0.25),
+            0.25
+        );
+    }
+
+    #[test]
+    fn test_sampler_mapping_non_parentbased_maps_to_equivalent() {
+        // Non-parentbased samplers map to their parentbased equivalent.
+        assert_eq!(otel_sampler_to_sample_rate("always_on", 1.0), 1.0);
+        assert_eq!(otel_sampler_to_sample_rate("always_off", 1.0), 0.0);
+        assert_eq!(otel_sampler_to_sample_rate("traceidratio", 0.5), 0.5);
+    }
+
+    #[test]
+    fn test_sampler_mapping_unknown_defaults_to_always_on() {
+        assert_eq!(otel_sampler_to_sample_rate("bogus", 0.1), 1.0);
+    }
+
+    #[test]
+    fn test_sampler_arg_out_of_range_is_ignored_not_clamped() {
+        // Invalid args are logged and ignored (treated as always-on, rate 1.0) per the OTel spec,
+        // rather than clamped — clamping a negative arg to 0.0 would silently drop all traces.
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", 2.0),
+            1.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", -1.0),
+            1.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", f64::NAN),
+            1.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", f64::INFINITY),
+            1.0
+        );
+        // Valid in-range args are honored, including the boundaries.
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", 0.0),
+            0.0
+        );
+        assert_eq!(
+            otel_sampler_to_sample_rate("parentbased_traceidratio", 1.0),
+            1.0
+        );
+    }
+
+    #[test]
+    fn test_otel_sampler_rate_none_when_default() {
+        let config = Config::builder().build();
+        assert_eq!(config.otel_traces_sampler_rate(), None);
+        // No catch-all rule installed when sampler is at its default.
+        assert!(config.effective_initial_rules().is_empty());
+    }
+
+    #[test]
+    fn test_otel_sampler_installs_catch_all_when_set() {
+        let config = config_from_env([
+            ("OTEL_TRACES_SAMPLER", "parentbased_traceidratio"),
+            ("OTEL_TRACES_SAMPLER_ARG", "0.2"),
+        ]);
+        assert_eq!(config.otel_traces_sampler_rate(), Some(0.2));
+        let rules = config.effective_initial_rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].sample_rate, 0.2);
+    }
+
+    #[test]
+    fn test_dd_trace_sample_rate_takes_precedence_over_otel_sampler() {
+        let config = config_from_env([
+            ("DD_TRACE_SAMPLE_RATE", "0.9"),
+            ("OTEL_TRACES_SAMPLER", "parentbased_traceidratio"),
+            ("OTEL_TRACES_SAMPLER_ARG", "0.2"),
+        ]);
+        let rules = config.effective_initial_rules();
+        assert_eq!(rules.len(), 1);
+        // DD_TRACE_SAMPLE_RATE wins.
+        assert_eq!(rules[0].sample_rate, 0.9);
     }
 }

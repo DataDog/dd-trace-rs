@@ -19,6 +19,7 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 mod logs;
 mod metrics;
 mod opentelemetry_api;
+mod traces_otlp;
 mod tracing_api;
 
 pub async fn with_test_agent_session(
