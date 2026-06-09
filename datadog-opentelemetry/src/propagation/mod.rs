@@ -149,7 +149,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                     .iter()
                     .find(|(_, style)| *style == TracePropagationStyle::Baggage)
                     .map(|x| x.0.clone())
-                    .unwrap_or(SpanContext::default());
+                    .unwrap_or_default();
                 let parent_style = contexts[0].1;
                 let parent_context = Self::resolve_contexts(contexts, carrier);
 
