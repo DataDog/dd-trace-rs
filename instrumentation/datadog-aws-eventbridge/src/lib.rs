@@ -51,7 +51,8 @@ use datadog_aws_core::attribute_keys::{
 };
 
 const TRACER_NAME: &str = "datadog-aws-eventbridge";
-const SPAN_SERVICE_ID: &str = "eventbridge";
+const SPAN_NAME: &str = "eventbridge.request";
+const SPAN_OPERATION_NAME: &str = "aws.eventbridge.request";
 const MAX_EVENT_DETAIL_BYTES: usize = 1024 * 1024;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into EventBridge
@@ -120,7 +121,8 @@ impl Intercept for EventBridgeInterceptor {
             .into_iter()
             .flatten();
         let trace_headers = aws_core::start_request_span(
-            SPAN_SERVICE_ID,
+            SPAN_NAME,
+            SPAN_OPERATION_NAME,
             metadata,
             service_tags,
             &self.tracer,

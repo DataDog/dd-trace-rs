@@ -42,7 +42,8 @@ use datadog_aws_core::attribute_keys::{
 };
 
 const TRACER_NAME: &str = "datadog-aws-sqs";
-const SPAN_SERVICE_ID: &str = "sqs";
+const SPAN_NAME: &str = "sqs.request";
+const SPAN_OPERATION_NAME: &str = "aws.sqs.request";
 const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
@@ -123,7 +124,8 @@ impl Intercept for SqsInterceptor {
         .flatten();
 
         let trace_headers = aws_core::start_request_span(
-            SPAN_SERVICE_ID,
+            SPAN_NAME,
+            SPAN_OPERATION_NAME,
             metadata,
             service_tags,
             &self.tracer,

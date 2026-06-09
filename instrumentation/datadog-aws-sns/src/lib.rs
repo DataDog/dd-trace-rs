@@ -44,7 +44,8 @@ use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
 
 const TRACER_NAME: &str = "datadog-aws-sns";
-const SPAN_SERVICE_ID: &str = "sns";
+const SPAN_NAME: &str = "sns.request";
+const SPAN_OPERATION_NAME: &str = "aws.sns.request";
 const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SNS requests.
@@ -129,7 +130,8 @@ impl Intercept for SnsInterceptor {
         .into_iter()
         .flatten();
         let trace_headers = aws_core::start_request_span(
-            SPAN_SERVICE_ID,
+            SPAN_NAME,
+            SPAN_OPERATION_NAME,
             metadata,
             service_tags,
             &self.tracer,

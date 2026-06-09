@@ -61,7 +61,8 @@ impl AwsRequestMetadata {
 /// request attributes and [`finish_request_span`] can record the response and
 /// end the span in later interceptor hooks.
 pub fn start_request_span(
-    service_id: &'static str,
+    span_name: &'static str,
+    operation_name: &'static str,
     metadata: AwsRequestMetadata,
     service_tags: impl IntoIterator<Item = KeyValue>,
     tracer: &global::BoxedTracer,
@@ -69,7 +70,7 @@ pub fn start_request_span(
 ) -> HashMap<String, String> {
     let resource_name = format!("{}.{}", metadata.service, metadata.operation);
     let base_tags = [
-        KeyValue::new(OPERATION_NAME, format!("aws.{service_id}.request")),
+        KeyValue::new(OPERATION_NAME, operation_name),
         KeyValue::new(AWS_SERVICE, metadata.service),
         KeyValue::new(AWS_OPERATION, metadata.operation),
         KeyValue::new(AWS_REGION, metadata.region),
@@ -79,7 +80,7 @@ pub fn start_request_span(
     ];
     let parent_cx = Context::current();
     let span = tracer
-        .span_builder(format!("{service_id}.request"))
+        .span_builder(span_name)
         .with_kind(SpanKind::Client)
         .with_attributes(base_tags.into_iter().chain(service_tags))
         .start_with_context(tracer, &parent_cx);
