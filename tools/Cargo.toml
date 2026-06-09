@@ -1,0 +1,23 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "tools"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+bench = false
+
+[dependencies]
+anyhow = "1.0"
+cargo_metadata = "0.18"
+clap = { version = "4.0", features = ["derive"] }
+quick-xml = "0.37"
+
+[[bin]]
+name = "add_junit_file_attributes"
+bench = false
