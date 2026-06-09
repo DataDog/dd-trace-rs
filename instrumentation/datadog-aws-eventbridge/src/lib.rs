@@ -19,7 +19,6 @@
 //! ```
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -39,7 +38,7 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use opentelemetry::{global, otel_debug, KeyValue};
+use opentelemetry::{global, otel_debug, Context, KeyValue};
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Serializer as _;
@@ -120,7 +119,7 @@ impl Intercept for EventBridgeInterceptor {
         let service_tags = [rule_name.map(|name| KeyValue::new(RULE_NAME, name.to_owned()))]
             .into_iter()
             .flatten();
-        let trace_headers = aws_core::start_request_span(
+        let span_context = aws_core::start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
@@ -128,9 +127,7 @@ impl Intercept for EventBridgeInterceptor {
             &self.tracer,
             cfg,
         );
-        if !trace_headers.is_empty() {
-            inject(&trace_headers, context.input_mut());
-        }
+        inject(&span_context, context.input_mut());
 
         Ok(())
     }
@@ -160,12 +157,12 @@ impl Intercept for EventBridgeInterceptor {
 ///
 /// Only `PutEvents` carries a `detail` JSON payload that supports injection;
 /// all other operations are no-ops.
-fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
+fn inject(span_context: &Context, input: &mut Input) {
     if let Some(input) = input.downcast_mut::<PutEventsInput>() {
         let Some(entries) = input.entries.as_mut() else {
             return;
         };
-        let Some(datadog_attr) = build_datadog_attribute(trace_headers) else {
+        let Some(datadog_attr) = build_datadog_attribute(span_context) else {
             return;
         };
 
@@ -211,14 +208,19 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
     }
 }
 
-fn build_datadog_attribute(trace_headers: &HashMap<String, String>) -> Option<serde_json::Value> {
+fn build_datadog_attribute(span_context: &Context) -> Option<serde_json::Value> {
+    let trace_headers = aws_core::request_span_trace_headers(span_context);
+    if trace_headers.is_empty() {
+        return None;
+    }
+
     let attribute = || -> Result<serde_json::Value, serde_json::Error> {
         let start_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis()
             .to_string();
-        let mut attribute = serde_json::to_value(trace_headers)?;
+        let mut attribute = serde_json::to_value(&trace_headers)?;
         if let serde_json::Value::Object(ctx) = &mut attribute {
             ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
         }
@@ -311,10 +313,12 @@ impl<'de> Visitor<'de> for JsonObjectReplaceAppendFieldVisitor<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        FixedTextMapTestPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
         DATADOG_TRACE_ID_KEY,
     };
 
@@ -332,7 +336,6 @@ mod tests {
 
     #[test]
     fn skips_injection_for_invalid_put_events_detail() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -340,7 +343,7 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -349,7 +352,6 @@ mod tests {
 
     #[test]
     fn skips_injection_for_non_object_put_events_detail() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -357,7 +359,7 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -369,7 +371,6 @@ mod tests {
 
     #[test]
     fn skips_injection_when_put_events_detail_would_exceed_size_limit() {
-        let trace_headers = sample_trace_headers();
         let large_value = "x".repeat(MAX_EVENT_DETAIL_BYTES);
         let detail = format!("{{\"big\":\"{large_value}\"}}");
         let entry = PutEventsRequestEntry::builder()
@@ -379,7 +380,7 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -388,7 +389,6 @@ mod tests {
 
     #[test]
     fn skips_only_entries_that_exceed_put_events_detail_size_limit() {
-        let trace_headers = sample_trace_headers();
         let oversized_detail_value = "x".repeat(MAX_EVENT_DETAIL_BYTES);
         let oversized_detail = format!("{{\"big\":\"{oversized_detail_value}\"}}");
         let oversized_entry = PutEventsRequestEntry::builder()
@@ -409,7 +409,8 @@ mod tests {
                 .unwrap(),
         );
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -428,7 +429,6 @@ mod tests {
 
     #[test]
     fn replaces_existing_top_level_datadog_key_in_put_events_detail() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -438,7 +438,8 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -454,7 +455,6 @@ mod tests {
 
     #[test]
     fn appends_top_level_datadog_key_when_missing_in_put_events_detail() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -462,7 +462,8 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -475,7 +476,6 @@ mod tests {
 
     #[test]
     fn injects_when_put_events_detail_contains_nested_datadog_key() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -483,7 +483,8 @@ mod tests {
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -497,7 +498,6 @@ mod tests {
 
     #[test]
     fn inject_dispatches_by_input_type() {
-        let trace_headers = sample_trace_headers();
         let entry = PutEventsRequestEntry::builder()
             .source("my.source")
             .detail_type("MyDetailType")
@@ -506,7 +506,8 @@ mod tests {
         let input = PutEventsInput::builder().entries(entry).build().unwrap();
         let mut input = Input::erase(input);
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let detail = input.entries.as_ref().unwrap()[0].detail.as_ref().unwrap();

@@ -8,7 +8,8 @@
 //! uses these helpers for the common span lifecycle:
 //! 1. Read [`AwsRequestMetadata`] from the SDK [`ConfigBag`].
 //! 2. Start the request span with base and service-specific tags ([`start_request_span`]).
-//! 3. Inject the returned propagation headers into the service request payload.
+//! 3. Inject propagation headers into service request payloads that support them
+//!    ([`request_span_trace_headers`]).
 //! 4. Add HTTP-level tags once the final request is known ([`update_request_span`]).
 //! 5. Record the response status and any error, then end the span ([`finish_request_span`]).
 
@@ -55,11 +56,13 @@ impl AwsRequestMetadata {
     }
 }
 
-/// Starts the AWS request span and returns propagation headers for service-specific injection.
+/// Starts the AWS request span.
 ///
 /// The span context is stored in `cfg` so [`update_request_span`] can add HTTP
 /// request attributes and [`finish_request_span`] can record the response and
-/// end the span in later interceptor hooks.
+/// end the span in later interceptor hooks. Service interceptors can call
+/// [`request_span_trace_headers`] with the returned context to inject propagation
+/// headers into request payloads that support them.
 pub fn start_request_span(
     span_name: &'static str,
     operation_name: &'static str,
@@ -67,7 +70,7 @@ pub fn start_request_span(
     service_tags: impl IntoIterator<Item = KeyValue>,
     tracer: &global::BoxedTracer,
     cfg: &mut ConfigBag,
-) -> HashMap<String, String> {
+) -> Context {
     let resource_name = format!("{}.{}", metadata.service, metadata.operation);
     let base_tags = [
         KeyValue::new(OPERATION_NAME, operation_name),
@@ -85,14 +88,19 @@ pub fn start_request_span(
         .with_attributes(base_tags.into_iter().chain(service_tags))
         .start_with_context(tracer, &parent_cx);
     let cx = parent_cx.with_span(span);
-    let trace_headers = global::get_text_map_propagator(|p| {
-        let mut carrier = HashMap::new();
-        p.inject_context(&cx, &mut carrier);
-        carrier
-    });
 
-    cfg.interceptor_state().store_put(RequestSpanContext(cx));
-    trace_headers
+    cfg.interceptor_state()
+        .store_put(RequestSpanContext(cx.clone()));
+    cx
+}
+
+/// Returns propagation headers for the request span context.
+pub fn request_span_trace_headers(cx: &Context) -> HashMap<String, String> {
+    global::get_text_map_propagator(|propagator| {
+        let mut carrier = HashMap::with_capacity(4);
+        propagator.inject_context(cx, &mut carrier);
+        carrier
+    })
 }
 
 /// Adds HTTP-level tags once the final serialized request is available.

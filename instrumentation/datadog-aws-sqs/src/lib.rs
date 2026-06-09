@@ -34,7 +34,7 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use opentelemetry::{global, otel_debug, KeyValue};
+use opentelemetry::{global, otel_debug, Context, KeyValue};
 
 use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{
@@ -123,7 +123,7 @@ impl Intercept for SqsInterceptor {
         .into_iter()
         .flatten();
 
-        let trace_headers = aws_core::start_request_span(
+        let span_context = aws_core::start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
@@ -131,9 +131,7 @@ impl Intercept for SqsInterceptor {
             &self.tracer,
             cfg,
         );
-        if !trace_headers.is_empty() {
-            inject(&trace_headers, context.input_mut());
-        }
+        inject(&span_context, context.input_mut());
         include_datadog_attribute_for_receive(context.input_mut());
 
         Ok(())
@@ -164,14 +162,14 @@ impl Intercept for SqsInterceptor {
 ///
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
 /// that supports injection; all other operations are no-ops.
-fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
+fn inject(span_context: &Context, input: &mut Input) {
     if let Some(send_input) = input.downcast_mut::<SendMessageInput>() {
-        if let Some(dd_attr) = build_datadog_attribute(trace_headers) {
+        if let Some(dd_attr) = build_datadog_attribute(span_context) {
             inject_message_attribute(&mut send_input.message_attributes, dd_attr);
         }
     } else if let Some(batch_input) = input.downcast_mut::<SendMessageBatchInput>() {
         if let Some(entries) = batch_input.entries.as_mut() {
-            if let Some(dd_attr) = build_datadog_attribute(trace_headers) {
+            if let Some(dd_attr) = build_datadog_attribute(span_context) {
                 for entry in entries.iter_mut() {
                     inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
                 }
@@ -199,11 +197,14 @@ fn include_datadog_attribute_for_receive(input: &mut Input) {
     names.push(DATADOG_ATTRIBUTE_KEY.to_string());
 }
 
-fn build_datadog_attribute(
-    trace_headers: &HashMap<String, String>,
-) -> Option<MessageAttributeValue> {
+fn build_datadog_attribute(span_context: &Context) -> Option<MessageAttributeValue> {
+    let trace_headers = aws_core::request_span_trace_headers(span_context);
+    if trace_headers.is_empty() {
+        return None;
+    }
+
     let attribute = || -> Result<MessageAttributeValue, BoxError> {
-        let json = serde_json::to_string(trace_headers)?;
+        let json = serde_json::to_string(&trace_headers)?;
         MessageAttributeValue::builder()
             .data_type("String")
             .string_value(json)
@@ -245,13 +246,12 @@ mod tests {
     use super::*;
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        sample_trace_headers, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        FixedTextMapTestPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
         DATADOG_TRACE_ID_KEY,
     };
 
     #[test]
     fn skips_injection_when_message_attributes_are_full() {
-        let trace_headers = sample_trace_headers();
         let mut builder = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
             .message_body("test body");
@@ -265,7 +265,7 @@ mod tests {
         }
         let mut input = Input::erase(builder.build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -275,7 +275,6 @@ mod tests {
 
     #[test]
     fn overwrites_existing_datadog_attribute_when_message_attributes_are_full() {
-        let trace_headers = sample_trace_headers();
         let mut builder = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
             .message_body("test body");
@@ -295,7 +294,8 @@ mod tests {
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = Input::erase(builder.build().unwrap());
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -310,7 +310,6 @@ mod tests {
 
     #[test]
     fn overwrites_existing_datadog_attribute_in_batch_entries_when_message_attributes_are_full() {
-        let trace_headers = sample_trace_headers();
         let mut full_attrs = HashMap::new();
         for i in 0..9 {
             full_attrs.insert(
@@ -344,7 +343,8 @@ mod tests {
                 .unwrap(),
         );
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<SendMessageBatchInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -360,7 +360,6 @@ mod tests {
 
     #[test]
     fn inject_dispatches_by_input_type() {
-        let trace_headers = sample_trace_headers();
         let input = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
             .message_body("test body")
@@ -368,7 +367,8 @@ mod tests {
             .unwrap();
         let mut input = Input::erase(input);
 
-        inject(&trace_headers, &mut input);
+        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
