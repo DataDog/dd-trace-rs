@@ -148,10 +148,11 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                     .find(|(_, style)| *style == TracePropagationStyle::Baggage)
                     .map(|x| x.0.clone());
                 let style = contexts[0].1;
-                let context = Self::resolve_contexts(contexts, carrier);
+                let parent_context = Self::resolve_contexts(contexts, carrier);
 
                 let mut ctx = baggage_ctx.unwrap_or(SpanContext::default());
-                ctx.links.push(SpanLink::restart(&context, style));
+                ctx.is_remote = false;
+                ctx.links.push(SpanLink::restart(&parent_context, style));
                 Some(ctx)
             }
             TracePropagationBehaviorExtract::Ignore => {
