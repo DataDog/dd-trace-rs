@@ -49,7 +49,10 @@ impl SpanLink {
     /// Creates a span link for a restarted context scenario.
     pub(super) fn restart(context: &SpanContext, style: TracePropagationStyle) -> Self {
         let attributes = Some(HashMap::from([
-            ("reason".to_string(), "restart".to_string()),
+            (
+                "reason".to_string(),
+                "propagation_behavior_extract".to_string(),
+            ),
             ("context_headers".to_string(), style.to_string()),
         ]));
 
