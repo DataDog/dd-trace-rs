@@ -38,7 +38,7 @@ use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Blob;
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{global, otel_debug, KeyValue};
 
 use datadog_aws_core as aws_core;
 use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
@@ -168,41 +168,59 @@ impl Intercept for SnsInterceptor {
 /// Only `Publish` and `PublishBatch` carry a message attributes payload that
 /// supports injection; all other operations are no-ops.
 fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
-    fn build_datadog_attribute(
-        trace_headers: &HashMap<String, String>,
-    ) -> Result<MessageAttributeValue, BoxError> {
+    if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
+        if let Some(dd_attr) = build_datadog_attribute(trace_headers) {
+            inject_message_attribute(&mut publish_input.message_attributes, dd_attr);
+        }
+    } else if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
+        if let Some(entries) = batch_input.publish_batch_request_entries.as_mut() {
+            if let Some(dd_attr) = build_datadog_attribute(trace_headers) {
+                for entry in entries.iter_mut() {
+                    inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
+                }
+            }
+        }
+    }
+}
+
+fn build_datadog_attribute(
+    trace_headers: &HashMap<String, String>,
+) -> Option<MessageAttributeValue> {
+    let attribute = || -> Result<MessageAttributeValue, BoxError> {
         let json_bytes = serde_json::to_vec(trace_headers)?;
-        Ok(MessageAttributeValue::builder()
+        MessageAttributeValue::builder()
             .data_type("Binary")
             .binary_value(Blob::new(json_bytes))
-            .build()?)
-    }
+            .build()
+            .map_err(Into::into)
+    };
 
-    fn inject_message_attribute(
-        message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
-        datadog_attr: MessageAttributeValue,
-    ) {
-        let attrs = message_attributes.get_or_insert_with(HashMap::new);
-        if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
-            attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
+    match attribute() {
+        Ok(attr) => Some(attr),
+        Err(err) => {
+            otel_debug!(
+                name: "Sns.Inject.DatadogAttributeBuildFailed",
+                reason = err.to_string(),
+                action = "context injection skipped",
+            );
+            None
         }
     }
+}
 
-    if let Some(publish_input) = input.downcast_mut::<PublishInput>() {
-        let Ok(datadog_attr) = build_datadog_attribute(trace_headers) else {
-            return;
-        };
-        inject_message_attribute(&mut publish_input.message_attributes, datadog_attr);
-    } else if let Some(batch_input) = input.downcast_mut::<PublishBatchInput>() {
-        let Some(entries) = batch_input.publish_batch_request_entries.as_mut() else {
-            return;
-        };
-        let Ok(dd_attr) = build_datadog_attribute(trace_headers) else {
-            return;
-        };
-        for entry in entries.iter_mut() {
-            inject_message_attribute(&mut entry.message_attributes, dd_attr.clone());
-        }
+fn inject_message_attribute(
+    message_attributes: &mut Option<HashMap<String, MessageAttributeValue>>,
+    datadog_attr: MessageAttributeValue,
+) {
+    let attrs = message_attributes.get_or_insert_with(HashMap::new);
+    if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
+        attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
+    } else {
+        otel_debug!(
+            name: "Sns.Inject.MessageAttributesFull",
+            max_message_attributes = MAX_MESSAGE_ATTRIBUTES,
+            action = "context injection skipped",
+        );
     }
 }
 

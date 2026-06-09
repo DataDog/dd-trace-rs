@@ -12,6 +12,9 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
+[features]
+internal-logs = ["opentelemetry/internal-logs"]
+
 [dependencies]
 datadog-aws-core = { workspace = true }
 aws-sdk-eventbridge = "1.104.0"

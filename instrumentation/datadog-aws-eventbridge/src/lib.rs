@@ -39,7 +39,7 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{global, otel_debug, KeyValue};
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Serializer as _;
@@ -159,52 +159,80 @@ impl Intercept for EventBridgeInterceptor {
 /// Only `PutEvents` carries a `detail` JSON payload that supports injection;
 /// all other operations are no-ops.
 fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
-    let Some(input) = input.downcast_mut::<PutEventsInput>() else {
-        return;
-    };
-
-    let Some(entries) = input.entries.as_mut() else {
-        return;
-    };
-
-    let start_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .to_string();
-
-    let Ok(serde_json::Value::Object(mut ctx)) = serde_json::to_value(trace_headers) else {
-        return;
-    };
-    ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
-    for entry in entries.iter_mut() {
-        let mut entry_ctx = ctx.clone();
-        if let Some(name) = entry.event_bus_name.as_deref() {
-            entry_ctx.insert(
-                DATADOG_RESOURCE_NAME_KEY.into(),
-                serde_json::Value::String(name.into()),
-            );
-        }
-
-        let trace_ctx = serde_json::Value::Object(entry_ctx);
-
-        let detail = entry.detail.as_deref().unwrap_or("{}");
-        if detail.len() > MAX_EVENT_DETAIL_BYTES {
-            continue;
-        }
-
-        let new_detail = match rewrite_json_object_field(detail, DATADOG_ATTRIBUTE_KEY, &trace_ctx)
-        {
-            Ok(detail) => detail,
-            Err(_) => continue,
+    if let Some(input) = input.downcast_mut::<PutEventsInput>() {
+        let Some(entries) = input.entries.as_mut() else {
+            return;
+        };
+        let Some(datadog_attr) = build_datadog_attribute(trace_headers) else {
+            return;
         };
 
-        // EventBridge entries have a 1 MB detail size limit.
-        if new_detail.len() > MAX_EVENT_DETAIL_BYTES {
-            continue;
-        }
+        for entry in entries.iter_mut() {
+            let mut trace_ctx = datadog_attr.clone();
+            if let (Some(ctx), Some(name)) =
+                (trace_ctx.as_object_mut(), entry.event_bus_name.as_deref())
+            {
+                ctx.insert(
+                    DATADOG_RESOURCE_NAME_KEY.into(),
+                    serde_json::Value::String(name.into()),
+                );
+            }
 
-        entry.detail = Some(new_detail);
+            let detail = entry.detail.as_deref().unwrap_or("{}");
+            // EventBridge limits the total PutEvents request size, computed from all
+            // entry fields across all entries, not the detail field alone. This coarse
+            // guard only avoids parsing detail payloads that are already too large to fit.
+            if detail.len() > MAX_EVENT_DETAIL_BYTES {
+                otel_debug!(
+                    name: "EventBridge.Inject.DetailSizeExceeded",
+                    max_size_bytes = MAX_EVENT_DETAIL_BYTES,
+                    action = "context injection skipped",
+                );
+                continue;
+            }
+
+            let new_detail =
+                match rewrite_json_object_field(detail, DATADOG_ATTRIBUTE_KEY, &trace_ctx) {
+                    Ok(detail) => detail,
+                    Err(err) => {
+                        otel_debug!(
+                            name: "EventBridge.Inject.DetailRewriteFailed",
+                            reason = err.to_string(),
+                            action = "context injection skipped",
+                        );
+                        continue;
+                    }
+                };
+
+            entry.detail = Some(new_detail);
+        }
+    }
+}
+
+fn build_datadog_attribute(trace_headers: &HashMap<String, String>) -> Option<serde_json::Value> {
+    let attribute = || -> Result<serde_json::Value, serde_json::Error> {
+        let start_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .to_string();
+        let mut attribute = serde_json::to_value(trace_headers)?;
+        if let serde_json::Value::Object(ctx) = &mut attribute {
+            ctx.insert(START_TIME_KEY.into(), serde_json::Value::String(start_time));
+        }
+        Ok(attribute)
+    };
+
+    match attribute() {
+        Ok(attr) => Some(attr),
+        Err(err) => {
+            otel_debug!(
+                name: "EventBridge.Inject.DatadogAttributeBuildFailed",
+                reason = err.to_string(),
+                action = "context injection skipped",
+            );
+            None
+        }
     }
 }
 
