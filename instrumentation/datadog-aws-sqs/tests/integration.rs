@@ -144,6 +144,13 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
         attrs["cloud.resource_id"],
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
     );
+
+    let bodies = harness.server.bodies();
+    assert_eq!(bodies.len(), 1);
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should request _datadog message attribute"
+    );
 }
 
 #[tokio::test]

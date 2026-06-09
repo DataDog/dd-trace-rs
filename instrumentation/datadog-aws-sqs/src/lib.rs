@@ -132,6 +132,7 @@ impl Intercept for SqsInterceptor {
         if !trace_headers.is_empty() {
             inject(&trace_headers, context.input_mut());
         }
+        include_datadog_attribute_for_receive(context.input_mut());
 
         Ok(())
     }
@@ -175,6 +176,25 @@ fn inject(trace_headers: &HashMap<String, String>, input: &mut Input) {
             }
         }
     }
+}
+
+fn include_datadog_attribute_for_receive(input: &mut Input) {
+    let Some(receive_input) = input.downcast_mut::<ReceiveMessageInput>() else {
+        return;
+    };
+
+    let names = receive_input
+        .message_attribute_names
+        .get_or_insert_with(Vec::new);
+
+    if names
+        .iter()
+        .any(|name| name == DATADOG_ATTRIBUTE_KEY || name == "All" || name == ".*")
+    {
+        return;
+    }
+
+    names.push(DATADOG_ATTRIBUTE_KEY.to_string());
 }
 
 fn build_datadog_attribute(
@@ -351,5 +371,22 @@ mod tests {
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert!(attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
+    }
+
+    #[test]
+    fn include_datadog_attribute_for_receive_when_missing() {
+        let input = ReceiveMessageInput::builder()
+            .queue_url("https://example.com/test-queue")
+            .build()
+            .unwrap();
+        let mut input = Input::erase(input);
+
+        include_datadog_attribute_for_receive(&mut input);
+
+        let input = input.downcast_ref::<ReceiveMessageInput>().unwrap();
+        assert_eq!(
+            input.message_attribute_names.as_deref(),
+            Some(&[DATADOG_ATTRIBUTE_KEY.to_string()][..])
+        );
     }
 }
