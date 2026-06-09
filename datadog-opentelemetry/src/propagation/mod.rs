@@ -143,17 +143,21 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
             // context is referenced via a span link with reason=propagation_behavior_extract.
             // Baggage is propagated.
             TracePropagationBehaviorExtract::Restart => {
-                let baggage_ctx = contexts
+                // baggage gets propagated, so build the new context from the baggage context if
+                // present.
+                let mut baggage_ctx = contexts
                     .iter()
                     .find(|(_, style)| *style == TracePropagationStyle::Baggage)
-                    .map(|x| x.0.clone());
-                let style = contexts[0].1;
+                    .map(|x| x.0.clone())
+                    .unwrap_or(SpanContext::default());
+                let parent_style = contexts[0].1;
                 let parent_context = Self::resolve_contexts(contexts, carrier);
 
-                let mut ctx = baggage_ctx.unwrap_or(SpanContext::default());
-                ctx.is_remote = false;
-                ctx.links.push(SpanLink::restart(&parent_context, style));
-                Some(ctx)
+                baggage_ctx.is_remote = false;
+                baggage_ctx
+                    .links
+                    .push(SpanLink::restart(&parent_context, parent_style));
+                Some(baggage_ctx)
             }
             TracePropagationBehaviorExtract::Ignore => {
                 unreachable!("`ignore` behavior treated beforehand")
