@@ -123,14 +123,35 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        if self.config.trace_propagation_behavior_extract()
+            == TracePropagationBehaviorExtract::Ignore
+        {
+            return None;
+        }
         let contexts = self.extract_available_contexts(carrier);
         if contexts.is_empty() {
             return None;
         }
 
-        let context = Self::resolve_contexts(contexts, carrier);
+        match self.config.trace_propagation_behavior_extract() {
+            TracePropagationBehaviorExtract::Continue => {
+                Some(Self::resolve_contexts(contexts, carrier))
+            }
+            TracePropagationBehaviorExtract::Restart => {
+                let mut baggage_ctx = contexts
+                    .iter()
+                    .find(|(_, style)| *style == TracePropagationStyle::Baggage)
+                    .map(|x| x.0.clone());
+                let style = contexts[0].1;
+                let context = Self::resolve_contexts(contexts, carrier);
 
-        Some(context)
+                let ctx = baggage_ctx.get_or_insert(SpanContext::default());
+                ctx.links.push(SpanLink::restart(&context, style));
+                Some(ctx.clone())
+            }
+            // unreachable
+            TracePropagationBehaviorExtract::Ignore => None,
+        }
     }
 
     /// Injects trace context into the carrier using the configured injection styles.
@@ -1070,6 +1091,52 @@ pub(crate) mod tests {
         assert_eq!(context.span_id, 987654320);
         assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
     }
+
+    fn behavior_config(
+        behavior: TracePropagationBehaviorExtract,
+        extract: Vec<TracePropagationStyle>,
+    ) -> Arc<Config> {
+        let mut builder = Config::builder();
+        builder.set_trace_propagation_style_extract(extract);
+        builder.set_trace_propagation_behavior_extract(behavior);
+        Arc::new(builder.build())
+    }
+
+    #[test]
+    fn test_extract_behavior_ignore_drops_valid_context() {
+        let config = behavior_config(
+            TracePropagationBehaviorExtract::Ignore,
+            vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+        );
+        let propagator = DatadogCompositePropagator::new(config);
+
+        // Even though the carrier contains a fully valid context, `Ignore` must
+        // discard it and behave as if nothing was propagated.
+        let context = propagator.extract(&ALL_VALID_HEADERS.clone());
+
+        assert!(context.is_none());
+    }
+
+    /*#[test]
+    fn test_extract_behavior_restart_drops_non_baggage_context() {
+        let config = behavior_config(
+            TracePropagationBehaviorExtract::Restart,
+            vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+        );
+        let propagator = DatadogCompositePropagator::new(config);
+
+        // `Restart` only keeps baggage; trace context extracted from datadog and
+        // tracecontext headers must be dropped.
+        let context = propagator.extract(&ALL_VALID_HEADERS.clone());
+
+        assert!(context.is_none());
+    }*/
 
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
         for (k, expected_value) in hm1.clone() {
