@@ -10,7 +10,7 @@ use crate::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        DatadogCompositePropagator, TracePropagationStyle,
+        DatadogCompositePropagator, TracePropagationBehaviorExtract, TracePropagationStyle,
     },
 };
 use opentelemetry::{
@@ -189,7 +189,10 @@ impl DatadogPropagator {
             })
             .unwrap_or_else(|| cx.clone());
 
-        if self.baggage_extract {
+        if self.baggage_extract
+            && self.cfg.trace_propagation_behavior_extract()
+                != TracePropagationBehaviorExtract::Ignore
+        {
             if let Some(baggage) = extract_baggage(&extractor) {
                 cx.with_baggage(baggage)
             } else {
