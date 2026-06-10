@@ -153,7 +153,10 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                 let parent_style = contexts[0].1;
                 let parent_context = Self::resolve_contexts(contexts, carrier);
 
-                baggage_ctx.is_remote = false;
+                // is_remote=true ensures on_start processes the restart span link; the new trace is
+                // started because baggage_ctx has no valid trace/span IDs, not because of
+                // is_remote.
+                baggage_ctx.is_remote = true;
                 baggage_ctx
                     .links
                     .push(SpanLink::restart(&parent_context, parent_style));
