@@ -47,8 +47,12 @@ impl TextMapPropagator for TestTextMapPropagator {
         injector.set(TEST_CONTEXT_INJECTED_KEY, "true".to_string());
     }
 
-    fn extract_with_context(&self, cx: &Context, _extractor: &dyn Extractor) -> Context {
-        cx.clone()
+    fn extract_with_context(&self, cx: &Context, extractor: &dyn Extractor) -> Context {
+        if extractor.get(TEST_CONTEXT_INJECTED_KEY) == Some("true") {
+            cx.clone().with_value(TestContext)
+        } else {
+            cx.clone()
+        }
     }
 
     fn fields(&self) -> FieldIter<'_> {

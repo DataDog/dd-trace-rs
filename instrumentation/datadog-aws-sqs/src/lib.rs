@@ -25,7 +25,7 @@ use aws_sdk_sqs::operation::delete_message_batch::DeleteMessageBatchInput;
 use aws_sdk_sqs::operation::receive_message::ReceiveMessageInput;
 use aws_sdk_sqs::operation::send_message::SendMessageInput;
 use aws_sdk_sqs::operation::send_message_batch::SendMessageBatchInput;
-use aws_sdk_sqs::types::MessageAttributeValue;
+use aws_sdk_sqs::types::{Message, MessageAttributeValue};
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
     BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
@@ -72,6 +72,37 @@ impl ConfigExt for aws_sdk_sqs::config::Builder {
     fn datadog_tracing(self) -> Self {
         self.interceptor(SqsInterceptor::new())
     }
+}
+
+/// Extracts an OpenTelemetry context from an SQS message's `_datadog` message attribute.
+///
+/// Returns `None` when the message does not contain a valid Datadog propagation attribute.
+pub fn extract_context(message: &Message) -> Option<Context> {
+    let attrs = message.message_attributes.as_ref()?;
+    let datadog_attr = attrs.get(DATADOG_ATTRIBUTE_KEY)?;
+    let Some(json) = datadog_attr.string_value() else {
+        otel_debug!(
+            name: "Sqs.Extract.DatadogAttributeNotString",
+            action = "context extraction skipped",
+        );
+        return None;
+    };
+
+    let trace_headers: HashMap<String, String> = match serde_json::from_str(json) {
+        Ok(headers) => headers,
+        Err(err) => {
+            otel_debug!(
+                name: "Sqs.Extract.DatadogAttributeParseFailed",
+                reason = err.to_string(),
+                action = "context extraction skipped",
+            );
+            return None;
+        }
+    };
+
+    Some(global::get_text_map_propagator(|propagator| {
+        propagator.extract(&trace_headers)
+    }))
 }
 
 impl Intercept for SqsInterceptor {
@@ -246,8 +277,7 @@ mod tests {
     use super::*;
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        FixedTextMapPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-        DATADOG_TRACE_ID_KEY,
+        ensure_test_propagator, test_context, TEST_CONTEXT_INJECTED_KEY,
     };
 
     #[test]
@@ -265,8 +295,7 @@ mod tests {
         }
         let mut input = Input::erase(builder.build().unwrap());
 
-        let span_context = Context::new();
-        inject(&span_context, &mut input);
+        inject(&Context::new(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -295,9 +324,8 @@ mod tests {
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = Input::erase(builder.build().unwrap());
 
-        let span_context = Context::new();
-        global::set_text_map_propagator(FixedTextMapPropagator::new());
-        inject(&span_context, &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -305,9 +333,7 @@ mod tests {
         let dd_attr = &attrs[DATADOG_ATTRIBUTE_KEY];
         let json_str = dd_attr.string_value().unwrap();
         let parsed: HashMap<String, String> = serde_json::from_str(json_str).unwrap();
-        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
-        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
-        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+        assert_eq!(parsed[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 
     #[test]
@@ -345,9 +371,8 @@ mod tests {
                 .unwrap(),
         );
 
-        let span_context = Context::new();
-        global::set_text_map_propagator(FixedTextMapPropagator::new());
-        inject(&span_context, &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<SendMessageBatchInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -356,9 +381,7 @@ mod tests {
         let dd_attr = &attrs[DATADOG_ATTRIBUTE_KEY];
         let json_str = dd_attr.string_value().unwrap();
         let parsed: HashMap<String, String> = serde_json::from_str(json_str).unwrap();
-        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
-        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
-        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+        assert_eq!(parsed[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 
     #[test]
@@ -370,13 +393,40 @@ mod tests {
             .unwrap();
         let mut input = Input::erase(input);
 
-        let span_context = Context::new();
-        global::set_text_map_propagator(FixedTextMapPropagator::new());
-        inject(&span_context, &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert!(attrs.contains_key(DATADOG_ATTRIBUTE_KEY));
+    }
+
+    #[test]
+    fn extract_context_reads_datadog_message_attribute() {
+        let input = SendMessageInput::builder()
+            .queue_url("https://example.com/test-queue")
+            .message_body("test body")
+            .build()
+            .unwrap();
+        let mut input = Input::erase(input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
+
+        let input = input.downcast_ref::<SendMessageInput>().unwrap();
+        let message = Message::builder()
+            .set_message_attributes(input.message_attributes.clone())
+            .build();
+        let extracted = extract_context(&message).unwrap();
+
+        let trace_headers = aws_core::request_span_trace_headers(&extracted);
+        assert_eq!(trace_headers[TEST_CONTEXT_INJECTED_KEY], "true");
+    }
+
+    #[test]
+    fn extract_context_returns_none_without_datadog_message_attribute() {
+        let message = Message::builder().build();
+
+        assert!(extract_context(&message).is_none());
     }
 
     #[test]
