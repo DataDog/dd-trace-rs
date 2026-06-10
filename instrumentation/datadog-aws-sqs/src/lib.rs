@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        FixedTextMapTestPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+        FixedTextMapPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
         DATADOG_TRACE_ID_KEY,
     };
 
@@ -265,7 +265,8 @@ mod tests {
         }
         let mut input = Input::erase(builder.build().unwrap());
 
-        inject(&Context::new(), &mut input);
+        let span_context = Context::new();
+        inject(&span_context, &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -294,8 +295,9 @@ mod tests {
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = Input::erase(builder.build().unwrap());
 
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        let span_context = Context::new();
+        global::set_text_map_propagator(FixedTextMapPropagator::new());
+        inject(&span_context, &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
@@ -343,8 +345,9 @@ mod tests {
                 .unwrap(),
         );
 
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        let span_context = Context::new();
+        global::set_text_map_propagator(FixedTextMapPropagator::new());
+        inject(&span_context, &mut input);
 
         let input = input.downcast_ref::<SendMessageBatchInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -367,8 +370,9 @@ mod tests {
             .unwrap();
         let mut input = Input::erase(input);
 
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        let span_context = Context::new();
+        global::set_text_map_propagator(FixedTextMapPropagator::new());
+        inject(&span_context, &mut input);
 
         let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();

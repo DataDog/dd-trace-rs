@@ -232,8 +232,7 @@ mod tests {
     use super::*;
     use aws_sdk_sns::types::PublishBatchRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        FixedTextMapTestPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-        DATADOG_TRACE_ID_KEY,
+        ensure_test_propagator, test_context, TEST_CONTEXT_INJECTED_KEY,
     };
 
     fn parse_binary_attr(attr: &MessageAttributeValue) -> HashMap<String, String> {
@@ -285,17 +284,14 @@ mod tests {
             .unwrap();
         builder = builder.message_attributes(DATADOG_ATTRIBUTE_KEY, stale);
         let mut input = Input::erase(builder.build().unwrap());
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
-        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
-        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
-        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+        assert_eq!(parsed[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 
     #[test]
@@ -330,9 +326,8 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PublishBatchInput>().unwrap();
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
@@ -386,18 +381,15 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PublishBatchInput>().unwrap();
         let entries = input.publish_batch_request_entries.as_ref().unwrap();
         let attrs = entries[0].message_attributes.as_ref().unwrap();
         assert_eq!(attrs.len(), 10);
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
-        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
-        assert_eq!(parsed[DATADOG_PARENT_ID_KEY], "987654321");
-        assert_eq!(parsed[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+        assert_eq!(parsed[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 
     #[test]
@@ -415,14 +407,13 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();
         let parsed = parse_binary_attr(&attrs[DATADOG_ATTRIBUTE_KEY]);
-        assert_eq!(parsed[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(parsed[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 
     #[test]
@@ -433,9 +424,8 @@ mod tests {
             .build()
             .unwrap();
         let mut input = Input::erase(input);
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PublishInput>().unwrap();
         let attrs = input.message_attributes.as_ref().unwrap();

@@ -318,8 +318,7 @@ mod tests {
     use super::*;
     use aws_sdk_eventbridge::types::PutEventsRequestEntry;
     use datadog_aws_core_test_utils::test_helpers::{
-        FixedTextMapTestPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-        DATADOG_TRACE_ID_KEY,
+        ensure_test_propagator, test_context, TEST_CONTEXT_INJECTED_KEY,
     };
 
     fn parse_detail_datadog(detail: &str) -> HashMap<String, String> {
@@ -408,9 +407,8 @@ mod tests {
                 .build()
                 .unwrap(),
         );
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
@@ -421,7 +419,7 @@ mod tests {
 
         let injected_detail = entries[1].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(injected_detail);
-        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(dd[TEST_CONTEXT_INJECTED_KEY], "true");
 
         let parsed: serde_json::Value = serde_json::from_str(injected_detail).unwrap();
         assert_eq!(parsed["small"], "payload");
@@ -437,17 +435,14 @@ mod tests {
             )
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
-        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
-        assert_eq!(dd[DATADOG_PARENT_ID_KEY], "987654321");
-        assert_eq!(dd[DATADOG_SAMPLING_PRIORITY_KEY], "1");
+        assert_eq!(dd[TEST_CONTEXT_INJECTED_KEY], "true");
         assert!(!dd.contains_key("stale"));
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();
         assert_eq!(parsed["existing"], "data");
@@ -461,15 +456,14 @@ mod tests {
             .detail(r#"{"existing":"data"}"#)
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
-        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(dd[TEST_CONTEXT_INJECTED_KEY], "true");
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();
         assert_eq!(parsed["existing"], "data");
     }
@@ -482,15 +476,14 @@ mod tests {
             .detail(r#"{"nested":{"_datadog":"keep-me"},"existing":"data"}"#)
             .build();
         let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let entries = input.entries.as_ref().unwrap();
         let detail = entries[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
-        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(dd[TEST_CONTEXT_INJECTED_KEY], "true");
         let parsed: serde_json::Value = serde_json::from_str(detail).unwrap();
         assert_eq!(parsed["existing"], "data");
         assert_eq!(parsed["nested"]["_datadog"], "keep-me");
@@ -505,13 +498,12 @@ mod tests {
             .build();
         let input = PutEventsInput::builder().entries(entry).build().unwrap();
         let mut input = Input::erase(input);
-
-        global::set_text_map_propagator(FixedTextMapTestPropagator::new());
-        inject(&Context::new(), &mut input);
+        ensure_test_propagator();
+        inject(&test_context(), &mut input);
 
         let input = input.downcast_ref::<PutEventsInput>().unwrap();
         let detail = input.entries.as_ref().unwrap()[0].detail.as_ref().unwrap();
         let dd = parse_detail_datadog(detail);
-        assert_eq!(dd[DATADOG_TRACE_ID_KEY], "123456789");
+        assert_eq!(dd[TEST_CONTEXT_INJECTED_KEY], "true");
     }
 }
