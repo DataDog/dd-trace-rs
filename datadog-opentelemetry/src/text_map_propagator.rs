@@ -5,12 +5,13 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     catch_panic,
+    configuration::TracePropagationBehaviorExtract,
     core::{configuration::Config, sampling::priority},
     propagation::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        DatadogCompositePropagator, TracePropagationBehaviorExtract, TracePropagationStyle,
+        DatadogCompositePropagator, TracePropagationStyle,
     },
 };
 use opentelemetry::{

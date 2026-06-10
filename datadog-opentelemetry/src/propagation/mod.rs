@@ -26,7 +26,7 @@ pub(crate) mod trace_propagation_style;
 /// W3C Trace Context propagation (`traceparent`/`tracestate` headers).
 pub mod tracecontext;
 
-pub use crate::core::configuration::{TracePropagationBehaviorExtract, TracePropagationStyle};
+pub use crate::core::configuration::TracePropagationStyle;
 
 /// Configuration required for trace context propagation.
 ///
@@ -34,9 +34,6 @@ pub use crate::core::configuration::{TracePropagationBehaviorExtract, TracePropa
 /// consumers to provide their own configuration implementation without
 /// depending on the full [`Config`](crate::configuration::Config) struct.
 pub trait PropagationConfig: Send + Sync {
-    /// Returns the trace propagation behavior when extracting trace context.
-    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract;
-
     /// Returns the default trace propagation styles (used as fallback for both
     /// extract and inject if specific styles are not configured).
     fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]>;
@@ -234,10 +231,6 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
 }
 
 impl PropagationConfig for crate::core::configuration::Config {
-    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
-        self.trace_propagation_behavior_extract()
-    }
-
     fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style()
     }
