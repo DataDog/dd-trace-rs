@@ -11,7 +11,7 @@
       "_dd.p.dm": "-0",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
-      "otel.trace_id": "00000000000000000000000000000000",
+      "otel.trace_id": "6a2960bb0000000075bbcd986de6224f",
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
@@ -21,6 +21,18 @@
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0
     },
-    "duration": 29000,
-    "start": 1781020213028620000
+    "span_links": [
+      {
+        "trace_id": 1,
+        "trace_id_high": 0,
+        "span_id": 1,
+        "attributes": {
+          "context_headers": "datadog",
+          "reason": "propagation_behavior_extract"
+        },
+        "flags": 1
+      }
+    ],
+    "duration": 47000,
+    "start": 1781096635829138000
   }]]

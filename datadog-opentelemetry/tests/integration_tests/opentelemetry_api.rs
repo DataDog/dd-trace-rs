@@ -379,6 +379,7 @@ async fn test_injection_extraction_extract_behavior_restart_single_context() {
             new_trace_id_low, original_trace_id_low,
             "Restart behavior must start a new trace with a different trace ID"
         );
+        assert_ne!(new_trace_id_low, 0, "New trace ID should be valid (not 0)");
         // Outbound headers must reflect the new trace ID
         assert_ne!(
             injected.get("x-datadog-trace-id").map(String::as_str),
