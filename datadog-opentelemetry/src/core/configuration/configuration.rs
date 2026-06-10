@@ -757,7 +757,7 @@ impl ExtraServicesTracker {
     }
 }
 
-/// Propagation behavior extraxt
+/// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TracePropagationBehaviorExtract {
     /// `continue` (default) - incoming trace context is used as the local trace context. Baggage
@@ -808,7 +808,7 @@ impl ConfigurationValueProvider for Option<TracePropagationBehaviorExtract> {
     fn get_configuration_value(&self) -> String {
         self.as_ref()
             .map(|b| b.get_configuration_value())
-            .unwrap_or_default() // return empty string if None, or default ?
+            .unwrap_or_default()
     }
 }
 
