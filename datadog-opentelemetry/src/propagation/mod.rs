@@ -122,7 +122,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     /// Extracts trace context from the carrier using the configured extraction styles.
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
-    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+    pub fn extract(&self, carrier: &dyn Extractor) -> Option<(SpanContext, TracePropagationStyle)> {
         // ignore: ignore the entire incoming trace context. Creates new trace with no parent.
         // Baggage is discarded.
         if self.config.trace_propagation_behavior_extract()
@@ -134,38 +134,8 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         if contexts.is_empty() {
             return None;
         }
-
-        match self.config.trace_propagation_behavior_extract() {
-            TracePropagationBehaviorExtract::Continue => {
-                Some(Self::resolve_contexts(contexts, carrier))
-            }
-            // restart: starts a new trace with a fresh trace ID and sampling decision. Incoming
-            // context is referenced via a span link with reason=propagation_behavior_extract.
-            // Baggage is propagated.
-            TracePropagationBehaviorExtract::Restart => {
-                // baggage gets propagated, so build the new context from the baggage context if
-                // present.
-                let mut baggage_ctx = contexts
-                    .iter()
-                    .find(|(_, style)| *style == TracePropagationStyle::Baggage)
-                    .map(|x| x.0.clone())
-                    .unwrap_or_default();
-                let parent_style = contexts[0].1;
-                let parent_context = Self::resolve_contexts(contexts, carrier);
-
-                // is_remote=true ensures on_start processes the restart span link; the new trace is
-                // started because baggage_ctx has no valid trace/span IDs, not because of
-                // is_remote.
-                baggage_ctx.is_remote = true;
-                baggage_ctx
-                    .links
-                    .push(SpanLink::restart(&parent_context, parent_style));
-                Some(baggage_ctx)
-            }
-            TracePropagationBehaviorExtract::Ignore => {
-                unreachable!("`ignore` behavior treated beforehand")
-            }
-        }
+        let style = contexts[0].1;
+        Some((Self::resolve_contexts(contexts, carrier), style))
     }
 
     /// Injects trace context into the carrier using the configured injection styles.
@@ -496,7 +466,7 @@ pub(crate) mod tests {
                     };
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
-                    let context = propagator.extract(&carrier).unwrap_or_default();
+                    let context = propagator.extract(&carrier).map(|(context, _)| context).unwrap_or_default();
                     assert_eq!(context.trace_id, expected.trace_id);
                     assert_eq!(context.span_id, expected.span_id);
                     assert_eq!(context.sampling, expected.sampling);
@@ -1100,7 +1070,10 @@ pub(crate) mod tests {
                 "_dd.p.tid=1111111111111111".to_string(),
             ),
         ]);
-        let context = propagator.extract(&carrier).expect("context is extracted");
+        let context = propagator
+            .extract(&carrier)
+            .map(|(context, _)| context)
+            .expect("context is extracted");
 
         assert_eq!(context.span_id, 987654320);
         assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
@@ -1129,28 +1102,9 @@ pub(crate) mod tests {
 
         // Even though the carrier contains a fully valid context, `Ignore` must
         // discard it and behave as if nothing was propagated.
-        let context = propagator.extract(&ALL_VALID_HEADERS.clone());
-
-        assert!(context.is_none());
+        let span_context_style = propagator.extract(&ALL_VALID_HEADERS.clone());
+        assert!(span_context_style.is_none());
     }
-
-    /*#[test]
-    fn test_extract_behavior_restart_drops_non_baggage_context() {
-        let config = behavior_config(
-            TracePropagationBehaviorExtract::Restart,
-            vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ],
-        );
-        let propagator = DatadogCompositePropagator::new(config);
-
-        // `Restart` only keeps baggage; trace context extracted from datadog and
-        // tracecontext headers must be dropped.
-        let context = propagator.extract(&ALL_VALID_HEADERS.clone());
-
-        assert!(context.is_none());
-    }*/
 
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
         for (k, expected_value) in hm1.clone() {

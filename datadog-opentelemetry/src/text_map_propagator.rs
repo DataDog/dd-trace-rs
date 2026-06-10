@@ -169,37 +169,43 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
-        let cx = self
-            .inner
-            .extract(&extractor)
-            .map(|dd_span_context| {
-                let trace_flags = extract_trace_flags(&dd_span_context);
-                let trace_state = extract_trace_state_from_context(&dd_span_context);
+        let extracted = self.inner.extract(&extractor);
+        let cx = match self.cfg.trace_propagation_behavior_extract() {
+            TracePropagationBehaviorExtract::Continue => extracted
+                .map(|(dd_span_context, _)| dd_span_context)
+                .map(|dd_span_context| {
+                    let trace_flags = extract_trace_flags(&dd_span_context);
+                    let trace_state = extract_trace_state_from_context(&dd_span_context);
 
-                let otel_span_context = opentelemetry::trace::SpanContext::new(
-                    opentelemetry::TraceId::from(dd_span_context.trace_id),
-                    opentelemetry::SpanId::from(dd_span_context.span_id),
-                    trace_flags,
-                    dd_span_context.is_remote,
-                    trace_state,
-                );
+                    let otel_span_context = opentelemetry::trace::SpanContext::new(
+                        opentelemetry::TraceId::from(dd_span_context.trace_id),
+                        opentelemetry::SpanId::from(dd_span_context.span_id),
+                        trace_flags,
+                        dd_span_context.is_remote,
+                        trace_state,
+                    );
 
-                cx.with_remote_span_context(otel_span_context)
-                    .with_value(DatadogExtractData::from_span_context(dd_span_context))
-            })
-            .unwrap_or_else(|| cx.clone());
-
-        if self.baggage_extract
-            && self.cfg.trace_propagation_behavior_extract()
-                != TracePropagationBehaviorExtract::Ignore
-        {
-            if let Some(baggage) = extract_baggage(&extractor) {
-                cx.with_baggage(baggage)
-            } else {
-                cx
-            }
-        } else {
-            cx
+                    cx.with_remote_span_context(otel_span_context)
+                        .with_value(DatadogExtractData::from_span_context(dd_span_context))
+                })
+                .unwrap_or_else(|| cx.clone()),
+            // restart: start a new trace with a fresh trace ID and sampling decision. Incoming
+            // context is referenced via a span link with reason=propagation_behavior_extract and
+            // baggage is propagated.
+            TracePropagationBehaviorExtract::Restart => match extracted {
+                Some((dd_span_context, parent_style)) => cx.with_value(DatadogExtractData {
+                    links: vec![SpanLink::restart(&dd_span_context, parent_style)],
+                    origin: None,
+                    internal_tags: HashMap::new(),
+                    sampling: Sampling::default(),
+                }),
+                None => cx.clone(),
+            },
+            TracePropagationBehaviorExtract::Ignore => return cx.clone(),
+        };
+        match (extract_baggage(&extractor), self.baggage_extract) {
+            (Some(baggage), true) => cx.with_baggage(baggage),
+            _ => cx,
         }
     }
 }
