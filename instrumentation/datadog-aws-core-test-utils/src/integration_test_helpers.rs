@@ -21,6 +21,7 @@ use wiremock::{Mock, MockServer as WireMockServer, Request, Respond, ResponseTem
 struct CaptureBodyResponder {
     status: u16,
     bodies: Arc<Mutex<Vec<String>>>,
+    response_body: String,
 }
 
 impl Respond for CaptureBodyResponder {
@@ -30,7 +31,7 @@ impl Respond for CaptureBodyResponder {
 
         ResponseTemplate::new(self.status)
             .insert_header("x-amzn-requestid", "test_req")
-            .set_body_raw("{}", "application/json")
+            .set_body_raw(self.response_body.clone(), "application/json")
     }
 }
 
@@ -69,6 +70,12 @@ impl TestHarness {
         Self::from_status(200).await
     }
 
+    /// Initializes tracing and starts a mock AWS endpoint returning `200 OK`
+    /// with the supplied response body.
+    pub async fn ok_with_body(response_body: impl Into<String>) -> Self {
+        Self::from_status_and_body(200, response_body).await
+    }
+
     /// Initializes tracing and starts a mock AWS endpoint returning
     /// `400 Bad Request` for every request.
     pub async fn bad_request() -> Self {
@@ -86,9 +93,13 @@ impl TestHarness {
     }
 
     async fn from_status(status: u16) -> Self {
+        Self::from_status_and_body(status, "{}").await
+    }
+
+    async fn from_status_and_body(status: u16, response_body: impl Into<String>) -> Self {
         Self {
             exporter: init_test_tracer(),
-            server: mock_aws(status).await,
+            server: mock_aws_with_body(status, response_body).await,
         }
     }
 }
@@ -96,12 +107,19 @@ impl TestHarness {
 /// Starts a minimal mock HTTP server. Every request gets status `status`,
 /// body `{}`, and header `x-amzn-requestid: test_req`.
 pub async fn mock_aws(status: u16) -> MockAwsServer {
+    mock_aws_with_body(status, "{}").await
+}
+
+/// Starts a minimal mock HTTP server. Every request gets status `status`,
+/// body `response_body`, and header `x-amzn-requestid: test_req`.
+pub async fn mock_aws_with_body(status: u16, response_body: impl Into<String>) -> MockAwsServer {
     let server = WireMockServer::start().await;
     let bodies: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     let responder = CaptureBodyResponder {
         status,
         bodies: Arc::clone(&bodies),
+        response_body: response_body.into(),
     };
 
     Mock::given(any())

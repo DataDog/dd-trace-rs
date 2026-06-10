@@ -12,8 +12,10 @@ use aws_types::SdkConfig;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-use opentelemetry::{global, Context};
+use opentelemetry::trace::{
+    SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
+};
+use opentelemetry::{global, Context, KeyValue};
 use serial_test::serial;
 
 use datadog_aws_sqs::ConfigExt as _;
@@ -29,11 +31,16 @@ const QUEUE_URL: &str = "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueu
 const QUEUE_URL_TRAILING: &str = "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue/";
 const HTTP_200: &str = "200";
 const HTTP_400: &str = "400";
+const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
 
 #[tokio::test]
 #[serial]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
-    let harness = TestHarness::ok().await;
+    let response_body = serde_json::json!({
+        "MessageId": "producer-message-id"
+    })
+    .to_string();
+    let harness = TestHarness::ok_with_body(response_body).await;
     let client = sqs_client(&harness.sdk_config());
 
     let _ = client
@@ -61,6 +68,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
     );
     assert_eq!(attrs["messaging.system"], "amazonsqs");
+    assert_eq!(attrs[MESSAGING_MESSAGE_ID], "producer-message-id");
     assert_eq!(attrs["http.status_code"], HTTP_200);
     assert_eq!(attrs["aws.request_id"], "test_req");
     assert_eq!(spans[0].span_kind, SpanKind::Client);
@@ -150,6 +158,63 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
     assert!(
         bodies[0].contains("_datadog"),
         "body should request _datadog message attribute"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn sqs_receive_message_links_span_to_message_context() {
+    let message_span_context = SpanContext::new(
+        TraceId::from_hex("11111111111111111111111111111111").unwrap(),
+        SpanId::from_hex("2222222222222222").unwrap(),
+        TraceFlags::SAMPLED,
+        true,
+        TraceState::NONE,
+    );
+    let datadog_attr = serde_json::json!({
+        "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+    })
+    .to_string();
+    let response_body = serde_json::json!({
+        "Messages": [
+            {
+                "MessageId": "message-id",
+                "ReceiptHandle": "receipt-handle",
+                "Body": "hello",
+                "MessageAttributes": {
+                    "_datadog": {
+                        "DataType": "String",
+                        "StringValue": datadog_attr
+                    }
+                }
+            }
+        ]
+    })
+    .to_string();
+
+    let harness = TestHarness::ok_with_body(response_body).await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let output = client
+        .receive_message()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.messages().len(), 1);
+    let extracted_context = datadog_aws_sqs::extract_context(&output.messages()[0]).unwrap();
+    assert_eq!(
+        extracted_context.span().span_context(),
+        &message_span_context
+    );
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].links.links.len(), 1);
+    assert_eq!(spans[0].links.links[0].span_context, message_span_context);
+    assert_eq!(
+        spans[0].links.links[0].attributes,
+        vec![KeyValue::new(MESSAGING_MESSAGE_ID, "message-id")]
     );
 }
 

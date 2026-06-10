@@ -103,14 +103,19 @@ pub fn request_span_trace_headers(cx: &Context) -> HashMap<String, String> {
     })
 }
 
+/// Returns the OpenTelemetry context that carries the stored request span.
+pub fn request_span_context(cfg: &ConfigBag) -> Option<&Context> {
+    cfg.load::<RequestSpanContext>().map(|span_ctx| &span_ctx.0)
+}
+
 /// Adds HTTP-level tags once the final serialized request is available.
 ///
 /// Records `http.method`, `http.url`, and `http.useragent` on the span.
 pub fn update_request_span(context: &BeforeTransmitInterceptorContextRef<'_>, cfg: &mut ConfigBag) {
-    let Some(span_ctx) = cfg.load::<RequestSpanContext>() else {
+    let Some(span_ctx) = request_span_context(cfg) else {
         return;
     };
-    let span = span_ctx.0.span();
+    let span = span_ctx.span();
     let request = context.request();
     let method = KeyValue::new(HTTP_METHOD, request.method().to_string());
     let url = KeyValue::new(HTTP_URL, request.uri().to_string());
@@ -124,10 +129,10 @@ pub fn update_request_span(context: &BeforeTransmitInterceptorContextRef<'_>, cf
 
 /// Records the response status and any SDK error, then ends the span.
 pub fn finish_request_span(context: &FinalizerInterceptorContextRef<'_>, cfg: &mut ConfigBag) {
-    let Some(span_ctx) = cfg.load::<RequestSpanContext>() else {
+    let Some(span_ctx) = request_span_context(cfg) else {
         return;
     };
-    let span = span_ctx.0.span();
+    let span = span_ctx.span();
 
     if let Some(response) = context.response() {
         let status_code = KeyValue::new(HTTP_STATUS_CODE, response.status().as_u16() as i64);

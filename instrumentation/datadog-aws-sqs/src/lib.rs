@@ -22,18 +22,19 @@ use std::collections::HashMap;
 
 use aws_sdk_sqs::operation::delete_message::DeleteMessageInput;
 use aws_sdk_sqs::operation::delete_message_batch::DeleteMessageBatchInput;
-use aws_sdk_sqs::operation::receive_message::ReceiveMessageInput;
-use aws_sdk_sqs::operation::send_message::SendMessageInput;
+use aws_sdk_sqs::operation::receive_message::{ReceiveMessageInput, ReceiveMessageOutput};
+use aws_sdk_sqs::operation::send_message::{SendMessageInput, SendMessageOutput};
 use aws_sdk_sqs::operation::send_message_batch::SendMessageBatchInput;
 use aws_sdk_sqs::types::{Message, MessageAttributeValue};
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
-    BeforeSerializationInterceptorContextMut, BeforeTransmitInterceptorContextRef,
-    FinalizerInterceptorContextRef, Input,
+    AfterDeserializationInterceptorContextRef, BeforeSerializationInterceptorContextMut,
+    BeforeTransmitInterceptorContextRef, FinalizerInterceptorContextRef, Input,
 };
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
+use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, otel_debug, Context, KeyValue};
 
 use datadog_aws_core as aws_core;
@@ -45,6 +46,7 @@ const TRACER_NAME: &str = "datadog-aws-sqs";
 const SPAN_NAME: &str = "sqs.request";
 const SPAN_OPERATION_NAME: &str = "aws.sqs.request";
 const MAX_MESSAGE_ATTRIBUTES: usize = 10;
+const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
 ///
@@ -100,9 +102,9 @@ pub fn extract_context(message: &Message) -> Option<Context> {
         }
     };
 
-    Some(global::get_text_map_propagator(|propagator| {
-        propagator.extract(&trace_headers)
-    }))
+    let context = global::get_text_map_propagator(|propagator| propagator.extract(&trace_headers));
+
+    context.span().span_context().is_valid().then_some(context)
 }
 
 impl Intercept for SqsInterceptor {
@@ -175,6 +177,49 @@ impl Intercept for SqsInterceptor {
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
         aws_core::update_request_span(context, cfg);
+        Ok(())
+    }
+
+    fn read_after_deserialization(
+        &self,
+        context: &AfterDeserializationInterceptorContextRef<'_>,
+        _runtime_components: &RuntimeComponents,
+        cfg: &mut ConfigBag,
+    ) -> Result<(), BoxError> {
+        fn message_id_attribute(message_id: &str) -> KeyValue {
+            KeyValue::new(MESSAGING_MESSAGE_ID, message_id.to_string())
+        }
+
+        let Ok(output) = context.output_or_error() else {
+            return Ok(());
+        };
+
+        let Some(request_span_context) = aws_core::request_span_context(cfg) else {
+            return Ok(());
+        };
+
+        if let Some(output) = output.downcast_ref::<SendMessageOutput>() {
+            if let Some(message_id) = output.message_id() {
+                request_span_context
+                    .span()
+                    .set_attributes([message_id_attribute(message_id)]);
+            }
+        } else if let Some(output) = output.downcast_ref::<ReceiveMessageOutput>() {
+            for message in output.messages() {
+                if let Some(message_context) = extract_context(message) {
+                    let message_span_context = message_context.span().span_context().clone();
+                    request_span_context.span().add_link(
+                        message_span_context,
+                        message
+                            .message_id()
+                            .map(message_id_attribute)
+                            .into_iter()
+                            .collect(),
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -403,23 +448,38 @@ mod tests {
 
     #[test]
     fn extract_context_reads_datadog_message_attribute() {
-        let input = SendMessageInput::builder()
-            .queue_url("https://example.com/test-queue")
-            .message_body("test body")
+        datadog_aws_core_test_utils::integration_test_helpers::init_test_tracer();
+        let datadog_attr = MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value(
+                serde_json::json!({
+                    "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+                })
+                .to_string(),
+            )
             .build()
             .unwrap();
-        let mut input = Input::erase(input);
-        ensure_test_propagator();
-        inject(&test_context(), &mut input);
-
-        let input = input.downcast_ref::<SendMessageInput>().unwrap();
         let message = Message::builder()
-            .set_message_attributes(input.message_attributes.clone())
+            .message_attributes(DATADOG_ATTRIBUTE_KEY, datadog_attr)
             .build();
         let extracted = extract_context(&message).unwrap();
 
-        let trace_headers = aws_core::request_span_trace_headers(&extracted);
-        assert_eq!(trace_headers[TEST_CONTEXT_INJECTED_KEY], "true");
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_returns_none_with_invalid_trace_context() {
+        datadog_aws_core_test_utils::integration_test_helpers::init_test_tracer();
+        let datadog_attr = MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value(serde_json::json!({ "traceparent": "invalid" }).to_string())
+            .build()
+            .unwrap();
+        let message = Message::builder()
+            .message_attributes(DATADOG_ATTRIBUTE_KEY, datadog_attr)
+            .build();
+
+        assert!(extract_context(&message).is_none());
     }
 
     #[test]

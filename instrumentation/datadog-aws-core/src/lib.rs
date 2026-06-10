@@ -11,6 +11,6 @@ pub mod attribute_keys;
 mod request_span;
 
 pub use request_span::{
-    finish_request_span, request_span_trace_headers, start_request_span, update_request_span,
-    AwsRequestMetadata,
+    finish_request_span, request_span_context, request_span_trace_headers, start_request_span,
+    update_request_span, AwsRequestMetadata,
 };
