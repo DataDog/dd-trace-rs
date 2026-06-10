@@ -135,7 +135,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": null,
+        "default": "0.4",
         "propertyKeys": ["trace_agent_protocol_version"]
       }
     ],
@@ -392,7 +392,7 @@
     ],
     "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": [
       {
-        "version": "A",
+        "version": "B",
         "type": "string",
         "default": "http/json",
         "propertyKeys": ["otlp_traces_protocol"]
@@ -456,7 +456,7 @@
     ],
     "OTEL_TRACES_EXPORTER": [
       {
-        "version": "A",
+        "version": "C",
         "type": "string",
         "default": null,
         "propertyKeys": ["otel_traces_exporter"]
@@ -464,7 +464,7 @@
     ],
     "OTEL_TRACES_SAMPLER": [
       {
-        "version": "A",
+        "version": "E",
         "type": "string",
         "default": "parentbased_always_on",
         "propertyKeys": ["otel_traces_sampler"]
