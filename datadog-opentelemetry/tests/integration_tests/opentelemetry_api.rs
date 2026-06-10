@@ -4,7 +4,9 @@
 use std::time::Duration;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
 
-use datadog_opentelemetry::configuration::{Config, SamplingRuleConfig, TracePropagationStyle};
+use datadog_opentelemetry::configuration::{
+    Config, SamplingRuleConfig, TracePropagationBehaviorExtract, TracePropagationStyle,
+};
 use datadog_opentelemetry::log::LevelFilter;
 use datadog_opentelemetry::make_test_tracer;
 use opentelemetry::global::ObjectSafeSpan;
@@ -331,4 +333,179 @@ async fn test_trace_writer_synchronous_mode() {
             });
     }
     test_agent.assert_snapshot(SESSION_NAME).await;
+}
+
+#[tokio::test]
+/// Datadog and TraceContext headers carry the same 128-bit trace ID
+/// (0x1111111111111111_0000000000000001). With Restart behavior a new trace is started and
+/// the incoming context is referenced via a span link with
+/// reason=propagation_behavior_extract, context_headers=datadog.
+async fn test_injection_extraction_extract_behavior_restart_single_context() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_injection_extraction_extract_behavior_restart_single_context";
+    let mut cfg = Config::builder();
+    cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
+        .set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1"),
+            ("x-datadog-parent-id", "1"),
+            ("x-datadog-sampling-priority", "2"),
+            ("x-datadog-tags", "_dd.p.tid=1111111111111111,_dd.p.dm=-4"),
+            (
+                "traceparent",
+                "00-11111111111111110000000000000001-0000000000000001-01",
+            ),
+            ("tracestate", "dd=s:2;t.dm:-4,foo=1"),
+            ("baggage", "key1=value1"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        let span = SpanBuilder::from_name("test_restart_single_context")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let new_trace_id_bytes = span.span_context().trace_id().to_bytes();
+        let _ctx = Context::current_with_span(span).attach();
+
+        let mut injected = HashMap::new();
+        propagator.inject(&mut injected);
+
+        // A fresh trace must be started: new trace ID must differ from the incoming one
+        let original_trace_id_low: u64 = 1;
+        let new_trace_id_low = u64::from_be_bytes(new_trace_id_bytes[8..16].try_into().unwrap());
+        assert_ne!(
+            new_trace_id_low, original_trace_id_low,
+            "Restart behavior must start a new trace with a different trace ID"
+        );
+        // Outbound headers must reflect the new trace ID
+        assert_ne!(
+            injected.get("x-datadog-trace-id").map(String::as_str),
+            Some("1"),
+            "Outbound trace ID should differ from the incoming trace ID"
+        );
+        // The original 128-bit trace high bits must not appear in the outbound tags
+        if let Some(tags) = injected.get("x-datadog-tags") {
+            assert!(
+                !tags.contains("_dd.p.tid=1111111111111111"),
+                "Outbound headers must not contain the original trace ID high bits"
+            );
+        }
+        // Baggage is propagated in Restart mode
+        assert_eq!(
+            injected.get("baggage").map(String::as_str),
+            Some("key1=value1"),
+            "Baggage must be propagated in Restart mode"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+/// Datadog and TraceContext headers reference different trace IDs. Restart mode creates a new
+/// trace and a single span link to the primary (Datadog) context; terminated-context links for
+/// the conflicting TraceContext are not included in the restarted trace context.
+async fn test_injection_extraction_extract_behavior_restart_multiple_contexts() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_injection_extraction_extract_behavior_restart_multiple_contexts";
+    let mut cfg = Config::builder();
+    cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
+        .set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1"),
+            ("x-datadog-parent-id", "1"),
+            ("x-datadog-sampling-priority", "2"),
+            ("x-datadog-tags", "_dd.p.tid=1111111111111111,_dd.p.dm=-4"),
+            (
+                "traceparent",
+                "00-12345678901234567890123456789012-1234567890123456-01",
+            ),
+            ("baggage", "key1=value1"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        let span = SpanBuilder::from_name("test_restart_multiple_contexts")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let _ctx = Context::current_with_span(span).attach();
+
+        let mut injected = HashMap::new();
+        propagator.inject(&mut injected);
+
+        // Outbound trace ID must differ from the incoming Datadog trace ID
+        assert_ne!(
+            injected.get("x-datadog-trace-id").map(String::as_str),
+            Some("1"),
+            "Outbound trace ID should differ from the incoming Datadog trace ID"
+        );
+        // Baggage is propagated in Restart mode
+        assert_eq!(
+            injected.get("baggage").map(String::as_str),
+            Some("key1=value1"),
+            "Baggage must be propagated in Restart mode"
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+/// The entire incoming trace context is discarded. A new trace is started with no parent and
+/// no span links. Baggage is also discarded.
+async fn test_injection_extraction_extract_behavior_ignore() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_injection_extraction_extract_behavior_ignore";
+    let mut cfg = Config::builder();
+    cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Ignore)
+        .set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1"),
+            ("x-datadog-parent-id", "1"),
+            ("x-datadog-sampling-priority", "2"),
+            ("x-datadog-tags", "_dd.p.tid=1111111111111111,_dd.p.dm=-4"),
+            (
+                "traceparent",
+                "00-11111111111111110000000000000001-0000000000000001-01",
+            ),
+            ("tracestate", "dd=s:2;t.dm:-4,foo=1"),
+            ("baggage", "key1=value1"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        let span = SpanBuilder::from_name("test_ignore")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let new_trace_id_bytes = span.span_context().trace_id().to_bytes();
+        let _ctx = Context::current_with_span(span).attach();
+
+        let mut injected = HashMap::new();
+        propagator.inject(&mut injected);
+
+        // A fresh trace must be started: new trace ID must differ from the incoming one
+        let original_trace_id_low: u64 = 1;
+        let new_trace_id_low = u64::from_be_bytes(new_trace_id_bytes[8..16].try_into().unwrap());
+        assert_ne!(
+            new_trace_id_low, original_trace_id_low,
+            "Ignore behavior must start a new trace with a different trace ID"
+        );
+        // Outbound headers must reflect the new trace ID
+        assert_ne!(
+            injected.get("x-datadog-trace-id").map(String::as_str),
+            Some("1"),
+            "Outbound trace ID should differ from the incoming trace ID"
+        );
+        // Baggage is discarded in Ignore mode
+        assert_eq!(
+            injected.get("baggage"),
+            None,
+            "Baggage must not be propagated in Ignore mode"
+        );
+    })
+    .await;
 }
