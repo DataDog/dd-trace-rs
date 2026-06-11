@@ -1045,4 +1045,111 @@ pub mod tests {
             "baggage header must be injected with default config"
         );
     }
+
+    fn get_propagator_with_behavior(
+        behavior: crate::core::configuration::TracePropagationBehaviorExtract,
+    ) -> DatadogPropagator {
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_propagation_style_extract(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                ])
+                .set_trace_propagation_behavior_extract(behavior)
+                .build(),
+        );
+        DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
+    }
+
+    #[test]
+    fn behavior_ignore_returns_unmodified_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Ignore);
+
+        // Incoming headers with a valid trace and baggage.
+        let mut carrier = HashMap::new();
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        carrier.insert(BAGGAGE_KEY.to_string(), "user=alice".to_string());
+
+        let parent_cx = Context::current();
+        let cx = propagator.extract_with_context(&parent_cx, &carrier);
+
+        // Context must be identical to the input — no span, no extract data, no baggage.
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Ignore must not populate a remote span context"
+        );
+        assert!(
+            cx.get::<DatadogExtractData>().is_none(),
+            "Ignore must not attach DatadogExtractData"
+        );
+        assert!(
+            cx.baggage().get("user").is_none(),
+            "Ignore must not extract baggage even when headers are present"
+        );
+    }
+
+    #[test]
+    fn behavior_restart_with_headers_produces_span_link() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        let mut carrier = HashMap::new();
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        let cx = propagator.extract_with_context(&Context::current(), &carrier);
+
+        // Must not propagate a remote span context — a new trace will be started.
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Restart must not populate a remote span context"
+        );
+
+        // Must attach DatadogExtractData with exactly one span link.
+        let extract_data = cx
+            .get::<DatadogExtractData>()
+            .expect("Restart must attach DatadogExtractData");
+        assert_eq!(
+            extract_data.links.len(),
+            1,
+            "Restart must produce exactly one span link"
+        );
+        let link = &extract_data.links[0];
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("reason"))
+                .map(String::as_str),
+            Some("propagation_behavior_extract"),
+            "span link reason must be propagation_behavior_extract"
+        );
+    }
+
+    #[test]
+    fn behavior_restart_without_headers_returns_unmodified_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        // No incoming trace headers at all.
+        let carrier: HashMap<String, String> = HashMap::new();
+        let parent_cx = Context::current();
+        let cx = propagator.extract_with_context(&parent_cx, &carrier);
+
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Restart with no headers must not populate a remote span context"
+        );
+        assert!(
+            cx.get::<DatadogExtractData>().is_none(),
+            "Restart with no headers must not attach DatadogExtractData"
+        );
+    }
 }
