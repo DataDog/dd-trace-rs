@@ -47,6 +47,8 @@ const SPAN_NAME: &str = "sqs.request";
 const SPAN_OPERATION_NAME: &str = "aws.sqs.request";
 const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
+const MESSAGING_BATCH_MESSAGE_COUNT: &str = "messaging.batch.message_count";
+const SQS_RECEIVE_MESSAGES_EVENT: &str = "sqs.receive.messages";
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
 ///
@@ -205,7 +207,16 @@ impl Intercept for SqsInterceptor {
                     .set_attributes([message_id_attribute(message_id)]);
             }
         } else if let Some(output) = output.downcast_ref::<ReceiveMessageOutput>() {
-            for message in output.messages() {
+            let messages = output.messages();
+            request_span_context.span().add_event(
+                SQS_RECEIVE_MESSAGES_EVENT,
+                vec![KeyValue::new(
+                    MESSAGING_BATCH_MESSAGE_COUNT,
+                    messages.len() as i64,
+                )],
+            );
+
+            for message in messages {
                 if let Some(message_context) = extract_context(message) {
                     let message_span_context = message_context.span().span_context().clone();
                     request_span_context.span().add_link(

@@ -152,6 +152,12 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
         attrs["cloud.resource_id"],
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
     );
+    assert_eq!(spans[0].events.events.len(), 1);
+    assert_eq!(spans[0].events.events[0].name, "sqs.receive.messages");
+    assert_eq!(
+        spans[0].events.events[0].attributes,
+        vec![KeyValue::new("messaging.batch.message_count", 0)]
+    );
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
@@ -215,6 +221,12 @@ async fn sqs_receive_message_links_span_to_message_context() {
     assert_eq!(
         spans[0].links.links[0].attributes,
         vec![KeyValue::new(MESSAGING_MESSAGE_ID, "message-id")]
+    );
+    assert_eq!(spans[0].events.events.len(), 1);
+    assert_eq!(spans[0].events.events[0].name, "sqs.receive.messages");
+    assert_eq!(
+        spans[0].events.events[0].attributes,
+        vec![KeyValue::new("messaging.batch.message_count", 1)]
     );
 }
 
