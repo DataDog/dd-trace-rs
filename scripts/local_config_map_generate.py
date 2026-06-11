@@ -30,6 +30,7 @@ as_str_block = ""
 aliases_block = []
 alias_deprecated_block = []
 deprecated_block = []
+sensitive_block = []
 for i, key in enumerate(supported_configurations["supportedConfigurations"].keys()):
     if i != 0:
         enum_block += "\n"
@@ -38,6 +39,7 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
     as_str_block += f"            SupportedConfigurations::{key} => \"{key}\","
     aliases_accumulator = []
     deprecated = False
+    sensitive = False
     for version in supported_configurations["supportedConfigurations"][key]:
         if "aliases" in version:
             for alias in version["aliases"]:
@@ -46,10 +48,14 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
                     alias_deprecated_block.append(f"\"{alias}\" => true,")
         if "deprecated" in version and version["deprecated"]:
             deprecated_block.append(f"SupportedConfigurations::{key} => true,")
+        if version.get("sensitive"):
+            sensitive = True
+    if sensitive:
+        sensitive_block.append(f"SupportedConfigurations::{key}")
     if len(aliases_accumulator) > 0:
         aliases_str = ', '.join(f'"{a}"' for a in aliases_accumulator)
         aliases_block.append(f"SupportedConfigurations::{key} => &[{aliases_str}],")
-        
+
 
 if len(undocumented_configurations) > 0:
     enum_block += "\n\n    /// Used for testing purposes only"
@@ -68,6 +74,12 @@ for i, key in enumerate(undocumented_configurations):
 aliases_join = "\n            ".join(aliases_block)
 deprecated_join = "\n            ".join(deprecated_block)
 alias_deprecated_join = "\n            ".join(alias_deprecated_block)
+
+if len(sensitive_block) > 0:
+    sensitive_pattern = "\n                | ".join(sensitive_block)
+    sensitive_body = f"matches!(\n            self,\n            {sensitive_pattern}\n        )"
+else:
+    sensitive_body = "false"
 
 result = f"""\
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
@@ -102,6 +114,11 @@ impl SupportedConfigurations {{
             {deprecated_join}
             _ => false,
         }}
+    }}
+
+    /// Whether this configuration's value is excluded from configuration telemetry.
+    pub fn is_sensitive(&self) -> bool {{
+        {sensitive_body}
     }}
 }}
 
