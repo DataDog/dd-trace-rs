@@ -335,6 +335,7 @@ mod tests {
     use datadog_aws_core_test_utils::test_helpers::{
         ensure_test_propagator, test_context, TEST_CONTEXT_INJECTED_KEY,
     };
+    use serial_test::serial;
 
     #[test]
     fn skips_injection_when_message_attributes_are_full() {
@@ -360,6 +361,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn overwrites_existing_datadog_attribute_when_message_attributes_are_full() {
         let mut builder = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
@@ -393,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn overwrites_existing_datadog_attribute_in_batch_entries_when_message_attributes_are_full() {
         let mut full_attrs = HashMap::new();
         for i in 0..9 {
@@ -441,6 +444,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn inject_dispatches_by_input_type() {
         let input = SendMessageInput::builder()
             .queue_url("https://example.com/test-queue")
@@ -458,6 +462,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn extract_context_reads_datadog_message_attribute() {
         datadog_aws_core_test_utils::integration_test_helpers::init_test_tracer();
         let datadog_attr = MessageAttributeValue::builder()
@@ -479,6 +484,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn extract_context_returns_none_with_invalid_trace_context() {
         datadog_aws_core_test_utils::integration_test_helpers::init_test_tracer();
         let datadog_attr = MessageAttributeValue::builder()
