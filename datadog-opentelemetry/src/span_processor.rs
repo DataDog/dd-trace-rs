@@ -465,8 +465,13 @@ impl DatadogSpanProcessor {
     ) {
         if let Some(DatadogExtractData { links, .. }) = parent_ctx.get::<DatadogExtractData>() {
             links.iter().for_each(|link| {
+                // Reconstruct the full 128-bit trace ID: `link.trace_id` holds the low 64 bits and
+                // `link.trace_id_high` the upper 64. Casting the low bits alone would zero-extend
+                // and silently drop the high bits (e.g. an incoming `_dd.p.tid`).
+                let trace_id =
+                    (link.trace_id_high.unwrap_or(0) as u128) << 64 | link.trace_id as u128;
                 let link_ctx = SpanContext::new(
-                    TraceId::from(link.trace_id as u128),
+                    TraceId::from(trace_id),
                     SpanId::from(link.span_id),
                     TraceFlags::new(link.flags.unwrap_or_default() as u8),
                     false, // TODO: dd SpanLink doesn't have the remote field...
@@ -571,9 +576,8 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // the local root span.
         // If the parent context has an active span, it means we are continuing an existing trace,
         // so we need to register the span.
-        let has_extract_data = parent_ctx.get::<DatadogExtractData>().is_some();
         if parent_ctx.span().span_context().is_remote()
-            || (has_extract_data && !parent_ctx.has_active_span())
+            || (!parent_ctx.has_active_span() && parent_ctx.get::<DatadogExtractData>().is_some())
         {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);

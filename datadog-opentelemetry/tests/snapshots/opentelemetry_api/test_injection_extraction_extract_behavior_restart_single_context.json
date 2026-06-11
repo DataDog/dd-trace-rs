@@ -24,7 +24,7 @@
     "span_links": [
       {
         "trace_id": 1,
-        "trace_id_high": 0,
+        "trace_id_high": 1229782938247303441,
         "span_id": 1,
         "attributes": {
           "context_headers": "datadog",

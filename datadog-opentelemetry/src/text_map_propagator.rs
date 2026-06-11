@@ -173,8 +173,7 @@ impl DatadogPropagator {
         let extracted = self.inner.extract(&extractor);
         let cx = match self.cfg.trace_propagation_behavior_extract() {
             TracePropagationBehaviorExtract::Continue => extracted
-                .map(|(dd_span_context, _)| dd_span_context)
-                .map(|dd_span_context| {
+                .map(|(dd_span_context, _)| {
                     let trace_flags = extract_trace_flags(&dd_span_context);
                     let trace_state = extract_trace_state_from_context(&dd_span_context);
 
@@ -204,9 +203,13 @@ impl DatadogPropagator {
             },
             TracePropagationBehaviorExtract::Ignore => return cx.clone(),
         };
-        match (extract_baggage(&extractor), self.baggage_extract) {
-            (Some(baggage), true) => cx.with_baggage(baggage),
-            _ => cx,
+        if self.baggage_extract {
+            match extract_baggage(&extractor) {
+                Some(baggage) => cx.with_baggage(baggage),
+                None => cx,
+            }
+        } else {
+            cx
         }
     }
 }

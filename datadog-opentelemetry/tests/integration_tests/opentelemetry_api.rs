@@ -399,6 +399,25 @@ async fn test_injection_extraction_extract_behavior_restart_single_context() {
             Some("key1=value1"),
             "Baggage must be propagated in Restart mode"
         );
+        // Restart makes its OWN sampling decision as a fresh local root: the sampler registers
+        // brand-new propagation data for the restarted trace, so the upstream decision must not be
+        // inherited. The incoming context carries priority=2 (USER_KEEP) and _dd.p.dm=-4 (manual);
+        // the restarted trace must reflect neither.
+        assert_ne!(
+            injected.get("x-datadog-sampling-priority").map(String::as_str),
+            Some("2"),
+            "Restart must make its own sampling decision, not inherit the upstream priority (2)"
+        );
+        if let Some(tags) = injected.get("x-datadog-tags") {
+            assert!(
+                !tags.contains("_dd.p.dm=-4"),
+                "Restarted trace must not inherit the upstream decision-maker (_dd.p.dm=-4), got: {tags}"
+            );
+            assert!(
+                tags.contains("_dd.p.dm="),
+                "Restarted trace must record its own sampling decision-maker tag, got: {tags}"
+            );
+        }
     })
     .await;
 }
@@ -449,6 +468,54 @@ async fn test_injection_extraction_extract_behavior_restart_multiple_contexts() 
             Some("key1=value1"),
             "Baggage must be propagated in Restart mode"
         );
+    })
+    .await;
+}
+
+#[tokio::test]
+/// Exercises the restart-detection branch in `DatadogSpanProcessor::on_start`. The local root span
+/// is created from a context that carries `DatadogExtractData` but no active span, so it must get
+/// the restart span link. The child span is created from a context that carries the SAME
+/// `DatadogExtractData` AND an active span — `on_start` must take the "continue existing trace"
+/// branch and add NO span link. Guards finding #3: `add_remote_links` must not fire when an active
+/// span is present, even though the extract data is still in context.
+async fn test_injection_extraction_extract_behavior_restart_child_not_relinked() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_injection_extraction_extract_behavior_restart_child_not_relinked";
+    let mut cfg = Config::builder();
+    cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
+        .set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1"),
+            ("x-datadog-parent-id", "1"),
+            ("x-datadog-sampling-priority", "2"),
+            ("x-datadog-tags", "_dd.p.tid=1111111111111111,_dd.p.dm=-4"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        // Local root: extract data present, no active span -> restart branch -> gets the link.
+        let root = SpanBuilder::from_name("test_restart_root")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let root_trace_id = root.span_context().trace_id();
+        let _root_ctx = Context::current_with_span(root).attach();
+        {
+            // Child: extract data STILL in context, but now there is an active span -> continue
+            // branch -> must NOT get a restart link.
+            let child = SpanBuilder::from_name("test_restart_child")
+                .with_kind(opentelemetry::trace::SpanKind::Internal)
+                .start(&tracer);
+            // Child must join the restarted trace, not start another one.
+            assert_eq!(
+                child.span_context().trace_id(),
+                root_trace_id,
+                "Child span must belong to the restarted trace"
+            );
+            let _child_ctx = Context::current_with_span(child).attach();
+        }
     })
     .await;
 }
