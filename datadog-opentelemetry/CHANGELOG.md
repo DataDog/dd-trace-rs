@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0 (Jun 05, 2026)
+
+- Add support for W3C baggage propagation in https://github.com/DataDog/dd-trace-rs/pull/200
+- Expose synchronous trace writes in https://github.com/DataDog/dd-trace-rs/pull/221
+- Update MSRV to Rust 1.87 in https://github.com/DataDog/dd-trace-rs/pull/232
+- Add root invocation span with OTel tracing in datadog-aws-lambda in https://github.com/DataDog/dd-trace-rs/pull/213
+- Use sampling from libdatadog in https://github.com/DataDog/dd-trace-rs/pull/154
+- Add support for baggage span tags in https://github.com/DataDog/dd-trace-rs/pull/223
+- Expose css obfuscation parameter for client-side stats in https://github.com/DataDog/dd-trace-rs/pull/225
+- Accept Remote Config list-shape tags and honor tracing_sampling_rate in https://github.com/DataDog/dd-trace-rs/pull/227
+- Add `https` feature to opt into the rustls TLS stack in https://github.com/DataDog/dd-trace-rs/pull/241
+
 ## 0.3.3 (May 06, 2026)
 
 - Fix config, use DD_AGENT_HOST and DD_TRACE_AGENT_PORT to derive agent url if it is an empty string in env in https://github.com/DataDog/dd-trace-rs/pull/208
