@@ -2,14 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for SnsInterceptor.
-//!
-//! Tests are serialized with `#[serial]` because `init_test_tracer` sets the
-//! global OTel tracer provider and propagator. Concurrent tests would race on
-//! that global state, causing spans to land in the wrong exporter.
 
 use aws_types::SdkConfig;
 use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
-use serial_test::serial;
 
 use datadog_aws_sns::ConfigExt as _;
 
@@ -25,7 +20,6 @@ const TARGET_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTarget";
 const HTTP_400: &str = "400";
 
 #[tokio::test]
-#[serial]
 async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -60,7 +54,6 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_publish_with_target_sets_targetname_tag() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -79,7 +72,6 @@ async fn sns_publish_with_target_sets_targetname_tag() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_publish_batch_creates_span_with_topicname() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -116,7 +108,6 @@ async fn sns_publish_batch_creates_span_with_topicname() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_subscribe_creates_span_with_topicname() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -136,7 +127,6 @@ async fn sns_subscribe_creates_span_with_topicname() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_create_topic_uses_name_field_not_arn() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -150,7 +140,6 @@ async fn sns_create_topic_uses_name_field_not_arn() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_get_topic_attributes_creates_span_with_topicname() {
     let harness = TestHarness::ok().await;
     let client = sns_client(&harness.sdk_config());
@@ -168,7 +157,6 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sns_error_response_sets_span_error_status() {
     let harness = TestHarness::bad_request().await;
     let client = sns_client(&harness.sdk_config());

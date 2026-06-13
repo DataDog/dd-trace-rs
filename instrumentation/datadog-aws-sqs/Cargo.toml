@@ -26,5 +26,5 @@ opentelemetry = { workspace = true }
 [dev-dependencies]
 datadog-aws-core-test-utils = { path = "../datadog-aws-core-test-utils" }
 aws-types = { workspace = true }
-serial_test = "3"
+opentelemetry_sdk = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }

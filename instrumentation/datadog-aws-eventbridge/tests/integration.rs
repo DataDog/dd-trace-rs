@@ -2,17 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for EventBridgeInterceptor.
-//!
-//! Tests are serialized with `#[serial]` because `init_test_tracer` sets the
-//! global OTel tracer provider and propagator. Concurrent tests would race on
-//! that global state, causing spans to land in the wrong exporter.
 
 use aws_sdk_eventbridge::types::PutEventsRequestEntry;
 use aws_types::SdkConfig;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     span_attrs, split_traceparent, TestHarness,
 };
-use serial_test::serial;
 
 use datadog_aws_eventbridge::ConfigExt as _;
 
@@ -24,7 +19,6 @@ fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
 }
 
 #[tokio::test]
-#[serial]
 async fn eventbridge_put_events_creates_span_and_injects_detail() {
     let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
@@ -68,7 +62,6 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
 }
 
 #[tokio::test]
-#[serial]
 async fn eventbridge_put_events_with_bus_name_creates_span() {
     let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
@@ -88,7 +81,6 @@ async fn eventbridge_put_events_with_bus_name_creates_span() {
 }
 
 #[tokio::test]
-#[serial]
 async fn eventbridge_put_events_multi_entry_creates_single_span() {
     let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
@@ -118,7 +110,6 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
 }
 
 #[tokio::test]
-#[serial]
 async fn eventbridge_put_rule_creates_span_with_rulename() {
     let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());
@@ -133,7 +124,6 @@ async fn eventbridge_put_rule_creates_span_with_rulename() {
 }
 
 #[tokio::test]
-#[serial]
 async fn eventbridge_put_targets_creates_span_with_rulename() {
     let harness = TestHarness::ok().await;
     let client = eventbridge_client(&harness.sdk_config());

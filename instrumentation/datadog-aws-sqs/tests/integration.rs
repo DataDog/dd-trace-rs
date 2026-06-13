@@ -2,10 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Integration tests for SqsInterceptor.
-//!
-//! Tests are serialized with `#[serial]` because `init_test_tracer` sets the
-//! global OTel tracer provider and propagator. Concurrent tests would race on
-//! that global state, causing spans to land in the wrong exporter.
 
 use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
 use aws_types::SdkConfig;
@@ -13,10 +9,9 @@ use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
 use opentelemetry::trace::{
-    SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
+    SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState,
 };
-use opentelemetry::{global, Context, KeyValue};
-use serial_test::serial;
+use opentelemetry::KeyValue;
 
 use datadog_aws_sqs::ConfigExt as _;
 
@@ -34,7 +29,6 @@ const HTTP_400: &str = "400";
 const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
 
 #[tokio::test]
-#[serial]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     let response_body = serde_json::json!({
         "MessageId": "producer-message-id"
@@ -70,7 +64,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     assert_eq!(attrs["messaging.system"], "amazonsqs");
     assert_eq!(attrs[MESSAGING_MESSAGE_ID], "producer-message-id");
     assert_eq!(attrs["http.status_code"], HTTP_200);
-    assert_eq!(attrs["aws.request_id"], "test_req");
+    assert_eq!(attrs["aws.request_id"], harness.server.request_id());
     assert_eq!(spans[0].span_kind, SpanKind::Client);
 
     let bodies = harness.server.bodies();
@@ -92,7 +86,6 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
@@ -136,7 +129,6 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_receive_message_creates_span_with_queue_tags() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
@@ -168,7 +160,6 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_receive_message_links_span_to_message_context() {
     let message_span_context = SpanContext::new(
         TraceId::from_hex("11111111111111111111111111111111").unwrap(),
@@ -231,7 +222,6 @@ async fn sqs_receive_message_links_span_to_message_context() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_delete_message_creates_span_with_queue_tags() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
@@ -251,7 +241,6 @@ async fn sqs_delete_message_creates_span_with_queue_tags() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
@@ -270,7 +259,6 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_queue_url_trailing_slash_parsed_correctly() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
@@ -292,7 +280,6 @@ async fn sqs_queue_url_trailing_slash_parsed_correctly() {
 }
 
 #[tokio::test]
-#[serial]
 async fn sqs_error_response_sets_span_error_status_and_http_code() {
     let harness = TestHarness::bad_request().await;
     let client = sqs_client(&harness.sdk_config());
@@ -312,42 +299,4 @@ async fn sqs_error_response_sets_span_error_status_and_http_code() {
         spans[0].status,
         opentelemetry::trace::Status::Error { .. }
     ));
-}
-
-#[tokio::test]
-#[serial]
-async fn sqs_send_message_propagates_parent_context() {
-    let harness = TestHarness::ok().await;
-    let client = sqs_client(&harness.sdk_config());
-
-    let tracer = global::tracer("test");
-    let parent_span = tracer.start("parent");
-    let parent_cx = Context::current().with_span(parent_span);
-
-    let _guard = parent_cx.clone().attach();
-    let _ = client
-        .send_message()
-        .queue_url(QUEUE_URL)
-        .message_body("hello")
-        .send()
-        .await;
-
-    let spans = harness.finished_spans();
-    let sqs_span = spans
-        .iter()
-        .find(|s| s.name == "sqs.request")
-        .expect("sqs.request span not found");
-
-    assert_eq!(
-        sqs_span.parent_span_id,
-        parent_cx.span().span_context().span_id()
-    );
-
-    let bodies = harness.server.bodies();
-    let tp = extract_traceparent(&bodies[0]).expect("traceparent should be in body");
-    let (_, injected_parent_id) = split_traceparent(&tp);
-    assert_eq!(
-        injected_parent_id,
-        format!("{}", sqs_span.span_context.span_id())
-    );
 }
