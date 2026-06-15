@@ -26,6 +26,7 @@ use libdd_remote_config::parse::{
 };
 use libdd_remote_config::{RemoteConfigCapabilities, RemoteConfigProduct, Target};
 use serde::Deserialize;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::thread::{self};
 use std::time::Duration;
@@ -389,11 +390,14 @@ impl RemoteConfigClientWorker {
         let target = build_target(&self.config);
         let runtime_id = self.config.runtime_id().to_string();
 
+        let agentless_enabled = self.config.agentless_rc_endpoint().is_some();
         let options = ConfigOptions {
             invariants: ConfigInvariants {
                 language: self.config.language().to_string(),
                 tracer_version: self.config.tracer_version().to_string(),
                 endpoint: self.endpoint.clone(),
+                hostname: HOSTNAME.clone(),
+                agentless_enabled,
             },
             products: vec![RemoteConfigProduct::ApmTracing],
             capabilities: vec![
@@ -402,7 +406,14 @@ impl RemoteConfigClientWorker {
             ],
         };
 
-        let mut fetcher = SingleChangesFetcher::new(storage, target, runtime_id, options);
+        let mut fetcher =
+            match SingleChangesFetcher::new(storage, target, runtime_id, options).await {
+                Ok(f) => f,
+                Err(e_) => {
+                    crate::dd_debug!("RemoteConfigClient: init failed {}", e_);
+                    return;
+                }
+            };
 
         loop {
             fetcher.set_extra_services(self.config.get_extra_services());
@@ -420,7 +431,28 @@ impl RemoteConfigClientWorker {
     }
 }
 
+/// The machine hostname, resolved once at first use by invoking the `hostname` CLI.
+/// Falls back to an empty string on any error.
+static HOSTNAME: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+});
+
 fn build_endpoint(config: &Config) -> Result<Endpoint, RemoteConfigClientError> {
+    if let Some((api_key, site_url)) = config.agentless_rc_endpoint() {
+        let url = libdd_common::parse_uri(&site_url)
+            .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
+        return Ok(Endpoint {
+            url,
+            api_key: Some(Cow::Owned(api_key)),
+            timeout_ms: FETCH_TIMEOUT_MS,
+            ..Default::default()
+        });
+    }
     let agent_url = libdd_common::parse_uri(&config.trace_agent_url())
         .map_err(|_| RemoteConfigClientError::InvalidAgentUri)?;
     Ok(Endpoint {

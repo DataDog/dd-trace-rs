@@ -68,19 +68,6 @@ hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
 
 
-# libdd-remote-config depends on libdd-common and (optionally) libdd-trace-protobuf
-# via path+version. Redirect their crates.io copies to the same libdatadog revision
-# so cargo unifies the graph (otherwise we get duplicate libdd-common copies and
-# type-mismatch errors at the boundary). Remove once libdd-remote-config is on
-# crates.io with matching libdd-* versions.
-[patch.crates-io]
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-
 [profile.dev]
 debug = 2 # full debug info
 
@@ -90,3 +77,15 @@ debug = false
 incremental = false
 opt-level = 3
 
+[patch.crates-io]
+libdd-data-pipeline = { path = "../libdatadog/libdd-data-pipeline" }
+libdd-trace-utils = { path = "../libdatadog/libdd-trace-utils" }
+libdd-capabilities-impl = { path = "../libdatadog/libdd-capabilities-impl" }
+libdd-telemetry = { path = "../libdatadog/libdd-telemetry" }
+libdd-common = { path = "../libdatadog/libdd-common" }
+libdd-tinybytes = { path = "../libdatadog/libdd-tinybytes" }
+libdd-library-config = { path = "../libdatadog/libdd-library-config" }
+libdd-sampling = { path = "../libdatadog/libdd-sampling" }
+
+[patch."https://github.com/DataDog/libdatadog"]
+libdd-remote-config =  { path = "../libdatadog/libdd-remote-config" }
