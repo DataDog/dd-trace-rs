@@ -1133,6 +1133,71 @@ pub mod tests {
     }
 
     #[test]
+    fn behavior_restart_rebuilds_128bit_trace_id_from_primary_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        // Datadog and TraceContext headers carry different trace IDs. In Restart mode the span
+        // link references the primary context (Datadog, first in the extract order), and its
+        // 128-bit trace ID is reconstructed from the low bits plus _dd.p.tid.
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        let mut carrier = HashMap::new();
+        carrier.insert("x-datadog-trace-id".to_string(), "1".to_string());
+        carrier.insert("x-datadog-parent-id".to_string(), "1".to_string());
+        carrier.insert("x-datadog-sampling-priority".to_string(), "2".to_string());
+        carrier.insert(
+            "x-datadog-tags".to_string(),
+            "_dd.p.tid=1111111111111111,_dd.p.dm=-4".to_string(),
+        );
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-12345678901234567890123456789012-1234567890123456-01".to_string(),
+        );
+
+        let cx = propagator.extract_with_context(&Context::current(), &carrier);
+
+        let extract_data = cx
+            .get::<DatadogExtractData>()
+            .expect("Restart must attach DatadogExtractData");
+
+        // Restart references the single primary context via one span link.
+        assert_eq!(
+            extract_data.links.len(),
+            1,
+            "Restart must produce exactly one span link"
+        );
+
+        let link = &extract_data.links[0];
+        // Lower 64 bits of the Datadog trace ID ("1")
+        assert_eq!(
+            link.trace_id, 1,
+            "Span link must carry the lower 64 bits of the incoming Datadog trace ID"
+        );
+        // Upper 64 bits from _dd.p.tid=1111111111111111 (hex)
+        assert_eq!(
+            link.trace_id_high,
+            Some(0x1111111111111111),
+            "Span link must carry the upper 64 bits of the incoming Datadog trace ID"
+        );
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("reason"))
+                .map(String::as_str),
+            Some("propagation_behavior_extract"),
+            "Span link reason must be propagation_behavior_extract"
+        );
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("context_headers"))
+                .map(String::as_str),
+            Some("datadog"),
+            "Span link context_headers must identify the primary Datadog propagator"
+        );
+    }
+
+    #[test]
     fn behavior_restart_without_headers_returns_unmodified_context() {
         use crate::core::configuration::TracePropagationBehaviorExtract;
 
