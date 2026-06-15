@@ -52,6 +52,10 @@ impl DatadogExporter {
         if config.trace_stats_computation_enabled() {
             builder.enable_stats(Duration::from_secs(10));
         }
+        if config.trace_stats_computation_experimental_client_obfuscation_enabled() {
+            builder.enable_client_side_stats_obfuscation();
+        }
+
         if let Some(env) = config.env() {
             builder.set_env(env);
         }
@@ -147,7 +151,7 @@ impl Exporter<SpanData> for MapperExporter {
             .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
         self.config.add_extra_services(services);
 
-        let agent_response = trace_exporter.send_trace_chunks(trace_chunks)?;
+        let agent_response = trace_exporter.send_trace_chunks(trace_chunks, None)?;
         Ok(agent_response)
     }
 }

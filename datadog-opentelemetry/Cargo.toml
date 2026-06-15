@@ -114,6 +114,15 @@ logs-http = [
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
 _unstable_propagation = []
+https = [
+    "libdd-data-pipeline/https",
+    "libdd-capabilities-impl/https",
+    "libdd-trace-utils/https",
+    "libdd-telemetry/https",
+    "libdd-common/https",
+    "opentelemetry-otlp?/reqwest-rustls",
+    "opentelemetry-otlp?/tls-roots",
+]
 test-utils = [
     "libdd-data-pipeline/test-utils",
     "criterion",

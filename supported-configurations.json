@@ -139,6 +139,14 @@
         "propertyKeys": ["trace_agent_url"]
       }
     ],
+    "DD_TRACE_BAGGAGE_TAG_KEYS": [
+      {
+        "version": "A",
+        "type": "array",
+        "default": "user.id, session.id, account.id",
+        "propertyKeys": ["trace_baggage_tag_keys"]
+      }
+    ],
     "DD_TRACE_ENABLED": [
       {
         "version": "A",
@@ -203,6 +211,14 @@
         "propertyKeys": ["trace_rate_limit"]
       }
     ],
+    "DD_TRACE_SAMPLE_RATE": [
+      {
+        "version": "B",
+        "type": "decimal",
+        "default": null,
+        "propertyKeys": ["trace_sample_rate"]
+      }
+    ],
     "DD_TRACE_SAMPLING_RULES": [
       {
         "version": "A",
@@ -248,7 +264,8 @@
         "version": "A",
         "type": "map",
         "default": "",
-        "propertyKeys": ["otlp_headers"]
+        "propertyKeys": ["otlp_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": [
@@ -264,7 +281,8 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_logs_headers"]
+        "propertyKeys": ["otlp_logs_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
@@ -296,7 +314,8 @@
         "version": "A",
         "type": "map",
         "default": null,
-        "propertyKeys": ["otlp_metrics_headers"]
+        "propertyKeys": ["otlp_metrics_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": [
@@ -377,6 +396,14 @@
         "type": "map",
         "default_value": "",
         "propertyKeys": []
+      }
+    ],
+    "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED": [
+      {
+        "version": "B",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["trace_stats_computation_experimental_client_obfuscation_enabled"]
       }
     ]
   }
