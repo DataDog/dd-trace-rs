@@ -20,6 +20,8 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::TraceContext => tracecontext::extract(carrier),
             // Baggage extraction operates on OTel Context and is handled by DatadogPropagator.
             Self::Baggage | Self::None => None,
+            // B3 propagators are wired in subsequent changes.
+            Self::B3Multi | Self::B3SingleHeader => None,
         }
     }
 
@@ -29,6 +31,8 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::TraceContext => tracecontext::inject(context, carrier),
             // Baggage injection operates on OTel Context and is handled by DatadogPropagator.
             Self::Baggage | Self::None => {}
+            // B3 propagators are wired in subsequent changes.
+            Self::B3Multi | Self::B3SingleHeader => {}
         }
     }
 
@@ -37,7 +41,7 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::Datadog => datadog::keys(),
             Self::TraceContext => tracecontext::keys(),
             Self::Baggage => baggage::keys(),
-            Self::None => &NONE_KEYS,
+            Self::None | Self::B3Multi | Self::B3SingleHeader => &NONE_KEYS,
         }
     }
 }
