@@ -5,7 +5,7 @@ use crate::core::configuration::TracePropagationStyle;
 use serde::{Deserialize, Deserializer};
 
 use crate::propagation::{
-    b3multi, baggage,
+    b3, b3multi, baggage,
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, SpanContext},
     datadog, tracecontext, PropagationConfig, Propagator,
@@ -19,10 +19,9 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::Datadog => datadog::extract(carrier, config),
             Self::TraceContext => tracecontext::extract(carrier),
             Self::B3Multi => b3multi::extract(carrier),
+            Self::B3SingleHeader => b3::extract(carrier),
             // Baggage extraction operates on OTel Context and is handled by DatadogPropagator.
             Self::Baggage | Self::None => None,
-            // The B3 single-header propagator is wired in a subsequent change.
-            Self::B3SingleHeader => None,
         }
     }
 
@@ -31,10 +30,9 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::Datadog => datadog::inject(context, carrier, config),
             Self::TraceContext => tracecontext::inject(context, carrier),
             Self::B3Multi => b3multi::inject(context, carrier),
+            Self::B3SingleHeader => b3::inject(context, carrier),
             // Baggage injection operates on OTel Context and is handled by DatadogPropagator.
             Self::Baggage | Self::None => {}
-            // The B3 single-header propagator is wired in a subsequent change.
-            Self::B3SingleHeader => {}
         }
     }
 
@@ -43,8 +41,9 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::Datadog => datadog::keys(),
             Self::TraceContext => tracecontext::keys(),
             Self::B3Multi => b3multi::keys(),
+            Self::B3SingleHeader => b3::keys(),
             Self::Baggage => baggage::keys(),
-            Self::None | Self::B3SingleHeader => &NONE_KEYS,
+            Self::None => &NONE_KEYS,
         }
     }
 }
