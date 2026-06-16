@@ -822,7 +822,7 @@ impl FromStr for TracePropagationStyle {
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
             "b3multi" => Ok(TracePropagationStyle::B3Multi),
-            // `b3` is added to from_str alongside the b3 single-header propagator.
+            "b3" => Ok(TracePropagationStyle::B3SingleHeader),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -3077,27 +3077,47 @@ mod tests {
     }
 
     #[test]
-    fn test_propagation_style_b3multi_parsed_from_env() {
-        // b3multi parses (it has a working propagator now); b3 is still dropped
-        // until the b3 single-header propagator lands.
+    fn test_propagation_style_b3_parsed_from_env() {
+        // Both b3multi and b3 now parse from env (case-insensitive).
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
-            [("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3multi,b3,datadog")],
+            [
+                (
+                    "DD_TRACE_PROPAGATION_STYLE",
+                    "datadog,tracecontext,b3multi,b3",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "B3Multi,B3"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "b3,b3multi"),
+            ],
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
 
         assert_eq!(
-            config.trace_propagation_style_extract(),
+            config.trace_propagation_style(),
             Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
                 TracePropagationStyle::B3Multi,
-                TracePropagationStyle::Datadog
+                TracePropagationStyle::B3SingleHeader,
             ])
             .as_deref()
         );
         assert_eq!(
-            TracePropagationStyle::from_str("B3Multi").unwrap(),
-            TracePropagationStyle::B3Multi
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::B3Multi,
+            ])
+            .as_deref()
         );
     }
 

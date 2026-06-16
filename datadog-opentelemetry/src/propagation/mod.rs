@@ -14,6 +14,8 @@ use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
 use tracecontext::TRACESTATE_KEY;
 
+/// B3 single-header propagation (`b3` header).
+pub mod b3;
 /// B3 multi-header propagation (`x-b3-*` headers).
 pub mod b3multi;
 /// W3C Baggage propagation (`baggage` header).
