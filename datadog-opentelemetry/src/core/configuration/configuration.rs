@@ -821,12 +821,8 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
-            // `b3multi` and `b3` are added to from_str alongside the b3multi and b3
-            // single-header propagator implementations. Accepting them here while their
-            // extractors are no-ops would regress users who set
-            // DD_TRACE_PROPAGATION_STYLE_EXTRACT=b3,datadog with
-            // DD_TRACE_PROPAGATION_EXTRACT_FIRST=true — the no-op b3 propagator would be
-            // picked first and Datadog headers would never be tried.
+            "b3multi" => Ok(TracePropagationStyle::B3Multi),
+            // `b3` is added to from_str alongside the b3 single-header propagator.
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -3076,16 +3072,14 @@ mod tests {
 
     #[test]
     fn test_propagation_style_b3_display() {
-        // `b3multi` and `b3` round-trip via Display now that the variants exist;
-        // FromStr support is added when the respective propagators land.
         assert_eq!(TracePropagationStyle::B3Multi.to_string(), "b3multi");
         assert_eq!(TracePropagationStyle::B3SingleHeader.to_string(), "b3");
     }
 
     #[test]
-    fn test_propagation_style_b3_not_yet_parsed_from_env() {
-        // Until each B3 propagator lands, b3multi/b3 in the env var are dropped
-        // (FromStr returns Err, the env-var deserializer silently filters those).
+    fn test_propagation_style_b3multi_parsed_from_env() {
+        // b3multi parses (it has a working propagator now); b3 is still dropped
+        // until the b3 single-header propagator lands.
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3multi,b3,datadog")],
@@ -3095,7 +3089,15 @@ mod tests {
 
         assert_eq!(
             config.trace_propagation_style_extract(),
-            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+            Some(vec![
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::Datadog
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            TracePropagationStyle::from_str("B3Multi").unwrap(),
+            TracePropagationStyle::B3Multi
         );
     }
 
