@@ -785,6 +785,10 @@ pub enum TracePropagationStyle {
     TraceContext,
     /// W3C Baggage propagation format using the `baggage` header.
     Baggage,
+    /// B3 multi-header propagation format using `x-b3-*` headers.
+    B3Multi,
+    /// B3 single-header propagation format using the `b3` header.
+    B3SingleHeader,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -817,6 +821,12 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
+            // `b3multi` and `b3` are added to from_str alongside the b3multi and b3
+            // single-header propagator implementations. Accepting them here while their
+            // extractors are no-ops would regress users who set
+            // DD_TRACE_PROPAGATION_STYLE_EXTRACT=b3,datadog with
+            // DD_TRACE_PROPAGATION_EXTRACT_FIRST=true — the no-op b3 propagator would be
+            // picked first and Datadog headers would never be tried.
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -829,6 +839,8 @@ impl Display for TracePropagationStyle {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
             TracePropagationStyle::Baggage => "baggage",
+            TracePropagationStyle::B3Multi => "b3multi",
+            TracePropagationStyle::B3SingleHeader => "b3",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -3059,6 +3071,31 @@ mod tests {
                 TracePropagationStyle::TraceContext,
             ])
             .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_propagation_style_b3_display() {
+        // `b3multi` and `b3` round-trip via Display now that the variants exist;
+        // FromStr support is added when the respective propagators land.
+        assert_eq!(TracePropagationStyle::B3Multi.to_string(), "b3multi");
+        assert_eq!(TracePropagationStyle::B3SingleHeader.to_string(), "b3");
+    }
+
+    #[test]
+    fn test_propagation_style_b3_not_yet_parsed_from_env() {
+        // Until each B3 propagator lands, b3multi/b3 in the env var are dropped
+        // (FromStr returns Err, the env-var deserializer silently filters those).
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3multi,b3,datadog")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
         );
     }
 
