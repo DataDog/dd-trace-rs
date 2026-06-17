@@ -798,20 +798,6 @@ impl Display for TracePropagationBehaviorExtract {
     }
 }
 
-impl ConfigurationValueProvider for TracePropagationBehaviorExtract {
-    fn get_configuration_value(&self) -> String {
-        self.to_string()
-    }
-}
-
-impl ConfigurationValueProvider for Option<TracePropagationBehaviorExtract> {
-    fn get_configuration_value(&self) -> String {
-        self.as_ref()
-            .map(|b| b.get_configuration_value())
-            .unwrap_or_default()
-    }
-}
-
 /// Trace context propagation style.
 ///
 /// Defines how trace context is propagated across service boundaries.
@@ -1011,7 +997,7 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
