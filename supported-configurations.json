@@ -264,7 +264,8 @@
         "version": "A",
         "type": "map",
         "default": "",
-        "propertyKeys": ["otlp_headers"]
+        "propertyKeys": ["otlp_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": [
@@ -280,7 +281,8 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_logs_headers"]
+        "propertyKeys": ["otlp_logs_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": [
@@ -312,7 +314,8 @@
         "version": "A",
         "type": "map",
         "default": null,
-        "propertyKeys": ["otlp_metrics_headers"]
+        "propertyKeys": ["otlp_metrics_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": [
