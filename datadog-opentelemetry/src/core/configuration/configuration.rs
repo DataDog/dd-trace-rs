@@ -309,6 +309,11 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         self.source() == ConfigSourceOrigin::Default
     }
 
+    /// Whether this configuration's value is excluded from configuration telemetry.
+    fn is_sensitive(&self) -> bool {
+        self.name.is_sensitive()
+    }
+
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
         let mut configurations = Vec::new();
         // Always include the default value
@@ -352,7 +357,13 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 
 impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
     /// Returns all configurations that were set for this configuration item.
+    ///
+    /// Configurations marked sensitive in the registry are excluded from
+    /// configuration telemetry, so this returns an empty list for them.
     fn get_all_configurations(&self) -> Vec<Configuration> {
+        if self.is_sensitive() {
+            return Vec::new();
+        }
         self.build_configurations_list(None)
     }
 }
@@ -488,7 +499,13 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     for ConfigItemWithOverride<T>
 {
     /// Returns all configurations that were set for this configuration item.
+    ///
+    /// Configurations marked sensitive in the registry are excluded from
+    /// configuration telemetry, so this returns an empty list for them.
     fn get_all_configurations(&self) -> Vec<Configuration> {
+        if self.config_item.is_sensitive() {
+            return Vec::new();
+        }
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
@@ -3968,5 +3985,115 @@ mod tests {
         let mut ok_builder = Config::builder();
         ok_builder.set_trace_sample_rate(0.3);
         assert_eq!(ok_builder.build().trace_sample_rate(), Some(0.3));
+    }
+
+    /// Collects every configuration entry reported via the telemetry
+    /// configuration list, mirroring the app-started reporting path.
+    fn collect_telemetry_configurations(config: &Config) -> Vec<Configuration> {
+        config
+            .get_telemetry_configuration()
+            .into_iter()
+            .flat_map(|provider| provider.get_all_configurations())
+            .collect()
+    }
+
+    #[test]
+    fn test_sensitive_otlp_headers_excluded_from_telemetry() {
+        const SENTINEL_OTLP_BASE: &str = "dd-api-key=SENTINEL_OTLP_BASE";
+        const SENTINEL_OTLP_METRICS: &str = "dd-api-key=SENTINEL_OTLP_METRICS";
+        const SENTINEL_OTLP_LOGS: &str = "dd-api-key=SENTINEL_OTLP_LOGS";
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                // Sensitive configurations, each with a distinct sentinel value.
+                ("OTEL_EXPORTER_OTLP_HEADERS", SENTINEL_OTLP_BASE),
+                ("OTEL_EXPORTER_OTLP_METRICS_HEADERS", SENTINEL_OTLP_METRICS),
+                ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", SENTINEL_OTLP_LOGS),
+                // Non-sensitive exporter configurations that must still be reported.
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+                ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+                ("OTEL_EXPORTER_OTLP_TIMEOUT", "5000"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        // The values are still parsed and usable; only their telemetry
+        // reporting is suppressed.
+        assert_eq!(config.otlp_headers(), SENTINEL_OTLP_BASE);
+        assert_eq!(config.otlp_metrics_headers(), SENTINEL_OTLP_METRICS);
+        assert_eq!(config.otlp_logs_headers(), SENTINEL_OTLP_LOGS);
+
+        let configurations = collect_telemetry_configurations(&config);
+
+        // No sentinel value may appear in any reported configuration value.
+        for sentinel in [
+            SENTINEL_OTLP_BASE,
+            SENTINEL_OTLP_METRICS,
+            SENTINEL_OTLP_LOGS,
+        ] {
+            assert!(
+                !configurations.iter().any(|c| c.value.contains(sentinel)),
+                "sentinel value {sentinel:?} must not appear in telemetry configuration"
+            );
+        }
+
+        // Sensitive header configurations are omitted entirely (omit idiom).
+        for name in [
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        ] {
+            assert!(
+                !configurations.iter().any(|c| c.name == name),
+                "expected {name} to be absent from configuration telemetry"
+            );
+        }
+
+        // Non-sensitive exporter configurations are still reported with their
+        // real values.
+        let value_for = |name: &str| {
+            configurations
+                .iter()
+                .filter(|c| c.name == name)
+                .max_by_key(|c| c.seq_id)
+                .map(|c| c.value.clone())
+        };
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_ENDPOINT").as_deref(),
+            Some("http://localhost:4318")
+        );
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_PROTOCOL").as_deref(),
+            Some("http/protobuf")
+        );
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_TIMEOUT").as_deref(),
+            Some("5000")
+        );
+    }
+
+    #[test]
+    fn test_sensitive_config_item_get_all_configurations_is_empty() {
+        // The reusable mechanism applies at the ConfigItem level: a sensitive
+        // configuration reports no telemetry entries regardless of source.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_EXPORTER_OTLP_HEADERS", "dd-api-key=SENTINEL")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(
+            config.otlp_headers.get_all_configurations().is_empty(),
+            "sensitive ConfigItem must not report any configuration entries"
+        );
+
+        // A non-sensitive ConfigItem continues to report entries.
+        assert!(
+            !config.otlp_endpoint.get_all_configurations().is_empty(),
+            "non-sensitive ConfigItem should still report configuration entries"
+        );
     }
 }
