@@ -13,6 +13,7 @@ use crate::core::configuration::Config;
 use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
+use libdd_remote_config::agentless_client::AgentlessConfig;
 use core::fmt;
 use libdd_common::tag::Tag;
 use libdd_common::Endpoint;
@@ -396,13 +397,24 @@ impl RemoteConfigClientWorker {
                 language: self.config.language().to_string(),
                 tracer_version: self.config.tracer_version().to_string(),
                 endpoint: self.endpoint.clone(),
-                hostname: HOSTNAME.clone(),
-                agentless_enabled,
+                agentless: agentless_enabled.then(|| AgentlessConfig {
+                    hostname: HOSTNAME.clone(),
+                    config_root_override_path: None,
+                    director_root_override_path: None,
+                    agent_uuid: None,
+                })
             },
-            products: vec![RemoteConfigProduct::ApmTracing],
+            products: vec![
+                RemoteConfigProduct::ApmTracing,
+                RemoteConfigProduct::LiveDebugger,
+            ],
             capabilities: vec![
                 RemoteConfigCapabilities::ApmTracingSampleRate,
                 RemoteConfigCapabilities::ApmTracingSampleRules,
+                RemoteConfigCapabilities::ApmTracingEnabled,
+                RemoteConfigCapabilities::ApmTracingCustomTags,
+                RemoteConfigCapabilities::ApmTracingEnableDynamicInstrumentation,
+                RemoteConfigCapabilities::ApmTracingEnableLiveDebugging,
             ],
         };
 
