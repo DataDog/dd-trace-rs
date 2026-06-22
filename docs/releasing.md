@@ -2,6 +2,12 @@
 
 ## Datadog-opentelemetry
 
+> [!CAUTION]
+> Before releasing, check the Codex Security Scanning results board and ensure there are no new
+> vulnerabilities discovered since last release.
+> If new vulnerabilities exist for the commit being released, discuss with the team whether
+> releasing is safe, or if it should be delayed to resolve the vulnerability.
+
 1. Bump libdatadog dependencies to their latest version. Unless there are specific reasons not to,
    we should make a fresh release of libdatadog crates just before dd-trace-rs releases to benefit
    from upgrades
