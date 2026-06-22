@@ -242,8 +242,8 @@ fn init_logs() -> SdkLoggerProvider {
         .with_log_processor(EnrichWithBaggageLogProcessor)
         .with_simple_exporter(LogExporter::default())
         .build();
-    let otel_layer = OpenTelemetryTracingBridge::new(&logger_provider);
-    tracing_subscriber::registry().with(otel_layer).init();
+    // let otel_layer = OpenTelemetryTracingBridge::new(&logger_provider);
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer()).init();
 
     logger_provider
 }

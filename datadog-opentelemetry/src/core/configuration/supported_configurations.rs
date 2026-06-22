@@ -9,6 +9,7 @@
 #[non_exhaustive]
 pub(crate) enum SupportedConfigurations {
     DD_AGENT_HOST,
+    DD_API_KEY,
     DD_DOGSTATSD_HOST,
     DD_DOGSTATSD_PORT,
     DD_DOGSTATSD_URL,
@@ -20,6 +21,7 @@ pub(crate) enum SupportedConfigurations {
     DD_REMOTE_CONFIGURATION_ENABLED,
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
     DD_SERVICE,
+    DD_SITE,
     DD_TAGS,
     DD_TELEMETRY_HEARTBEAT_INTERVAL,
     DD_TELEMETRY_LOG_COLLECTION_ENABLED,
@@ -57,6 +59,7 @@ pub(crate) enum SupportedConfigurations {
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
     OTEL_RESOURCE_ATTRIBUTES,
+    _DD_EXPERIMENTAL_AGENTLESS_ENABLED,
     _DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
 
     /// Used for testing purposes only
@@ -78,6 +81,7 @@ impl SupportedConfigurations {
     pub fn as_str(&self) -> &'static str {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => "DD_AGENT_HOST",
+            SupportedConfigurations::DD_API_KEY => "DD_API_KEY",
             SupportedConfigurations::DD_DOGSTATSD_HOST => "DD_DOGSTATSD_HOST",
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",
@@ -89,6 +93,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => "DD_REMOTE_CONFIGURATION_ENABLED",
             SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
+            SupportedConfigurations::DD_SITE => "DD_SITE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => "DD_TELEMETRY_HEARTBEAT_INTERVAL",
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
@@ -126,6 +131,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES => "OTEL_RESOURCE_ATTRIBUTES",
+            SupportedConfigurations::_DD_EXPERIMENTAL_AGENTLESS_ENABLED => "_DD_EXPERIMENTAL_AGENTLESS_ENABLED",
             SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED => "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
@@ -164,7 +170,8 @@ impl SupportedConfigurations {
     pub fn is_sensitive(&self) -> bool {
         matches!(
             self,
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
+            SupportedConfigurations::DD_API_KEY
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
         )

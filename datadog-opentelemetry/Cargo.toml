@@ -40,17 +40,8 @@ thiserror = { version = "1.0", default-features = false }
 anyhow = "1.0.97"
 rustc_version_runtime = "0.3.0"
 hyper = { version = "1.6", features = ["client", "http1"] }
-hyper-util = { version = "0.1.16", features = [
-    "client",
-    "client-legacy",
-    "http1",
-    "tokio",
-] }
-http-body-util = "0.1"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = "0.7"
-base64 = "0.21"
-sha2 = "0.10"
 uuid = { version = "1.11.0", features = ["v4"] }
 arc-swap = "1.7.1"
 
@@ -65,6 +56,7 @@ libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
+libdd-remote-config = { workspace = true }
 percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
@@ -119,6 +111,7 @@ https = [
     "libdd-trace-utils/https",
     "libdd-telemetry/https",
     "libdd-common/https",
+    "libdd-remote-config/https",
     "opentelemetry-otlp?/reqwest-rustls",
     "opentelemetry-otlp?/tls-roots",
 ]

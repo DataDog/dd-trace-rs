@@ -10,6 +10,15 @@
         "propertyKeys": ["agent_host"]
       }
     ],
+    "DD_API_KEY": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "",
+        "propertyKeys": ["api_key"],
+        "sensitive": true
+      }
+    ],
     "DD_DOGSTATSD_HOST": [
       {
         "version": "A",
@@ -97,6 +106,14 @@
         "type": "string",
         "default": "unnamed-rust-service",
         "propertyKeys": ["service"]
+      }
+    ],
+    "DD_SITE": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "datadoghq.com",
+        "propertyKeys": ["site"]
       }
     ],
     "DD_TAGS": [
@@ -396,6 +413,14 @@
         "type": "map",
         "default_value": "",
         "propertyKeys": []
+      }
+    ],
+    "_DD_EXPERIMENTAL_AGENTLESS_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["experimental_agentless_enabled"]
       }
     ],
     "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED": [

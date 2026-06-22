@@ -90,7 +90,8 @@ impl Default for RemoteConfigCallbacks {
         Self::new()
     }
 }
-pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
+// pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const TRACER_VERSION: &str = "4.10.4";
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
@@ -1086,6 +1087,15 @@ pub struct Config {
     /// Which baggage keys are promoted to span tags with a `"baggage."` prefix.
     trace_baggage_tag_keys: ConfigItem<BaggageTagKeyFilter>,
 
+    /// Datadog API key used for agentless mode
+    api_key: ConfigItem<Option<String>>,
+
+    /// Datadog site (e.g. "datadoghq.com") used for agentless mode
+    site: ConfigItem<Cow<'static, str>>,
+
+    /// Enables agentless remote config when set together with DD_API_KEY and DD_SITE
+    experimental_agentless_enabled: ConfigItem<bool>,
+
     /// Whether remote configuration is enabled
     remote_config_enabled: ConfigItem<bool>,
 
@@ -1287,6 +1297,10 @@ impl Config {
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
+            api_key: cisu.update_non_empty_string(default.api_key, Some),
+            site: cisu.update_non_empty_string(default.site, Cow::Owned),
+            experimental_agentless_enabled: cisu
+                .update_parsed(default.experimental_agentless_enabled),
             remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
             remote_config_poll_interval: cisu.update_parsed_with_transform(
                 default.remote_config_poll_interval,
@@ -1358,6 +1372,8 @@ impl Config {
             &self.trace_propagation_style_inject,
             &self.trace_propagation_extract_first,
             &self.trace_baggage_tag_keys,
+            &self.site,
+            &self.experimental_agentless_enabled,
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
@@ -1834,6 +1850,29 @@ impl Config {
             || self.extra_services_tracker.contains_service(target_service)
     }
 
+    /// Returns the Datadog API key if set.
+    pub fn api_key(&self) -> Option<&str> {
+        self.api_key.value().as_deref()
+    }
+
+    /// Returns the Datadog site (e.g. `"datadoghq.com"`).
+    pub fn site(&self) -> &str {
+        self.site.value().as_ref()
+    }
+
+    /// Returns `Some((api_key, site_url))` when all three agentless settings are
+    /// set — `DD_API_KEY`, `DD_SITE`, and `_DD_EXPERIMENTAL_AGENTLESS_ENABLED` —
+    /// allowing the remote config client to operate without a local agent.
+    /// The returned `site_url` is `https://{site}`.
+    pub(crate) fn agentless_rc_endpoint(&self) -> Option<(String, String)> {
+        if !*self.experimental_agentless_enabled.value() {
+            return None;
+        }
+        let api_key = self.api_key()?.to_owned();
+        let site_url = format!("https://{}", self.site());
+        Some((api_key, site_url))
+    }
+
     /// Check if remote configuration is enabled
     pub fn remote_config_enabled(&self) -> bool {
         *self.remote_config_enabled.value()
@@ -1988,8 +2027,8 @@ fn default_config() -> Config {
             LevelFilter::default(),
         ),
         tracer_version: TRACER_VERSION,
-        language: "rust",
-        language_version: version().to_string(),
+        language: "python",
+        language_version: "3.10.1".to_string(),  // version().to_string(),
         trace_stats_computation_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
@@ -2053,6 +2092,15 @@ fn default_config() -> Config {
             ]),
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
+        api_key: ConfigItem::new(SupportedConfigurations::DD_API_KEY, None),
+        site: ConfigItem::new(
+            SupportedConfigurations::DD_SITE,
+            Cow::Borrowed("datadoghq.com"),
+        ),
+        experimental_agentless_enabled: ConfigItem::new(
+            SupportedConfigurations::_DD_EXPERIMENTAL_AGENTLESS_ENABLED,
+            false,
+        ),
         remote_config_enabled: ConfigItem::new(
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED,
             true,
