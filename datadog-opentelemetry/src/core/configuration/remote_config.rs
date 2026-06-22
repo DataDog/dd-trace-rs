@@ -13,12 +13,11 @@ use crate::core::configuration::Config;
 use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
-use libdd_remote_config::agentless_client::AgentlessConfig;
 use core::fmt;
 use libdd_common::tag::Tag;
 use libdd_common::Endpoint;
 use libdd_remote_config::fetch::{
-    ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
+    AgentlessConfig, ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
 };
 use libdd_remote_config::file_change_tracker::Change;
 use libdd_remote_config::file_storage::ParsedFileStorage;
@@ -402,7 +401,7 @@ impl RemoteConfigClientWorker {
                     config_root_override_path: None,
                     director_root_override_path: None,
                     agent_uuid: None,
-                })
+                }),
             },
             products: vec![
                 RemoteConfigProduct::ApmTracing,
