@@ -5,13 +5,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     catch_panic,
-    configuration::TracePropagationBehaviorExtract,
     core::{configuration::Config, sampling::priority},
     propagation::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        DatadogCompositePropagator, TracePropagationStyle,
+        DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
     },
 };
 use opentelemetry::{
@@ -170,41 +169,36 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
-        let cx = match self.cfg.trace_propagation_behavior_extract() {
-            TracePropagationBehaviorExtract::Continue => {
-                let extracted = self.inner.extract(&extractor);
-                extracted
-                    .map(|(dd_span_context, _)| {
-                        let trace_flags = extract_trace_flags(&dd_span_context);
-                        let trace_state = extract_trace_state_from_context(&dd_span_context);
+        let extracted = self.inner.extract(&extractor);
+        let cx = match extracted {
+            ExtractResult::Continue(dd_span_context) => {
+                let trace_flags = extract_trace_flags(&dd_span_context);
+                let trace_state = extract_trace_state_from_context(&dd_span_context);
 
-                        let otel_span_context = opentelemetry::trace::SpanContext::new(
-                            opentelemetry::TraceId::from(dd_span_context.trace_id),
-                            opentelemetry::SpanId::from(dd_span_context.span_id),
-                            trace_flags,
-                            dd_span_context.is_remote,
-                            trace_state,
-                        );
+                let otel_span_context = opentelemetry::trace::SpanContext::new(
+                    opentelemetry::TraceId::from(dd_span_context.trace_id),
+                    opentelemetry::SpanId::from(dd_span_context.span_id),
+                    trace_flags,
+                    dd_span_context.is_remote,
+                    trace_state,
+                );
 
-                        cx.with_remote_span_context(otel_span_context)
-                            .with_value(DatadogExtractData::from_span_context(dd_span_context))
-                    })
-                    .unwrap_or_else(|| cx.clone())
+                cx.with_remote_span_context(otel_span_context)
+                    .with_value(DatadogExtractData::from_span_context(dd_span_context))
             }
             // restart: start a new trace with a fresh trace ID and sampling decision. Incoming
             // context is referenced via a span link with reason=propagation_behavior_extract and
             // baggage is propagated.
-            TracePropagationBehaviorExtract::Restart => match self.inner.extract(&extractor) {
-                Some((dd_span_context, parent_style)) => cx.with_value(DatadogExtractData {
-                    links: vec![SpanLink::restart(&dd_span_context, parent_style)],
-                    origin: None,
-                    internal_tags: HashMap::new(),
-                    sampling: Sampling::default(),
-                }),
-                None => cx.clone(),
-            },
-            TracePropagationBehaviorExtract::Ignore => return cx.clone(),
+            ExtractResult::Restart(span_link) => cx.with_value(DatadogExtractData {
+                links: vec![span_link],
+                origin: None,
+                internal_tags: HashMap::new(),
+                sampling: Sampling::default(),
+            }),
+            ExtractResult::Passthrough => cx.clone(),
+            ExtractResult::Ignore => return cx.clone(),
         };
+        // Propagate baggage for continue and restart modes
         if self.baggage_extract {
             match extract_baggage(&extractor) {
                 Some(baggage) => cx.with_baggage(baggage),

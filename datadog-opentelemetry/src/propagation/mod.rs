@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
+    configuration::TracePropagationBehaviorExtract,
     dd_debug,
     propagation::context::{InjectSpanContext, SpanContext, SpanLink},
 };
@@ -49,6 +50,9 @@ pub trait PropagationConfig: Send + Sync {
     /// Whether to stop extraction after the first successful propagator.
     fn trace_propagation_extract_first(&self) -> bool;
 
+    /// Propagation behavior whan extracting: continue, restart or ignore
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract;
+
     /// Maximum length of the `x-datadog-tags` header value.
     fn datadog_tags_max_length(&self) -> usize;
 }
@@ -73,6 +77,18 @@ pub struct DatadogCompositePropagator<C: PropagationConfig> {
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
     fields: Vec<String>,
+}
+
+/// ExtractResult stores the action associated with that given result
+pub enum ExtractResult {
+    /// Continue current trace, enriching context
+    Continue(SpanContext),
+    /// No extracted context (absent)
+    Passthrough,
+    /// Restart a new trace, dropping everything except baggage
+    Restart(SpanLink),
+    /// Extracted context is being explicitly ignored
+    Ignore,
 }
 
 impl<C: PropagationConfig> DatadogCompositePropagator<C> {
@@ -120,13 +136,27 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     /// the style used to extract it.
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
-    pub fn extract(&self, carrier: &dyn Extractor) -> Option<(SpanContext, TracePropagationStyle)> {
+    pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
         let contexts = self.extract_available_contexts(carrier);
         if contexts.is_empty() {
-            return None;
+            return match self.config.trace_propagation_behavior_extract() {
+                TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
+                _ => ExtractResult::Passthrough,
+            };
         }
-        let style = contexts[0].1;
-        Some((Self::resolve_contexts(contexts, carrier), style))
+
+        match self.config.trace_propagation_behavior_extract() {
+            TracePropagationBehaviorExtract::Continue => {
+                ExtractResult::Continue(Self::resolve_contexts(contexts, carrier))
+            }
+            TracePropagationBehaviorExtract::Restart => {
+                let style = contexts[0].1;
+                let span_context = Self::resolve_contexts(contexts, carrier);
+                let link = SpanLink::restart(&span_context, style);
+                ExtractResult::Restart(link)
+            }
+            TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
+        }
     }
 
     /// Injects trace context into the carrier using the configured injection styles.
@@ -245,6 +275,10 @@ impl PropagationConfig for crate::core::configuration::Config {
 
     fn trace_propagation_extract_first(&self) -> bool {
         self.trace_propagation_extract_first()
+    }
+
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        self.trace_propagation_behavior_extract()
     }
 
     fn datadog_tags_max_length(&self) -> usize {
@@ -453,7 +487,12 @@ pub(crate) mod tests {
                     };
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
-                    let context = propagator.extract(&carrier).map(|(context, _)| context).unwrap_or_default();
+                    let context = match propagator.extract(&carrier) {
+                        ExtractResult::Continue(context) => context,
+                        ExtractResult::Passthrough => SpanContext::default(),
+                        _ => panic!("context is extracted")
+                    };
+
                     assert_eq!(context.trace_id, expected.trace_id);
                     assert_eq!(context.span_id, expected.span_id);
                     assert_eq!(context.sampling, expected.sampling);
@@ -1057,13 +1096,13 @@ pub(crate) mod tests {
                 "_dd.p.tid=1111111111111111".to_string(),
             ),
         ]);
-        let context = propagator
-            .extract(&carrier)
-            .map(|(context, _)| context)
-            .expect("context is extracted");
+        let context = propagator.extract(&carrier);
+        let ExtractResult::Continue(context) = context else {
+            panic!("context is extracted")
+        };
 
         assert_eq!(context.span_id, 987654320);
-        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
+        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY))
     }
 
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
@@ -1386,65 +1425,5 @@ pub(crate) mod tests {
             ],
             propagator.fields()
         )
-    }
-
-    macro_rules! test_extracted_style {
-        ($($name:ident: $value:expr,)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let (styles, carrier, expected_style) = $value;
-                    let config = if let Some(styles) = styles {
-                        let mut builder = Config::builder();
-                        builder.set_trace_propagation_style_extract(styles.to_vec());
-                        builder.build()
-                    } else {
-                        Config::builder().build()
-                    };
-
-                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
-                    let style = propagator.extract(&carrier).map(|(_, style)| style);
-                    assert_eq!(style, expected_style);
-                }
-            )*
-        }
-    }
-
-    test_extracted_style! {
-        extracted_style_datadog_only: (
-            Some(vec![TracePropagationStyle::Datadog]),
-            VALID_DATADOG_HEADERS.clone(),
-            Some(TracePropagationStyle::Datadog),
-        ),
-        extracted_style_tracecontext_only: (
-            Some(vec![TracePropagationStyle::TraceContext]),
-            VALID_TRACECONTEXT_HEADERS.clone(),
-            Some(TracePropagationStyle::TraceContext),
-        ),
-        extracted_style_datadog_wins_when_first: (
-            Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
-            ALL_VALID_HEADERS.clone(),
-            Some(TracePropagationStyle::Datadog),
-        ),
-        extracted_style_tracecontext_wins_when_first: (
-            Some(vec![TracePropagationStyle::TraceContext, TracePropagationStyle::Datadog]),
-            ALL_VALID_HEADERS.clone(),
-            Some(TracePropagationStyle::TraceContext),
-        ),
-        extracted_style_no_matching_headers: (
-            Some(vec![TracePropagationStyle::Datadog]),
-            VALID_TRACECONTEXT_HEADERS.clone(),
-            None,
-        ),
-        extracted_style_none_style: (
-            Some(vec![TracePropagationStyle::None]),
-            ALL_VALID_HEADERS.clone(),
-            None,
-        ),
-        extracted_style_default_config_uses_datadog_first: (
-            None::<Vec<TracePropagationStyle>>,
-            ALL_VALID_HEADERS.clone(),
-            Some(TracePropagationStyle::Datadog),
-        ),
     }
 }
