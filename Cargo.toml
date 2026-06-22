@@ -31,14 +31,12 @@ libdd-data-pipeline = { version = "6.0.0", features = [
 libdd-trace-utils = { version = "8.0.0", default-features = false }
 libdd-capabilities-impl = { version = "2.0.0", default-features = false }
 libdd-telemetry = { version = "5.0.1", default-features = false }
+libdd-common-5 = { package = "libdd-common", version = "5.0.0", default-features = false }
 libdd-common = { version = "4.2.0", default-features = false }
 libdd-tinybytes = { version = "1.1.1", default-features = false }
 libdd-library-config = { version = "2.0.0", default-features = false }
 libdd-sampling = { version = "4.0.0", default-features = false }
-# libdd-remote-config is not yet published to crates.io. Tracked via the
-# [patch.crates-io] section below for any libdd-* crate co-resolved between
-# crates.io and this git revision.
-libdd-remote-config = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80", default-features = false, features = [
+libdd-remote-config = { version = "1.0.0", default-features = false, features = [
     "client",
 ] }
 opentelemetry_sdk = { version = "0.31.0", features = [
@@ -66,20 +64,6 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
-
-
-# libdd-remote-config depends on libdd-common and (optionally) libdd-trace-protobuf
-# via path+version. Redirect their crates.io copies to the same libdatadog revision
-# so cargo unifies the graph (otherwise we get duplicate libdd-common copies and
-# type-mismatch errors at the boundary). Remove once libdd-remote-config is on
-# crates.io with matching libdd-* versions.
-[patch.crates-io]
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", rev = "2e6214d80" }
 
 [profile.dev]
 debug = 2 # full debug info

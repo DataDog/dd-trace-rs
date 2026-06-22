@@ -14,8 +14,7 @@ use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
 use core::fmt;
-use libdd_common::tag::Tag;
-use libdd_common::Endpoint;
+use libdd_common_5::{tag::Tag, Endpoint};
 use libdd_remote_config::fetch::{
     ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
 };

@@ -54,6 +54,7 @@ libdd-capabilities-impl = { workspace = true }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
+libdd-common-5 = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
 libdd-remote-config = { workspace = true }
