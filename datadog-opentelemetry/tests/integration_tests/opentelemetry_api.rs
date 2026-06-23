@@ -332,3 +332,29 @@ async fn test_trace_writer_synchronous_mode() {
     }
     test_agent.assert_snapshot(SESSION_NAME).await;
 }
+
+#[tokio::test]
+/// A request arrives with baggage but NO trace context.
+/// The local root span must therefore receive the configured `DD_TRACE_BAGGAGE_TAG_KEYS`
+/// span tags (`baggage.user.id` here) even though there is no upstream trace context — guarding the
+/// `on_start` path that applies baggage tags to a local root reached without a remote parent.
+async fn test_baggage_only_no_trace_context_applies_baggage_span_tags() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_baggage_only_no_trace_context_applies_baggage_span_tags";
+    let mut cfg = Config::builder();
+    cfg.set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        // Only a baggage header, no x-datadog-* or traceparent headers. `user.id` is one of the
+        // keys tracked by the default DD_TRACE_BAGGAGE_TAG_KEYS filter.
+        let parent_ctx = propagator.extract(&make_extractor([("baggage", "user.id=alice")]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        let span = SpanBuilder::from_name("test_baggage_only")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let _ctx = Context::current_with_span(span).attach();
+    })
+    .await;
+}

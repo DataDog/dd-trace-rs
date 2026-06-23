@@ -569,15 +569,17 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         if parent_ctx.span().span_context().is_remote() {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);
-            for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())
-            {
-                span.set_attribute(kv);
-            }
         } else if !parent_ctx.has_active_span() {
             self.registry.register_local_root_span(trace_id, span_id);
         } else {
             self.registry
                 .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
+            return;
+        }
+
+        // Apply baggage tags to any root span
+        for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys()) {
+            span.set_attribute(kv);
         }
     }
 
