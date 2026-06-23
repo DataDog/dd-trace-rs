@@ -80,7 +80,7 @@
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["remote_config_enabled"],
-        "aliases": ["DD_REMOTE_CONFIG_ENABLED"]
+        "deprecated_aliases": ["DD_REMOTE_CONFIG_ENABLED"]
       }
     ],
     "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS": [
@@ -96,7 +96,8 @@
         "version": "C",
         "type": "string",
         "default": "unnamed-rust-service",
-        "propertyKeys": ["service"]
+        "propertyKeys": ["service"],
+        "aliases": ["OTEL_SERVICE_NAME"]
       }
     ],
     "DD_TAGS": [

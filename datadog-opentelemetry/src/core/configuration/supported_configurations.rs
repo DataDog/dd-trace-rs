@@ -143,6 +143,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 &["DD_REMOTE_CONFIG_ENABLED"]
             }
+            SupportedConfigurations::DD_SERVICE => &["OTEL_SERVICE_NAME"],
             #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION => &[
                 "DD_NONEXISTANT_CONFIGURATION_ALIAS",

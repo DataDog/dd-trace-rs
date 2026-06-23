@@ -2795,6 +2795,34 @@ mod tests {
     }
 
     #[test]
+    fn test_otel_service_name_alias() {
+        // OTEL_SERVICE_NAME is a non-deprecated alias for DD_SERVICE
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_takes_precedence_over_otel_service_name() {
+        // DD_SERVICE has higher precedence than OTEL_SERVICE_NAME
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_SERVICE", "dd-service"),
+                ("OTEL_SERVICE_NAME", "otel-service"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "dd-service");
+    }
+
+    #[test]
     fn test_sampling_rules() {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
