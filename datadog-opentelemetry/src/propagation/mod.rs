@@ -50,7 +50,7 @@ pub trait PropagationConfig: Send + Sync {
     /// Whether to stop extraction after the first successful propagator.
     fn trace_propagation_extract_first(&self) -> bool;
 
-    /// Propagation behavior whan extracting: continue, restart or ignore
+    /// Propagation behavior when extracting: continue, restart or ignore
     fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract;
 
     /// Maximum length of the `x-datadog-tags` header value.
