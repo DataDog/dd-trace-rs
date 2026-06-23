@@ -137,12 +137,15 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
+        if self.config.trace_propagation_behavior_extract()
+            == TracePropagationBehaviorExtract::Ignore
+        {
+            return ExtractResult::Ignore;
+        }
+
         let contexts = self.extract_available_contexts(carrier);
         if contexts.is_empty() {
-            return match self.config.trace_propagation_behavior_extract() {
-                TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
-                _ => ExtractResult::Passthrough,
-            };
+            return ExtractResult::Passthrough;
         }
 
         match self.config.trace_propagation_behavior_extract() {
@@ -155,7 +158,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                 let link = SpanLink::restart(&span_context, style);
                 ExtractResult::Restart(link)
             }
-            TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
+            TracePropagationBehaviorExtract::Ignore => unreachable!(),
         }
     }
 
