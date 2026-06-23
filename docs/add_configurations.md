@@ -26,7 +26,10 @@ Each configuration entry in `supported-configurations.json` follows this structu
       "internal_property_name"
     ],
     "aliases": [
-      "DD_ALTERNATE_NAME"
+      "OTEL_ALTERNATE_NAME"
+    ],
+    "deprecated_aliases": [
+      "DD_OLD_NAME"
     ],
     "deprecated": true | false
   }
@@ -44,7 +47,10 @@ Each configuration entry in `supported-configurations.json` follows this structu
   informative.
 - **propertyKeys**: Array containing the internal property name(s) used in the configuration struct.
   Also currently only informative.
-- **aliases** (optional): Array of alternative environment variable names
+- **aliases** (optional): Array of alternative environment variable names that are accepted without
+  a deprecation warning (e.g. standard OpenTelemetry env vars like `OTEL_SERVICE_NAME`)
+- **deprecated_aliases** (optional): Array of old environment variable names that still work but
+  emit a deprecation warning at runtime, directing users to the canonical name
 - **deprecated** (optional): Boolean indicating if this configuration is deprecated
 
 ## Adding a New Configuration
@@ -89,19 +95,22 @@ After generation, you need to implement the actual configuration logic in your c
 
 ## Working with Aliases and Deprecation
 
-### Basic Alias Rules
+### Alias Types
 
-- **When an alias isn't registered as its own config key, it is by default deprecated.**
-- The script automatically detects unregistered aliases and marks them as deprecated in the
-  generated code.
+There are two kinds of aliases:
+
+- **`aliases`** — accepted without a deprecation warning. Use for standard names from other
+  ecosystems (e.g. `OTEL_SERVICE_NAME` as an alternative to `DD_SERVICE`).
+- **`deprecated_aliases`** — accepted but emit a deprecation warning at runtime, directing the
+  user to the canonical name. Use when renaming an existing Datadog env var.
 
 ### Deprecating a Configuration with Replacement
 
-If you want to deprecate a config and provide a replacement:
+If you want to rename an existing Datadog env var:
 
 1. Create a new configuration with the replacement name
 2. Delete the original configuration entry
-3. Add the original name to the `aliases` array in the replacement config
+3. Add the original name to the **`deprecated_aliases`** array in the replacement config
 
 Example:
 
@@ -114,9 +123,26 @@ Example:
     "propertyKeys": [
       "config_property"
     ],
-    "aliases": [
+    "deprecated_aliases": [
       "DD_OLD_CONFIG_NAME"
     ]
+  }
+]
+```
+
+### Adding a Non-Deprecated Alternative Name
+
+If a standard name from another ecosystem (e.g. OpenTelemetry) should be accepted alongside the
+Datadog name without a deprecation warning, use the **`aliases`** field:
+
+```json
+"DD_SERVICE": [
+  {
+    "version": "C",
+    "type": "string",
+    "default": "unnamed-rust-service",
+    "propertyKeys": ["service"],
+    "aliases": ["OTEL_SERVICE_NAME"]
   }
 ]
 ```

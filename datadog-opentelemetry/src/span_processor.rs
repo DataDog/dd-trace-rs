@@ -700,12 +700,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // set the shared resource in the DatadogSpanProcessor
         *self.resource.write().unwrap() = dd_resource.clone();
 
-        // update config's service name and init telemetry once service name has been resolved
+        // Propagate a programmatically-set OTel Resource service.name back into Config so that
+        // telemetry and RC service targeting see the right value. This path handles Resources
+        // provided via DatadogTracingBuilder::with_resource(); env-var users are covered at
+        // startup by the OTEL_SERVICE_NAME alias for DD_SERVICE in SupportedConfigurations.
         let service_name = dd_resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
-        // Only set calculated service name if DD_SERVICE is default
-        // and otel service name is not default
         if self.config.service_is_default()
             && service_name.is_some()
             && service_name.as_ref().unwrap().as_str() != self.config.service().to_string()

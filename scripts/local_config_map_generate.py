@@ -42,13 +42,10 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
     deprecated = False
     sensitive = False
     for version in supported_configurations["supportedConfigurations"][key]:
-        if "aliases" in version:
-            for alias in version["aliases"]:
-                aliases_accumulator.append(alias)
-        if "deprecated_aliases" in version:
-            for alias in version["deprecated_aliases"]:
-                aliases_accumulator.append(alias)
-                alias_deprecated_block.append(f"\"{alias}\" => true,")
+        aliases_accumulator.extend(version.get("aliases", []))
+        for alias in version.get("deprecated_aliases", []):
+            aliases_accumulator.append(alias)
+            alias_deprecated_block.append(f"\"{alias}\" => true,")
         if "deprecated" in version and version["deprecated"]:
             deprecated_block.append(f"SupportedConfigurations::{key} => true,")
         if version.get("sensitive"):
