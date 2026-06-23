@@ -47,6 +47,15 @@ static B3_HEADER_KEYS: LazyLock<[String; 4]> = LazyLock::new(|| {
 /// id cannot be parsed as a non-zero hex integer, or a present span id
 /// header is malformed. A missing or zero span id is accepted and recorded
 /// as `0`, matching how the Datadog propagator handles missing parent ids.
+///
+/// Sampling-only requests (only `x-b3-sampled` / `x-b3-flags` present, no
+/// `x-b3-traceid`) drop here. This matches dd-trace-py's `_B3MultiHeader`
+/// but diverges from dd-trace-java, which preserves the sampling state in
+/// the same way it does for the single-header form. Java is the more
+/// spec-correct side (the B3 spec allows `X-B3-Sampled` to stand alone).
+/// Aligning with java is tracked in APMSP-3579 alongside the cross-language
+/// system-tests; it is blocked on APMSP-3578 (resolve_contexts zero-trace
+/// primary fix) because the change widens that bug's surface area.
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let trace_id_hex = carrier.get(B3_TRACE_ID_KEY)?;
     let trace_id = parse_trace_id(trace_id_hex)?;
@@ -97,6 +106,13 @@ pub fn keys() -> &'static [String] {
 }
 
 fn parse_trace_id(hex: &str) -> Option<u128> {
+    // B3 spec mandates 16 or 32 hex chars; reject anything longer up front
+    // so leading-zero-padded oversized inputs (which `u128::from_str_radix`
+    // would otherwise accept) are treated as malformed.
+    if hex.len() > 32 {
+        dd_warn!("Propagator (b3multi): trace_id {hex:?} exceeds 32 hex chars");
+        return None;
+    }
     let id = match u128::from_str_radix(hex, 16) {
         Ok(id) => id,
         Err(e) => {
@@ -115,6 +131,10 @@ fn parse_trace_id(hex: &str) -> Option<u128> {
 /// can distinguish "malformed" (reject the context) from "zero / no parent"
 /// (accept the context with span_id 0).
 fn parse_span_id(hex: &str) -> Option<u64> {
+    if hex.len() > 16 {
+        dd_warn!("Propagator (b3multi): span_id {hex:?} exceeds 16 hex chars");
+        return None;
+    }
     match u64::from_str_radix(hex, 16) {
         Ok(id) => Some(id),
         Err(e) => {
@@ -204,6 +224,23 @@ mod test {
     #[test]
     fn extract_malformed_trace_id_returns_none() {
         let carrier = headers(&[("x-b3-traceid", "nothex"), ("x-b3-spanid", "1")]);
+        assert_eq!(extract(&carrier), None);
+    }
+
+    #[test]
+    fn extract_oversized_trace_id_returns_none() {
+        let oversized = format!("{:033x}", 1u128);
+        let carrier = headers(&[("x-b3-traceid", oversized.as_str()), ("x-b3-spanid", "1")]);
+        assert_eq!(extract(&carrier), None);
+    }
+
+    #[test]
+    fn extract_oversized_span_id_returns_none() {
+        let oversized = format!("{:017x}", 1u64);
+        let carrier = headers(&[
+            ("x-b3-traceid", "80f198ee56343ba8"),
+            ("x-b3-spanid", oversized.as_str()),
+        ]);
         assert_eq!(extract(&carrier), None);
     }
 

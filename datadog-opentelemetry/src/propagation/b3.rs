@@ -61,7 +61,15 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
         match (first, second, third) {
             // Sampling-only form: a single segment is the sampling state.
             // An unknown sampling token (anything but `0`/`1`/`d`) makes the
-            // whole header useless — bail out.
+            // whole header useless, bail out.
+            //
+            // KNOWN ISSUE (tracked in APMSP-3578): the zero-trace context
+            // returned here can be wrongly picked as the primary by
+            // `resolve_contexts` when b3 is configured before another style
+            // and the request also carries valid datadog/tracecontext
+            // headers. The fix belongs in `resolve_contexts` (skip
+            // zero-trace contexts when picking primary; merge their
+            // sampling priority into the real primary), not here.
             (Some(s), None, None) => (0, 0, Some(parse_priority(s)?)),
             (Some(t), Some(s), sampled) => {
                 let trace_id = parse_trace_id(t)?;
@@ -111,6 +119,13 @@ pub fn keys() -> &'static [String] {
 }
 
 fn parse_trace_id(hex: &str) -> Option<u128> {
+    // B3 spec mandates 16 or 32 hex chars; reject anything longer up front
+    // so leading-zero-padded oversized inputs (which `u128::from_str_radix`
+    // would otherwise accept) are treated as malformed.
+    if hex.len() > 32 {
+        dd_warn!("Propagator (b3): trace_id {hex:?} exceeds 32 hex chars");
+        return None;
+    }
     let id = match u128::from_str_radix(hex, 16) {
         Ok(id) => id,
         Err(e) => {
@@ -128,6 +143,10 @@ fn parse_trace_id(hex: &str) -> Option<u128> {
 /// explicit `0` is accepted so callers can distinguish "malformed → reject
 /// the whole context" from "zero / no parent → accept with span_id 0".
 fn parse_span_id(hex: &str) -> Option<u64> {
+    if hex.len() > 16 {
+        dd_warn!("Propagator (b3): span_id {hex:?} exceeds 16 hex chars");
+        return None;
+    }
     match u64::from_str_radix(hex, 16) {
         Ok(id) => Some(id),
         Err(e) => {
@@ -258,6 +277,23 @@ mod test {
     #[test]
     fn extract_malformed_trace_id_returns_none() {
         assert_eq!(extract(&carrier_with("nothex-1-1")), None);
+    }
+
+    #[test]
+    fn extract_oversized_trace_id_returns_none() {
+        // 33 hex chars: leading-zero-padded but longer than the spec allows.
+        let oversized = format!("{:033x}", 1u128);
+        assert_eq!(extract(&carrier_with(&format!("{oversized}-1-1"))), None);
+    }
+
+    #[test]
+    fn extract_oversized_span_id_returns_none() {
+        // 17 hex chars span_id; longer than the spec allows.
+        let oversized = format!("{:017x}", 1u64);
+        assert_eq!(
+            extract(&carrier_with(&format!("80f198ee56343ba8-{oversized}-1"))),
+            None
+        );
     }
 
     #[test]
