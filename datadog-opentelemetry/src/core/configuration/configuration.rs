@@ -2827,8 +2827,8 @@ mod tests {
     fn test_dd_service_empty_does_not_fall_through_to_otel_service_name() {
         // DD_SERVICE="" is discarded as empty by update_non_empty_string before alias resolution
         // occurs in CompositeSource. OTEL_SERVICE_NAME is therefore not reached, and the service
-        // falls back to the default. This matches the principle that an explicit (if empty) DD_SERVICE
-        // takes precedence over the alias.
+        // falls back to the default. This matches the principle that an explicit (if empty)
+        // DD_SERVICE takes precedence over the alias.
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],
