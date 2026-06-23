@@ -1225,7 +1225,7 @@ impl Config {
                 let has_value = dd_service
                     .value
                     .as_ref()
-                    .map_or(false, |k| !k.value.is_empty());
+                    .is_some_and(|k| !k.value.is_empty());
                 let is_absent = dd_service.value.is_none();
                 if has_value {
                     cisu.apply_result(default.service, dd_service, ServiceName::Configured)
