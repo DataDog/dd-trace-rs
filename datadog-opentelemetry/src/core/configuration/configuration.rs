@@ -1217,7 +1217,25 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
+            service: {
+                // DD_SERVICE takes precedence. If absent (not set), OTEL_SERVICE_NAME is checked
+                // as a fallback. An explicit empty DD_SERVICE="" suppresses the fallback and
+                // produces the default service name.
+                let dd_service = cisu.sources.get(SupportedConfigurations::DD_SERVICE);
+                let has_value = dd_service
+                    .value
+                    .as_ref()
+                    .map_or(false, |k| !k.value.is_empty());
+                let is_absent = dd_service.value.is_none();
+                if has_value {
+                    cisu.apply_result(default.service, dd_service, ServiceName::Configured)
+                } else if is_absent {
+                    let otel = cisu.sources.get(SupportedConfigurations::OTEL_SERVICE_NAME);
+                    cisu.apply_result(default.service, otel, ServiceName::Configured)
+                } else {
+                    default.service
+                }
+            },
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -2825,10 +2843,8 @@ mod tests {
 
     #[test]
     fn test_dd_service_empty_does_not_fall_through_to_otel_service_name() {
-        // DD_SERVICE="" is discarded as empty by update_non_empty_string before alias resolution
-        // occurs in CompositeSource. OTEL_SERVICE_NAME is therefore not reached, and the service
-        // falls back to the default. This matches the principle that an explicit (if empty)
-        // DD_SERVICE takes precedence over the alias.
+        // An explicit DD_SERVICE="" suppresses the OTEL_SERVICE_NAME fallback — only a fully
+        // absent DD_SERVICE triggers the fallback. An empty value produces the default.
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],

@@ -96,8 +96,7 @@
         "version": "C",
         "type": "string",
         "default": "unnamed-rust-service",
-        "propertyKeys": ["service"],
-        "aliases": ["OTEL_SERVICE_NAME"]
+        "propertyKeys": ["service"]
       }
     ],
     "DD_TAGS": [
@@ -396,6 +395,14 @@
         "version": "A",
         "type": "map",
         "default_value": "",
+        "propertyKeys": []
+      }
+    ],
+    "OTEL_SERVICE_NAME": [
+      {
+        "version": "B",
+        "type": "string",
+        "default": null,
         "propertyKeys": []
       }
     ],

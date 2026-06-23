@@ -97,12 +97,16 @@ After generation, you need to implement the actual configuration logic in your c
 
 ### Alias Types
 
-There are two kinds of aliases:
+There are two kinds of aliases in `supported-configurations.json`:
 
-- **`aliases`** — accepted without a deprecation warning. Use for standard names from other
-  ecosystems (e.g. `OTEL_SERVICE_NAME` as an alternative to `DD_SERVICE`).
+- **`aliases`** — accepted without a deprecation warning. Use for Datadog-specific alternative
+  names that are in the FPD registry as aliases of the canonical key.
 - **`deprecated_aliases`** — accepted but emit a deprecation warning at runtime, directing the
   user to the canonical name. Use when renaming an existing Datadog env var.
+
+**Note:** For standard names from other ecosystems (e.g. OpenTelemetry env vars), do **not** use
+the `aliases` field. Register them as separate top-level entries and handle the fallback in code.
+See [Adding a Standard Alternative Name](#adding-a-standard-alternative-name-eg-opentelemetry).
 
 ### Deprecating a Configuration with Replacement
 
@@ -130,22 +134,30 @@ Example:
 ]
 ```
 
-### Adding a Non-Deprecated Alternative Name
+### Adding a Standard Alternative Name (e.g. OpenTelemetry)
 
 If a standard name from another ecosystem (e.g. OpenTelemetry) should be accepted alongside the
-Datadog name without a deprecation warning, use the **`aliases`** field:
+Datadog name, register it as a **separate top-level entry** in `supported-configurations.json` —
+this matches how other Datadog tracers (Python, Go, Java) register it and satisfies the Feature
+Parity Dashboard (FPD) validation. Then handle the fallback in code.
+
+For example, `OTEL_SERVICE_NAME` is registered as its own entry:
 
 ```json
-"DD_SERVICE": [
+"OTEL_SERVICE_NAME": [
   {
-    "version": "C",
+    "version": "B",
     "type": "string",
-    "default": "unnamed-rust-service",
-    "propertyKeys": ["service"],
-    "aliases": ["OTEL_SERVICE_NAME"]
+    "default": null,
+    "propertyKeys": []
   }
 ]
 ```
+
+And the precedence (`DD_SERVICE` wins; `OTEL_SERVICE_NAME` used when `DD_SERVICE` is absent) is
+implemented explicitly in `configuration.rs` — not via the `aliases` field. This is because the
+FPD validates that local `aliases` are a subset of aliases registered in the FPD, and the FPD
+treats OTel env vars as separate configs, not as aliases of their DD counterparts.
 
 ### Deprecating a Configuration Without Replacement
 
