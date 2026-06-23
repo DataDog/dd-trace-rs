@@ -47,7 +47,7 @@ pub struct SpanLink {
 
 impl SpanLink {
     /// Creates a span link for a restarted context scenario.
-    pub(crate) fn restart(context: &SpanContext, style: TracePropagationStyle) -> Self {
+    pub(super) fn restart(context: &SpanContext, style: TracePropagationStyle) -> Self {
         let attributes = Some(HashMap::from([
             (
                 "reason".to_string(),
