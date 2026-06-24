@@ -581,7 +581,8 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
         // Apply baggage tags to any root span
         if is_local_root {
-            for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys()) {
+            for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())
+            {
                 span.set_attribute(kv);
             }
         }
