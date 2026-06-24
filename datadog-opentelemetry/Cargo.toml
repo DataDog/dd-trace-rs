@@ -92,7 +92,7 @@ tracing-subscriber = { version = "0.3" }
 
 # Testing the logging API 
 log = { version = "0.4.21" }
-opentelemetry-appender-log = { version = "0.31.0" }
+opentelemetry-appender-log = { path = "../../opentelemetry-rust/opentelemetry-appender-log" }
 
 # Benchmarking
 criterion = "0.5.1"
