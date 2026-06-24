@@ -421,7 +421,8 @@ dependencies = [
  "hyper",
  "libc",
  "libdd-capabilities-impl",
- "libdd-common",
+ "libdd-common 4.2.0",
+ "libdd-common 5.0.0",
  "libdd-data-pipeline",
  "libdd-library-config",
  "libdd-remote-config",
@@ -1172,7 +1173,8 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 [[package]]
 name = "libdd-capabilities"
 version = "2.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0ce42b411956272ea0ff851dddbd8ea4dae251192ffdbc50e90e20737ffd600"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1183,20 +1185,53 @@ dependencies = [
 [[package]]
 name = "libdd-capabilities-impl"
 version = "2.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79a6210d654b578a52ac4abe31f94b88f52740c8f2a62adc969cad240eae319d"
 dependencies = [
  "bytes",
  "http",
  "http-body-util",
  "libdd-capabilities",
- "libdd-common",
+ "libdd-common 4.2.0",
  "tokio",
 ]
 
 [[package]]
 name = "libdd-common"
 version = "4.2.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4af81e6953fab2814792b8893a2cee9f16aad1b71cb3f8720b7256f28d6a2d8d"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cc",
+ "const_format",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hex",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "nix",
+ "pin-project",
+ "regex",
+ "serde",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower-service",
+ "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "libdd-common"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1213da73f26196329fe76ba99b83d76ab6092e169c68516e8b4bdad2bd76f514"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1226,7 +1261,8 @@ dependencies = [
 [[package]]
 name = "libdd-data-pipeline"
 version = "6.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bda4a989dc3fc0ebd0523521f52d18ee72172d9f275762b65a205ec9b960eb9"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1238,14 +1274,14 @@ dependencies = [
  "http-body-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common",
+ "libdd-common 4.2.0",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-trace-protobuf",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1261,7 +1297,8 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b31b2435e2e8eaba0e35a96df3e1407b68f8ef76055383ceb2ba5a09e5a1bb5"
 dependencies = [
  "prost",
 ]
@@ -1269,12 +1306,13 @@ dependencies = [
 [[package]]
 name = "libdd-dogstatsd-client"
 version = "3.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f79afd4a3f84f80f6b631e4446d09131c156f1179295e390e9b4dc2bfa527cf"
 dependencies = [
  "anyhow",
  "cadence",
  "http",
- "libdd-common",
+ "libdd-common 4.2.0",
  "serde",
  "tracing",
 ]
@@ -1287,7 +1325,7 @@ checksum = "726e95f0f543da854a24999b16601afd2ca2c6b0c1bdc511bf52c5cd0635f7ad"
 dependencies = [
  "anyhow",
  "libc",
- "libdd-trace-protobuf 3.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libdd-trace-protobuf",
  "memfd",
  "prost",
  "rand 0.8.6",
@@ -1299,21 +1337,25 @@ dependencies = [
 
 [[package]]
 name = "libdd-remote-config"
-version = "0.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62367ce4dc8f80aa12f54af7be9b2e4f11bd0ec32a66edeb64b4f3286ecf2cc3"
 dependencies = [
  "anyhow",
  "base64",
  "futures-util",
+ "hashbrown 0.15.5",
  "http",
  "http-body-util",
- "libdd-common",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-common 5.0.0",
+ "libdd-trace-protobuf",
  "manual_future",
  "serde",
  "serde_json",
  "serde_with",
  "sha2",
+ "strum",
+ "strum_macros",
  "thiserror 2.0.18",
  "time",
  "tokio",
@@ -1328,7 +1370,7 @@ version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e4a7bf5fe62282784cd6ae4c805b2e35f0520c3464ca090f49b3c9794d4fd4d"
 dependencies = [
- "libdd-common",
+ "libdd-common 4.2.0",
  "lru",
  "serde",
  "serde_json",
@@ -1337,14 +1379,15 @@ dependencies = [
 [[package]]
 name = "libdd-shared-runtime"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9c295f7b55ec78e261537627a75be4e926a94e2b0014e98392b3f98e1957aa"
 dependencies = [
  "async-trait",
  "futures",
  "futures-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common",
+ "libdd-common 4.2.0",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1354,7 +1397,8 @@ dependencies = [
 [[package]]
 name = "libdd-telemetry"
 version = "5.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9626d441cee43418a080cb2fae694d86f62eb965282ff9d0a1c99058658eb3ad"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1365,7 +1409,7 @@ dependencies = [
  "http",
  "http-body-util",
  "libc",
- "libdd-common",
+ "libdd-common 4.2.0",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "serde",
@@ -1381,7 +1425,8 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.1.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97db80e3f3f9d19643ac444d6267951a5dab622ad9828c51149d49150625cfe8"
 dependencies = [
  "serde",
 ]
@@ -1389,21 +1434,23 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "2.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab12e095f3589d02ceed76556e7aa8a1b5bc928a900e143b624e2331294e54b5"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-trace-protobuf",
 ]
 
 [[package]]
 name = "libdd-trace-obfuscation"
 version = "4.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44197ef58464bd75d002d10e02f702096dc52d68d08b7355860b534a30f8ac5b"
 dependencies = [
  "anyhow",
  "fluent-uri",
- "libdd-common",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-common 4.2.0",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "log",
  "percent-encoding",
@@ -1423,19 +1470,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "libdd-trace-protobuf"
-version = "3.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
-dependencies = [
- "prost",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
 name = "libdd-trace-stats"
 version = "5.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d32bfbd154a6d6a5b452458850adfa1dd3e36d567ad6ae606b16b8bfeb97fa7a"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1444,11 +1482,11 @@ dependencies = [
  "http",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common",
+ "libdd-common 4.2.0",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "rmp-serde",
  "serde",
@@ -1460,7 +1498,8 @@ dependencies = [
 [[package]]
 name = "libdd-trace-utils"
 version = "8.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=2e6214d80#2e6214d80fb3b7055569cdd3bada279f2f723b09"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58340581c2d7f02782e5e0ace77cd42bca18938761f359079a7ff534a24bca99"
 dependencies = [
  "anyhow",
  "base64",
@@ -1473,10 +1512,10 @@ dependencies = [
  "indexmap 2.14.0",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common",
+ "libdd-common 4.2.0",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 3.0.2 (git+https://github.com/DataDog/libdatadog?rev=2e6214d80)",
+ "libdd-trace-protobuf",
  "prost",
  "rand 0.8.6",
  "rmp",
@@ -2284,6 +2323,25 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "strum"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+
+[[package]]
+name = "strum_macros"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
 
 [[package]]
 name = "syn"
