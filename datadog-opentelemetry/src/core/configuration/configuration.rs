@@ -785,6 +785,10 @@ pub enum TracePropagationStyle {
     TraceContext,
     /// W3C Baggage propagation format using the `baggage` header.
     Baggage,
+    /// B3 multi-header propagation format using `x-b3-*` headers.
+    B3Multi,
+    /// B3 single-header propagation format using the `b3` header.
+    B3SingleHeader,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -817,6 +821,8 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
+            "b3multi" => Ok(TracePropagationStyle::B3Multi),
+            "b3" => Ok(TracePropagationStyle::B3SingleHeader),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -829,6 +835,8 @@ impl Display for TracePropagationStyle {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
             TracePropagationStyle::Baggage => "baggage",
+            TracePropagationStyle::B3Multi => "b3multi",
+            TracePropagationStyle::B3SingleHeader => "b3",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -3057,6 +3065,57 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Baggage,
                 TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_propagation_style_b3_display() {
+        assert_eq!(TracePropagationStyle::B3Multi.to_string(), "b3multi");
+        assert_eq!(TracePropagationStyle::B3SingleHeader.to_string(), "b3");
+    }
+
+    #[test]
+    fn test_propagation_style_b3_parsed_from_env() {
+        // Both b3multi and b3 now parse from env (case-insensitive).
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                (
+                    "DD_TRACE_PROPAGATION_STYLE",
+                    "datadog,tracecontext,b3multi,b3",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "B3Multi,B3"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "b3,b3multi"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::B3Multi,
             ])
             .as_deref()
         );
