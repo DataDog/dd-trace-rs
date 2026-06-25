@@ -2,7 +2,6 @@ include:
   - local: ".gitlab/configuration-central-validation.yml"
   - project: 'DataDog/apm-reliability/apm-sdks-benchmarks'
     file: '.gitlab/ci-rust-axum-realworld-parallel.yml'
-    ref: 'igor/rust'
 
 stages:
   - config-validation
