@@ -371,8 +371,6 @@ impl RemoteConfigClientWorker {
     }
 
     async fn run_loop(self) {
-        let poll_interval = Duration::from_secs_f64(self.config.remote_config_poll_interval());
-
         let registry = match ParserRegistry::new().with::<ApmTracingConfig>() {
             Ok(r) => r,
             Err(e) => {
@@ -403,17 +401,21 @@ impl RemoteConfigClientWorker {
 
         let mut fetcher = SingleChangesFetcher::new(storage, target, runtime_id, options);
 
+        let mut poll_interval = tokio::time::interval(Duration::from_secs_f64(
+            self.config.remote_config_poll_interval(),
+        ));
+        poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
-            fetcher.set_extra_services(self.config.get_extra_services());
-
-            match fetcher.fetch_changes().await {
-                Ok(changes) => apply_changes(changes, &self.config, &fetcher),
-                Err(e) => crate::dd_debug!("RemoteConfigClient: fetch failed: {}", e),
-            }
-
             tokio::select! {
                 _ = self.shutdown_receiver.cancel_token.cancelled() => break,
-                _ = tokio::time::sleep(poll_interval) => {}
+                _ = poll_interval.tick() => {
+                    fetcher.set_extra_services(self.config.get_extra_services());
+                    match fetcher.fetch_changes().await {
+                        Ok(changes) => apply_changes(changes, &self.config, &fetcher),
+                        Err(e) => crate::dd_debug!("RemoteConfigClient: fetch failed: {}", e),
+                    }
+                }
             }
         }
     }
