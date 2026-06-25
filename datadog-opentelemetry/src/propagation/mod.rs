@@ -132,31 +132,34 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         }
     }
 
+    /// Runs the configured extractors, returning `None` when no context was found.
+    fn extracted_contexts(
+        &self,
+        carrier: &dyn Extractor,
+    ) -> Option<Vec<(SpanContext, TracePropagationStyle)>> {
+        let contexts = self.extract_available_contexts(carrier);
+        (!contexts.is_empty()).then_some(contexts)
+    }
+
     /// Extracts trace context from the carrier using the configured extraction styles.
     /// Returns an [`ExtractResult`] indicating how the caller should treat the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
-        if self.config.trace_propagation_behavior_extract()
-            == TracePropagationBehaviorExtract::Ignore
-        {
-            return ExtractResult::Ignore;
-        }
-
-        let contexts = self.extract_available_contexts(carrier);
-        if contexts.is_empty() {
-            return ExtractResult::Passthrough;
-        }
-
         match self.config.trace_propagation_behavior_extract() {
-            TracePropagationBehaviorExtract::Continue => {
-                ExtractResult::Continue(Self::resolve_contexts(contexts, carrier))
-            }
-            TracePropagationBehaviorExtract::Restart => {
-                let style = contexts[0].1;
-                let span_context = Self::resolve_contexts(contexts, carrier);
-                let link = SpanLink::restart(&span_context, style);
-                ExtractResult::Restart(link)
-            }
-            TracePropagationBehaviorExtract::Ignore => unreachable!(),
+            TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
+            TracePropagationBehaviorExtract::Continue => match self.extracted_contexts(carrier) {
+                Some(contexts) => {
+                    ExtractResult::Continue(Self::resolve_contexts(contexts, carrier))
+                }
+                None => ExtractResult::Passthrough,
+            },
+            TracePropagationBehaviorExtract::Restart => match self.extracted_contexts(carrier) {
+                Some(contexts) => {
+                    let style = contexts[0].1;
+                    let span_context = Self::resolve_contexts(contexts, carrier);
+                    ExtractResult::Restart(SpanLink::restart(&span_context, style))
+                }
+                None => ExtractResult::Passthrough,
+            },
         }
     }
 
