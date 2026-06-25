@@ -15,6 +15,10 @@ use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
 use tracecontext::TRACESTATE_KEY;
 
+/// B3 single-header propagation (`b3` header).
+pub mod b3;
+/// B3 multi-header propagation (`x-b3-*` headers).
+pub mod b3multi;
 /// W3C Baggage propagation (`baggage` header).
 pub mod baggage;
 pub mod carrier;
@@ -442,6 +446,35 @@ pub(crate) mod tests {
         ])
     });
 
+    // B3 Headers — deliberately distinct trace ids from the Datadog and
+    // TraceContext fixtures so cross-style span-link tests can tell which
+    // propagator produced which context.
+    const B3_MULTI_TRACE_ID: u128 = 0x1234_5678_90ab_cdef_1234_5678_90ab_cdefu128;
+    const B3_MULTI_TRACE_ID_HEX: &str = "1234567890abcdef1234567890abcdef";
+    const B3_MULTI_SPAN_ID: u64 = 0xfedc_ba98_7654_3210;
+    const B3_MULTI_SPAN_ID_HEX: &str = "fedcba9876543210";
+    const B3_SINGLE_TRACE_ID: u128 = 0xaabb_ccdd_eeff_0011_2233_4455_6677_8899u128;
+    const B3_SINGLE_TRACE_ID_HEX: &str = "aabbccddeeff00112233445566778899";
+    const B3_SINGLE_SPAN_ID: u64 = 0x1122_3344_5566_7788;
+    const B3_SINGLE_SPAN_ID_HEX: &str = "1122334455667788";
+
+    static VALID_B3_MULTI_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        HashMap::from([
+            (
+                "x-b3-traceid".to_string(),
+                B3_MULTI_TRACE_ID_HEX.to_string(),
+            ),
+            ("x-b3-spanid".to_string(), B3_MULTI_SPAN_ID_HEX.to_string()),
+            ("x-b3-sampled".to_string(), "1".to_string()),
+        ])
+    });
+    static VALID_B3_SINGLE_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        HashMap::from([(
+            "b3".to_string(),
+            format!("{B3_SINGLE_TRACE_ID_HEX}-{B3_SINGLE_SPAN_ID_HEX}-1"),
+        )])
+    });
+
     // Fixtures
     //
     static ALL_VALID_HEADERS: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
@@ -449,6 +482,12 @@ pub(crate) mod tests {
         h.extend(VALID_DATADOG_HEADERS.clone());
         h.extend(VALID_TRACECONTEXT_HEADERS.clone());
         // todo: add b3
+        h
+    });
+    static ALL_VALID_HEADERS_WITH_B3: LazyLock<HashMap<String, String>> = LazyLock::new(|| {
+        let mut h = ALL_VALID_HEADERS.clone();
+        h.extend(VALID_B3_MULTI_HEADERS.clone());
+        h.extend(VALID_B3_SINGLE_HEADERS.clone());
         h
     });
     static DATADOG_TRACECONTEXT_MATCHING_TRACE_ID_HEADERS: LazyLock<HashMap<String, String>> =
@@ -656,9 +695,51 @@ pub(crate) mod tests {
             }
         ),
         // B3 Headers
-        // todo: all of them
+        valid_b3_multi_simple: (
+            Some(vec![TracePropagationStyle::B3Multi]),
+            VALID_B3_MULTI_HEADERS.clone(),
+            SpanContext {
+                trace_id: B3_MULTI_TRACE_ID,
+                span_id: B3_MULTI_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        valid_b3_multi_no_b3_style_returns_default: (
+            Some(vec![TracePropagationStyle::Datadog]),
+            VALID_B3_MULTI_HEADERS.clone(),
+            SpanContext::default(),
+        ),
         // B3 single Headers
-        // todo: all of them
+        valid_b3_single_simple: (
+            Some(vec![TracePropagationStyle::B3SingleHeader]),
+            VALID_B3_SINGLE_HEADERS.clone(),
+            SpanContext {
+                trace_id: B3_SINGLE_TRACE_ID,
+                span_id: B3_SINGLE_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        valid_b3_single_no_b3_style_returns_default: (
+            Some(vec![TracePropagationStyle::Datadog]),
+            VALID_B3_SINGLE_HEADERS.clone(),
+            SpanContext::default(),
+        ),
         // All Headers
         valid_all_headers: (
             None::<Vec<TracePropagationStyle>>,
@@ -742,9 +823,69 @@ pub(crate) mod tests {
                 tracestate: None
             },
         ),
-        // todo: valid_all_headers_b3_style
-        // todo: valid_all_headers_both_b3_styles
-        // todo: valid_all_headers_b3_single_style
+        valid_all_headers_b3_style: (
+            Some(vec![TracePropagationStyle::B3Multi]),
+            ALL_VALID_HEADERS_WITH_B3.clone(),
+            SpanContext {
+                trace_id: B3_MULTI_TRACE_ID,
+                span_id: B3_MULTI_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        valid_all_headers_b3_single_style: (
+            Some(vec![TracePropagationStyle::B3SingleHeader]),
+            ALL_VALID_HEADERS_WITH_B3.clone(),
+            SpanContext {
+                trace_id: B3_SINGLE_TRACE_ID,
+                span_id: B3_SINGLE_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        valid_all_headers_both_b3_styles: (
+            Some(vec![TracePropagationStyle::B3Multi, TracePropagationStyle::B3SingleHeader]),
+            ALL_VALID_HEADERS_WITH_B3.clone(),
+            SpanContext {
+                trace_id: B3_MULTI_TRACE_ID,
+                span_id: B3_MULTI_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![
+                    SpanLink {
+                        trace_id: B3_SINGLE_TRACE_ID as u64,
+                        trace_id_high: Some((B3_SINGLE_TRACE_ID >> 64) as u64),
+                        span_id: B3_SINGLE_SPAN_ID,
+                        flags: Some(1),
+                        tracestate: None,
+                        attributes: Some(HashMap::from([
+                            ("reason".to_string(), "terminated_context".to_string()),
+                            ("context_headers".to_string(), "b3".to_string()),
+                        ])),
+                    },
+                ],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
         none_style: (
             Some(vec![TracePropagationStyle::None]),
             ALL_VALID_HEADERS.clone(),
@@ -770,9 +911,81 @@ pub(crate) mod tests {
             }
         ),
         // Order matters
-        // todo: order_matters_b3_single_header_first
-        // todo: order_matters_b3_first
-        // todo: order_matters_b3_second_no_datadog_headers
+        order_matters_b3_first: (
+            Some(vec![TracePropagationStyle::B3Multi, TracePropagationStyle::Datadog]),
+            ALL_VALID_HEADERS_WITH_B3.clone(),
+            SpanContext {
+                trace_id: B3_MULTI_TRACE_ID,
+                span_id: B3_MULTI_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![
+                    SpanLink {
+                        trace_id: 13_088_165_645_273_925_489,
+                        trace_id_high: None,
+                        span_id: 5678,
+                        flags: Some(1),
+                        tracestate: None,
+                        attributes: Some(HashMap::from([
+                            ("reason".to_string(), "terminated_context".to_string()),
+                            ("context_headers".to_string(), "datadog".to_string()),
+                        ])),
+                    },
+                ],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        order_matters_b3_single_header_first: (
+            Some(vec![TracePropagationStyle::B3SingleHeader, TracePropagationStyle::Datadog]),
+            ALL_VALID_HEADERS_WITH_B3.clone(),
+            SpanContext {
+                trace_id: B3_SINGLE_TRACE_ID,
+                span_id: B3_SINGLE_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![
+                    SpanLink {
+                        trace_id: 13_088_165_645_273_925_489,
+                        trace_id_high: None,
+                        span_id: 5678,
+                        flags: Some(1),
+                        tracestate: None,
+                        attributes: Some(HashMap::from([
+                            ("reason".to_string(), "terminated_context".to_string()),
+                            ("context_headers".to_string(), "datadog".to_string()),
+                        ])),
+                    },
+                ],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
+        order_matters_b3_second_no_datadog_headers: (
+            Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::B3Multi]),
+            VALID_B3_MULTI_HEADERS.clone(),
+            SpanContext {
+                trace_id: B3_MULTI_TRACE_ID,
+                span_id: B3_MULTI_SPAN_ID,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None,
+            },
+        ),
         // Tracestate is still added when TraceContext style comes later and matches
         // first style's `trace_id`
         additional_tracestate_support_when_present_and_matches_first_style_trace_id: (
@@ -1376,6 +1589,49 @@ pub(crate) mod tests {
             },
             HashMap::<String,String>::new()
         ),
+
+        inject_b3_multi_128bit_trace_id: (
+            Some(vec![TracePropagationStyle::B3Multi]),
+            &mut SpanContext {
+                trace_id: TRACE_ID,
+                span_id: 5678,
+                sampling: Sampling {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            HashMap::from([
+                ("x-b3-traceid".to_string(), TRACE_ID_HEX.to_string()),
+                ("x-b3-spanid".to_string(), "000000000000162e".to_string()),
+                ("x-b3-sampled".to_string(), "1".to_string()),
+            ])
+        ),
+
+        inject_b3_single_128bit_trace_id: (
+            Some(vec![TracePropagationStyle::B3SingleHeader]),
+            &mut SpanContext {
+                trace_id: TRACE_ID,
+                span_id: 5678,
+                sampling: Sampling {
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: None,
+                },
+                origin: None,
+                tags: HashMap::new(),
+                links: vec![],
+                is_remote: true,
+                tracestate: None
+            },
+            HashMap::from([(
+                "b3".to_string(),
+                format!("{TRACE_ID_HEX}-000000000000162e-d"),
+            )])
+        ),
     }
 
     #[test]
@@ -1429,5 +1685,28 @@ pub(crate) mod tests {
             ],
             propagator.fields()
         )
+    }
+
+    #[test]
+    fn test_b3_multi_fields() {
+        let inject = Some(vec![TracePropagationStyle::B3Multi]);
+        let config = get_config(None, inject);
+
+        let propagator = DatadogCompositePropagator::new(config);
+
+        assert_eq!(
+            vec!["x-b3-traceid", "x-b3-spanid", "x-b3-sampled", "x-b3-flags"],
+            propagator.fields()
+        )
+    }
+
+    #[test]
+    fn test_b3_single_fields() {
+        let inject = Some(vec![TracePropagationStyle::B3SingleHeader]);
+        let config = get_config(None, inject);
+
+        let propagator = DatadogCompositePropagator::new(config);
+
+        assert_eq!(vec!["b3"], propagator.fields())
     }
 }

@@ -161,6 +161,16 @@ impl SupportedConfigurations {
             _ => false,
         }
     }
+
+    /// Whether this configuration's value is excluded from configuration telemetry.
+    pub fn is_sensitive(&self) -> bool {
+        matches!(
+            self,
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
+        )
+    }
 }
 
 pub(crate) fn is_alias_deprecated(name: &str) -> bool {

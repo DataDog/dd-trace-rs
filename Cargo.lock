@@ -517,14 +517,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a2785755761f3ddc1492979ce1e48d2c00d09311c39e4466429188f3dd6501"
+dependencies = [
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "datadog-opentelemetry"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "arc-swap",
  "assert_unordered",
  "base64 0.21.7",
  "criterion",
+ "ctor",
  "datadog-opentelemetry",
  "foldhash 0.1.5",
  "hashbrown 0.15.5",
@@ -2010,7 +2021,7 @@ dependencies = [
 
 [[package]]
 name = "propagator"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "datadog-opentelemetry",
  "http-body-util",
@@ -2682,7 +2693,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simple_tracing"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "datadog-opentelemetry",
  "opentelemetry",
@@ -3031,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
