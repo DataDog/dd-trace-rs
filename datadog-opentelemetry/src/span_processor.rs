@@ -455,9 +455,14 @@ impl DatadogSpanProcessor {
         }
     }
 
-    /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
-    /// - links generated during extraction are added to the root span as span links.
-    /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
+    /// Adds the span links recorded in the parent context's [`DatadogExtractData`] to `span`.
+    ///
+    /// These links are produced during extraction — `terminated_context` links for conflicting
+    /// contexts (continue), or the `propagation_behavior_extract` link (restart). The full 128-bit
+    /// linked trace ID is reconstructed from `trace_id_high` (high 64) + `trace_id` (low 64).
+    ///
+    /// Sampling decision, origin and propagation tags from `DatadogExtractData` are handled
+    /// separately by the sampler, not here.
     fn add_remote_links(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
@@ -465,8 +470,13 @@ impl DatadogSpanProcessor {
     ) {
         if let Some(DatadogExtractData { links, .. }) = parent_ctx.get::<DatadogExtractData>() {
             links.iter().for_each(|link| {
+                // Reconstruct the full 128-bit trace ID: `link.trace_id` holds the low 64 bits and
+                // `link.trace_id_high` the upper 64. Casting the low bits alone would zero-extend
+                // and silently drop the high bits (e.g. an incoming `_dd.p.tid`).
+                let trace_id =
+                    (link.trace_id_high.unwrap_or(0) as u128) << 64 | link.trace_id as u128;
                 let link_ctx = SpanContext::new(
-                    TraceId::from(link.trace_id as u128),
+                    TraceId::from(trace_id),
                     SpanId::from(link.span_id),
                     TraceFlags::new(link.flags.unwrap_or_default() as u8),
                     false, // TODO: dd SpanLink doesn't have the remote field...
@@ -566,7 +576,14 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
 
-        if parent_ctx.span().span_context().is_remote() {
+        // If the parent context has extract data, but has no active span, it means we are
+        // restarting a new trace, so we need to add its remote links and baggage tags and register
+        // the local root span.
+        // If the parent context has an active span, it means we are continuing an existing trace,
+        // so we need to register the span.
+        if parent_ctx.span().span_context().is_remote()
+            || (!parent_ctx.has_active_span() && parent_ctx.get::<DatadogExtractData>().is_some())
+        {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);
             for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())

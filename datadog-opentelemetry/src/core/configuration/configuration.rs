@@ -774,6 +774,47 @@ impl ExtraServicesTracker {
     }
 }
 
+/// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TracePropagationBehaviorExtract {
+    /// `continue` (default) - incoming trace context is used as the local trace context. Baggage
+    /// is propagated.
+    #[default]
+    Continue,
+    /// `restart` - starts a new trace with a fresh trace ID and sampling decision. Incoming
+    /// context is referenced via a span link with reason=propagation_behavior_extract. Baggage is
+    /// propagated.
+    Restart,
+    /// `ignore` - discards the entire incoming trace context. Creates new trace with no parent.
+    /// Baggage is discarded.
+    Ignore,
+}
+
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "" => Ok(TracePropagationBehaviorExtract::default()),
+            "continue" => Ok(TracePropagationBehaviorExtract::Continue),
+            "restart" => Ok(TracePropagationBehaviorExtract::Restart),
+            "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
+            _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
+        }
+    }
+}
+
+impl Display for TracePropagationBehaviorExtract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let behavior = match self {
+            TracePropagationBehaviorExtract::Continue => "continue",
+            TracePropagationBehaviorExtract::Restart => "restart",
+            TracePropagationBehaviorExtract::Ignore => "ignore",
+        };
+        write!(f, "{behavior}")
+    }
+}
+
 /// Trace context propagation style.
 ///
 /// Defines how trace context is propagated across service boundaries.
@@ -981,7 +1022,7 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1084,6 +1125,9 @@ pub struct Config {
     /// Partial flush
     trace_partial_flush_enabled: ConfigItem<bool>,
     trace_partial_flush_min_spans: ConfigItem<usize>,
+
+    /// Trace propagation behavior extract
+    trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -1274,6 +1318,8 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
+            trace_propagation_behavior_extract: cisu
+                .update_parsed(default.trace_propagation_behavior_extract),
             trace_propagation_style: cisu
                 .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
                     TracePropagationStyle::from_tags(Some(tags))
@@ -1361,6 +1407,7 @@ impl Config {
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
+            &self.trace_propagation_behavior_extract,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
@@ -1662,6 +1709,11 @@ impl Config {
         *self.trace_partial_flush_min_spans.value()
     }
 
+    /// Returns the trace propagation behavior when extracting trace context.
+    pub fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        *self.trace_propagation_behavior_extract.value()
+    }
+
     /// Returns the configured trace propagation styles for both injection and extraction.
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style.value().as_deref()
@@ -1917,6 +1969,10 @@ impl std::fmt::Debug for Config {
                 "trace_stats_computation_enabled",
                 &self.trace_stats_computation_enabled,
             )
+            .field(
+                "trace_propagation_behavior_extract",
+                &self.trace_propagation_behavior_extract,
+            )
             .field("trace_propagation_style", &self.trace_propagation_style)
             .field(
                 "trace_propagation_style_extract",
@@ -2031,6 +2087,10 @@ fn default_config() -> Config {
         trace_partial_flush_min_spans: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
             300,
+        ),
+        trace_propagation_behavior_extract: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
+            TracePropagationBehaviorExtract::default(),
         ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
@@ -2566,6 +2626,21 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the trace propagation behavior extract.
+    ///
+    /// **Default**: `Continue`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT`
+    pub fn set_trace_propagation_behavior_extract(
+        &mut self,
+        behavior: TracePropagationBehaviorExtract,
+    ) -> &mut Self {
+        self.config
+            .trace_propagation_behavior_extract
+            .set_code(behavior);
+        self
+    }
+
     /// A list of propagation styles to use for both extraction and injection. Supported values are
     /// `datadog` and `tracecontext`.
     ///
@@ -3027,6 +3102,20 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first());
+    }
+
+    #[test]
+    fn test_propagation_behavior_extract_from_source() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT", "restart")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_behavior_extract(),
+            TracePropagationBehaviorExtract::Restart
+        );
     }
 
     #[test]
