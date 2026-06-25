@@ -455,9 +455,14 @@ impl DatadogSpanProcessor {
         }
     }
 
-    /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
-    /// - links generated during extraction are added to the root span as span links.
-    /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
+    /// Adds the span links recorded in the parent context's [`DatadogExtractData`] to `span`.
+    ///
+    /// These links are produced during extraction — `terminated_context` links for conflicting
+    /// contexts (continue), or the `propagation_behavior_extract` link (restart). The full 128-bit
+    /// linked trace ID is reconstructed from `trace_id_high` (high 64) + `trace_id` (low 64).
+    ///
+    /// Sampling decision, origin and propagation tags from `DatadogExtractData` are handled
+    /// separately by the sampler, not here.
     fn add_remote_links(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
