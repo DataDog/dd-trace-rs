@@ -622,10 +622,10 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
-    /// Like [`Self::update_non_empty_string`], but consults a `fallback` key when the
-    /// ConfigItem's own key is entirely absent. The primary key takes precedence; an
-    /// explicit empty value on the primary key produces the default (it does not fall
-    /// through to the fallback). The fallback is also required to be non-empty.
+    /// Like [`Self::update_non_empty_string`], but uses the first non-empty value among the
+    /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
+    /// value on either key is treated the same as the key being absent. If neither key has a
+    /// non-empty value, the default is returned.
     pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
         &self,
         default: ConfigItemType,
@@ -639,14 +639,16 @@ impl ConfigItemSourceUpdater<'_> {
     {
         let result = self.sources.get(default.name());
         match result.value {
-            Some(ref config_key) if config_key.value.is_empty() => default,
-            Some(_) => self.apply_result(default, result, transform),
-            None => {
+            Some(ref config_key) if !config_key.value.is_empty() => {
+                self.apply_result(default, result, transform)
+            }
+            _ => {
                 let fallback_result = self.sources.get(fallback);
                 match fallback_result.value {
-                    Some(ref config_key) if config_key.value.is_empty() => default,
-                    Some(_) => self.apply_result(default, fallback_result, transform),
-                    None => default,
+                    Some(ref config_key) if !config_key.value.is_empty() => {
+                        self.apply_result(default, fallback_result, transform)
+                    }
+                    _ => default,
                 }
             }
         }
@@ -1247,8 +1249,9 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            // DD_SERVICE takes precedence; OTEL_SERVICE_NAME is the fallback when DD_SERVICE is
-            // absent. An explicit empty DD_SERVICE="" produces the default.
+            // DD_SERVICE takes precedence; OTEL_SERVICE_NAME is the fallback. An empty value on
+            // either is treated as unset, and an empty DD_SERVICE="" falls through to
+            // OTEL_SERVICE_NAME.
             service: cisu.update_non_empty_string_with_fallback(
                 default.service,
                 SupportedConfigurations::OTEL_SERVICE_NAME,
@@ -2860,12 +2863,24 @@ mod tests {
     }
 
     #[test]
-    fn test_dd_service_empty_does_not_fall_through_to_otel_service_name() {
-        // An explicit DD_SERVICE="" suppresses the OTEL_SERVICE_NAME fallback — only a fully
-        // absent DD_SERVICE triggers the fallback. An empty value produces the default.
+    fn test_dd_service_empty_falls_through_to_otel_service_name() {
+        // An empty DD_SERVICE="" is treated as unset, so it falls through to OTEL_SERVICE_NAME.
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_and_otel_service_name_both_empty_uses_default() {
+        // When both are empty, neither has a usable value, so the default is used.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "")],
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
