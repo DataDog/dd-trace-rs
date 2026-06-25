@@ -26,7 +26,7 @@ Each configuration entry in `supported-configurations.json` follows this structu
       "internal_property_name"
     ],
     "aliases": [
-      "DD_OLD_NAME"
+      "DD_ALTERNATE_NAME"
     ],
     "deprecated": true | false
   }
@@ -44,8 +44,7 @@ Each configuration entry in `supported-configurations.json` follows this structu
   informative.
 - **propertyKeys**: Array containing the internal property name(s) used in the configuration struct.
   Also currently only informative.
-- **aliases** (optional): Array of alternative environment variable names. An alias emits a
-  deprecation warning at runtime if it is not itself a top-level key in `supportedConfigurations`.
+- **aliases** (optional): Array of alternative environment variable names
 - **deprecated** (optional): Boolean indicating if this configuration is deprecated
 
 ## Adding a New Configuration
@@ -90,17 +89,19 @@ After generation, you need to implement the actual configuration logic in your c
 
 ## Working with Aliases and Deprecation
 
+### Basic Alias Rules
+
+- **When an alias isn't registered as its own config key, it is by default deprecated.**
+- The script automatically detects unregistered aliases and marks them as deprecated in the
+  generated code.
+
 ### Deprecating a Configuration with Replacement
 
-If you want to rename an existing Datadog env var:
+If you want to deprecate a config and provide a replacement:
 
 1. Create a new configuration with the replacement name
 2. Delete the original configuration entry
-3. Add the original name to the **`aliases`** array in the replacement config
-
-The generator automatically marks an alias as deprecated if it is **not** itself a top-level key
-in `supportedConfigurations`. So old DD names added as aliases will automatically emit a
-deprecation warning at runtime; no extra field is needed.
+3. Add the original name to the `aliases` array in the replacement config
 
 Example:
 

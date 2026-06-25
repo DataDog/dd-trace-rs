@@ -25,8 +25,6 @@ undocumented_configurations = {
     },
 }
 
-all_top_level_keys = set(supported_configurations["supportedConfigurations"].keys()) | set(undocumented_configurations.keys())
-
 enum_block = ""
 as_str_block = ""
 aliases_block = []
@@ -43,10 +41,11 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
     deprecated = False
     sensitive = False
     for version in supported_configurations["supportedConfigurations"][key]:
-        for alias in version.get("aliases", []):
-            aliases_accumulator.append(alias)
-            if alias not in all_top_level_keys:
-                alias_deprecated_block.append(f"\"{alias}\" => true,")
+        if "aliases" in version:
+            for alias in version["aliases"]:
+                aliases_accumulator.append(alias)
+                if alias not in supported_configurations["supportedConfigurations"].keys():
+                    alias_deprecated_block.append(f"\"{alias}\" => true,")
         if "deprecated" in version and version["deprecated"]:
             deprecated_block.append(f"SupportedConfigurations::{key} => true,")
         if version.get("sensitive"):
@@ -63,14 +62,13 @@ if len(undocumented_configurations) > 0:
 for i, key in enumerate(undocumented_configurations):
     enum_block += f"\n    #[cfg(test)]\n    #[allow(unused)]\n    {key},"
     as_str_block += f"\n            #[cfg(test)]\n            SupportedConfigurations::{key} => \"{key}\","
-    all_aliases = undocumented_configurations[key].get("aliases", [])
-    if len(all_aliases) > 0:
-        aliases_str = ', '.join(f'"{a}"' for a in all_aliases)
+    if len(undocumented_configurations[key]["aliases"]) > 0:
+        aliases_str = ', '.join(f'"{a}"' for a in undocumented_configurations[key]["aliases"])
         aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{aliases_str}],")
     if undocumented_configurations[key]["deprecated"]:
         deprecated_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => true,")
-    for alias in undocumented_configurations[key].get("aliases", []):
-        if alias not in all_top_level_keys:
+    for alias in undocumented_configurations[key]["aliases"]:
+        if alias not in undocumented_configurations.keys():
             alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
 
 aliases_join = "\n            ".join(aliases_block)
