@@ -120,31 +120,6 @@ Example:
 ]
 ```
 
-### Adding a Standard Alternative Name (e.g. OpenTelemetry)
-
-If a standard name from another ecosystem (e.g. OpenTelemetry) should be accepted alongside the
-Datadog name, register it as a **separate top-level entry** in `supported-configurations.json` —
-this matches how other Datadog tracers (Python, Go, Java) register it and satisfies the Feature
-Parity Dashboard (FPD) validation. Then handle the fallback in code.
-
-For example, `OTEL_SERVICE_NAME` is registered as its own entry:
-
-```json
-"OTEL_SERVICE_NAME": [
-  {
-    "version": "B",
-    "type": "string",
-    "default": null,
-    "propertyKeys": []
-  }
-]
-```
-
-And the precedence (`DD_SERVICE` wins; `OTEL_SERVICE_NAME` used when `DD_SERVICE` is absent) is
-implemented explicitly in `configuration.rs` — not via the `aliases` field. This is because the
-FPD validates that local `aliases` are a subset of aliases registered in the FPD, and the FPD
-treats OTel env vars as separate configs, not as aliases of their DD counterparts.
-
 ### Deprecating a Configuration Without Replacement
 
 To deprecate a configuration without providing a replacement:
