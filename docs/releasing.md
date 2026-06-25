@@ -4,7 +4,7 @@
 
 > [!CAUTION]
 > Before releasing, check the Codex Security Scanning results board and ensure there are no new
-> vulnerabilities discovered since last release.
+> vulnerabilities discovered since the last release.
 > If new vulnerabilities exist for the commit being released, discuss with the team whether
 > releasing is safe, or if it should be delayed to resolve the vulnerability.
 
