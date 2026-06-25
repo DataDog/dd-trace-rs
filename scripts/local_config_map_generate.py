@@ -12,8 +12,7 @@ undocumented_configurations = {
         "deprecated": False,
     },
     "DD_NONEXISTANT_CONFIGURATION": {
-        "aliases": ["DD_NONEXISTANT_CONFIGURATION_ALIAS"],
-        "deprecated_aliases": ["DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"],
+        "aliases": ["DD_NONEXISTANT_CONFIGURATION_ALIAS", "DD_NONEXISTANT_CONFIGURATION_DEPRECATED_ALIAS"],
         "deprecated": False,
     },
     "DD_NONEXISTANT_CONFIGURATION_ALIAS": {
@@ -25,6 +24,8 @@ undocumented_configurations = {
         "deprecated": True,
     },
 }
+
+all_top_level_keys = set(supported_configurations["supportedConfigurations"].keys()) | set(undocumented_configurations.keys())
 
 enum_block = ""
 as_str_block = ""
@@ -42,10 +43,10 @@ for i, key in enumerate(supported_configurations["supportedConfigurations"].keys
     deprecated = False
     sensitive = False
     for version in supported_configurations["supportedConfigurations"][key]:
-        aliases_accumulator.extend(version.get("aliases", []))
-        for alias in version.get("deprecated_aliases", []):
+        for alias in version.get("aliases", []):
             aliases_accumulator.append(alias)
-            alias_deprecated_block.append(f"\"{alias}\" => true,")
+            if alias not in all_top_level_keys:
+                alias_deprecated_block.append(f"\"{alias}\" => true,")
         if "deprecated" in version and version["deprecated"]:
             deprecated_block.append(f"SupportedConfigurations::{key} => true,")
         if version.get("sensitive"):
@@ -62,14 +63,15 @@ if len(undocumented_configurations) > 0:
 for i, key in enumerate(undocumented_configurations):
     enum_block += f"\n    #[cfg(test)]\n    #[allow(unused)]\n    {key},"
     as_str_block += f"\n            #[cfg(test)]\n            SupportedConfigurations::{key} => \"{key}\","
-    all_aliases = undocumented_configurations[key].get("aliases", []) + undocumented_configurations[key].get("deprecated_aliases", [])
+    all_aliases = undocumented_configurations[key].get("aliases", [])
     if len(all_aliases) > 0:
         aliases_str = ', '.join(f'"{a}"' for a in all_aliases)
         aliases_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => &[{aliases_str}],")
     if undocumented_configurations[key]["deprecated"]:
         deprecated_block.append(f"#[cfg(test)]\n            SupportedConfigurations::{key} => true,")
-    for alias in undocumented_configurations[key].get("deprecated_aliases", []):
-        alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
+    for alias in undocumented_configurations[key].get("aliases", []):
+        if alias not in all_top_level_keys:
+            alias_deprecated_block.append(f"#[cfg(test)]\n        \"{alias}\" => true,")
 
 aliases_join = "\n            ".join(aliases_block)
 deprecated_join = "\n            ".join(deprecated_block)

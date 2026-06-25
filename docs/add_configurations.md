@@ -26,9 +26,6 @@ Each configuration entry in `supported-configurations.json` follows this structu
       "internal_property_name"
     ],
     "aliases": [
-      "OTEL_ALTERNATE_NAME"
-    ],
-    "deprecated_aliases": [
       "DD_OLD_NAME"
     ],
     "deprecated": true | false
@@ -47,10 +44,8 @@ Each configuration entry in `supported-configurations.json` follows this structu
   informative.
 - **propertyKeys**: Array containing the internal property name(s) used in the configuration struct.
   Also currently only informative.
-- **aliases** (optional): Array of alternative environment variable names that are accepted without
-  a deprecation warning (e.g. standard OpenTelemetry env vars like `OTEL_SERVICE_NAME`)
-- **deprecated_aliases** (optional): Array of old environment variable names that still work but
-  emit a deprecation warning at runtime, directing users to the canonical name
+- **aliases** (optional): Array of alternative environment variable names. An alias emits a
+  deprecation warning at runtime if it is not itself a top-level key in `supportedConfigurations`.
 - **deprecated** (optional): Boolean indicating if this configuration is deprecated
 
 ## Adding a New Configuration
@@ -95,26 +90,17 @@ After generation, you need to implement the actual configuration logic in your c
 
 ## Working with Aliases and Deprecation
 
-### Alias Types
-
-There are two kinds of aliases in `supported-configurations.json`:
-
-- **`aliases`** — accepted without a deprecation warning. Use for Datadog-specific alternative
-  names that are in the FPD registry as aliases of the canonical key.
-- **`deprecated_aliases`** — accepted but emit a deprecation warning at runtime, directing the
-  user to the canonical name. Use when renaming an existing Datadog env var.
-
-**Note:** For standard names from other ecosystems (e.g. OpenTelemetry env vars), do **not** use
-the `aliases` field. Register them as separate top-level entries and handle the fallback in code.
-See [Adding a Standard Alternative Name](#adding-a-standard-alternative-name-eg-opentelemetry).
-
 ### Deprecating a Configuration with Replacement
 
 If you want to rename an existing Datadog env var:
 
 1. Create a new configuration with the replacement name
 2. Delete the original configuration entry
-3. Add the original name to the **`deprecated_aliases`** array in the replacement config
+3. Add the original name to the **`aliases`** array in the replacement config
+
+The generator automatically marks an alias as deprecated if it is **not** itself a top-level key
+in `supportedConfigurations`. So old DD names added as aliases will automatically emit a
+deprecation warning at runtime; no extra field is needed.
 
 Example:
 
@@ -127,7 +113,7 @@ Example:
     "propertyKeys": [
       "config_property"
     ],
-    "deprecated_aliases": [
+    "aliases": [
       "DD_OLD_CONFIG_NAME"
     ]
   }
