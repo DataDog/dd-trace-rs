@@ -581,20 +581,27 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // the local root span.
         // If the parent context has an active span, it means we are continuing an existing trace,
         // so we need to register the span.
-        if parent_ctx.span().span_context().is_remote()
+        let is_local_root = if parent_ctx.span().span_context().is_remote()
             || (!parent_ctx.has_active_span() && parent_ctx.get::<DatadogExtractData>().is_some())
         {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);
+            true
+        } else if !parent_ctx.has_active_span() {
+            self.registry.register_local_root_span(trace_id, span_id);
+            true
+        } else {
+            self.registry
+                .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
+            false
+        };
+
+        // Apply baggage tags to any root span
+        if is_local_root {
             for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())
             {
                 span.set_attribute(kv);
             }
-        } else if !parent_ctx.has_active_span() {
-            self.registry.register_local_root_span(trace_id, span_id);
-        } else {
-            self.registry
-                .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
         }
     }
 
