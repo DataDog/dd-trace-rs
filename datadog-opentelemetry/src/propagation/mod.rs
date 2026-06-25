@@ -132,8 +132,9 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         }
     }
 
-    /// Extracts trace context from the carrier using the configured extraction styles, along with
-    /// the style used to extract it.
+/// Extracts trace context from the carrier using the configured extraction styles.                                                                                                                                                                                                      
+///                                                                                                                                                                                                                                                                                      
+/// Returns an [`ExtractResult`] indicating how the caller should treat the carrier.                                                                                                                                                                                                                                                                                                           
     ///
     /// Returns `None` if no valid trace context is found in the carrier.
     pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
