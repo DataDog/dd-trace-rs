@@ -637,20 +637,17 @@ impl ConfigItemSourceUpdater<'_> {
         ConfigItemType: ValueSourceUpdater<ParsedConfig>,
         F: FnOnce(String) -> ParsedConfig,
     {
+        // Use the primary key if it has a non-empty value; otherwise fall back to `fallback`.
         let result = self.sources.get(default.name());
+        let result = match result.value {
+            Some(ref config_key) if !config_key.value.is_empty() => result,
+            _ => self.sources.get(fallback),
+        };
         match result.value {
             Some(ref config_key) if !config_key.value.is_empty() => {
                 self.apply_result(default, result, transform)
             }
-            _ => {
-                let fallback_result = self.sources.get(fallback);
-                match fallback_result.value {
-                    Some(ref config_key) if !config_key.value.is_empty() => {
-                        self.apply_result(default, fallback_result, transform)
-                    }
-                    _ => default,
-                }
-            }
+            _ => default,
         }
     }
 
@@ -1249,9 +1246,6 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            // DD_SERVICE takes precedence; OTEL_SERVICE_NAME is the fallback. An empty value on
-            // either is treated as unset, and an empty DD_SERVICE="" falls through to
-            // OTEL_SERVICE_NAME.
             service: cisu.update_non_empty_string_with_fallback(
                 default.service,
                 SupportedConfigurations::OTEL_SERVICE_NAME,
