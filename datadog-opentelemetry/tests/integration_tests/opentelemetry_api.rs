@@ -358,3 +358,34 @@ async fn test_baggage_only_no_trace_context_applies_baggage_span_tags() {
     })
     .await;
 }
+
+#[tokio::test]
+/// A request arrives with a baggage header AND a trace context. The incoming context is continued,
+/// so the new span is the local root of this service (remote parent). The local root must receive
+/// the configured `DD_TRACE_BAGGAGE_TAG_KEYS` span tags (`baggage.user.id` here) — guarding the
+/// `on_start` remote-parent branch that applies baggage tags alongside the remote links.
+async fn test_baggage_with_trace_context_applies_baggage_span_tags() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_baggage_with_trace_context_applies_baggage_span_tags";
+    let mut cfg = Config::builder();
+    cfg.set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        // A trace context plus a baggage header. `user.id` is one of the keys tracked by the
+        // default DD_TRACE_BAGGAGE_TAG_KEYS filter.
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1234567890123456789"),
+            ("x-datadog-parent-id", "987654321098765432"),
+            ("x-datadog-sampling-priority", "1"),
+            ("baggage", "user.id=alice"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        let span = SpanBuilder::from_name("test_baggage_with_trace_context")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let _ctx = Context::current_with_span(span).attach();
+    })
+    .await;
+}

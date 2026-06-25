@@ -1,0 +1,26 @@
+[[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "test_baggage_with_trace_context",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 987654321098765432,
+    "type": "web",
+    "meta": {
+      "baggage.user.id": "alice",
+      "otel.scope.name": "test",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "0000000000000000112210f47de98115",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.4.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0
+    },
+    "duration": 36328,
+    "start": 1782375082961166789
+  }]]
