@@ -1218,22 +1218,18 @@ impl Config {
             language_version: default.language_version,
             language: default.language,
             service: {
-                // DD_SERVICE takes precedence. If absent (not set), OTEL_SERVICE_NAME is checked
-                // as a fallback. An explicit empty DD_SERVICE="" suppresses the fallback and
-                // produces the default service name.
+                // DD_SERVICE takes precedence. When it is unset entirely, OTEL_SERVICE_NAME is
+                // used as a fallback. An explicit empty DD_SERVICE="" produces the default.
                 let dd_service = cisu.sources.get(SupportedConfigurations::DD_SERVICE);
-                let has_value = dd_service
-                    .value
-                    .as_ref()
-                    .is_some_and(|k| !k.value.is_empty());
-                let is_absent = dd_service.value.is_none();
-                if has_value {
-                    cisu.apply_result(default.service, dd_service, ServiceName::Configured)
-                } else if is_absent {
-                    let otel = cisu.sources.get(SupportedConfigurations::OTEL_SERVICE_NAME);
-                    cisu.apply_result(default.service, otel, ServiceName::Configured)
-                } else {
-                    default.service
+                match dd_service.value {
+                    Some(ref k) if !k.value.is_empty() => {
+                        cisu.apply_result(default.service, dd_service, ServiceName::Configured)
+                    }
+                    Some(_) => default.service,
+                    None => {
+                        let otel = cisu.sources.get(SupportedConfigurations::OTEL_SERVICE_NAME);
+                        cisu.apply_result(default.service, otel, ServiceName::Configured)
+                    }
                 }
             },
             env: cisu.update_string(default.env, Some),
