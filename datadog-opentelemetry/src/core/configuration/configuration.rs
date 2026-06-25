@@ -774,6 +774,47 @@ impl ExtraServicesTracker {
     }
 }
 
+/// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TracePropagationBehaviorExtract {
+    /// `continue` (default) - incoming trace context is used as the local trace context. Baggage
+    /// is propagated.
+    #[default]
+    Continue,
+    /// `restart` - starts a new trace with a fresh trace ID and sampling decision. Incoming
+    /// context is referenced via a span link with reason=propagation_behavior_extract. Baggage is
+    /// propagated.
+    Restart,
+    /// `ignore` - discards the entire incoming trace context. Creates new trace with no parent.
+    /// Baggage is discarded.
+    Ignore,
+}
+
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "" => Ok(TracePropagationBehaviorExtract::default()),
+            "continue" => Ok(TracePropagationBehaviorExtract::Continue),
+            "restart" => Ok(TracePropagationBehaviorExtract::Restart),
+            "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
+            _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
+        }
+    }
+}
+
+impl Display for TracePropagationBehaviorExtract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let behavior = match self {
+            TracePropagationBehaviorExtract::Continue => "continue",
+            TracePropagationBehaviorExtract::Restart => "restart",
+            TracePropagationBehaviorExtract::Ignore => "ignore",
+        };
+        write!(f, "{behavior}")
+    }
+}
+
 /// Trace context propagation style.
 ///
 /// Defines how trace context is propagated across service boundaries.
@@ -785,6 +826,10 @@ pub enum TracePropagationStyle {
     TraceContext,
     /// W3C Baggage propagation format using the `baggage` header.
     Baggage,
+    /// B3 multi-header propagation format using `x-b3-*` headers.
+    B3Multi,
+    /// B3 single-header propagation format using the `b3` header.
+    B3SingleHeader,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -817,6 +862,8 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
+            "b3multi" => Ok(TracePropagationStyle::B3Multi),
+            "b3" => Ok(TracePropagationStyle::B3SingleHeader),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -829,6 +876,8 @@ impl Display for TracePropagationStyle {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
             TracePropagationStyle::Baggage => "baggage",
+            TracePropagationStyle::B3Multi => "b3multi",
+            TracePropagationStyle::B3SingleHeader => "b3",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -973,7 +1022,7 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1076,6 +1125,9 @@ pub struct Config {
     /// Partial flush
     trace_partial_flush_enabled: ConfigItem<bool>,
     trace_partial_flush_min_spans: ConfigItem<usize>,
+
+    /// Trace propagation behavior extract
+    trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -1266,6 +1318,8 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
+            trace_propagation_behavior_extract: cisu
+                .update_parsed(default.trace_propagation_behavior_extract),
             trace_propagation_style: cisu
                 .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
                     TracePropagationStyle::from_tags(Some(tags))
@@ -1353,6 +1407,7 @@ impl Config {
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
+            &self.trace_propagation_behavior_extract,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
@@ -1537,7 +1592,7 @@ impl Config {
     }
 
     /// Static runtime id if the process
-    fn process_runtime_id() -> &'static str {
+    pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
@@ -1652,6 +1707,11 @@ impl Config {
     /// Returns the minimum number of spans required to trigger a partial flush.
     pub fn trace_partial_flush_min_spans(&self) -> usize {
         *self.trace_partial_flush_min_spans.value()
+    }
+
+    /// Returns the trace propagation behavior when extracting trace context.
+    pub fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        *self.trace_propagation_behavior_extract.value()
     }
 
     /// Returns the configured trace propagation styles for both injection and extraction.
@@ -1909,6 +1969,10 @@ impl std::fmt::Debug for Config {
                 "trace_stats_computation_enabled",
                 &self.trace_stats_computation_enabled,
             )
+            .field(
+                "trace_propagation_behavior_extract",
+                &self.trace_propagation_behavior_extract,
+            )
             .field("trace_propagation_style", &self.trace_propagation_style)
             .field(
                 "trace_propagation_style_extract",
@@ -2023,6 +2087,10 @@ fn default_config() -> Config {
         trace_partial_flush_min_spans: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
             300,
+        ),
+        trace_propagation_behavior_extract: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
+            TracePropagationBehaviorExtract::default(),
         ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
@@ -2558,6 +2626,21 @@ impl ConfigBuilder {
         self
     }
 
+    /// Set the trace propagation behavior extract.
+    ///
+    /// **Default**: `Continue`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT`
+    pub fn set_trace_propagation_behavior_extract(
+        &mut self,
+        behavior: TracePropagationBehaviorExtract,
+    ) -> &mut Self {
+        self.config
+            .trace_propagation_behavior_extract
+            .set_code(behavior);
+        self
+    }
+
     /// A list of propagation styles to use for both extraction and injection. Supported values are
     /// `datadog` and `tracecontext`.
     ///
@@ -3022,6 +3105,20 @@ mod tests {
     }
 
     #[test]
+    fn test_propagation_behavior_extract_from_source() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT", "restart")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_behavior_extract(),
+            TracePropagationBehaviorExtract::Restart
+        );
+    }
+
+    #[test]
     fn test_propagation_style_baggage_parsed_from_env() {
         // "baggage" is recognised as a valid style value (case-insensitive) in all three env vars.
         let mut sources = CompositeSource::new();
@@ -3057,6 +3154,57 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Baggage,
                 TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_propagation_style_b3_display() {
+        assert_eq!(TracePropagationStyle::B3Multi.to_string(), "b3multi");
+        assert_eq!(TracePropagationStyle::B3SingleHeader.to_string(), "b3");
+    }
+
+    #[test]
+    fn test_propagation_style_b3_parsed_from_env() {
+        // Both b3multi and b3 now parse from env (case-insensitive).
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                (
+                    "DD_TRACE_PROPAGATION_STYLE",
+                    "datadog,tracecontext,b3multi,b3",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "B3Multi,B3"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "b3,b3multi"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::B3Multi,
             ])
             .as_deref()
         );

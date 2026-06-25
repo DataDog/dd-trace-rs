@@ -10,7 +10,7 @@ use crate::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        DatadogCompositePropagator, TracePropagationStyle,
+        DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
     },
 };
 use opentelemetry::{
@@ -169,10 +169,9 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
-        let cx = self
-            .inner
-            .extract(&extractor)
-            .map(|dd_span_context| {
+        let extracted = self.inner.extract(&extractor);
+        let cx = match extracted {
+            ExtractResult::Continue(dd_span_context) => {
                 let trace_flags = extract_trace_flags(&dd_span_context);
                 let trace_state = extract_trace_state_from_context(&dd_span_context);
 
@@ -186,14 +185,24 @@ impl DatadogPropagator {
 
                 cx.with_remote_span_context(otel_span_context)
                     .with_value(DatadogExtractData::from_span_context(dd_span_context))
-            })
-            .unwrap_or_else(|| cx.clone());
-
+            }
+            // restart: start a new trace with a fresh trace ID and sampling decision. Incoming
+            // context is referenced via a span link with reason=propagation_behavior_extract and
+            // baggage is propagated.
+            ExtractResult::Restart(span_link) => cx.with_value(DatadogExtractData {
+                links: vec![span_link],
+                origin: None,
+                internal_tags: HashMap::new(),
+                sampling: Sampling::default(),
+            }),
+            ExtractResult::Passthrough => cx.clone(),
+            ExtractResult::Ignore => return cx.clone(),
+        };
+        // Propagate baggage for continue and restart modes
         if self.baggage_extract {
-            if let Some(baggage) = extract_baggage(&extractor) {
-                cx.with_baggage(baggage)
-            } else {
-                cx
+            match extract_baggage(&extractor) {
+                Some(baggage) => cx.with_baggage(baggage),
+                None => cx,
             }
         } else {
             cx
@@ -1030,6 +1039,178 @@ pub mod tests {
         assert!(
             carrier.contains_key(BAGGAGE_KEY),
             "baggage header must be injected with default config"
+        );
+    }
+
+    fn get_propagator_with_behavior(
+        behavior: crate::core::configuration::TracePropagationBehaviorExtract,
+    ) -> DatadogPropagator {
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_propagation_style_extract(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                ])
+                .set_trace_propagation_behavior_extract(behavior)
+                .build(),
+        );
+        DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
+    }
+
+    #[test]
+    fn behavior_ignore_returns_unmodified_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Ignore);
+
+        // Incoming headers with a valid trace and baggage.
+        let mut carrier = HashMap::new();
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        carrier.insert(BAGGAGE_KEY.to_string(), "user=alice".to_string());
+
+        let parent_cx = Context::current();
+        let cx = propagator.extract_with_context(&parent_cx, &carrier);
+
+        // Context must be identical to the input — no span, no extract data, no baggage.
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Ignore must not populate a remote span context"
+        );
+        assert!(
+            cx.get::<DatadogExtractData>().is_none(),
+            "Ignore must not attach DatadogExtractData"
+        );
+        assert!(
+            cx.baggage().get("user").is_none(),
+            "Ignore must not extract baggage even when headers are present"
+        );
+    }
+
+    #[test]
+    fn behavior_restart_with_headers_produces_span_link() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        let mut carrier = HashMap::new();
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        let cx = propagator.extract_with_context(&Context::current(), &carrier);
+
+        // Must not propagate a remote span context — a new trace will be started.
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Restart must not populate a remote span context"
+        );
+
+        // Must attach DatadogExtractData with exactly one span link.
+        let extract_data = cx
+            .get::<DatadogExtractData>()
+            .expect("Restart must attach DatadogExtractData");
+        assert_eq!(
+            extract_data.links.len(),
+            1,
+            "Restart must produce exactly one span link"
+        );
+        let link = &extract_data.links[0];
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("reason"))
+                .map(String::as_str),
+            Some("propagation_behavior_extract"),
+            "span link reason must be propagation_behavior_extract"
+        );
+    }
+
+    #[test]
+    fn behavior_restart_rebuilds_128bit_trace_id_from_primary_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        // Datadog and TraceContext headers carry different trace IDs. In Restart mode the span
+        // link references the primary context (Datadog, first in the extract order), and its
+        // 128-bit trace ID is reconstructed from the low bits plus _dd.p.tid.
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        let mut carrier = HashMap::new();
+        carrier.insert("x-datadog-trace-id".to_string(), "1".to_string());
+        carrier.insert("x-datadog-parent-id".to_string(), "1".to_string());
+        carrier.insert("x-datadog-sampling-priority".to_string(), "2".to_string());
+        carrier.insert(
+            "x-datadog-tags".to_string(),
+            "_dd.p.tid=1111111111111111,_dd.p.dm=-4".to_string(),
+        );
+        carrier.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-12345678901234567890123456789012-1234567890123456-01".to_string(),
+        );
+
+        let cx = propagator.extract_with_context(&Context::current(), &carrier);
+
+        let extract_data = cx
+            .get::<DatadogExtractData>()
+            .expect("Restart must attach DatadogExtractData");
+
+        // Restart references the single primary context via one span link.
+        assert_eq!(
+            extract_data.links.len(),
+            1,
+            "Restart must produce exactly one span link"
+        );
+
+        let link = &extract_data.links[0];
+        // Lower 64 bits of the Datadog trace ID ("1")
+        assert_eq!(
+            link.trace_id, 1,
+            "Span link must carry the lower 64 bits of the incoming Datadog trace ID"
+        );
+        // Upper 64 bits from _dd.p.tid=1111111111111111 (hex)
+        assert_eq!(
+            link.trace_id_high,
+            Some(0x1111111111111111),
+            "Span link must carry the upper 64 bits of the incoming Datadog trace ID"
+        );
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("reason"))
+                .map(String::as_str),
+            Some("propagation_behavior_extract"),
+            "Span link reason must be propagation_behavior_extract"
+        );
+        assert_eq!(
+            link.attributes
+                .as_ref()
+                .and_then(|a| a.get("context_headers"))
+                .map(String::as_str),
+            Some("datadog"),
+            "Span link context_headers must identify the primary Datadog propagator"
+        );
+    }
+
+    #[test]
+    fn behavior_restart_without_headers_returns_unmodified_context() {
+        use crate::core::configuration::TracePropagationBehaviorExtract;
+
+        let propagator = get_propagator_with_behavior(TracePropagationBehaviorExtract::Restart);
+
+        // No incoming trace headers at all.
+        let carrier: HashMap<String, String> = HashMap::new();
+        let parent_cx = Context::current();
+        let cx = propagator.extract_with_context(&parent_cx, &carrier);
+
+        assert!(
+            !cx.span().span_context().is_valid(),
+            "Restart with no headers must not populate a remote span context"
+        );
+        assert!(
+            cx.get::<DatadogExtractData>().is_none(),
+            "Restart with no headers must not attach DatadogExtractData"
         );
     }
 }
