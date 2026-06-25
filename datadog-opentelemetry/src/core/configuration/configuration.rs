@@ -622,6 +622,36 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
+    /// Like [`Self::update_non_empty_string`], but consults a `fallback` key when the
+    /// ConfigItem's own key is entirely absent. The primary key takes precedence; an
+    /// explicit empty value on the primary key produces the default (it does not fall
+    /// through to the fallback). The fallback is also required to be non-empty.
+    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        fallback: SupportedConfigurations,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        let result = self.sources.get(default.name());
+        match result.value {
+            Some(ref config_key) if config_key.value.is_empty() => default,
+            Some(_) => self.apply_result(default, result, transform),
+            None => {
+                let fallback_result = self.sources.get(fallback);
+                match fallback_result.value {
+                    Some(ref config_key) if config_key.value.is_empty() => default,
+                    Some(_) => self.apply_result(default, fallback_result, transform),
+                    None => default,
+                }
+            }
+        }
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -1217,21 +1247,13 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: {
-                // DD_SERVICE takes precedence. When it is unset entirely, OTEL_SERVICE_NAME is
-                // used as a fallback. An explicit empty DD_SERVICE="" produces the default.
-                let dd_service = cisu.sources.get(SupportedConfigurations::DD_SERVICE);
-                match dd_service.value {
-                    Some(ref k) if !k.value.is_empty() => {
-                        cisu.apply_result(default.service, dd_service, ServiceName::Configured)
-                    }
-                    Some(_) => default.service,
-                    None => {
-                        let otel = cisu.sources.get(SupportedConfigurations::OTEL_SERVICE_NAME);
-                        cisu.apply_result(default.service, otel, ServiceName::Configured)
-                    }
-                }
-            },
+            // DD_SERVICE takes precedence; OTEL_SERVICE_NAME is the fallback when DD_SERVICE is
+            // absent. An explicit empty DD_SERVICE="" produces the default.
+            service: cisu.update_non_empty_string_with_fallback(
+                default.service,
+                SupportedConfigurations::OTEL_SERVICE_NAME,
+                ServiceName::Configured,
+            ),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -2844,6 +2866,19 @@ mod tests {
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "unnamed-rust-service");
+        assert!(config.service_is_default());
+    }
+
+    #[test]
+    fn test_otel_service_name_empty_uses_default() {
+        // An empty OTEL_SERVICE_NAME="" is treated as unset and produces the default.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "")],
             ConfigSourceOrigin::EnvVar,
         ));
         let config = Config::builder_with_sources(&sources).build();
