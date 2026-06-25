@@ -389,3 +389,43 @@ async fn test_baggage_with_trace_context_applies_baggage_span_tags() {
     })
     .await;
 }
+
+#[tokio::test]
+/// A request arrives with a baggage header AND a trace context, then a child span is created under
+/// the local root. Only the local root carries the `DD_TRACE_BAGGAGE_TAG_KEYS` span tags; the child
+/// span is NOT a local root, so it must NOT receive them — guarding the `on_start` branch that
+/// registers a non-root span without applying baggage tags. The snapshot shows `baggage.user.id`
+/// on the root span only.
+async fn test_baggage_not_applied_to_non_local_root_child() {
+    const SESSION_NAME: &str =
+        "opentelemetry_api/test_baggage_not_applied_to_non_local_root_child";
+    let mut cfg = Config::builder();
+    cfg.set_log_level_filter(LevelFilter::Debug);
+
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+        // A trace context plus a baggage header. `user.id` is one of the keys tracked by the
+        // default DD_TRACE_BAGGAGE_TAG_KEYS filter.
+        let parent_ctx = propagator.extract(&make_extractor([
+            ("x-datadog-trace-id", "1234567890123456789"),
+            ("x-datadog-parent-id", "987654321098765432"),
+            ("x-datadog-sampling-priority", "1"),
+            ("baggage", "user.id=alice"),
+        ]));
+        let _guard = parent_ctx.attach();
+
+        let tracer = tracer_provider.tracer("test");
+        // Local root: gets the baggage span tag.
+        let root = SpanBuilder::from_name("test_baggage_root")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start(&tracer);
+        let _root_ctx = Context::current_with_span(root).attach();
+        {
+            // Child of an active local span -> not a local root -> must NOT get the baggage tag.
+            let child = SpanBuilder::from_name("test_baggage_child")
+                .with_kind(opentelemetry::trace::SpanKind::Internal)
+                .start(&tracer);
+            let _child_ctx = Context::current_with_span(child).attach();
+        }
+    })
+    .await;
+}
