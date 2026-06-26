@@ -622,6 +622,35 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
+    /// Like [`Self::update_non_empty_string`], but uses the first non-empty value among the
+    /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
+    /// value on either key is treated the same as the key being absent. If neither key has a
+    /// non-empty value, the default is returned.
+    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        fallback: SupportedConfigurations,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        // Use the primary key if it has a non-empty value; otherwise fall back to `fallback`.
+        let result = self.sources.get(default.name());
+        let result = match result.value {
+            Some(ref config_key) if !config_key.value.is_empty() => result,
+            _ => self.sources.get(fallback),
+        };
+        match result.value {
+            Some(ref config_key) if !config_key.value.is_empty() => {
+                self.apply_result(default, result, transform)
+            }
+            _ => default,
+        }
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -1269,7 +1298,11 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
+            service: cisu.update_non_empty_string_with_fallback(
+                default.service,
+                SupportedConfigurations::OTEL_SERVICE_NAME,
+                ServiceName::Configured,
+            ),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -2875,6 +2908,74 @@ mod tests {
 
         assert!(config.enabled());
         assert_eq!(*config.log_level_filter(), super::LevelFilter::Debug);
+    }
+
+    #[test]
+    fn test_otel_service_name_alias() {
+        // OTEL_SERVICE_NAME is an alias for DD_SERVICE
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_takes_precedence_over_otel_service_name() {
+        // DD_SERVICE has higher precedence than OTEL_SERVICE_NAME
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_SERVICE", "dd-service"),
+                ("OTEL_SERVICE_NAME", "otel-service"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "dd-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_empty_falls_through_to_otel_service_name() {
+        // An empty DD_SERVICE="" is treated as unset, so it falls through to OTEL_SERVICE_NAME.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_and_otel_service_name_both_empty_uses_default() {
+        // When both are empty, neither has a usable value, so the default is used.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "unnamed-rust-service");
+        assert!(config.service_is_default());
+    }
+
+    #[test]
+    fn test_otel_service_name_empty_uses_default() {
+        // An empty OTEL_SERVICE_NAME="" is treated as unset and produces the default.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "unnamed-rust-service");
+        assert!(config.service_is_default());
     }
 
     #[test]

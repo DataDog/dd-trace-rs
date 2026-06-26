@@ -58,6 +58,7 @@ pub(crate) enum SupportedConfigurations {
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
     OTEL_RESOURCE_ATTRIBUTES,
+    OTEL_SERVICE_NAME,
     _DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
 
     /// Used for testing purposes only
@@ -128,6 +129,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES => "OTEL_RESOURCE_ATTRIBUTES",
+            SupportedConfigurations::OTEL_SERVICE_NAME => "OTEL_SERVICE_NAME",
             SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED => "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",

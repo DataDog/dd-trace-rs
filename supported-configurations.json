@@ -406,6 +406,14 @@
         "propertyKeys": []
       }
     ],
+    "OTEL_SERVICE_NAME": [
+      {
+        "version": "B",
+        "type": "string",
+        "default": null,
+        "propertyKeys": []
+      }
+    ],
     "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED": [
       {
         "version": "B",
