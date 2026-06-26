@@ -2829,7 +2829,7 @@ mod tests {
 
     #[test]
     fn test_otel_service_name_alias() {
-        // OTEL_SERVICE_NAME is a non-deprecated alias for DD_SERVICE
+        // OTEL_SERVICE_NAME is an alias for DD_SERVICE
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("OTEL_SERVICE_NAME", "otel-service")],
