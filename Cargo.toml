@@ -44,6 +44,7 @@ opentelemetry = { path = "../opentelemetry-rust/opentelemetry", features = [
     "trace",
     "metrics",
     "logs",
+    "experimental_context_observer",
 ], default-features = false }
 opentelemetry-otlp = { path = "../opentelemetry-rust/opentelemetry-otlp", features = [
     "metrics",

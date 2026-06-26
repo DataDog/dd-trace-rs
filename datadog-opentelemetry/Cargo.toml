@@ -71,6 +71,9 @@ percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true }
+# Publisher of the per-thread OTel context TLS slot read by the Datadog eBPF profiler.
+# Linux-only; enabled through the `profiling-thread-ctx` feature.
+libdd-otel-thread-ctx = { path = "../../libdatadog-thread-ctx/libdd-otel-thread-ctx", optional = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
@@ -114,6 +117,15 @@ logs-http = [
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
 _unstable_propagation = []
+# Publishes the active OTel span context into a per-thread TLS slot so out-of-process readers
+# (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces. Linux-only; the
+# integration code is additionally gated on `#[cfg(target_os = "linux")]`. Enabling
+# `libdd-library-config/otel-thread-ctx` lets us advertise the thread-local attribute keys in the
+# published OTel process context, so readers know the process emits thread contexts.
+profiling-thread-ctx = [
+    "dep:libdd-otel-thread-ctx",
+    "libdd-library-config/otel-thread-ctx",
+]
 https = [
     "libdd-data-pipeline/https",
     "libdd-capabilities-impl/https",
