@@ -4,8 +4,6 @@
 //! This module contains trace mapping from otel to datadog
 //! specific to datadog-opentelemetry
 
-use std::collections::hash_map;
-
 use crate::{
     core::sampling,
     mappings::{
@@ -28,28 +26,30 @@ fn otel_sampling_to_dd_sampling(
     otel_trace_flags: opentelemetry::trace::TraceFlags,
     dd_span: &mut DdSpan,
 ) {
-    if let hash_map::Entry::Vacant(e) = dd_span
-        .metrics
-        .entry(SpanStr::from_static_str("_sampling_priority_v1"))
-    {
-        if otel_trace_flags.is_sampled() {
-            e.insert(sampling::priority::AUTO_KEEP.into_i8() as f64);
+    let priority_key = SpanStr::from_static_str("_sampling_priority_v1");
+    if !dd_span.metrics.contains_key(&priority_key) {
+        let priority = if otel_trace_flags.is_sampled() {
+            sampling::priority::AUTO_KEEP.into_i8() as f64
         } else {
-            e.insert(sampling::priority::AUTO_REJECT.into_i8() as f64);
-        }
+            sampling::priority::AUTO_REJECT.into_i8() as f64
+        };
+        dd_span.metrics.insert(priority_key, priority);
     }
 }
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_trace_chunk_to_dd_trace_chunk<'a>(
+pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
-    span_data: &'a [SpanData],
+    span_data: I,
     otel_resource: &'a Resource,
-) -> Vec<DdSpan<'a>> {
+) -> Vec<DdSpan<'a>>
+where
+    I: IntoIterator<Item = &'a SpanData>,
+{
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
-    span_data
-        .iter()
+    let mut chunk: Vec<DdSpan<'a>> = span_data
+        .into_iter()
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
             let sdk_span = SdkSpan::from_sdk_span_data(s);
@@ -60,7 +60,9 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a>(
 
             dd_span
         })
-        .collect()
+        .collect();
+    libdd_trace_utils::span::trace_utils::compute_top_level_span(&mut chunk);
+    chunk
 }
 
 fn add_config_metadata<'a>(

@@ -67,6 +67,7 @@ libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
+libdd-shared-runtime = { workspace = true }
 percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
@@ -120,6 +121,7 @@ https = [
     "libdd-trace-utils/https",
     "libdd-telemetry/https",
     "libdd-common/https",
+    "libdd-shared-runtime/https",
     "opentelemetry-otlp?/reqwest-rustls",
     "opentelemetry-otlp?/tls-roots",
     "opentelemetry-otlp?/tls-ring",

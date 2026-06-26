@@ -25,8 +25,7 @@ use crate::{
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
-    exporter::AsyncExporterError,
-    span_exporter::DatadogExporter,
+    span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
     text_map_propagator::DatadogExtractData,
 };
@@ -427,7 +426,7 @@ impl DatadogSpanProcessor {
         registry: TraceRegistry,
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
-    ) -> Self {
+    ) -> Result<Self, DatadogExporterInitError> {
         let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
             RemoteConfigClientWorker::start(config.clone())
                 .inspect_err(|e| {
@@ -440,19 +439,19 @@ impl DatadogSpanProcessor {
         } else {
             None
         };
-        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler);
+        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler)?;
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
             TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
         });
 
-        Self {
+        Ok(Self {
             registry,
             span_exporter,
             resource,
             config,
             rc_client_handle,
             telemetry_metrics_handle,
-        }
+        })
     }
 
     /// Adds the span links recorded in the parent context's [`DatadogExtractData`] to `span`.
@@ -608,7 +607,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
 
-        let Some(mut trace) = self.registry.finish_span(trace_id, span) else {
+        let Some(trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
 
@@ -616,35 +615,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             return;
         }
 
-        if self.config.trace_partial_flush_enabled() {
-            // TODO(paullgdc):
-            // This is wrong, we should go over all span to find who has a different service name
-            // than their parent yet this is complex to implement as there are cases
-            // where we can't read the parent before finishing the child...
-            // This tags only the local root as top level which is good enough in a lot of cases
-            // though To make partial flushing enabled by default we should fix this
-            // behaviour.
-            let root_span = trace
-                .finished_spans
-                .iter_mut()
-                .find(|s| s.span_context.span_id().to_bytes() == trace.local_root_span_id);
-            if let Some(root_span) = root_span {
-                root_span.attributes.push(KeyValue::new("_top_level", 1.0));
-            }
-        }
-
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.send_chunk(trace_chunk) {
-            match e {
-                AsyncExporterError::Panic(p) => {
-                    dd_error!("DatadogSpanProcessor.on_end message='Failed to export trace chunk' operation='DatadogExporter.export_chunk_no_wait' panic='{}'", p)
-                }
-                _ => dd_debug!(
-                    "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
-                    exporter_error_to_otel(&e, "export_chunk_no_wait")
-                ),
-            }
+            dd_debug!(
+                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
+                exporter_error_to_otel(&e, "export_chunk_no_wait")
+            );
         }
     }
 
@@ -660,6 +637,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let deadline = std::time::Instant::now() + timeout;
 
+        // Drain in-flight traces before triggering the runtime teardown. libdatadog's
+        // `force_flush` only notifies the worker; the subsequent `shutdown_async` cancels the
+        // worker biased-first, dropping any chunk it hadn't yet picked up. Waiting here is the
+        // only place that can ensure the export actually completes before cancellation.
+        let drain_left = deadline.saturating_duration_since(std::time::Instant::now());
+        let _ = self.span_exporter.flush_and_drain(drain_left);
+
         // Trigger all tasks shutdown
         self.span_exporter.trigger_shutdown();
         if let Some(rc_client_handle) = &self.rc_client_handle {
@@ -674,7 +658,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         self.span_exporter.wait_for_shutdown(left).map_err(|e| {
             let e = match e {
-                AsyncExporterError::TimedOut(_) => AsyncExporterError::TimedOut(timeout),
+                DatadogExporterError::TimedOut(_) => DatadogExporterError::TimedOut(timeout),
                 _ => e,
             };
             exporter_error_to_otel(&e, "wait_for_shutdown")
@@ -740,19 +724,19 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 }
 
-fn exporter_error_to_otel(e: &AsyncExporterError, operation: &str) -> OTelSdkError {
+fn exporter_error_to_otel(e: &DatadogExporterError, operation: &str) -> OTelSdkError {
     match e {
-        AsyncExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
-        AsyncExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
-        AsyncExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
+        DatadogExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        DatadogExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
+        DatadogExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
             "DatadogExporter.{operation}: the sender mutex was poisonned"
         )),
-        AsyncExporterError::BatchFull(_) => {
+        DatadogExporterError::BatchFull(_) => {
             OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: unexpected error"))
         }
-        AsyncExporterError::Panic(_) => {
-            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: a panic happened"))
-        }
+        DatadogExporterError::TraceExporter(e) => OTelSdkError::InternalFailure(format!(
+            "DatadogExporter.{operation}: trace exporter error: {e}"
+        )),
     }
 }
 
@@ -792,7 +776,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             // .with_service_name("otel-service")
@@ -822,7 +806,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let attributes = [KeyValue::new("key_schema", "value_schema")];
 
@@ -861,7 +845,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("key1", "value1"))
@@ -890,7 +874,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
@@ -913,7 +897,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
