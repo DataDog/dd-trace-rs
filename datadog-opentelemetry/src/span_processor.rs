@@ -9,6 +9,7 @@ use std::{
     fmt::Debug,
     str::FromStr,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use crate::{
@@ -561,6 +562,17 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     ) {
         if !self.config.enabled() || !span.is_recording() || !span.span_context().is_valid() {
             return;
+        }
+
+        // FIXME(temporary): artificial performance regression to validate the CI
+        // benchmark-alert notification. REMOVE before merging.
+        {
+            let busy_until = std::time::Instant::now() + Duration::from_secs(1);
+            let mut sink: u64 = 0;
+            while std::time::Instant::now() < busy_until {
+                sink = sink.wrapping_add(1);
+            }
+            std::hint::black_box(sink);
         }
 
         let trace_id = span.span_context().trace_id().to_bytes();
