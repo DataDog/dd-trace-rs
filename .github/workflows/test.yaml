@@ -180,5 +180,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: f2c6cc393bcd996357259ac991c8a6ba1f59177d # main
+      ref: igor/rust/bump-otel-0.32
       push_to_test_optimization: true
