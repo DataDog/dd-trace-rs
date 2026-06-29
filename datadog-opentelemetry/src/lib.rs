@@ -607,9 +607,20 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
     // Collect attributes to add
     let mut attributes = Vec::new();
 
+    // The OpenTelemetry SDK falls back to a spec-defined default service name when none
+    // is configured: "unknown_service" or "unknown_service:<executable name>" (the latter
+    // since opentelemetry 0.32, which made the fallback spec-compliant). Treat either as unset.
+    let otel_service_is_default = otel_service_name
+        .as_ref()
+        .map(|name| {
+            let name = name.as_str();
+            name == "unknown_service" || name.starts_with("unknown_service:")
+        })
+        .unwrap_or(true);
+
     // Handle service name
-    if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
-        // If the OpenTelemetry service name is not set or is "unknown_service",
+    if otel_service_is_default {
+        // If the OpenTelemetry service name is not set or is the SDK default,
         // we override it with the Datadog service name.
         attributes.push((
             Key::from_static_str(SERVICE_NAME),
