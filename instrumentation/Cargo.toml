@@ -18,7 +18,7 @@ publish = false
 serde = "1.0.194"
 serde_json = "1.0.140"
 opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"], default-features = false }
-opentelemetry_sdk = { version = "0.32.0", default-features = false }
+opentelemetry_sdk = { version = "0.32.1", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
 tracing = { version = "0.1", default-features = false }
 tokio = { version = "1.44.1" }
