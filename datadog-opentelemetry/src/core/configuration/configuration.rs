@@ -651,6 +651,32 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
+    /// Like [`Self::update_parsed_with_transform`], but falls back to the `fallback` key when the
+    /// ConfigItem's primary key is **entirely absent** from all sources. A present-but-empty
+    /// primary value is still honored (it is NOT treated as unset), preserving existing
+    /// `DD_TRACE_PROPAGATION_STYLE=""` semantics; the fallback applies only when the primary
+    /// env var is not set at all.
+    pub fn update_parsed_with_transform_with_fallback<ParsedConfig, RawConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        fallback: SupportedConfigurations,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        RawConfig: FromStr,
+        RawConfig::Err: std::fmt::Display,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(RawConfig) -> ParsedConfig,
+    {
+        let result = self.sources.get_parse::<RawConfig>(default.name());
+        let result = match result.value {
+            Some(_) => result,
+            None => self.sources.get_parse::<RawConfig>(fallback),
+        };
+        self.apply_result(default, result, transform)
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -1353,10 +1379,11 @@ impl Config {
             ),
             trace_propagation_behavior_extract: cisu
                 .update_parsed(default.trace_propagation_behavior_extract),
-            trace_propagation_style: cisu
-                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
-                    TracePropagationStyle::from_tags(Some(tags))
-                }),
+            trace_propagation_style: cisu.update_parsed_with_transform_with_fallback(
+                default.trace_propagation_style,
+                SupportedConfigurations::OTEL_PROPAGATORS,
+                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+            ),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -3072,6 +3099,25 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first())
+    }
+
+    #[test]
+    fn test_otel_propagators_sets_global_style_when_dd_absent() {
+        // OTEL_PROPAGATORS is used as a fallback when DD_TRACE_PROPAGATION_STYLE is not set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]
