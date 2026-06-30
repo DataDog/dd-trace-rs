@@ -4484,6 +4484,29 @@ mod tests {
     }
 
     #[test]
+    fn test_dd_style_in_lower_priority_source_beats_otel_propagators_in_higher() {
+        // DD_TRACE_PROPAGATION_STYLE present in ANY source beats OTEL_PROPAGATORS: the fallback
+        // helper checks the primary key across all sources before consulting the fallback. Here
+        // OTEL_PROPAGATORS sits in the higher-precedence (first-added) source and DD style in the
+        // lower-precedence (second-added) source, yet DD style still wins. This tests the
+        // cross-source behavior that the fallback helper uses.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_STYLE", "datadog")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
     fn test_no_propagation_env_uses_default() {
         // Neither DD nor OTEL set -> default [datadog, tracecontext, baggage].
         let sources = CompositeSource::new();
