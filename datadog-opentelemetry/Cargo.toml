@@ -122,6 +122,7 @@ https = [
     "libdd-common/https",
     "opentelemetry-otlp?/reqwest-rustls",
     "opentelemetry-otlp?/tls-roots",
+    "opentelemetry-otlp?/tls-ring",
 ]
 test-utils = [
     "libdd-data-pipeline/test-utils",
