@@ -402,7 +402,7 @@
       {
         "version": "A",
         "type": "array",
-        "default": null,
+        "default": "",
         "propertyKeys": []
       }
     ],
