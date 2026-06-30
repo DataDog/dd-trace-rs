@@ -2901,6 +2901,7 @@ mod tests {
     use super::Config;
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
+    use crate::propagation::config::{get_extractors, get_injectors};
 
     #[test]
     fn test_config_from_source() {
@@ -4447,7 +4448,6 @@ mod tests {
     fn test_otel_propagators_inherited_by_extract_and_inject() {
         // With only OTEL_PROPAGATORS set (no extract/inject), the effective extractors and
         // injectors fall back to the global style fed by OTEL_PROPAGATORS.
-        use crate::propagation::config::{get_extractors, get_injectors};
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [("OTEL_PROPAGATORS", "datadog,tracecontext")],
@@ -4466,7 +4466,6 @@ mod tests {
     fn test_dd_extract_wins_while_inject_inherits_otel_propagators() {
         // DD_TRACE_PROPAGATION_STYLE_EXTRACT set + OTEL_PROPAGATORS set (no global DD style):
         // extract uses its own DD value; inject inherits the global style from OTEL_PROPAGATORS.
-        use crate::propagation::config::{get_extractors, get_injectors};
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
             [
