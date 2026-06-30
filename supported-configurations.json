@@ -398,6 +398,14 @@
         "propertyKeys": ["metric_export_timeout"]
       }
     ],
+    "OTEL_PROPAGATORS": [
+      {
+        "version": "A",
+        "type": "array",
+        "default": null,
+        "propertyKeys": []
+      }
+    ],
     "OTEL_RESOURCE_ATTRIBUTES": [
       {
         "version": "A",
