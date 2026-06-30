@@ -10,43 +10,52 @@ use datadog_opentelemetry::configuration::{
 use datadog_opentelemetry::log::LevelFilter;
 use datadog_opentelemetry::make_test_tracer;
 use opentelemetry::global::ObjectSafeSpan;
-use opentelemetry::trace::{
-    SamplingDecision, SamplingResult, SpanBuilder, TraceContextExt, TraceState, Tracer,
-    TracerProvider,
-};
+use opentelemetry::trace::{SpanBuilder, TraceContextExt, Tracer, TracerProvider};
 use opentelemetry::Context;
 
 use crate::integration_tests::{
     assert_subset, make_extractor, make_test_agent, with_test_agent_session,
 };
 
+// Verify the Datadog span processor exports only the spans the sampler keeps.
+// opentelemetry 0.32 removed `SpanBuilder::with_sampling_result`, so a caller can no
+// longer force the per-span decision; we drive it deterministically with sampling
+// rules instead: a `sample_rate` of 0.0 -> drop -> `RecordOnly` (not exported) and a
+// `sample_rate` of 1.0 -> keep -> `RecordAndSample` (exported). The snapshot must
+// therefore contain only the kept span.
 #[tokio::test]
 async fn test_received_traces() {
     const SESSION_NAME: &str = "opentelemetry_api/test_received_traces";
-    with_test_agent_session(
-        SESSION_NAME,
-        Config::builder(),
-        |_, tracer_provider, _, _| {
-            let tracer = tracer_provider.tracer("test");
-            for decision in [
-                SamplingDecision::RecordOnly,
-                SamplingDecision::RecordAndSample,
-            ] {
-                {
-                    let base_ctx = Context::new();
-                    let span = SpanBuilder::from_name("test")
-                        .with_kind(opentelemetry::trace::SpanKind::Client)
-                        .with_sampling_result(SamplingResult {
-                            decision,
-                            attributes: vec![],
-                            trace_state: TraceState::default(),
-                        })
-                        .start_with_context(&tracer, &base_ctx);
-                    drop(span)
-                };
-            }
+    let mut cfg = Config::builder();
+    cfg.set_trace_sampling_rules(vec![
+        SamplingRuleConfig {
+            resource: Some("kept-span".to_string()),
+            sample_rate: 1.0,
+            ..SamplingRuleConfig::default()
         },
-    )
+        SamplingRuleConfig {
+            resource: Some("dropped-span".to_string()),
+            sample_rate: 0.0,
+            ..SamplingRuleConfig::default()
+        },
+    ]);
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+        let tracer = tracer_provider.tracer("test");
+
+        // Dropped by the sampler (RecordOnly): must NOT be exported to the agent.
+        drop(
+            SpanBuilder::from_name("dropped-span")
+                .with_kind(opentelemetry::trace::SpanKind::Client)
+                .start_with_context(&tracer, &Context::new()),
+        );
+
+        // Kept by the sampler (RecordAndSample): must be exported to the agent.
+        drop(
+            SpanBuilder::from_name("kept-span")
+                .with_kind(opentelemetry::trace::SpanKind::Client)
+                .start_with_context(&tracer, &Context::new()),
+        );
+    })
     .await;
 }
 
