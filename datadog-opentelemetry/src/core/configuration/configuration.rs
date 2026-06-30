@@ -1975,6 +1975,12 @@ impl Config {
             service_env: self.env().map(str::to_owned),
             service_version: self.version().map(str::to_owned),
             container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // Advertise that this process publishes per-thread OTel context records. An empty list
+            // means we only emit the implicit index-0 key (`datadog.local_root_span_id`); add more
+            // here if `thread_ctx` starts encoding extra attributes. `None` (the default) would
+            // tell readers we don't emit thread contexts at all.
+            #[cfg(feature = "profiling-thread-ctx")]
+            threadlocal_attribute_keys: Some(Vec::new()),
             // TODO: add the process tags. For now, we can't easily get them.
             ..Default::default()
         }

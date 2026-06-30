@@ -146,6 +146,20 @@ impl InnerTraceRegistry {
         }
     }
 
+    /// Look up the local root span ID for a given trace ID, if it has been registered.
+    ///
+    /// Returns `None` if the trace is unknown or its root span ID has not been set yet (the
+    /// sentinel `[0; 8]` value).
+    #[cfg(all(target_os = "linux", feature = "profiling-thread-ctx"))]
+    fn get_local_root_span_id(&self, trace_id: [u8; 16]) -> Option<[u8; 8]> {
+        let trace = self.registry.get(&trace_id)?;
+        if trace.local_root_span_id == [0u8; 8] {
+            None
+        } else {
+            Some(trace.local_root_span_id)
+        }
+    }
+
     /// Register a new trace with the given trace ID and span ID.
     /// If the trace is already registered, increment the open span count.
     /// If the trace is not registered, create a new entry with the given trace ID
@@ -327,6 +341,17 @@ impl TraceRegistry {
             .write()
             .expect("Failed to acquire lock on trace registry");
         inner.register_local_root_span(trace_id, root_span_id);
+    }
+
+    /// Look up the local root span ID for a given trace ID.
+    ///
+    /// Returns `None` if the trace is unknown or its root span ID has not been set yet.
+    #[cfg(all(target_os = "linux", feature = "profiling-thread-ctx"))]
+    pub(crate) fn get_local_root_span_id(&self, trace_id: [u8; 16]) -> Option<[u8; 8]> {
+        self.get_shard(trace_id)
+            .read()
+            .expect("Failed to acquire lock on trace registry")
+            .get_local_root_span_id(trace_id)
     }
 
     /// Register a new span with the given trace ID and span ID.

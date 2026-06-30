@@ -304,6 +304,8 @@ mod telemetry_logs_exporter;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
+#[cfg(all(target_os = "linux", feature = "profiling-thread-ctx"))]
+mod thread_ctx;
 mod trace_id;
 
 use std::sync::{Arc, RwLock};
@@ -525,6 +527,12 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
+
+        // Publish the active span context into the per-thread TLS slot so out-of-process readers
+        // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
+        #[cfg(all(target_os = "linux", feature = "profiling-thread-ctx"))]
+        crate::thread_ctx::install_observer(registry.clone());
+
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
         // Runtime updates come via config callback, so no need for shared config
