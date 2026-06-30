@@ -223,7 +223,7 @@
 //!
 //! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
-//!   version: 0.32
+//!   version: 0.33
 //! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
 //!   version 0.32
 //! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
