@@ -651,32 +651,6 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
-    /// Like [`Self::update_parsed_with_transform`], but falls back to the `fallback` key when the
-    /// ConfigItem's primary key is **entirely absent** from all sources. A present-but-empty
-    /// primary value is still honored (it is NOT treated as unset), preserving existing
-    /// `DD_TRACE_PROPAGATION_STYLE=""` semantics; the fallback applies only when the primary
-    /// env var is not set at all.
-    pub fn update_parsed_with_transform_with_fallback<ParsedConfig, RawConfig, ConfigItemType, F>(
-        &self,
-        default: ConfigItemType,
-        fallback: SupportedConfigurations,
-        transform: F,
-    ) -> ConfigItemType
-    where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        RawConfig: FromStr,
-        RawConfig::Err: std::fmt::Display,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(RawConfig) -> ParsedConfig,
-    {
-        let result = self.sources.get_parse::<RawConfig>(default.name());
-        let result = match result.value {
-            Some(_) => result,
-            None => self.sources.get_parse::<RawConfig>(fallback),
-        };
-        self.apply_result(default, result, transform)
-    }
-
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -1379,10 +1353,17 @@ impl Config {
             ),
             trace_propagation_behavior_extract: cisu
                 .update_parsed(default.trace_propagation_behavior_extract),
-            trace_propagation_style: cisu.update_parsed_with_transform_with_fallback(
+            // OTEL_PROPAGATORS is an alias/fallback for DD_TRACE_PROPAGATION_STYLE. An empty
+            // value on either key is treated as unset (consistent with the OTEL_SERVICE_NAME
+            // fallback), so the comma-split is done in the transform rather than via DdTags.
+            trace_propagation_style: cisu.update_non_empty_string_with_fallback(
                 default.trace_propagation_style,
                 SupportedConfigurations::OTEL_PROPAGATORS,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |styles| {
+                    TracePropagationStyle::from_tags(Some(
+                        styles.split(',').map(|s| s.to_string()).collect(),
+                    ))
+                },
             ),
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
@@ -3086,7 +3067,17 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
@@ -3211,7 +3202,18 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default. The
+        // extract-specific key, set explicitly to empty, still yields an empty list.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![]).as_deref()
