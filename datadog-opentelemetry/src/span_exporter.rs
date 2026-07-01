@@ -102,15 +102,12 @@ pub struct DatadogExporter {
 
 impl Drop for DatadogExporter {
     fn drop(&mut self) {
-        let trace_buffer = self.trace_buffer.take();
-        let shared_runtime = self.shared_runtime.take();
-        if trace_buffer.is_none() && shared_runtime.is_none() {
-            return;
-        }
         // `tokio::runtime::Runtime::drop` calls `BlockingPool::shutdown`, which performs a
         // blocking wait. That panics when invoked from inside an async context (e.g. when a
         // `DatadogExporter` is dropped at the end of a `#[tokio::test]`). Move all owners of
         // the runtime onto a dedicated std thread so the drop runs outside any tokio context.
+        let trace_buffer = self.trace_buffer.take();
+        let shared_runtime = self.shared_runtime.take();
         let _ = thread::Builder::new()
             .name("datadog-trace-drop".into())
             .spawn(move || {
@@ -141,56 +138,28 @@ impl std::fmt::Display for DatadogExporterInitError {
 
 impl std::error::Error for DatadogExporterInitError {}
 
-struct BuildOutput {
-    shared_runtime: Arc<BasicRuntime>,
-    trace_buffer: TraceBuffer<BufferedSpan>,
-    pending_spans: PendingSpans,
-}
+type AgentResponseHandler = Box<dyn for<'a> Fn(&'a str) + Send + Sync>;
 
 impl DatadogExporter {
-    #[allow(clippy::type_complexity)]
     pub fn new(
         config: Arc<Config>,
-        agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
+        agent_response_handler: Option<AgentResponseHandler>,
     ) -> Result<Self, DatadogExporterInitError> {
-        let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
         let response_handler = build_response_handler(agent_response_handler);
-
-        let resource_for_thread = Arc::clone(&otel_resource);
-        let config_for_thread = Arc::clone(&config);
 
         // `TraceExporterBuilder::build` drives async setup via `tokio::runtime::Runtime::block_on`,
         // which panics when called from inside an existing tokio runtime (e.g. a `#[tokio::test]`).
-        // Run construction on a dedicated std thread so the builder is outside any caller context;
-        // the runtime stays alive afterwards via the `Arc<BasicRuntime>` we hand back.
+        // Run construction on a dedicated std thread so the builder is outside any caller context.
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("datadog-trace-init".into())
             .spawn(move || {
-                let result = build_on_dedicated_thread(
-                    config_for_thread,
-                    resource_for_thread,
-                    response_handler,
-                );
-                let _ = tx.send(result);
+                let _ = tx.send(build_on_dedicated_thread(config, response_handler));
             })
             .map_err(DatadogExporterInitError::BuildThread)?;
-
-        let BuildOutput {
-            shared_runtime,
-            trace_buffer,
-            pending_spans,
-        } = rx.recv().map_err(|_| {
+        rx.recv().map_err(|_| {
             DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeUnavailable)
-        })??;
-
-        Ok(DatadogExporter {
-            trace_buffer: Some(trace_buffer),
-            shared_runtime: Some(shared_runtime),
-            otel_resource,
-            shutdown_rx: Mutex::new(None),
-            pending_spans,
-        })
+        })?
     }
 
     fn trace_buffer(&self) -> &TraceBuffer<BufferedSpan> {
@@ -275,7 +244,7 @@ impl DatadogExporter {
         if thread::Builder::new()
             .name("datadog-trace-shutdown".into())
             .spawn(move || {
-                let _ = tx.send(shutdown_basic_runtime(&rt, None));
+                let _ = tx.send(shutdown_basic_runtime(&rt));
             })
             .is_ok()
         {
@@ -284,30 +253,35 @@ impl DatadogExporter {
     }
 
     pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
-        let rx = match self.shutdown_rx.lock() {
-            Ok(mut slot) => slot.take(),
-            Err(_) => return Err(TraceBufferError::MutexPoisoned),
-        };
-        let Some(rx) = rx else {
-            // `trigger_shutdown` failed to spawn the shutdown thread (or wasn't called).
-            // Drive the shutdown synchronously on a fresh thread so we stay out of any
-            // tokio context the caller might be in; `BasicRuntime::block_on` would panic
-            // otherwise.
-            return map_runtime_err(synchronous_shutdown(self.shared_runtime(), timeout));
-        };
-        let result = match rx.recv_timeout(timeout) {
+        let rx = self
+            .shutdown_rx
+            .lock()
+            .map_err(|_| TraceBufferError::MutexPoisoned)?
+            .take()
+            .ok_or(TraceBufferError::AlreadyShutdown)?;
+        let runtime_result = match rx.recv_timeout(timeout) {
             Ok(res) => res,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                return Err(TraceBufferError::TimedOut(timeout));
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => return Err(TraceBufferError::TimedOut(timeout)),
+            // Shutdown thread vanished before sending — treat as an internal worker error.
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                // The shutdown thread vanished before sending — it panicked.
-                return Err(internal_worker_error(
-                    "shutdown thread terminated unexpectedly",
-                ));
+                return Err(TraceBufferError::TraceExporter(TraceExporterError::Internal(
+                    libdd_data_pipeline::trace_exporter::error::InternalErrorKind::InvalidWorkerState(
+                        "shutdown thread terminated unexpectedly".to_string(),
+                    ),
+                )))
             }
         };
-        map_runtime_err(result)
+        match runtime_result {
+            Ok(()) => Ok(()),
+            Err(SharedRuntimeError::ShutdownTimedOut(d)) => Err(TraceBufferError::TimedOut(d)),
+            Err(SharedRuntimeError::LockFailed(_)) => Err(TraceBufferError::MutexPoisoned),
+            Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyShutdown),
+            Err(e) => Err(TraceBufferError::TraceExporter(TraceExporterError::Internal(
+                libdd_data_pipeline::trace_exporter::error::InternalErrorKind::InvalidWorkerState(
+                    e.to_string(),
+                ),
+            ))),
+        }
     }
 
     pub fn set_resource(&self, r: Resource) {
@@ -336,17 +310,13 @@ fn build_response_handler(
     })
 }
 
-/// Drives trace-exporter construction on a dedicated std thread.
-///
-/// `TraceExporterBuilder::build` runs async setup through `Runtime::block_on`, which panics when
-/// called from inside an existing tokio runtime. Running this function on a fresh std thread
-/// keeps the builder outside the caller's tokio context (e.g. a `#[tokio::test]` thread) so
-/// `block_on` succeeds.
+/// Drives trace-exporter construction on a dedicated std thread. `TraceExporterBuilder::build`
+/// runs async setup through `Runtime::block_on`, which panics when called from inside an existing
+/// tokio runtime — this function must therefore run on a fresh std thread.
 fn build_on_dedicated_thread(
     config: Arc<Config>,
-    otel_resource: Arc<ArcSwap<Resource>>,
     response_handler: ResponseHandler,
-) -> Result<BuildOutput, DatadogExporterInitError> {
+) -> Result<DatadogExporter, DatadogExporterInitError> {
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -362,11 +332,12 @@ fn build_on_dedicated_thread(
         .synchronous_export_timeout(Some(config.trace_writer_synchronous_timeout()))
         .max_flush_interval(config.trace_writer_max_flush_interval());
 
+    let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
     let pending_spans: PendingSpans = Arc::new((Mutex::new(0_usize), Condvar::new()));
 
     let export = SpanDataExport {
         trace_exporter,
-        otel_resource,
+        otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
         pending_spans: Arc::clone(&pending_spans),
@@ -381,9 +352,11 @@ fn build_on_dedicated_thread(
         .spawn_worker(worker, false)
         .map_err(DatadogExporterInitError::Runtime)?;
 
-    Ok(BuildOutput {
-        shared_runtime,
-        trace_buffer,
+    Ok(DatadogExporter {
+        trace_buffer: Some(trace_buffer),
+        shared_runtime: Some(shared_runtime),
+        otel_resource,
+        shutdown_rx: Mutex::new(None),
         pending_spans,
     })
 }
@@ -454,67 +427,10 @@ fn build_trace_exporter(
 
 /// Tears the workers down on `shared_runtime` synchronously. Must be called from a thread that is
 /// not already inside a tokio runtime — `BasicRuntime::block_on` would otherwise panic.
-fn shutdown_basic_runtime(
-    shared_runtime: &BasicRuntime,
-    timeout: Option<Duration>,
-) -> Result<(), SharedRuntimeError> {
-    let Some(timeout) = timeout else {
-        shared_runtime
-            .block_on(shared_runtime.shutdown_async())
-            .map_err(SharedRuntimeError::RuntimeCreation)?;
-        return Ok(());
-    };
-    match shared_runtime
-        .block_on(async { tokio::time::timeout(timeout, shared_runtime.shutdown_async()).await })
-    {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(_)) => Err(SharedRuntimeError::ShutdownTimedOut(timeout)),
-        Err(e) => Err(SharedRuntimeError::RuntimeCreation(e)),
-    }
-}
-
-/// Runs `shutdown_basic_runtime` on a fresh std thread and waits up to `timeout` for it.
-///
-/// Used as the fallback when no shutdown thread was launched by `trigger_shutdown` — typically
-/// because that earlier spawn failed.
-fn synchronous_shutdown(
-    shared_runtime: &Arc<BasicRuntime>,
-    timeout: Duration,
-) -> Result<(), SharedRuntimeError> {
-    let rt = Arc::clone(shared_runtime);
-    let (tx, rx) = mpsc::sync_channel(1);
-    thread::Builder::new()
-        .name("datadog-trace-shutdown".into())
-        .spawn(move || {
-            let _ = tx.send(shutdown_basic_runtime(&rt, Some(timeout)));
-        })
-        .map_err(SharedRuntimeError::RuntimeCreation)?;
-    // Grace period above the inner timeout so the spawned thread has time to return its result
-    // after the inner `tokio::time::timeout` elapses.
-    match rx.recv_timeout(timeout.saturating_add(Duration::from_secs(1))) {
-        Ok(res) => res,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(SharedRuntimeError::ShutdownTimedOut(timeout)),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(SharedRuntimeError::RuntimeUnavailable),
-    }
-}
-
-fn map_runtime_err(result: Result<(), SharedRuntimeError>) -> Result<(), TraceBufferError> {
-    match result {
-        Ok(()) => Ok(()),
-        Err(SharedRuntimeError::ShutdownTimedOut(d)) => Err(TraceBufferError::TimedOut(d)),
-        Err(SharedRuntimeError::LockFailed(_)) => Err(TraceBufferError::MutexPoisoned),
-        Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyShutdown),
-        Err(e @ (SharedRuntimeError::WorkerError(_) | SharedRuntimeError::RuntimeCreation(_))) => {
-            Err(internal_worker_error(&e.to_string()))
-        }
-    }
-}
-
-fn internal_worker_error(msg: &str) -> TraceBufferError {
-    use libdd_data_pipeline::trace_exporter::error::InternalErrorKind;
-    TraceBufferError::TraceExporter(TraceExporterError::Internal(
-        InternalErrorKind::InvalidWorkerState(msg.to_string()),
-    ))
+fn shutdown_basic_runtime(shared_runtime: &BasicRuntime) -> Result<(), SharedRuntimeError> {
+    shared_runtime
+        .block_on(shared_runtime.shutdown_async())
+        .map_err(SharedRuntimeError::RuntimeCreation)
 }
 
 #[derive(Debug)]
