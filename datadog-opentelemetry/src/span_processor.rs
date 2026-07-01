@@ -607,12 +607,29 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_end(&self, span: SpanData) {
         let trace_id = span.span_context.trace_id().to_bytes();
 
-        let Some(trace) = self.registry.finish_span(trace_id, span) else {
+        let Some(mut trace) = self.registry.finish_span(trace_id, span) else {
             return;
         };
 
         if !self.config.enabled() {
             return;
+        }
+
+        if self.config.trace_partial_flush_enabled() {
+            // TODO(paullgdc):
+            // This is wrong, we should go over all span to find who has a different service name
+            // than their parent yet this is complex to implement as there are cases
+            // where we can't read the parent before finishing the child...
+            // This tags only the local root as top level which is good enough in a lot of cases
+            // though To make partial flushing enabled by default we should fix this
+            // behaviour.
+            let root_span = trace
+                .finished_spans
+                .iter_mut()
+                .find(|s| s.span_context.span_id().to_bytes() == trace.local_root_span_id);
+            if let Some(root_span) = root_span {
+                root_span.attributes.push(KeyValue::new("_top_level", 1.0));
+            }
         }
 
         // Add propagation data before exporting the trace

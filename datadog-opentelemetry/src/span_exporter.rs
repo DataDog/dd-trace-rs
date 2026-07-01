@@ -39,9 +39,23 @@ pub struct BufferedSpan(SpanData);
 // can sum to enforce its byte-based capacity. They do not need to be exact — they
 // only feed into the buffer's drop / flush thresholds.
 const FIXED_SPAN_OVERHEAD: usize = 96;
-const ATTRIBUTE_VALUE_ESTIMATE: usize = 24;
+const ATTRIBUTE_ENTRY_OVERHEAD: usize = 24;
 const EVENT_OVERHEAD: usize = 16;
 const LINK_OVERHEAD: usize = 32;
+
+fn attr_value_bytes(v: &opentelemetry::Value) -> usize {
+    use opentelemetry::{Array, Value};
+    match v {
+        Value::Bool(_) => 1,
+        Value::I64(_) | Value::F64(_) => 8,
+        Value::String(s) => s.as_str().len(),
+        Value::Array(Array::Bool(a)) => a.len(),
+        Value::Array(Array::I64(a)) => a.len() * 8,
+        Value::Array(Array::F64(a)) => a.len() * 8,
+        Value::Array(Array::String(a)) => a.iter().map(|s| s.as_str().len()).sum(),
+        _ => 0,
+    }
+}
 
 /// Reinterprets a `Vec<SpanData>` as a `Vec<BufferedSpan>` without allocating or
 /// moving elements, relying on `BufferedSpan` being `#[repr(transparent)]` over
@@ -68,18 +82,20 @@ impl BufferSize for BufferedSpan {
         let mut size: usize = FIXED_SPAN_OVERHEAD;
         size += s.name.len();
         for kv in &s.attributes {
-            size += kv.key.as_str().len() + ATTRIBUTE_VALUE_ESTIMATE;
+            size += ATTRIBUTE_ENTRY_OVERHEAD + kv.key.as_str().len() + attr_value_bytes(&kv.value);
         }
         for event in s.events.iter() {
             size += EVENT_OVERHEAD + event.name.len();
             for kv in &event.attributes {
-                size += kv.key.as_str().len() + ATTRIBUTE_VALUE_ESTIMATE;
+                size +=
+                    ATTRIBUTE_ENTRY_OVERHEAD + kv.key.as_str().len() + attr_value_bytes(&kv.value);
             }
         }
         for link in s.links.iter() {
             size += LINK_OVERHEAD;
             for kv in &link.attributes {
-                size += kv.key.as_str().len() + ATTRIBUTE_VALUE_ESTIMATE;
+                size +=
+                    ATTRIBUTE_ENTRY_OVERHEAD + kv.key.as_str().len() + attr_value_bytes(&kv.value);
             }
         }
         size
@@ -190,8 +206,11 @@ impl DatadogExporter {
         match self.trace_buffer().send_chunk(buffered) {
             Ok(()) => Ok(()),
             Err(e) => {
-                // Chunk was rejected (e.g. batch full); export-side decrement won't run for it.
-                decrement_pending(&self.pending_spans, n);
+                // Only `BatchFull` is an outright rejection. Late errors from `wait_flush_done`
+                // (sync mode) mean the chunk is still queued.
+                if matches!(e, TraceBufferError::BatchFull(_)) {
+                    decrement_pending(&self.pending_spans, n);
+                }
                 Err(e)
             }
         }

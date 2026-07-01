@@ -48,7 +48,7 @@ where
 {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
-    let mut chunk: Vec<DdSpan<'a>> = span_data
+    span_data
         .into_iter()
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
@@ -60,9 +60,7 @@ where
 
             dd_span
         })
-        .collect();
-    libdd_trace_utils::span::trace_utils::compute_top_level_span(&mut chunk);
-    chunk
+        .collect()
 }
 
 fn add_config_metadata<'a>(
