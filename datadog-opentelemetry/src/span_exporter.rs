@@ -315,9 +315,7 @@ impl std::fmt::Debug for DatadogExporter {
 }
 
 #[allow(clippy::type_complexity)]
-fn build_response_handler(
-    agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
-) -> ResponseHandler {
+fn build_response_handler(agent_response_handler: Option<AgentResponseHandler>) -> ResponseHandler {
     Box::new(move |result| match result {
         Ok(AgentResponse::Changed { body }) => {
             if let Some(handler) = agent_response_handler.as_ref() {
