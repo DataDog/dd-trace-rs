@@ -23,11 +23,11 @@
 //!
 //! #### Tracing
 //!
-//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
 //! #### Metrics
 //!
-//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html).
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html).
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 //!
 //! #### Logging
@@ -47,7 +47,7 @@
 //!
 //! Requires
 //! * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
 //! * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 //!
 //! ```no_run
@@ -73,7 +73,7 @@
 //! #### Opentelemetry trace API
 //!
 //! Requires
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `trace`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace`
 //!   feature enabled
 //!
 //! ```no_run
@@ -101,7 +101,7 @@
 //!
 //! Requires
 //! * the `metrics` feature of this crate to be enabled
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `metrics`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics`
 //!   feature enabled
 //! * [`tokio`](https://docs.rs/tokio)
 //!
@@ -129,7 +129,7 @@
 //! Requires
 //! * the `logs` feature of this crate to be enabled
 //! * [`log`](https://docs.rs/log/0.4.29/log/)
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
 //! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The logger provider MUST be initialized within a tokio context
@@ -221,11 +221,11 @@
 //!
 //! * MSRV: 1.87
 //!
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
-//!   version: 0.32
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
-//!   version 0.31
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+//!   version: 0.33
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+//!   version 0.32
 //! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 //!
 //! ## Features
@@ -607,9 +607,20 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
     // Collect attributes to add
     let mut attributes = Vec::new();
 
+    // The OpenTelemetry SDK falls back to a spec-defined default service name when none
+    // is configured: "unknown_service" or "unknown_service:<executable name>" (the latter
+    // since opentelemetry 0.32, which made the fallback spec-compliant). Treat either as unset.
+    let otel_service_is_default = otel_service_name
+        .as_ref()
+        .map(|name| {
+            let name = name.as_str();
+            name == "unknown_service" || name.starts_with("unknown_service:")
+        })
+        .unwrap_or(true);
+
     // Handle service name
-    if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
-        // If the OpenTelemetry service name is not set or is "unknown_service",
+    if otel_service_is_default {
+        // If the OpenTelemetry service name is not set or is the SDK default,
         // we override it with the Datadog service name.
         attributes.push((
             Key::from_static_str(SERVICE_NAME),

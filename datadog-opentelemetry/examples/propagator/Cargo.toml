@@ -20,10 +20,10 @@ hyper-util = { version = "0.1", features = ["full"] }
 tokio = { version = "1", default-features = false, features = ["full"] }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-opentelemetry-http = "0.31.0"
-opentelemetry-stdout = { version = "0.31.0", features = ["trace", "logs"] }
-opentelemetry-semantic-conventions = "0.31.0"
-opentelemetry-appender-tracing = "0.31.0"
+opentelemetry-http = "0.32.0"
+opentelemetry-stdout = { version = "0.32.0", features = ["trace", "logs"] }
+opentelemetry-semantic-conventions = "0.32.0"
+opentelemetry-appender-tracing = "0.32.0"
 
 tracing = { version = ">=0.1.40", default-features = false, features = ["std"] }
 # `tracing-core >=0.1.33` is required for compatibility with `tracing >=0.1.40`.

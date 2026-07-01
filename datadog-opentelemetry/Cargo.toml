@@ -80,12 +80,12 @@ datadog-opentelemetry = { path = ".", features = ["test-utils"] }
 
 # Testing the tracing API
 tracing = { version = "0.1.4" }
-tracing-opentelemetry = { version = "0.32" }
+tracing-opentelemetry = { version = "0.33" }
 tracing-subscriber = { version = "0.3" }
 
 # Testing the logging API 
 log = { version = "0.4.21" }
-opentelemetry-appender-log = { version = "0.31.0" }
+opentelemetry-appender-log = { version = "0.32.0" }
 
 # Benchmarking
 criterion = "0.5.1"
@@ -116,6 +116,7 @@ https = [
     "libdd-remote-config/https",
     "opentelemetry-otlp?/reqwest-rustls",
     "opentelemetry-otlp?/tls-roots",
+    "opentelemetry-otlp?/tls-ring",
 ]
 test-utils = [
     "libdd-data-pipeline/test-utils",

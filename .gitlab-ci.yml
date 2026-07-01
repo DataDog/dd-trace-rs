@@ -1,8 +1,12 @@
-stages:
-  - config-validation
-
 include:
   - local: ".gitlab/configuration-central-validation.yml"
+  - project: 'DataDog/apm-reliability/apm-sdks-benchmarks'
+    file: '.gitlab/ci-rust-axum-realworld-parallel.yml'
+
+stages:
+  - config-validation
+  - rust-axum-realworld-parallel
+  - rust-axum-realworld-parallel-slo
 
 variables:
   REPO_LANG: rust

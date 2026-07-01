@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use crate::{
+    configuration::TracePropagationBehaviorExtract,
     dd_debug,
     propagation::context::{InjectSpanContext, SpanContext, SpanLink},
 };
@@ -53,6 +54,9 @@ pub trait PropagationConfig: Send + Sync {
     /// Whether to stop extraction after the first successful propagator.
     fn trace_propagation_extract_first(&self) -> bool;
 
+    /// Propagation behavior when extracting: continue, restart or ignore
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract;
+
     /// Maximum length of the `x-datadog-tags` header value.
     fn datadog_tags_max_length(&self) -> usize;
 }
@@ -77,6 +81,18 @@ pub struct DatadogCompositePropagator<C: PropagationConfig> {
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
     fields: Vec<String>,
+}
+
+/// ExtractResult stores the action associated with that given result
+pub enum ExtractResult {
+    /// Continue current trace, enriching context
+    Continue(SpanContext),
+    /// No extracted context (absent)
+    Passthrough,
+    /// Restart a new trace, dropping everything except baggage
+    Restart(SpanLink),
+    /// Extracted context is being explicitly ignored
+    Ignore,
 }
 
 impl<C: PropagationConfig> DatadogCompositePropagator<C> {
@@ -120,18 +136,35 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         }
     }
 
-    /// Extracts trace context from the carrier using the configured extraction styles.
-    ///
-    /// Returns `None` if no valid trace context is found in the carrier.
-    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+    /// Runs the configured extractors, returning `None` when no context was found.
+    fn extracted_contexts(
+        &self,
+        carrier: &dyn Extractor,
+    ) -> Option<Vec<(SpanContext, TracePropagationStyle)>> {
         let contexts = self.extract_available_contexts(carrier);
-        if contexts.is_empty() {
-            return None;
+        (!contexts.is_empty()).then_some(contexts)
+    }
+
+    /// Extracts trace context from the carrier using the configured extraction styles.
+    /// Returns an [`ExtractResult`] indicating how the caller should treat the carrier.
+    pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
+        match self.config.trace_propagation_behavior_extract() {
+            TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
+            TracePropagationBehaviorExtract::Continue => match self.extracted_contexts(carrier) {
+                Some(contexts) => {
+                    ExtractResult::Continue(Self::resolve_contexts(contexts, carrier))
+                }
+                None => ExtractResult::Passthrough,
+            },
+            TracePropagationBehaviorExtract::Restart => match self.extracted_contexts(carrier) {
+                Some(contexts) => {
+                    let style = contexts[0].1;
+                    let span_context = Self::resolve_contexts(contexts, carrier);
+                    ExtractResult::Restart(SpanLink::restart(&span_context, style))
+                }
+                None => ExtractResult::Passthrough,
+            },
         }
-
-        let context = Self::resolve_contexts(contexts, carrier);
-
-        Some(context)
     }
 
     /// Injects trace context into the carrier using the configured injection styles.
@@ -250,6 +283,10 @@ impl PropagationConfig for crate::core::configuration::Config {
 
     fn trace_propagation_extract_first(&self) -> bool {
         self.trace_propagation_extract_first()
+    }
+
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        self.trace_propagation_behavior_extract()
     }
 
     fn datadog_tags_max_length(&self) -> usize {
@@ -493,7 +530,12 @@ pub(crate) mod tests {
                     };
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
-                    let context = propagator.extract(&carrier).unwrap_or_default();
+                    let context = match propagator.extract(&carrier) {
+                        ExtractResult::Continue(context) => context,
+                        ExtractResult::Passthrough => SpanContext::default(),
+                        _ => panic!("context is extracted")
+                    };
+
                     assert_eq!(context.trace_id, expected.trace_id);
                     assert_eq!(context.span_id, expected.span_id);
                     assert_eq!(context.sampling, expected.sampling);
@@ -1271,10 +1313,13 @@ pub(crate) mod tests {
                 "_dd.p.tid=1111111111111111".to_string(),
             ),
         ]);
-        let context = propagator.extract(&carrier).expect("context is extracted");
+        let context = propagator.extract(&carrier);
+        let ExtractResult::Continue(context) = context else {
+            panic!("context is extracted")
+        };
 
         assert_eq!(context.span_id, 987654320);
-        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY));
+        assert!(!context.tags.contains_key(DATADOG_LAST_PARENT_ID_KEY))
     }
 
     fn assert_hashmap_keys(hm1: &HashMap<String, String>, hm2: &HashMap<String, String>) {
