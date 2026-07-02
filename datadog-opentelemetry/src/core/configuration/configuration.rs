@@ -1307,7 +1307,7 @@ pub struct Config {
     otlp_traces_endpoint: ConfigItem<Cow<'static, str>>,
     /// OTLP traces headers (`key=value` comma-separated). Sensitive: excluded from telemetry.
     otlp_traces_headers: ConfigItem<Cow<'static, str>>,
-    /// OTLP traces protocol (only `http/json` is honored this phase).
+    /// OTLP traces protocol (`http/json` or `http/protobuf`; `grpc` is unsupported).
     otlp_traces_protocol: ConfigItem<Option<OtlpProtocol>>,
     /// OTLP traces timeout in milliseconds.
     otlp_traces_timeout: ConfigItem<u32>,
@@ -1863,8 +1863,17 @@ impl Config {
         *self.otlp_logs_timeout.value()
     }
 
-    /// The only OTLP protocol supported for trace export in this phase (`http/json`).
-    pub const OTLP_TRACES_SUPPORTED_PROTOCOL: OtlpProtocol = OtlpProtocol::HttpJson;
+    /// Resolves the OTLP traces protocol used for the wire encoding.
+    ///
+    /// Resolution order: `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` → `OTEL_EXPORTER_OTLP_PROTOCOL` →
+    /// default `http/json`. Both `http/json` and `http/protobuf` are supported (libdatadog
+    /// #2115). `grpc` is not supported for OTLP trace export — libdatadog speaks HTTP only — and
+    /// is surfaced here as [`OtlpProtocol::Grpc`] so the caller can warn and fall back.
+    pub fn resolved_otlp_traces_protocol(&self) -> OtlpProtocol {
+        self.otlp_traces_protocol()
+            .or_else(|| self.otlp_protocol())
+            .unwrap_or(OtlpProtocol::HttpJson)
+    }
 
     /// Returns the OTEL traces exporter type (`otlp`, `none`, or `None` if unset).
     pub fn otel_traces_exporter(&self) -> Option<&str> {
@@ -2906,7 +2915,8 @@ impl ConfigBuilder {
         self
     }
 
-    /// Set the OTLP traces protocol. Only `http/json` is honored this phase.
+    /// Set the OTLP traces protocol. `http/json` and `http/protobuf` are supported; `grpc` is
+    /// not (it falls back to `http/json` with a warning).
     ///
     /// **Default**: `(unset, treated as http/json)`
     ///
@@ -4934,6 +4944,50 @@ mod tests {
     fn test_otlp_traces_protocol_parsing() {
         let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/json")]);
         assert_eq!(config.otlp_traces_protocol(), Some(OtlpProtocol::HttpJson));
+
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/protobuf")]);
+        assert_eq!(
+            config.otlp_traces_protocol(),
+            Some(OtlpProtocol::HttpProtobuf)
+        );
+    }
+
+    #[test]
+    fn test_resolved_otlp_traces_protocol() {
+        // Default is http/json when nothing is set.
+        let config = config_from_env([("OTEL_TRACES_EXPORTER", "otlp")]);
+        assert_eq!(
+            config.resolved_otlp_traces_protocol(),
+            OtlpProtocol::HttpJson
+        );
+
+        // The trace-specific protocol is honored (protobuf is supported, libdatadog #2115).
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/protobuf")]);
+        assert_eq!(
+            config.resolved_otlp_traces_protocol(),
+            OtlpProtocol::HttpProtobuf
+        );
+
+        // Falls back to the generic OTLP protocol when the trace-specific one is unset.
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")]);
+        assert_eq!(
+            config.resolved_otlp_traces_protocol(),
+            OtlpProtocol::HttpProtobuf
+        );
+
+        // The trace-specific protocol wins over the generic one.
+        let config = config_from_env([
+            ("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/json"),
+            ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+        ]);
+        assert_eq!(
+            config.resolved_otlp_traces_protocol(),
+            OtlpProtocol::HttpJson
+        );
+
+        // `grpc` is surfaced as-is; the exporter warns and falls back to http/json.
+        let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "grpc")]);
+        assert_eq!(config.resolved_otlp_traces_protocol(), OtlpProtocol::Grpc);
     }
 
     // ----- OTEL_TRACES_SAMPLER mapping -----

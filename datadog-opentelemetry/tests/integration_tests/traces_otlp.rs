@@ -5,8 +5,9 @@
 //!
 //! These tests start an application that uses only the Datadog tracer's own OpenTelemetry-shim API
 //! (no external OpenTelemetry SDK setup) and verify that, when `OTEL_TRACES_EXPORTER=otlp` is set,
-//! sampled spans are emitted as OTLP HTTP/JSON to a local HTTP endpoint instead of to the Datadog
-//! agent in MessagePack.
+//! sampled spans are emitted as OTLP HTTP (JSON or protobuf, per
+//! `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`) to a local HTTP endpoint instead of to the Datadog agent
+//! in MessagePack.
 //!
 //! A minimal local HTTP server doubles as both the Datadog agent (`/info`, so the trace exporter
 //! worker can start) and the OTLP collector (`/v1/traces`, which captures the exported payload).
@@ -16,9 +17,7 @@ use std::time::Duration;
 
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
 use datadog_opentelemetry::make_test_tracer;
-use opentelemetry::trace::{
-    SamplingDecision, SamplingResult, SpanBuilder, TraceState, TracerProvider,
-};
+use opentelemetry::trace::{SpanBuilder, TracerProvider};
 use opentelemetry::Context;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -169,17 +168,15 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// Builds a tracer wired for OTLP export against the mock collector and emits one sampled span.
+///
+/// The default Datadog sampler keeps all root spans (rate 1.0), so a normally-started span is
+/// sampled — and therefore exported — without forcing a sampling decision on the span builder.
 fn emit_one_sampled_span(cfg: ConfigBuilder) {
     let cfg = Arc::new(cfg.build());
     let (tracer_provider, _propagator) = make_test_tracer(cfg);
     let tracer = tracer_provider.tracer("otlp-trace-export-test");
     let span = SpanBuilder::from_name("otlp.test.span")
         .with_kind(opentelemetry::trace::SpanKind::Server)
-        .with_sampling_result(SamplingResult {
-            decision: SamplingDecision::RecordAndSample,
-            attributes: vec![],
-            trace_state: TraceState::default(),
-        })
         .start_with_context(&tracer, &Context::new());
     drop(span);
     tracer_provider.force_flush().expect("force_flush failed");
@@ -247,6 +244,53 @@ async fn test_otlp_traces_exported_to_local_endpoint() {
     assert!(
         body_str.contains("traceId") && body_str.contains("spanId"),
         "exported payload was not lowerCamelCase OTLP JSON: {body_str}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_otlp_traces_exported_as_protobuf() {
+    let mut collector = MockCollector::start().await;
+
+    // Same wiring as the JSON test, but selecting the OTel-standard http/protobuf encoding.
+    let mut cfg = Config::builder();
+    cfg.set_service("otlp-protobuf-svc".to_string())
+        .set_env("test".to_string())
+        .set_version("9.9.9".to_string())
+        .set_trace_agent_url(collector.base_url.clone())
+        .set_otel_traces_exporter("otlp".to_string())
+        .set_otlp_traces_endpoint(format!("{}/v1/traces", collector.base_url))
+        .set_otlp_traces_protocol("http/protobuf".to_string());
+
+    assert!(cfg.build().otlp_traces_enabled());
+
+    std::thread::spawn(move || emit_one_sampled_span(cfg));
+
+    let request = collector
+        .next_trace_request()
+        .await
+        .expect("did not receive an OTLP /v1/traces request");
+
+    // OTLP HTTP/protobuf: posted to /v1/traces with the protobuf content type.
+    assert!(
+        request.path.ends_with("/v1/traces"),
+        "path was {}",
+        request.path
+    );
+    assert_eq!(
+        request.content_type.as_deref(),
+        Some("application/x-protobuf")
+    );
+
+    // The payload is binary protobuf, not JSON. Proto string fields are UTF-8, so the span name
+    // still appears verbatim in the bytes, while the lowerCamelCase JSON keys do not.
+    assert!(
+        request.body.contains("otlp.test.span"),
+        "protobuf payload did not contain the span name"
+    );
+    assert!(
+        !request.body.contains("resourceSpans"),
+        "protobuf payload unexpectedly looked like OTLP JSON: {}",
+        request.body
     );
 }
 

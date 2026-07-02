@@ -42,11 +42,9 @@ pub mod transform_tests;
 use attribute_keys::*;
 use otel_util::*;
 
-use std::{
-    borrow::{Borrow, Cow},
-    collections::{hash_map, HashMap},
-};
+use std::borrow::{Borrow, Cow};
 
+use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText;
 use opentelemetry::{
     trace::{Link, SpanKind},
@@ -161,13 +159,13 @@ fn otel_span_to_dd_span_minimal<'a>(
         parent_id,
         start,
         duration,
-        meta: HashMap::with_capacity(span.attr_len() + span.res_len()),
+        meta: VecMap::with_capacity(span.attr_len() + span.res_len()),
         // We will likely put _sampling_priority, maybe _dd.measured, top level
         // And by default tracing tags by code.line.number, thread.id and busy_ns/idle_ns
         //
         // Why 6? This seems like a good number to prevent small reallocations while not
         // using too much memory
-        metrics: HashMap::with_capacity(6),
+        metrics: VecMap::with_capacity(6),
         ..Default::default()
     };
     if let Some(error) = span.get_attr_num(DATADOG_ERROR) {
@@ -283,10 +281,12 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
         }
     }
     let error_msg_key = SpanStr::from_static_str("error.message");
-    if let hash_map::Entry::Vacant(error_msg_slot) = dd_span.meta.entry(error_msg_key.clone()) {
+    if !dd_span.meta.contains_key(&error_msg_key) {
         match status {
             opentelemetry::trace::Status::Error { description, .. } if !description.is_empty() => {
-                error_msg_slot.insert(SpanStr::from_cow(description.clone()));
+                dd_span
+                    .meta
+                    .insert(error_msg_key, SpanStr::from_cow(description.clone()));
             }
             _ => {
                 for key in ["http.response.status_code", "http.status_code"] {
@@ -590,15 +590,16 @@ pub fn otel_span_to_dd_span<'a>(
         SpanStr::from_string(otel_trace_id),
     );
 
-    if let hash_map::Entry::Vacant(version_slot) =
-        dd_span.meta.entry(SpanStr::from_static_str("version"))
-    {
+    let version_key = SpanStr::from_static_str("version");
+    if !dd_span.meta.contains_key(&version_key) {
         let version = otel_resource
             .get(&Key::from_static_str(SERVICE_VERSION.key()))
             .map(|v| v.to_string())
             .unwrap_or_default();
         if !version.is_empty() {
-            version_slot.insert(SpanStr::from_string(version));
+            dd_span
+                .meta
+                .insert(version_key, SpanStr::from_string(version));
         }
     }
 
@@ -620,10 +621,11 @@ pub fn otel_span_to_dd_span<'a>(
         }
     }
 
-    if let hash_map::Entry::Vacant(env_slot) = dd_span.meta.entry(SpanStr::from_static_str("env")) {
+    let env_key = SpanStr::from_static_str("env");
+    if !dd_span.meta.contains_key(&env_key) {
         let env = get_otel_env(&span_extracted);
         if !env.is_empty() {
-            env_slot.insert(SpanStr::from_cow(env));
+            dd_span.meta.insert(env_key, SpanStr::from_cow(env));
         }
     }
 
