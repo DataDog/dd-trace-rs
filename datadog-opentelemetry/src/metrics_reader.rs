@@ -21,6 +21,14 @@ use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
 
 use crate::dd_warn;
 
+/// A view function used to customize instrument aggregation, naming, etc.
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
+pub(crate) type MetricView = Arc<
+    dyn Fn(&opentelemetry_sdk::metrics::Instrument) -> Option<opentelemetry_sdk::metrics::Stream>
+        + Send
+        + Sync,
+>;
+
 /// Creates a meter provider with the given configuration.
 ///
 /// Returns a no-op meter provider if metrics are disabled or if initialization fails.
@@ -30,6 +38,7 @@ pub fn create_meter_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,
+    views: Vec<MetricView>,
 ) -> SdkMeterProvider {
     let metrics_enabled = config.metrics_otel_enabled();
     if !metrics_enabled {
@@ -106,10 +115,15 @@ pub fn create_meter_provider(
 
     let final_resource = build_otel_resource(&config, resource);
 
-    SdkMeterProvider::builder()
+    let mut builder = SdkMeterProvider::builder()
         .with_reader(reader)
-        .with_resource(final_resource)
-        .build()
+        .with_resource(final_resource);
+
+    for view in views {
+        builder = builder.with_view(move |instrument| view(instrument));
+    }
+
+    builder.build()
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]

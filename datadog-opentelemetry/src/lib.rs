@@ -671,6 +671,7 @@ pub struct DatadogMetricsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
     export_interval: Option<std::time::Duration>,
+    views: Vec<metrics_reader::MetricView>,
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
@@ -694,6 +695,20 @@ impl DatadogMetricsBuilder {
         self
     }
 
+    /// Adds a view for customizing instrument aggregation before export.
+    pub fn with_view<T>(mut self, view: T) -> Self
+    where
+        T: Fn(
+                &opentelemetry_sdk::metrics::Instrument,
+            ) -> Option<opentelemetry_sdk::metrics::Stream>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.views.push(Arc::new(view));
+        self
+    }
+
     /// Initializes the metrics provider and sets it as the global meter provider.
     pub fn init(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let meter_provider = self.init_local();
@@ -704,7 +719,12 @@ impl DatadogMetricsBuilder {
     /// Initializes the metrics provider without setting it as the global meter provider.
     pub fn init_local(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        metrics_reader::create_meter_provider(Arc::new(config), self.resource, self.export_interval)
+        metrics_reader::create_meter_provider(
+            Arc::new(config),
+            self.resource,
+            self.export_interval,
+            self.views,
+        )
     }
 }
 
@@ -716,6 +736,163 @@ pub fn metrics() -> DatadogMetricsBuilder {
         config: None,
         resource: None,
         export_interval: None,
+        views: Vec::new(),
+    }
+}
+
+#[cfg(all(test, any(feature = "metrics-grpc", feature = "metrics-http")))]
+mod metrics_tests {
+    use std::sync::{Arc, Weak};
+    use std::time::Duration;
+
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::{
+        InstrumentKind, ManualReader, Pipeline, SdkMeterProvider, Stream, Temporality,
+    };
+
+    use super::{metrics, DatadogMetricsBuilder};
+
+    const TEST_METER_NAME: &str = "test-meter";
+
+    /// Keeps a handle to the inner [`ManualReader`] so tests can call `collect`
+    /// after the [`SdkMeterProvider`] has taken ownership of the boxed reader.
+    #[derive(Debug)]
+    struct SharedManualReader(Arc<ManualReader>);
+
+    impl MetricReader for SharedManualReader {
+        fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
+            self.0.register_pipeline(pipeline)
+        }
+
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+            self.0.collect(rm)
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            self.0.force_flush()
+        }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+            self.0.shutdown_with_timeout(timeout)
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            self.0.temporality(kind)
+        }
+    }
+
+    fn collect_metric_names(
+        datadog_metrics_builder: DatadogMetricsBuilder,
+        record_metrics: impl FnOnce(&opentelemetry::metrics::Meter),
+    ) -> Vec<String> {
+        let manual_reader = Arc::new(ManualReader::builder().build());
+        let reader = SharedManualReader(Arc::clone(&manual_reader));
+
+        let mut sdk_builder = SdkMeterProvider::builder().with_reader(reader);
+        for view in datadog_metrics_builder.views {
+            sdk_builder = sdk_builder.with_view(move |instrument| view(instrument));
+        }
+        let provider = sdk_builder.build();
+
+        let meter = provider.meter(TEST_METER_NAME);
+        record_metrics(&meter);
+
+        let mut resource_metrics = ResourceMetrics::default();
+        manual_reader.collect(&mut resource_metrics).unwrap();
+
+        resource_metrics
+            .scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .map(|m| m.name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_metrics_with_view_renames_instrument() {
+        let metric_names = collect_metric_names(
+            metrics().with_view(|instrument| {
+                if instrument.name() == "test.counter" {
+                    Some(
+                        Stream::builder()
+                            .with_name("renamed.counter")
+                            .build()
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                }
+            }),
+            |meter| {
+                let counter = meter.u64_counter("test.counter").build();
+                counter.add(1, &[]);
+            },
+        );
+
+        assert!(
+            metric_names.contains(&"renamed.counter".to_string()),
+            "expected view to rename `test.counter` to `renamed.counter`, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.counter".to_string()),
+            "original instrument name should not appear once renamed by the view, got: {metric_names:?}"
+        );
+    }
+
+    #[test]
+    fn test_metrics_with_view_multiple_renames_instruments() {
+        let metric_names = collect_metric_names(
+            metrics()
+                .with_view(|instrument| {
+                    if instrument.name() == "test.counter" {
+                        Some(
+                            Stream::builder()
+                                .with_name("renamed.counter")
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .with_view(|instrument| {
+                    if instrument.name() == "test.histogram" {
+                        Some(
+                            Stream::builder()
+                                .with_name("renamed.histogram")
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                }),
+            |meter| {
+                let counter = meter.u64_counter("test.counter").build();
+                let histogram = meter.f64_histogram("test.histogram").build();
+                counter.add(1, &[]);
+                histogram.record(1.0, &[]);
+            },
+        );
+
+        assert!(
+            metric_names.contains(&"renamed.counter".to_string()),
+            "expected first view to rename `test.counter`, got: {metric_names:?}"
+        );
+        assert!(
+            metric_names.contains(&"renamed.histogram".to_string()),
+            "expected second view to rename `test.histogram`, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.counter".to_string()),
+            "original counter name should not appear once renamed, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.histogram".to_string()),
+            "original histogram name should not appear once renamed, got: {metric_names:?}"
+        );
     }
 }
 
