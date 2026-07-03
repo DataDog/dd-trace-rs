@@ -39,6 +39,7 @@ libdd-shared-runtime = { version = "2.0.0", default-features = false }
 libdd-remote-config = { version = "2.0.0", default-features = false, features = [
     "client",
 ] }
+libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",
