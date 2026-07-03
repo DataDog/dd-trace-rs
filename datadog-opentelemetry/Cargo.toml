@@ -67,6 +67,7 @@ libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
+libdd-heap-allocator = { workspace = true, optional = true }
 percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
@@ -115,6 +116,21 @@ logs-http = [
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
 _unstable_propagation = []
+# Emits sampled allocation USDT probes for out-of-process profilers (e.g.
+# dd-otel-host-profiler) to pick up. Depends on libdatadog's in-progress
+# sgg/heap-prof-poc branch; see the workspace Cargo.toml comment.
+#
+# `memory-profiling` includes live-heap (retained-heap) tracking: sampled
+# allocations are flagged and frees are sampled so the profiler can
+# balance allocs against frees. `memory-profiling-alloc-only` compiles
+# that out - allocation profiling only, with lower overhead and no in-band
+# pointer metadata. Enable exactly one; if both end up enabled, live-heap
+# wins (features are additive).
+memory-profiling = ["_memory-profiling", "libdd-heap-allocator/live-heap"]
+memory-profiling-alloc-only = ["_memory-profiling"]
+# Internal umbrella: pulls the allocator dependency and gates the
+# memory_profiling module. Not part of the public feature surface.
+_memory-profiling = ["dep:libdd-heap-allocator"]
 https = [
     "libdd-data-pipeline/https",
     "libdd-capabilities-impl/https",
