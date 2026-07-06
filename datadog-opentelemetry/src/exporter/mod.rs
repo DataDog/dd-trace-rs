@@ -584,7 +584,7 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     ) -> TraceExporterHandle {
         let handle = thread::spawn({
             move || {
-                let trace_exporter = match builder.build() {
+                let trace_exporter = match builder.build::<NativeCapabilities>() {
                     Ok(exporter) => exporter,
                     Err(e) => {
                         return Err(e);

@@ -9,11 +9,12 @@ use libdd_data_pipeline::trace_exporter::{
     agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
     TraceExporterOutputFormat,
 };
+use libdd_data_pipeline::OtlpProtocol as LibddOtlpProtocol;
 
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
-    configuration::Config,
+    configuration::{Config, OtlpProtocol},
     core::telemetry_session,
     ddtrace_transform,
     exporter::{AsyncExporterError, AsyncTraceExporter, Exporter, TraceChunk},
@@ -62,6 +63,44 @@ impl DatadogExporter {
         if let Some(version) = config.version() {
             builder.set_app_version(version);
         }
+
+        // OTLP trace export: when enabled, route trace chunks through libdatadog's OTLP HTTP
+        // exporter path (JSON or protobuf) instead of the Datadog MessagePack agent path. The
+        // agent URL is kept separate (set_url above) so /info, Remote Config, and telemetry keep
+        // talking to the agent. libdatadog drops unsampled (priority < 1) spans via drop_chunks
+        // before sending.
+        if config.otlp_traces_enabled() {
+            let endpoint = config.resolved_otlp_traces_endpoint();
+            let headers = config.resolved_otlp_traces_headers();
+            let timeout = config.resolved_otlp_traces_timeout();
+
+            // Map the resolved OTEL protocol to libdatadog's wire encoding. OTLP trace export
+            // speaks HTTP only, so `grpc` is unsupported and falls back to http/json with a
+            // warning.
+            let protocol = match config.resolved_otlp_traces_protocol() {
+                OtlpProtocol::HttpProtobuf => LibddOtlpProtocol::HttpProtobuf,
+                OtlpProtocol::HttpJson => LibddOtlpProtocol::HttpJson,
+                OtlpProtocol::Grpc => {
+                    crate::dd_warn!(
+                        "OTLP trace export does not support the grpc protocol; sending http/json instead. Set OTEL_EXPORTER_OTLP_TRACES_PROTOCOL to http/json or http/protobuf."
+                    );
+                    LibddOtlpProtocol::HttpJson
+                }
+            };
+
+            crate::dd_debug!(
+                "OTLP trace export enabled. endpoint='{endpoint}' protocol={protocol:?} timeout_ms={timeout} header_count={}",
+                headers.len()
+            );
+            builder
+                .set_otlp_endpoint(&endpoint)
+                .set_otlp_protocol(protocol)
+                .set_connection_timeout(Some(timeout as u64));
+            if !headers.is_empty() {
+                builder.set_otlp_headers(headers);
+            }
+        }
+
         if config.telemetry_enabled() {
             builder.enable_telemetry(TelemetryConfig {
                 heartbeat: (config.telemetry_heartbeat_interval() * 1000.0) as u64,

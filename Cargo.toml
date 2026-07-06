@@ -23,18 +23,22 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "6.0.0", features = [
+# Libdatadog dependencies - pinned to the git commit that added the OTLP HTTP/protobuf
+# trace-export API (libdatadog #2115), which is not yet published to crates.io. This is the
+# earliest commit with protobuf support; pinning to it (rather than a later tag) keeps the
+# libdatadog delta minimal and avoids unrelated post-#2115 exporter/runtime changes.
+# Switch back to the published crates.io versions once a release containing #2115 ships.
+libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "8.0.0", default-features = false }
-libdd-capabilities-impl = { version = "2.0.0", default-features = false }
-libdd-telemetry = { version = "5.0.1", default-features = false }
-libdd-common = { version = "4.2.0", default-features = false }
-libdd-tinybytes = { version = "1.1.1", default-features = false }
-libdd-library-config = { version = "2.0.0", default-features = false }
-libdd-sampling = { version = "4.0.0", default-features = false }
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-library-config = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
+libdd-sampling = { git = "https://github.com/DataDog/libdatadog", rev = "4e8e6cc8c0fe083089cc8e57f0fd26667f29941c", default-features = false }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",

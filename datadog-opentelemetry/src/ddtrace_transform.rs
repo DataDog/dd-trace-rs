@@ -4,8 +4,6 @@
 //! This module contains trace mapping from otel to datadog
 //! specific to datadog-opentelemetry
 
-use std::collections::hash_map;
-
 use crate::{
     core::sampling,
     mappings::{
@@ -28,15 +26,16 @@ fn otel_sampling_to_dd_sampling(
     otel_trace_flags: opentelemetry::trace::TraceFlags,
     dd_span: &mut DdSpan,
 ) {
-    if let hash_map::Entry::Vacant(e) = dd_span
-        .metrics
-        .entry(SpanStr::from_static_str("_sampling_priority_v1"))
-    {
-        if otel_trace_flags.is_sampled() {
-            e.insert(sampling::priority::AUTO_KEEP.into_i8() as f64);
+    let priority_key = SpanStr::from_static_str("_sampling_priority_v1");
+    if !dd_span.metrics.contains_key(&priority_key) {
+        let priority = if otel_trace_flags.is_sampled() {
+            sampling::priority::AUTO_KEEP
         } else {
-            e.insert(sampling::priority::AUTO_REJECT.into_i8() as f64);
-        }
+            sampling::priority::AUTO_REJECT
+        };
+        dd_span
+            .metrics
+            .insert(priority_key, priority.into_i8() as f64);
     }
 }
 

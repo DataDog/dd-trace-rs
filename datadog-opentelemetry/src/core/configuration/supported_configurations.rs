@@ -24,6 +24,7 @@ pub(crate) enum SupportedConfigurations {
     DD_TELEMETRY_HEARTBEAT_INTERVAL,
     DD_TELEMETRY_LOG_COLLECTION_ENABLED,
     DD_TRACE_AGENT_PORT,
+    DD_TRACE_AGENT_PROTOCOL_VERSION,
     DD_TRACE_AGENT_URL,
     DD_TRACE_BAGGAGE_TAG_KEYS,
     DD_TRACE_ENABLED,
@@ -53,12 +54,19 @@ pub(crate) enum SupportedConfigurations {
     OTEL_EXPORTER_OTLP_METRICS_TIMEOUT,
     OTEL_EXPORTER_OTLP_PROTOCOL,
     OTEL_EXPORTER_OTLP_TIMEOUT,
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    OTEL_EXPORTER_OTLP_TRACES_HEADERS,
+    OTEL_EXPORTER_OTLP_TRACES_PROTOCOL,
+    OTEL_EXPORTER_OTLP_TRACES_TIMEOUT,
     OTEL_LOGS_EXPORTER,
     OTEL_METRICS_EXPORTER,
     OTEL_METRIC_EXPORT_INTERVAL,
     OTEL_METRIC_EXPORT_TIMEOUT,
     OTEL_RESOURCE_ATTRIBUTES,
     OTEL_SERVICE_NAME,
+    OTEL_TRACES_EXPORTER,
+    OTEL_TRACES_SAMPLER,
+    OTEL_TRACES_SAMPLER_ARG,
     _DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
 
     /// Used for testing purposes only
@@ -95,6 +103,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => "DD_TELEMETRY_HEARTBEAT_INTERVAL",
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
             SupportedConfigurations::DD_TRACE_AGENT_PORT => "DD_TRACE_AGENT_PORT",
+            SupportedConfigurations::DD_TRACE_AGENT_PROTOCOL_VERSION => "DD_TRACE_AGENT_PROTOCOL_VERSION",
             SupportedConfigurations::DD_TRACE_AGENT_URL => "DD_TRACE_AGENT_URL",
             SupportedConfigurations::DD_TRACE_BAGGAGE_TAG_KEYS => "DD_TRACE_BAGGAGE_TAG_KEYS",
             SupportedConfigurations::DD_TRACE_ENABLED => "DD_TRACE_ENABLED",
@@ -124,12 +133,19 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_TIMEOUT => "OTEL_EXPORTER_OTLP_METRICS_TIMEOUT",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_PROTOCOL => "OTEL_EXPORTER_OTLP_PROTOCOL",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_TIMEOUT => "OTEL_EXPORTER_OTLP_TIMEOUT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_ENDPOINT => "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_HEADERS => "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_PROTOCOL => "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+            SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_TIMEOUT => "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT",
             SupportedConfigurations::OTEL_LOGS_EXPORTER => "OTEL_LOGS_EXPORTER",
             SupportedConfigurations::OTEL_METRICS_EXPORTER => "OTEL_METRICS_EXPORTER",
             SupportedConfigurations::OTEL_METRIC_EXPORT_INTERVAL => "OTEL_METRIC_EXPORT_INTERVAL",
             SupportedConfigurations::OTEL_METRIC_EXPORT_TIMEOUT => "OTEL_METRIC_EXPORT_TIMEOUT",
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES => "OTEL_RESOURCE_ATTRIBUTES",
             SupportedConfigurations::OTEL_SERVICE_NAME => "OTEL_SERVICE_NAME",
+            SupportedConfigurations::OTEL_TRACES_EXPORTER => "OTEL_TRACES_EXPORTER",
+            SupportedConfigurations::OTEL_TRACES_SAMPLER => "OTEL_TRACES_SAMPLER",
+            SupportedConfigurations::OTEL_TRACES_SAMPLER_ARG => "OTEL_TRACES_SAMPLER_ARG",
             SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED => "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED",
             #[cfg(test)]
             SupportedConfigurations::DD_COMPLEX_STRUCT => "DD_COMPLEX_STRUCT",
@@ -171,6 +187,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_HEADERS
         )
     }
 }
