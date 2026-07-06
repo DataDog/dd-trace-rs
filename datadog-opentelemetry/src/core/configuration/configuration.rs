@@ -1355,16 +1355,22 @@ impl Config {
                 .update_parsed(default.trace_propagation_behavior_extract),
             // OTEL_PROPAGATORS is an alias/fallback for DD_TRACE_PROPAGATION_STYLE. An empty
             // value on either key is treated as unset (consistent with the OTEL_SERVICE_NAME
-            // fallback), so the comma-split is done in the transform rather than via DdTags.
-            trace_propagation_style: cisu.update_non_empty_string_with_fallback(
-                default.trace_propagation_style,
-                SupportedConfigurations::OTEL_PROPAGATORS,
-                |styles| {
-                    TracePropagationStyle::from_tags(Some(
-                        styles.split(',').map(|s| s.to_string()).collect(),
-                    ))
-                },
-            ),
+            // fallback). A value that parses to no recognized styles (e.g. only unsupported
+            // OpenTelemetry propagators like "jaeger") also falls back to the default rather
+            // than silently disabling propagation.
+            trace_propagation_style: {
+                let default_style = default.trace_propagation_style.value().clone();
+                cisu.update_non_empty_string_with_fallback(
+                    default.trace_propagation_style,
+                    SupportedConfigurations::OTEL_PROPAGATORS,
+                    move |styles| match TracePropagationStyle::from_tags(Some(
+                        DdTags::from_str(&styles).unwrap().0,
+                    )) {
+                        Some(styles) if styles.is_empty() => default_style,
+                        other => other,
+                    },
+                )
+            },
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -4410,6 +4416,28 @@ mod tests {
         assert_eq!(
             config.trace_propagation_style(),
             Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_all_unsupported_uses_default() {
+        // When OTEL_PROPAGATORS contains only unsupported values it parses to no valid
+        // styles; rather than disabling propagation, the global style falls back to the
+        // default set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "jaeger")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
         );
     }
 
