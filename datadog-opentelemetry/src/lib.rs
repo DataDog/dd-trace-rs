@@ -538,6 +538,9 @@ fn make_tracer(
 
         let dd_resource =
             create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+        // Resolve a Resource-provided service.name into config before the span processor (and its
+        // trace exporter) are built below, so it reaches the OTLP exporter metadata.
+        resolve_service_from_resource(&config, &dd_resource);
         tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
         let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
@@ -599,6 +602,30 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
     }
     builder = builder.with_attributes(additional.into_iter().map(|(k, v)| KeyValue::new(k, v)));
     builder.build()
+}
+
+/// If `DD_SERVICE` was not set (config service is at its default) and the resolved OTel Resource
+/// provides a `service.name`, promote it to config's calculated service name.
+///
+/// Called from the `tracing()` init *before* the trace exporter is built, so a service provided
+/// only via a programmatic OpenTelemetry Resource reaches the libdatadog OTLP exporter metadata
+/// (and hence the OTLP Resource `service.name`), which is snapshotted at build time. Also called
+/// from [`DatadogSpanProcessor::set_resource`] for the external-processor path; the two calls are
+/// idempotent.
+pub(crate) fn resolve_service_from_resource(config: &Config, dd_resource: &Resource) {
+    // Only promote when DD_SERVICE was not explicitly set.
+    if !config.service_is_default() {
+        return;
+    }
+    let Some(service_name) = dd_resource
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|service_name| service_name.as_str().to_string())
+    else {
+        return;
+    };
+    if service_name != config.service().to_string() {
+        config.set_calculated_service_name(Some(service_name));
+    }
 }
 
 fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
@@ -761,5 +788,39 @@ pub fn logs() -> DatadogLogsBuilder {
     DatadogLogsBuilder {
         config: None,
         resource: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::configuration::Config;
+    use opentelemetry_sdk::Resource;
+
+    #[test]
+    fn resolve_service_from_resource_promotes_resource_service_when_dd_service_default() {
+        // DD_SERVICE unset (config at its default) + the OTel Resource carries a service.name:
+        // config adopts it, so the (build-time) OTLP exporter metadata reflects it.
+        let config = Config::builder().build();
+        assert!(config.service_is_default());
+        let resource = Resource::builder()
+            .with_service_name("otel-resource-svc")
+            .build();
+        resolve_service_from_resource(&config, &resource);
+        assert_eq!(&*config.service(), "otel-resource-svc");
+    }
+
+    #[test]
+    fn resolve_service_from_resource_keeps_explicit_dd_service() {
+        // An explicitly configured service wins over the Resource service.name.
+        let mut builder = Config::builder();
+        builder.set_service("dd-svc".to_string());
+        let config = builder.build();
+        assert!(!config.service_is_default());
+        let resource = Resource::builder()
+            .with_service_name("otel-resource-svc")
+            .build();
+        resolve_service_from_resource(&config, &resource);
+        assert_eq!(&*config.service(), "dd-svc");
     }
 }
