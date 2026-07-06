@@ -187,6 +187,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_TRACES_HEADERS
         )
     }
 }

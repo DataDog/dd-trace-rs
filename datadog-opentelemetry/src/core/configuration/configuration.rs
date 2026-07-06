@@ -1587,7 +1587,9 @@ impl Config {
             &self.otlp_logs_timeout,
             &self.otel_traces_exporter,
             &self.otlp_traces_endpoint,
-            // otlp_traces_headers is intentionally excluded: it is sensitive.
+            // Reported like the other OTLP header configs: gated by `is_sensitive()`
+            // (OTEL_EXPORTER_OTLP_TRACES_HEADERS is marked sensitive), so its value is omitted.
+            &self.otlp_traces_headers,
             &self.otlp_traces_protocol,
             &self.otlp_traces_timeout,
             &self.otel_traces_sampler,
@@ -4686,6 +4688,7 @@ mod tests {
         const SENTINEL_OTLP_BASE: &str = "dd-api-key=SENTINEL_OTLP_BASE";
         const SENTINEL_OTLP_METRICS: &str = "dd-api-key=SENTINEL_OTLP_METRICS";
         const SENTINEL_OTLP_LOGS: &str = "dd-api-key=SENTINEL_OTLP_LOGS";
+        const SENTINEL_OTLP_TRACES: &str = "dd-api-key=SENTINEL_OTLP_TRACES";
 
         let mut sources = CompositeSource::new();
         sources.add_source(HashMapSource::from_iter(
@@ -4694,6 +4697,7 @@ mod tests {
                 ("OTEL_EXPORTER_OTLP_HEADERS", SENTINEL_OTLP_BASE),
                 ("OTEL_EXPORTER_OTLP_METRICS_HEADERS", SENTINEL_OTLP_METRICS),
                 ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", SENTINEL_OTLP_LOGS),
+                ("OTEL_EXPORTER_OTLP_TRACES_HEADERS", SENTINEL_OTLP_TRACES),
                 // Non-sensitive exporter configurations that must still be reported.
                 ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
                 ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
@@ -4708,6 +4712,7 @@ mod tests {
         assert_eq!(config.otlp_headers(), SENTINEL_OTLP_BASE);
         assert_eq!(config.otlp_metrics_headers(), SENTINEL_OTLP_METRICS);
         assert_eq!(config.otlp_logs_headers(), SENTINEL_OTLP_LOGS);
+        assert_eq!(config.otlp_traces_headers(), SENTINEL_OTLP_TRACES);
 
         let configurations = collect_telemetry_configurations(&config);
 
@@ -4716,6 +4721,7 @@ mod tests {
             SENTINEL_OTLP_BASE,
             SENTINEL_OTLP_METRICS,
             SENTINEL_OTLP_LOGS,
+            SENTINEL_OTLP_TRACES,
         ] {
             assert!(
                 !configurations.iter().any(|c| c.value.contains(sentinel)),
@@ -4728,6 +4734,7 @@ mod tests {
             "OTEL_EXPORTER_OTLP_HEADERS",
             "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
             "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+            "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
         ] {
             assert!(
                 !configurations.iter().any(|c| c.name == name),

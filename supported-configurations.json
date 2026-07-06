@@ -387,7 +387,8 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["otlp_traces_headers"]
+        "propertyKeys": ["otlp_traces_headers"],
+        "sensitive": true
       }
     ],
     "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": [
