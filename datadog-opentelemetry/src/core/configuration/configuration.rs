@@ -14,6 +14,7 @@ use std::{borrow::Cow, sync::OnceLock};
 #[cfg(target_os = "linux")]
 use libdd_library_config::tracer_metadata::TracerMetadata;
 
+use percent_encoding::percent_decode_str;
 use rustc_version_runtime::version;
 
 use super::{ParsedSamplingRules, SamplingRuleConfig};
@@ -101,19 +102,32 @@ const OTLP_HTTP_DEFAULT_PORT: u16 = 4318;
 
 /// Parses an OTLP headers string (`key=value` comma-separated) into `(key, value)` pairs.
 ///
-/// Entries without a `=` separator are skipped. Keys and values are trimmed and percent-decoded
-/// is not applied (values are passed through as-is, matching the OpenTelemetry environment-variable
-/// specification for simple header lists).
+/// Entries without a `=` separator are skipped. Keys and values are trimmed and then
+/// percent-decoded, per the OpenTelemetry specification for the `OTEL_EXPORTER_OTLP_*_HEADERS`
+/// environment variables (and matching the metrics/logs OTLP exporter behavior). Splitting on `,`
+/// and `=` happens before decoding, so percent-encoded separators in a value (`%2C`, `%3D`) are
+/// preserved and decoded into the value. Example: `Authorization=Bearer%20token` yields
+/// `("Authorization", "Bearer token")`.
 fn parse_otlp_headers(headers: &str) -> Vec<(String, String)> {
     headers
         .split(',')
         .filter_map(|entry| {
-            entry
-                .split_once('=')
-                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+            entry.split_once('=').map(|(k, v)| {
+                (
+                    percent_decode_header_part(k.trim()),
+                    percent_decode_header_part(v.trim()),
+                )
+            })
         })
         .filter(|(k, _)| !k.is_empty())
         .collect()
+}
+
+/// Percent-decodes a single OTLP header key or value (`%XX` escapes). Invalid or incomplete
+/// escapes are left as-is, and invalid UTF-8 is replaced lossily; a part with no `%` is returned
+/// unchanged.
+fn percent_decode_header_part(part: &str) -> String {
+    percent_decode_str(part).decode_utf8_lossy().into_owned()
 }
 
 /// Maps an `OTEL_TRACES_SAMPLER` value (with its `OTEL_TRACES_SAMPLER_ARG`) to a Datadog trace
@@ -1913,10 +1927,18 @@ impl Config {
         *self.otel_traces_sampler_arg.value()
     }
 
-    /// Returns the sample rate implied by `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG`, or
-    /// `None` when neither is explicitly set (i.e. both at their defaults). When `None`, the
-    /// default parent-based-always-on behavior is preserved by leaving libdatadog's no-rule
-    /// 100% fallback in place rather than installing a catch-all rule.
+    /// Returns the sample rate implied by `OTEL_TRACES_SAMPLER`/`OTEL_TRACES_SAMPLER_ARG` that
+    /// warrants installing a catch-all sampling rule, or `None` to leave libdatadog's default
+    /// no-rule 100% behavior in place.
+    ///
+    /// `None` is returned when neither is explicitly set, and — importantly — also whenever the
+    /// resolved rate is 100% (`always_on`, the default sampler, or `traceidratio` with arg `1.0`).
+    /// A `1.0` catch-all rule is *not* equivalent to the no-rule fallback: libdatadog applies
+    /// `DD_TRACE_RATE_LIMIT` to traces matching an explicit rule, so installing one would silently
+    /// drop traces past the limiter for users who asked to keep everything. Because `always_on`
+    /// resolves to `1.0` regardless of the arg, this also means `OTEL_TRACES_SAMPLER_ARG` only has
+    /// an effect for the `*traceidratio` samplers. Only a genuine sub-100% (or drop-all) rate
+    /// installs a rule.
     ///
     /// Explicit `DD_TRACE_SAMPLE_RATE` / `DD_TRACE_SAMPLING_RULES` take precedence over this and
     /// are applied independently in [`Config::effective_initial_rules`].
@@ -1926,10 +1948,13 @@ impl Config {
         if !sampler_set && !arg_set {
             return None;
         }
-        Some(otel_sampler_to_sample_rate(
-            self.otel_traces_sampler(),
-            self.otel_traces_sampler_arg(),
-        ))
+        let rate =
+            otel_sampler_to_sample_rate(self.otel_traces_sampler(), self.otel_traces_sampler_arg());
+        if rate >= 1.0 {
+            None
+        } else {
+            Some(rate)
+        }
     }
 
     /// Returns the configured Datadog agent protocol version (`DD_TRACE_AGENT_PROTOCOL_VERSION`),
@@ -4927,6 +4952,23 @@ mod tests {
             parse_otlp_headers("novalue,k=v"),
             vec![("k".to_string(), "v".to_string())]
         );
+
+        // Values are percent-decoded (OTel spec + parity with the metrics/logs exporter): a
+        // space encoded as `%20`, and separators encoded as `%2C` / `%3D` survive the split and
+        // decode into the value rather than corrupting parsing.
+        assert_eq!(
+            parse_otlp_headers("Authorization=Bearer%20token"),
+            vec![("Authorization".to_string(), "Bearer token".to_string())]
+        );
+        assert_eq!(
+            parse_otlp_headers("k=a%2Cb%3Dc"),
+            vec![("k".to_string(), "a,b=c".to_string())]
+        );
+        // Invalid/incomplete escapes are left as-is rather than dropped.
+        assert_eq!(
+            parse_otlp_headers("k=100%"),
+            vec![("k".to_string(), "100%".to_string())]
+        );
     }
 
     #[test]
@@ -5077,6 +5119,36 @@ mod tests {
         let rules = config.effective_initial_rules();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].sample_rate, 0.2);
+    }
+
+    #[test]
+    fn test_always_on_sampler_does_not_install_catch_all() {
+        // always_on (and the default sampler) resolve to 100%, which is already libdatadog's
+        // no-rule behavior. Installing a 1.0 catch-all rule would subject kept traces to
+        // DD_TRACE_RATE_LIMIT, silently dropping traffic — so no rule must be installed.
+        for sampler in ["always_on", "parentbased_always_on"] {
+            let config = config_from_env([("OTEL_TRACES_SAMPLER", sampler)]);
+            assert_eq!(
+                config.otel_traces_sampler_rate(),
+                None,
+                "{sampler} should not install a catch-all rule"
+            );
+            assert!(
+                config.effective_initial_rules().is_empty(),
+                "{sampler} should leave the no-rule 100% fallback in place"
+            );
+        }
+
+        // The sampler arg only affects the *traceidratio variants: with the default (always_on)
+        // sampler, a stray arg must not install a catch-all rule.
+        let config = config_from_env([("OTEL_TRACES_SAMPLER_ARG", "0.2")]);
+        assert_eq!(config.otel_traces_sampler_rate(), None);
+        assert!(config.effective_initial_rules().is_empty());
+
+        // always_off still installs a drop-all rule (0.0 is not the default keep-all behavior).
+        let config = config_from_env([("OTEL_TRACES_SAMPLER", "parentbased_always_off")]);
+        assert_eq!(config.otel_traces_sampler_rate(), Some(0.0));
+        assert_eq!(config.effective_initial_rules().len(), 1);
     }
 
     #[test]

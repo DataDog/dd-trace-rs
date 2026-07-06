@@ -141,7 +141,12 @@ fn otel_span_to_dd_span_minimal<'a>(
     span: &SpanExtractArgs<'a, '_>,
     is_top_level: bool,
 ) -> DdSpan<'a> {
-    let (trace_id_lower_half, _) = otel_trace_id_to_dd_id(span.span.span_context.trace_id());
+    // Preserve the full 128-bit trace ID. libdatadog's OTLP encoder reconstructs the exported
+    // trace ID from the high 64 bits of this field (`trace_id >> 64`); the Datadog v0.4 agent
+    // path truncates it to the low 64 bits on the wire, so keeping the full value here is safe
+    // for both. Storing only the lower half would zero the high bits and corrupt the OTLP trace
+    // ID for any span whose trace ID has a non-zero high half (all locally generated ones do).
+    let trace_id = u128::from_be_bytes(span.span.span_context.trace_id().to_bytes());
     let span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
     let parent_id = otel_span_id_to_dd_id(span.span.parent_span_id);
     let start = time_as_unix_nanos(span.span.start_time);
@@ -154,7 +159,7 @@ fn otel_span_to_dd_span_minimal<'a>(
         name: SpanStr::from_cow(span.get_attr_str(DATADOG_NAME)),
         resource: SpanStr::from_cow(span.get_attr_str(DATADOG_RESOURCE)),
         r#type: SpanStr::from_cow(span.get_attr_str(DATADOG_TYPE)),
-        trace_id: trace_id_lower_half.into(),
+        trace_id,
         span_id,
         parent_id,
         start,

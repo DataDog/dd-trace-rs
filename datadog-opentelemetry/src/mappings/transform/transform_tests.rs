@@ -261,7 +261,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "server.request".into(),
                 resource: "/path".into(),
                 service: "pylons".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -342,7 +342,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "myservice".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -436,7 +436,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "pylons".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -537,7 +537,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "READ".into(),
                 resource: "/path".into(),
                 service: "mongo".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -614,7 +614,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -689,7 +689,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
-                trace_id: 2594128270069917171,
+                trace_id: 0x72df520af2bde7a5240031ead750e5f3,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
