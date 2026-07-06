@@ -67,8 +67,12 @@ impl DatadogExporter {
         // OTLP trace export: when enabled, route trace chunks through libdatadog's OTLP HTTP
         // exporter path (JSON or protobuf) instead of the Datadog MessagePack agent path. The
         // agent URL is kept separate (set_url above) so /info, Remote Config, and telemetry keep
-        // talking to the agent. libdatadog drops unsampled (priority < 1) spans via drop_chunks
-        // before sending.
+        // talking to the agent. Unsampled chunks are dropped strictly for the OTLP path in
+        // `MapperExporter::trace_chunks` (see `otlp_export_active` below).
+        //
+        // `otlp_export_active` is set true only when trace chunks are actually exported over OTLP
+        // (requested and using a supported HTTP encoding).
+        let mut otlp_export_active = false;
         if config.otlp_traces_enabled() {
             // Map the resolved OTEL protocol to libdatadog's wire encoding. OTLP trace export
             // speaks HTTP only (`http/json`, `http/protobuf`). For `grpc` we deliberately do NOT
@@ -88,6 +92,7 @@ impl DatadogExporter {
             };
 
             if let Some(protocol) = protocol {
+                otlp_export_active = true;
                 let endpoint = config.resolved_otlp_traces_endpoint();
                 let headers = config.resolved_otlp_traces_headers();
                 let timeout = config.resolved_otlp_traces_timeout();
@@ -128,6 +133,7 @@ impl DatadogExporter {
                     otel_resource: arc_swap::Cache::new(otel_resource.clone()),
                     cached_config: CachedConfig::new(&config),
                     config: config.clone(),
+                    otlp_export_active,
                 }),
                 builder,
             ),
@@ -167,6 +173,9 @@ struct MapperExporter {
     >,
     cached_config: CachedConfig,
     config: Arc<Config>,
+    /// True when trace chunks are exported over OTLP (vs the Datadog agent). Enables strict OTel
+    /// sampling for the OTLP path (see `trace_chunks`).
+    otlp_export_active: bool,
 }
 
 impl Exporter<SpanData> for MapperExporter {
@@ -176,7 +185,7 @@ impl Exporter<SpanData> for MapperExporter {
         trace_exporter: &TraceExporter<NativeCapabilities>,
     ) -> Result<AgentResponse, TraceExporterError> {
         let resource = self.otel_resource.load();
-        let trace_chunks = trace_chunks
+        let mut trace_chunks = trace_chunks
             .iter()
             .map(|TraceChunk { chunk }| -> Vec<_> {
                 ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
@@ -186,6 +195,16 @@ impl Exporter<SpanData> for MapperExporter {
                 )
             })
             .collect::<Vec<_>>();
+
+        // Strictly honor the OTel sampling decision on the OTLP export path: drop chunks the
+        // sampler rejected before handing them to libdatadog, whose send path would otherwise
+        // retain error/single-span chunks regardless of priority (correct for the Datadog agent,
+        // but a leak for OTLP — e.g. an error span under
+        // OTEL_TRACES_SAMPLER=parentbased_always_off). The agent path keeps libdatadog's
+        // default behavior.
+        if self.otlp_export_active {
+            trace_chunks.retain(|chunk| ddtrace_transform::chunk_is_sampled(chunk));
+        }
 
         let services = trace_chunks
             .iter()

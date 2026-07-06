@@ -39,6 +39,22 @@ fn otel_sampling_to_dd_sampling(
     }
 }
 
+/// Whether a trace chunk was kept by the sampler (its sampling priority is positive).
+///
+/// Used to strictly honor the OTel sampling decision on the OTLP export path. libdatadog's send
+/// path retains chunks containing an error span (and single-span-sampled spans) regardless of
+/// priority — correct for the Datadog agent, but for OTLP it would leak spans the OTel sampler
+/// dropped (e.g. an error span under `OTEL_TRACES_SAMPLER=parentbased_always_off`). Mirrors
+/// libdatadog's priority lookup: the chunk priority is the first span's `_sampling_priority_v1`,
+/// and a chunk with no priority is kept.
+pub(crate) fn chunk_is_sampled(chunk: &[DdSpan]) -> bool {
+    let priority_key = SpanStr::from_static_str("_sampling_priority_v1");
+    chunk
+        .iter()
+        .find_map(|span| span.metrics.get(&priority_key))
+        .is_none_or(|priority| *priority > 0.0)
+}
+
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
 pub fn otel_trace_chunk_to_dd_trace_chunk<'a>(
     cached_config: &'a CachedConfig,
@@ -95,5 +111,37 @@ fn add_config_metadata<'a>(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libdd_trace_utils::span::vec_map::VecMap;
+
+    fn chunk_with(priority: Option<f64>, error: i32) -> Vec<DdSpan<'static>> {
+        let mut metrics = VecMap::new();
+        if let Some(p) = priority {
+            metrics.insert(SpanStr::from_static_str("_sampling_priority_v1"), p);
+        }
+        vec![DdSpan {
+            error,
+            metrics,
+            ..Default::default()
+        }]
+    }
+
+    #[test]
+    fn chunk_is_sampled_honors_priority_without_error_retention() {
+        // A dropped (priority <= 0) chunk is NOT sampled even when it contains an error span:
+        // OTLP export must not apply libdatadog's error retention (that would leak spans dropped
+        // by e.g. OTEL_TRACES_SAMPLER=parentbased_always_off).
+        assert!(!chunk_is_sampled(&chunk_with(Some(-1.0), 1)));
+        assert!(!chunk_is_sampled(&chunk_with(Some(0.0), 1)));
+        // Kept chunks (priority > 0) are sampled.
+        assert!(chunk_is_sampled(&chunk_with(Some(1.0), 0)));
+        assert!(chunk_is_sampled(&chunk_with(Some(2.0), 1)));
+        // A chunk with no priority is kept, mirroring libdatadog's send-path default.
+        assert!(chunk_is_sampled(&chunk_with(None, 0)));
     }
 }
