@@ -327,3 +327,26 @@ async fn test_unsampled_spans_not_exported() {
         "unsampled spans should not be exported, but received: {got:?}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_grpc_protocol_disables_otlp_export() {
+    let mut collector = MockCollector::start().await;
+
+    // grpc is not supported for OTLP trace export. Rather than coercing to http/json (which would
+    // fail against a grpc-only endpoint and drop traces), OTLP export is disabled and traces are
+    // sent to the Datadog agent — so no OTLP /v1/traces request is produced for a sampled span.
+    let mut cfg = Config::builder();
+    cfg.set_service("otlp-grpc-svc".to_string())
+        .set_trace_agent_url(collector.base_url.clone())
+        .set_otel_traces_exporter("otlp".to_string())
+        .set_otlp_traces_endpoint(format!("{}/v1/traces", collector.base_url))
+        .set_otlp_traces_protocol("grpc".to_string());
+
+    std::thread::spawn(move || emit_one_sampled_span(cfg));
+
+    let got = tokio::time::timeout(Duration::from_secs(3), collector.next_trace_request()).await;
+    assert!(
+        matches!(got, Ok(None) | Err(_)),
+        "grpc should disable OTLP export (no /v1/traces expected), but received: {got:?}"
+    );
+}

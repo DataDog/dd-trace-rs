@@ -1884,7 +1884,8 @@ impl Config {
     /// Resolution order: `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` → `OTEL_EXPORTER_OTLP_PROTOCOL` →
     /// default `http/json`. Both `http/json` and `http/protobuf` are supported (libdatadog
     /// #2115). `grpc` is not supported for OTLP trace export — libdatadog speaks HTTP only — and
-    /// is surfaced here as [`OtlpProtocol::Grpc`] so the caller can warn and fall back.
+    /// is surfaced here as [`OtlpProtocol::Grpc`] so the caller can warn and disable OTLP export
+    /// (falling back to the Datadog agent) rather than coercing it to an HTTP encoding.
     pub fn resolved_otlp_traces_protocol(&self) -> OtlpProtocol {
         self.otlp_traces_protocol()
             .or_else(|| self.otlp_protocol())
@@ -2943,7 +2944,7 @@ impl ConfigBuilder {
     }
 
     /// Set the OTLP traces protocol. `http/json` and `http/protobuf` are supported; `grpc` is
-    /// not (it falls back to `http/json` with a warning).
+    /// not (OTLP export is disabled and traces are sent to the Datadog agent instead).
     ///
     /// **Default**: `(unset, treated as http/json)`
     ///
@@ -5034,7 +5035,8 @@ mod tests {
             OtlpProtocol::HttpJson
         );
 
-        // `grpc` is surfaced as-is; the exporter warns and falls back to http/json.
+        // `grpc` is surfaced as-is; the exporter warns and disables OTLP export (falling back to
+        // the Datadog agent) rather than coercing it to http/json.
         let config = config_from_env([("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "grpc")]);
         assert_eq!(config.resolved_otlp_traces_protocol(), OtlpProtocol::Grpc);
     }
