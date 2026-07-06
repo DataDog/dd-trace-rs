@@ -206,9 +206,13 @@ impl DatadogExporter {
         match self.trace_buffer().send_chunk(buffered) {
             Ok(()) => Ok(()),
             Err(e) => {
-                // Only `BatchFull` is an outright rejection. Late errors from `wait_flush_done`
-                // (sync mode) mean the chunk is still queued.
-                if matches!(e, TraceBufferError::BatchFull(_)) {
+                // `BatchFull` and `AlreadyShutdown` are outright rejections, so the export side
+                // will never decrement. Late errors from `wait_flush_done` (sync
+                // mode) mean the chunk is still queued.
+                if matches!(
+                    e,
+                    TraceBufferError::BatchFull(_) | TraceBufferError::AlreadyShutdown
+                ) {
                     decrement_pending(&self.pending_spans, n);
                 }
                 Err(e)
