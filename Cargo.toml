@@ -35,6 +35,9 @@ libdd-common = { version = "4.2.0", default-features = false }
 libdd-tinybytes = { version = "1.1.1", default-features = false }
 libdd-library-config = { version = "2.0.0", default-features = false }
 libdd-sampling = { version = "4.0.0", default-features = false }
+# Memory profiling support hasn't landed on libdatadog's main branch yet;
+# point at the in-progress branch until it ships a release.
+libdd-heap-allocator = { git = "https://github.com/DataDog/libdatadog.git", branch = "sgg/heap-prof-poc" }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",
