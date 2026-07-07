@@ -7,8 +7,8 @@ use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 use datadog_opentelemetry::sampler::Sampler;
-use opentelemetry::{trace::SamplingDecision, trace::SpanKind, KeyValue, TraceId};
-use opentelemetry_sdk::trace::ShouldSample;
+use opentelemetry::{trace::SpanKind, KeyValue, TraceId};
+use opentelemetry_sdk::trace::{SamplingDecision, ShouldSample};
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::sync::{Arc, RwLock};

@@ -7,6 +7,7 @@ use datadog_opentelemetry::configuration::Config;
 use datadog_opentelemetry::configuration::OtlpProtocol;
 use datadog_opentelemetry::metrics;
 use opentelemetry::global;
+use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 
 const TEST_EXPORT_INTERVAL: Duration = Duration::from_millis(100);
@@ -221,5 +222,92 @@ async fn test_metrics_export_http_json() {
 
     let _meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_with_view() {
+    // `with_view` should be accepted and not break instrument creation, both
+    // for instruments the view matches and instruments it doesn't.
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .build();
+
+    let meter_provider = metrics()
+        .with_config(config)
+        .with_export_interval(TEST_EXPORT_INTERVAL)
+        .with_view(|instrument| {
+            if instrument.name() == "test.counter" {
+                Some(
+                    opentelemetry_sdk::metrics::Stream::builder()
+                        .with_name("renamed.counter")
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        })
+        .init();
+
+    let meter = meter_provider.meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_with_view_multiple() {
+    // Chaining multiple `with_view` calls should be accepted by the public
+    // builder API.
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("http/protobuf".to_string())
+        .build();
+
+    let meter_provider = metrics()
+        .with_config(config)
+        .with_export_interval(TEST_EXPORT_INTERVAL)
+        .with_view(|instrument| {
+            if instrument.name() == "test.counter" {
+                Some(
+                    opentelemetry_sdk::metrics::Stream::builder()
+                        .with_name("renamed.counter")
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        })
+        .with_view(|instrument| {
+            if instrument.name() == "test.histogram" {
+                Some(
+                    opentelemetry_sdk::metrics::Stream::builder()
+                        .with_name("renamed.histogram")
+                        .build()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        })
+        .init();
+
+    let meter = meter_provider.meter(TEST_METER_NAME);
+    assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test]
+async fn test_metrics_disabled_with_view_returns_noop() {
+    // When metrics are disabled the provider is a no-op; registering a view
+    // must not panic or otherwise break initialization.
+    let config = Config::builder().set_metrics_otel_enabled(false).build();
+
+    let meter_provider = metrics()
+        .with_config(config)
+        .with_view(|_instrument| None)
+        .init();
+
+    let meter = meter_provider.meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
 }

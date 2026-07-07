@@ -171,6 +171,14 @@
         "propertyKeys": ["trace_partial_flushed_min_spans"]
       }
     ],
+    "DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT": [
+      {
+        "version": "B",
+        "type": "string",
+        "default": "continue",
+        "propertyKeys": ["trace_propagation_behavior_extract"]
+      }
+    ],
     "DD_TRACE_PROPAGATION_EXTRACT_FIRST": [
       {
         "version": "A",
@@ -390,11 +398,27 @@
         "propertyKeys": ["metric_export_timeout"]
       }
     ],
+    "OTEL_PROPAGATORS": [
+      {
+        "version": "A",
+        "type": "array",
+        "default": "",
+        "propertyKeys": []
+      }
+    ],
     "OTEL_RESOURCE_ATTRIBUTES": [
       {
         "version": "A",
         "type": "map",
         "default_value": "",
+        "propertyKeys": []
+      }
+    ],
+    "OTEL_SERVICE_NAME": [
+      {
+        "version": "B",
+        "type": "string",
+        "default": null,
         "propertyKeys": []
       }
     ],

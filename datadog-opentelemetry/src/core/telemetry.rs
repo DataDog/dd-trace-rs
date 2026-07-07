@@ -16,6 +16,7 @@ use libdd_telemetry::{
 };
 
 use super::configuration::{Config, ConfigurationProvider};
+use super::telemetry_session;
 use crate::{dd_debug, dd_error, dd_warn};
 
 static TELEMETRY: TelemetryCell = OnceLock::new();
@@ -249,6 +250,10 @@ fn make_telemetry_worker(
         builder.config = libdd_telemetry::config::Config::from_env();
         builder.config.telemetry_heartbeat_interval =
             Duration::from_secs_f64(config.telemetry_heartbeat_interval());
+        let inst = telemetry_session::sessions_from_runtime_id(config.runtime_id());
+        builder.config.session_id = inst.session_id;
+        builder.config.root_session_id = inst.root_session_id;
+        builder.config.parent_session_id = inst.parent_session_id;
         // builder.config.debug_enabled = true;
 
         builder.run().map(|handle| {

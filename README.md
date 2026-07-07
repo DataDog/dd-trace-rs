@@ -39,14 +39,14 @@ datadog-opentelemetry = { version = "0.4.0" }
 #### Tracing
 
 To trace functions, you can either use the `opentelemetry` crate's
-[API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate
+[API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate
 [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry`
 [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 
 #### Metrics
 
 To collect metrics, use the `opentelemetry` crate's
-[Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html). For more
+[Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html). For more
 details, see the
 [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 
@@ -69,7 +69,7 @@ metrics
 Requires
 
 * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
 * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 
 ```rust ,no_run
@@ -96,7 +96,7 @@ tracer_provider
 
 Requires
 
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `trace` feature
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace` feature
   enabled
 
 ```rust ,no_run
@@ -125,7 +125,7 @@ tracer_provider
 Requires
 
 * the `metrics` feature of this crate to be enabled
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `metrics` feature
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics` feature
   enabled
 * [`tokio`](https://docs.rs/tokio)
 
@@ -154,7 +154,7 @@ Requires
 
 * the `logs` feature of this crate to be enabled
 * [`log`](https://docs.rs/log/0.4.29/log/)
-* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
+* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
 * [`tokio`](https://docs.rs/tokio)
 
 The logger provider MUST be initialized within a tokio context
@@ -231,11 +231,11 @@ datadog_opentelemetry::tracing()
 
 * MSRV: 1.87
 
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
-  version: 0.32
-* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
-  version 0.31
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+  version: 0.33
+* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+  version 0.32
 * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 
 ## Features

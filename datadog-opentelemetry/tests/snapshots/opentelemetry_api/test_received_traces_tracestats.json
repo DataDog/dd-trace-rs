@@ -5,16 +5,30 @@
     "Stats": [
       {
         "Name": "client.request",
-        "Resource": "test",
+        "Resource": "dropped-span",
         "Service": "unnamed-rust-service",
         "Type": "http",
         "HTTPStatusCode": 0,
         "Synthetics": false,
-        "Hits": 2,
-        "TopLevelHits": 2,
-        "Duration": 58000,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 9000,
         "Errors": 0,
-        "OkSummary": 2119,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "client.request",
+        "Resource": "kept-span",
+        "Service": "unnamed-rust-service",
+        "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 1000,
+        "Errors": 0,
+        "OkSummary": 37,
         "ErrorSummary": 24
       }
     ]

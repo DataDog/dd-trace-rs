@@ -1,29 +1,27 @@
 [[
   {
-    "name": "client.request",
+    "name": "server.request",
     "service": "unnamed-rust-service",
-    "resource": "kept-span",
+    "resource": "test_baggage_only",
     "trace_id": 0,
     "span_id": 1,
     "parent_id": 0,
-    "type": "http",
+    "type": "web",
     "meta": {
-      "_dd.p.dm": "-3",
-      "_dd.p.ksr": "1",
+      "_dd.p.dm": "-0",
+      "baggage.user.id": "alice",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6a432ae900000000fadb9ed3e75ee6b8",
-      "span.kind": "client",
+      "otel.trace_id": "6a3a5a6c00000000525a2c317a438eb3",
+      "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.4.0"
     },
     "metrics": {
-      "_dd.measured": 1.0,
-      "_dd.rule_psr": 1.0,
-      "_sampling_priority_v1": 2.0,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0
     },
-    "duration": 1000,
-    "start": 1782786793752101000
+    "duration": 27050,
+    "start": 1782209132899264227
   }]]
