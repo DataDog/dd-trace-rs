@@ -379,7 +379,7 @@ dependencies = [
  "hyper-util",
  "libc",
  "libdd-capabilities-impl",
- "libdd-common 5.1.0",
+ "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
  "libdd-sampling",
@@ -1087,39 +1087,8 @@ dependencies = [
  "http",
  "http-body-util",
  "libdd-capabilities",
- "libdd-common 5.1.0",
+ "libdd-common",
  "tokio",
-]
-
-[[package]]
-name = "libdd-common"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4af81e6953fab2814792b8893a2cee9f16aad1b71cb3f8720b7256f28d6a2d8d"
-dependencies = [
- "anyhow",
- "bytes",
- "cc",
- "const_format",
- "futures",
- "futures-core",
- "futures-util",
- "hex",
- "http",
- "http-body",
- "http-body-util",
- "hyper",
- "hyper-util",
- "libc",
- "nix",
- "pin-project",
- "regex",
- "serde",
- "static_assertions",
- "thiserror 1.0.69",
- "tokio",
- "tower-service",
- "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1169,7 +1138,7 @@ dependencies = [
  "http-body-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 5.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
  "libdd-shared-runtime",
@@ -1177,7 +1146,7 @@ dependencies = [
  "libdd-tinybytes",
  "libdd-trace-normalization",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 4.0.0",
+ "libdd-trace-protobuf",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "rmp-serde",
@@ -1208,20 +1177,20 @@ dependencies = [
  "anyhow",
  "cadence",
  "http",
- "libdd-common 5.1.0",
+ "libdd-common",
  "serde",
  "tracing",
 ]
 
 [[package]]
 name = "libdd-library-config"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726e95f0f543da854a24999b16601afd2ca2c6b0c1bdc511bf52c5cd0635f7ad"
+checksum = "ab46ec324c1b916ca06c4a369da171a08eb9f112620e6f6f004860e589892715"
 dependencies = [
  "anyhow",
  "libc",
- "libdd-trace-protobuf 3.0.2",
+ "libdd-trace-protobuf",
  "memfd",
  "prost",
  "rand 0.8.6",
@@ -1233,11 +1202,11 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e4a7bf5fe62282784cd6ae4c805b2e35f0520c3464ca090f49b3c9794d4fd4d"
+checksum = "fc6c34dd818feb6a2c1de996017d2f8e3190615c62fa5513f3b9559bce727dfb"
 dependencies = [
- "libdd-common 4.2.0",
+ "libdd-common",
  "lru",
  "serde",
  "serde_json",
@@ -1254,7 +1223,7 @@ dependencies = [
  "futures-util",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 5.1.0",
+ "libdd-common",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1276,7 +1245,7 @@ dependencies = [
  "http",
  "http-body-util",
  "libc",
- "libdd-common 5.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "serde",
@@ -1305,7 +1274,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4184666070c137e058b2c16acd147c3f045b51de3efe81e0bec62044f29fc6c6"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf 4.0.0",
+ "libdd-trace-protobuf",
 ]
 
 [[package]]
@@ -1316,24 +1285,13 @@ checksum = "d313153f515b9dd31a483bc7e4d432ecb76e53dd33f67f4eeaa415319372b68d"
 dependencies = [
  "anyhow",
  "fluent-uri",
- "libdd-common 5.1.0",
- "libdd-trace-protobuf 4.0.0",
+ "libdd-common",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "log",
  "percent-encoding",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "libdd-trace-protobuf"
-version = "3.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c67e3e9a09dab3f19d4f79006f3efb8b4bf8416551465edaeeb71816949e2197"
-dependencies = [
- "prost",
- "serde",
- "serde_bytes",
 ]
 
 [[package]]
@@ -1360,13 +1318,13 @@ dependencies = [
  "http",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 5.1.0",
+ "libdd-common",
  "libdd-ddsketch",
  "libdd-dogstatsd-client",
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf 4.0.0",
+ "libdd-trace-protobuf",
  "libdd-trace-utils",
  "rmp-serde",
  "serde",
@@ -1393,10 +1351,10 @@ dependencies = [
  "indexmap",
  "libdd-capabilities",
  "libdd-capabilities-impl",
- "libdd-common 5.1.0",
+ "libdd-common",
  "libdd-tinybytes",
  "libdd-trace-normalization",
- "libdd-trace-protobuf 4.0.0",
+ "libdd-trace-protobuf",
  "prost",
  "rand 0.8.6",
  "rmp",
