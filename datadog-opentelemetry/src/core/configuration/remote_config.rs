@@ -14,7 +14,7 @@ use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
 use anyhow::Result;
 use core::fmt;
-use libdd_common_5::{tag::Tag, Endpoint};
+use libdd_common::Endpoint;
 use libdd_remote_config::fetch::{
     ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
 };
@@ -432,32 +432,20 @@ fn build_endpoint(config: &Config) -> Result<Endpoint, RemoteConfigClientError> 
     })
 }
 
-/// Translate `Config` identity (service / env / version / global tags) into the
-/// [`Target`] used by `libdd-remote-config` for server-side scoping.
 fn build_target(config: &Config) -> Target {
-    Target {
-        service: config.service().to_string(),
-        env: config.env().unwrap_or_default().to_string(),
-        app_version: config.version().unwrap_or_default().to_string(),
-        tags: convert_global_tags(config),
-        process_tags: vec![],
-    }
+    Target::new(
+        config.service().to_string(),
+        config.env().unwrap_or_default().to_string(),
+        config.version().unwrap_or_default().to_string(),
+        convert_global_tags(config),
+        vec![],
+    )
 }
 
-/// Convert the tracer's `global_tags` iterator into `libdd-common` [`Tag`]
-/// values.
-fn convert_global_tags(config: &Config) -> Vec<Tag> {
+fn convert_global_tags(config: &Config) -> Vec<String> {
     config
         .global_tags()
-        .filter_map(|(key, value)| match Tag::new(key, value) {
-            Ok(tag) => Some(tag),
-            Err(e) => {
-                crate::dd_debug!(
-                    "RemoteConfigClient: skipping invalid global tag {key}:{value}: {e}"
-                );
-                None
-            }
-        })
+        .map(|(key, value)| format!("{}:{}", key, value))
         .collect()
 }
 

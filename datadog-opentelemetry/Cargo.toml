@@ -56,9 +56,9 @@ libdd-capabilities-impl = { workspace = true }
 libdd-trace-utils = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
-libdd-common-5 = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
+libdd-shared-runtime = { workspace = true }
 libdd-remote-config = { workspace = true }
 percent-encoding = "2.3.1"
 
@@ -67,6 +67,7 @@ libdd-library-config = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
+opentelemetry_sdk = { workspace = true, features = ["experimental_metrics_custom_reader"] }
 pretty_assertions = "1.4.1"
 proptest = { version = "1.9", features = ["std"], default-features = false }
 test-case = "3.3.1"
@@ -114,6 +115,7 @@ https = [
     "libdd-telemetry/https",
     "libdd-common/https",
     "libdd-remote-config/https",
+    "libdd-shared-runtime/https",
     "opentelemetry-otlp?/reqwest-rustls",
     "opentelemetry-otlp?/tls-roots",
     "opentelemetry-otlp?/tls-ring",

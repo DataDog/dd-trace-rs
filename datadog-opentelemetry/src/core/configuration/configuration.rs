@@ -1353,10 +1353,24 @@ impl Config {
             ),
             trace_propagation_behavior_extract: cisu
                 .update_parsed(default.trace_propagation_behavior_extract),
-            trace_propagation_style: cisu
-                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
-                    TracePropagationStyle::from_tags(Some(tags))
-                }),
+            // OTEL_PROPAGATORS is an alias/fallback for DD_TRACE_PROPAGATION_STYLE. An empty
+            // value on either key is treated as unset (consistent with the OTEL_SERVICE_NAME
+            // fallback). A value that parses to no recognized styles (e.g. only unsupported
+            // OpenTelemetry propagators like "jaeger") also falls back to the default rather
+            // than silently disabling propagation.
+            trace_propagation_style: {
+                let default_style = default.trace_propagation_style.value().clone();
+                cisu.update_non_empty_string_with_fallback(
+                    default.trace_propagation_style,
+                    SupportedConfigurations::OTEL_PROPAGATORS,
+                    move |styles| match TracePropagationStyle::from_tags(Some(
+                        DdTags::from_str(&styles).unwrap().0,
+                    )) {
+                        Some(styles) if styles.is_empty() => default_style,
+                        other => other,
+                    },
+                )
+            },
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -2874,6 +2888,7 @@ mod tests {
     use super::Config;
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
+    use crate::propagation::config::{get_extractors, get_injectors};
 
     #[test]
     fn test_config_from_source() {
@@ -3058,7 +3073,17 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
@@ -3072,6 +3097,25 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first())
+    }
+
+    #[test]
+    fn test_otel_propagators_sets_global_style_when_dd_absent() {
+        // OTEL_PROPAGATORS is used as a fallback when DD_TRACE_PROPAGATION_STYLE is not set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]
@@ -3164,7 +3208,18 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default. The
+        // extract-specific key, set explicitly to empty, still yields an empty list.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![]).as_deref()
@@ -4343,6 +4398,156 @@ mod tests {
         assert!(
             !config.otlp_endpoint.get_all_configurations().is_empty(),
             "non-sensitive ConfigItem should still report configuration entries"
+        );
+    }
+
+    #[test]
+    fn test_dd_propagation_style_takes_precedence_over_otel_propagators() {
+        // DD_TRACE_PROPAGATION_STYLE wins outright when both are set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog"),
+                ("OTEL_PROPAGATORS", "b3,tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_all_unsupported_uses_default() {
+        // When OTEL_PROPAGATORS contains only unsupported values it parses to no valid
+        // styles; rather than disabling propagation, the global style falls back to the
+        // default set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "jaeger")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_filters_unsupported_values() {
+        // Unknown propagator names (e.g. "jaeger") are dropped; supported ones are kept.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "jaeger,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_supports_baggage_and_none() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "baggage,none")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::None,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_inherited_by_extract_and_inject() {
+        // With only OTEL_PROPAGATORS set (no extract/inject), the effective extractors and
+        // injectors fall back to the global style fed by OTEL_PROPAGATORS.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "datadog,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let expected = [
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ];
+        assert_eq!(get_extractors(&config), &expected);
+        assert_eq!(get_injectors(&config), &expected);
+    }
+
+    #[test]
+    fn test_dd_extract_wins_while_inject_inherits_otel_propagators() {
+        // DD_TRACE_PROPAGATION_STYLE_EXTRACT set + OTEL_PROPAGATORS set (no global DD style):
+        // extract uses its own DD value; inject inherits the global style from OTEL_PROPAGATORS.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "datadog"),
+                ("OTEL_PROPAGATORS", "tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(get_extractors(&config), &[TracePropagationStyle::Datadog]);
+        assert_eq!(
+            get_injectors(&config),
+            &[TracePropagationStyle::TraceContext]
+        );
+    }
+
+    #[test]
+    fn test_dd_style_in_lower_priority_source_beats_otel_propagators_in_higher() {
+        // DD_TRACE_PROPAGATION_STYLE present in ANY source beats OTEL_PROPAGATORS: the fallback
+        // helper checks the primary key across all sources before consulting the fallback. Here
+        // OTEL_PROPAGATORS sits in the higher-precedence (first-added) source and DD style in the
+        // lower-precedence (second-added) source, yet DD style still wins. This tests the
+        // cross-source behavior that the fallback helper uses.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_STYLE", "datadog")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_no_propagation_env_uses_default() {
+        // Neither DD nor OTEL set -> default [datadog, tracecontext, baggage].
+        let sources = CompositeSource::new();
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
         );
     }
 }
