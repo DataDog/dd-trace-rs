@@ -23,19 +23,19 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - sourced from git main branch
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", branch = "main", features = [
+# Libdatadog dependencies
+libdd-data-pipeline = { version = "7.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-library-config = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-sampling = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
-libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", branch = "main", default-features = false }
+libdd-trace-utils = { version = "9.0.0", default-features = false }
+libdd-capabilities-impl = { version = "3.0.0", default-features = false }
+libdd-telemetry = { version = "6.0.0", default-features = false }
+libdd-common = { version = "5.1.0", default-features = false }
+libdd-tinybytes = { version = "1.1.1", default-features = false }
+libdd-library-config = { version = "2.0.0", default-features = false }
+libdd-sampling = { version = "4.0.0", default-features = false }
+libdd-shared-runtime = { version = "2.0.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",
