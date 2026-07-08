@@ -291,7 +291,6 @@ pub(crate) mod sampling;
 mod span_processor;
 
 mod ddtrace_transform;
-mod exporter;
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod logs_reader;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
@@ -555,13 +554,23 @@ fn make_tracer(
             .with_sampler(sampler) // Use the sampler created above
             .with_id_generator(trace_id::TraceidGenerator);
         if config.enabled() {
-            let span_processor = DatadogSpanProcessor::new(
+            match DatadogSpanProcessor::new(
                 config.clone(),
                 registry.clone(),
                 resource_slot.clone(),
                 Some(agent_response_handler),
-            );
-            tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+            ) {
+                Ok(span_processor) => {
+                    tracer_provider_builder =
+                        tracer_provider_builder.with_span_processor(span_processor);
+                }
+                Err(e) => {
+                    crate::dd_error!(
+                        "Failed to initialize Datadog span processor: {}. Traces will not be exported.",
+                        e
+                    );
+                }
+            }
         }
         let tracer_provider = tracer_provider_builder.build();
 
