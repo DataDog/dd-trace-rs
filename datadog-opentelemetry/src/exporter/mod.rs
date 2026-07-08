@@ -185,7 +185,7 @@ impl<T: Send + 'static> AsyncTraceExporter<T> {
         config: AsyncExporterConfig,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
         exporter: Box<dyn Exporter<T> + Send>,
-        trace_exporter_builder: TraceExporterBuilder,
+        trace_exporter_builder: TraceExporterBuilder<libdd_shared_runtime::ForkSafeRuntime>,
     ) -> Self {
         let (tx, rx) = channel(
             config.span_flush_threshold,
@@ -554,12 +554,12 @@ pub trait Exporter<T> {
     fn trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<T>>,
-        trace_exporter: &TraceExporter<NativeCapabilities>,
+        trace_exporter: &TraceExporter<NativeCapabilities, libdd_shared_runtime::ForkSafeRuntime>,
     ) -> Result<AgentResponse, TraceExporterError>;
 }
 
 struct TraceExporterWorker<T> {
-    trace_exporter: TraceExporter<NativeCapabilities>,
+    trace_exporter: TraceExporter<NativeCapabilities, libdd_shared_runtime::ForkSafeRuntime>,
     rx: Receiver<T>,
     exporter: Box<dyn Exporter<T>>,
     #[allow(clippy::type_complexity)]
@@ -576,7 +576,7 @@ impl<T: Send + 'static> TraceExporterWorker<T> {
     /// * The thread panics
     #[allow(clippy::type_complexity)]
     fn spawn(
-        builder: TraceExporterBuilder,
+        builder: TraceExporterBuilder<libdd_shared_runtime::ForkSafeRuntime>,
         rx: Receiver<T>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
         exporter: Box<dyn Exporter<T> + Send>,

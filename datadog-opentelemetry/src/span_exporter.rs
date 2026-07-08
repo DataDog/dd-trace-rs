@@ -125,7 +125,7 @@ impl Exporter<SpanData> for MapperExporter {
     fn trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<SpanData>>,
-        trace_exporter: &TraceExporter<NativeCapabilities>,
+        trace_exporter: &TraceExporter<NativeCapabilities, libdd_shared_runtime::ForkSafeRuntime>,
     ) -> Result<AgentResponse, TraceExporterError> {
         let resource = self.otel_resource.load();
         let trace_chunks = trace_chunks
