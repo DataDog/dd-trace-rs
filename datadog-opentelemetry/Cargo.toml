@@ -38,6 +38,7 @@ thiserror = { version = "1.0", default-features = false }
 
 # core
 anyhow = "1.0.97"
+async-trait = "0.1"
 rustc_version_runtime = "0.3.0"
 hyper = { version = "1.6", features = ["client", "http1"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }

@@ -13,12 +13,7 @@ use std::{
 
 use crate::{
     core::{
-        configuration::{
-            remote_config::{
-                RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
-            },
-            BaggageTagKeyFilter, Config,
-        },
+        configuration::{remote_config::RemoteConfigClientWorker, BaggageTagKeyFilter, Config},
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
         telemetry::init_telemetry,
@@ -29,6 +24,7 @@ use crate::{
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
     text_map_propagator::DatadogExtractData,
 };
+use libdd_shared_runtime::{BasicRuntime, SharedRuntimeError};
 use opentelemetry::{
     baggage::BaggageExt as _,
     global::ObjectSafeSpan,
@@ -409,7 +405,6 @@ pub(crate) struct DatadogSpanProcessor {
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Config>,
-    rc_client_handle: Option<RemoteConfigClientHandle>,
     telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
 }
 
@@ -417,6 +412,22 @@ impl std::fmt::Debug for DatadogSpanProcessor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DatadogSpanProcessor").finish()
     }
+}
+
+/// Builds the multi-thread tokio runtime shared by the span exporter and the
+/// remote-config client.
+///
+/// Created once by [`DatadogSpanProcessor::new`] and handed to both subsystems
+/// (each registers a [`Worker`](libdd_shared_runtime::Worker) on it) so they run
+/// on a single runtime instead of each spinning up their own. The `BasicRuntime`
+/// is owned and dropped off-thread by [`DatadogExporter`].
+fn build_shared_runtime() -> Result<Arc<BasicRuntime>, DatadogExporterInitError> {
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
+    Ok(Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime))))
 }
 
 impl DatadogSpanProcessor {
@@ -427,19 +438,18 @@ impl DatadogSpanProcessor {
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Result<Self, DatadogExporterInitError> {
-        let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
-            RemoteConfigClientWorker::start(config.clone())
-                .inspect_err(|e| {
-                    dd_error!(
-                        "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
-                        e
-                    );
-                })
-                .ok()
-        } else {
-            None
-        };
-        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler)?;
+        let shared_runtime = build_shared_runtime()?;
+
+        if config.remote_config_enabled() && config.enabled() {
+            if let Err(e) = RemoteConfigClientWorker::start(config.clone(), &shared_runtime) {
+                dd_error!(
+                    "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
+                    e
+                );
+            }
+        }
+        let span_exporter =
+            DatadogExporter::new(config.clone(), agent_response_handler, shared_runtime)?;
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
             TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
         });
@@ -449,7 +459,6 @@ impl DatadogSpanProcessor {
             span_exporter,
             resource,
             config,
-            rc_client_handle,
             telemetry_metrics_handle,
         })
     }
@@ -661,11 +670,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let drain_left = deadline.saturating_duration_since(std::time::Instant::now());
         let _ = self.span_exporter.flush_and_drain(drain_left);
 
-        // Trigger all tasks shutdown
+        // Trigger all tasks shutdown. The Remote Config worker is torn down as
+        // part of the exporter's runtime shutdown (`shutdown_async` stops every
+        // worker on the shared runtime), so it needs no separate trigger/wait.
         self.span_exporter.trigger_shutdown();
-        if let Some(rc_client_handle) = &self.rc_client_handle {
-            rc_client_handle.trigger_shutdown();
-        };
         if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
             telemetry_metrics_handle.trigger_shutdown();
         }
@@ -680,25 +688,6 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             };
             exporter_error_to_otel(&e, "wait_for_shutdown")
         })?;
-
-        if let Some(rc_client_handle) = &self.rc_client_handle {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            rc_client_handle
-                .wait_for_shutdown(left)
-                .map_err(|e| match e {
-                    RemoteConfigClientError::HandleMutexPoisoned
-                    | RemoteConfigClientError::WorkerPanicked(_)
-                    | RemoteConfigClientError::InvalidAgentUri => {
-                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
-                            "RemoteConfigClient.shutdown_with_timeout: {}",
-                            e
-                        ))
-                    }
-                    RemoteConfigClientError::ShutdownTimedOut => {
-                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                    }
-                })?;
-        }
 
         if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
             let left = deadline.saturating_duration_since(std::time::Instant::now());

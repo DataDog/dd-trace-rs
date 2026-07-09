@@ -160,6 +160,7 @@ impl DatadogExporter {
     pub fn new(
         config: Arc<Config>,
         agent_response_handler: Option<AgentResponseHandler>,
+        shared_runtime: Arc<BasicRuntime>,
     ) -> Result<Self, DatadogExporterInitError> {
         let response_handler = build_response_handler(agent_response_handler);
 
@@ -170,7 +171,11 @@ impl DatadogExporter {
         thread::Builder::new()
             .name("datadog-trace-init".into())
             .spawn(move || {
-                let _ = tx.send(build_on_dedicated_thread(config, response_handler));
+                let _ = tx.send(build_on_dedicated_thread(
+                    config,
+                    response_handler,
+                    shared_runtime,
+                ));
             })
             .map_err(DatadogExporterInitError::BuildThread)?;
         rx.recv().map_err(|_| {
@@ -337,14 +342,8 @@ fn build_response_handler(agent_response_handler: Option<AgentResponseHandler>) 
 fn build_on_dedicated_thread(
     config: Arc<Config>,
     response_handler: ResponseHandler,
+    shared_runtime: Arc<BasicRuntime>,
 ) -> Result<DatadogExporter, DatadogExporterInitError> {
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
-    let shared_runtime = Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime)));
-
     let trace_exporter = build_trace_exporter(&config, &shared_runtime)
         .map_err(DatadogExporterInitError::TraceExporter)?;
 
