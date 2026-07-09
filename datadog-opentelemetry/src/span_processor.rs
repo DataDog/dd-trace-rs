@@ -17,11 +17,10 @@ use crate::{
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
         telemetry::init_telemetry,
-        utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
-    spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
+    spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
 };
 use libdd_shared_runtime::{BasicRuntime, SharedRuntimeError};
@@ -405,7 +404,6 @@ pub(crate) struct DatadogSpanProcessor {
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Config>,
-    telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -448,18 +446,32 @@ impl DatadogSpanProcessor {
                 );
             }
         }
-        let span_exporter =
-            DatadogExporter::new(config.clone(), agent_response_handler, shared_runtime)?;
-        let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
-            TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
-        });
+        // Clone the runtime for the exporter; keep the original to register the
+        // telemetry worker (which needs the exporter's queue-metrics fetcher).
+        let span_exporter = DatadogExporter::new(
+            config.clone(),
+            agent_response_handler,
+            Arc::clone(&shared_runtime),
+        )?;
+        if config.telemetry_enabled() {
+            // Like RC, registered on `shared_runtime` and torn down with it.
+            if let Err(e) = TelemetryMetricsCollector::start(
+                registry.clone(),
+                span_exporter.queue_metrics(),
+                &shared_runtime,
+            ) {
+                dd_error!(
+                    "TelemetryMetricsCollector.start: Failed to start telemetry metrics collector: {}",
+                    e
+                );
+            }
+        }
 
         Ok(Self {
             registry,
             span_exporter,
             resource,
             config,
-            telemetry_metrics_handle,
         })
     }
 
@@ -670,16 +682,14 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let drain_left = deadline.saturating_duration_since(std::time::Instant::now());
         let _ = self.span_exporter.flush_and_drain(drain_left);
 
-        // Trigger all tasks shutdown. The Remote Config worker is torn down as
-        // part of the exporter's runtime shutdown (`shutdown_async` stops every
-        // worker on the shared runtime), so it needs no separate trigger/wait.
+        // Trigger the runtime teardown. The Remote Config and telemetry-metrics
+        // workers are torn down as part of the exporter's runtime shutdown
+        // (`shutdown_async` stops every worker on the shared runtime), so they
+        // need no separate trigger/wait.
         self.span_exporter.trigger_shutdown();
-        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
-            telemetry_metrics_handle.trigger_shutdown();
-        }
 
-        // Wait fot all tasks to finish, keeping in mind how much time is left
-        // since the beginning of the call
+        // Wait for the runtime shutdown to finish, keeping in mind how much time
+        // is left since the beginning of the call.
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         self.span_exporter.wait_for_shutdown(left).map_err(|e| {
             let e = match e {
@@ -688,23 +698,6 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             };
             exporter_error_to_otel(&e, "wait_for_shutdown")
         })?;
-
-        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            telemetry_metrics_handle
-                .wait_for_shutdown(left)
-                .map_err(|e| match e {
-                    WorkerError::ShutdownTimedOut => {
-                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                    }
-                    WorkerError::HandleMutexPoisoned | WorkerError::WorkerPanicked(_) => {
-                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
-                            "TelemetryMetricsCollector.shutdown_with_timeout: {}",
-                            e
-                        ))
-                    }
-                })?;
-        }
         Ok(())
     }
 
