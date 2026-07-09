@@ -132,6 +132,8 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant);
+
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
 }
@@ -196,6 +198,10 @@ impl TelemetryHandle for TelemetryHandleWrapper {
 
     fn send_stop(&self) -> Result<(), anyhow::Error> {
         self.handle.send_stop()
+    }
+
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) {
+        self.handle.wait_for_shutdown_deadline(deadline);
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -267,15 +273,15 @@ fn make_telemetry_worker(
     }
 }
 
-#[allow(dead_code)]
-pub fn stop_telemetry() {
-    stop_telemetry_inner(&TELEMETRY);
+pub fn stop_telemetry(deadline: std::time::Instant) {
+    stop_telemetry_inner(deadline, &TELEMETRY);
 }
 
-fn stop_telemetry_inner(telemetry_cell: &TelemetryCell) {
+fn stop_telemetry_inner(deadline: std::time::Instant, telemetry_cell: &TelemetryCell) {
     with_telemetry_handle(telemetry_cell, |t| {
         dd_debug!("Stopping telemetry");
         t.handle.send_stop().ok();
+        t.handle.wait_for_shutdown_deadline(deadline);
     });
 }
 
@@ -403,6 +409,8 @@ mod tests {
         fn send_stop(&self) -> Result<(), anyhow::Error> {
             Ok(())
         }
+
+        fn wait_for_shutdown_deadline(&self, _deadline: std::time::Instant) {}
 
         fn as_any(&self) -> &dyn Any {
             self

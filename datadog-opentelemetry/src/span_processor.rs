@@ -21,7 +21,7 @@ use crate::{
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::init_telemetry,
+        telemetry::{init_telemetry, stop_telemetry},
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
@@ -716,6 +716,8 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                     }
                 })?;
         }
+
+        stop_telemetry(deadline);
         Ok(())
     }
 
