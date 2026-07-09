@@ -4,7 +4,10 @@
 use std::{
     any::Any,
     ops::DerefMut,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex, OnceLock,
+    },
     time::Duration,
 };
 
@@ -20,8 +23,18 @@ use super::telemetry_session;
 use crate::{dd_debug, dd_error, dd_warn};
 
 static TELEMETRY: TelemetryCell = OnceLock::new();
+static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 
 type TelemetryCell = OnceLock<Mutex<Telemetry>>;
+
+pub fn register_telemetry_user(config: &Config) -> bool {
+    if config.telemetry_enabled() {
+        TELEMETRY_USERS.fetch_add(1, Ordering::AcqRel);
+        true
+    } else {
+        false
+    }
+}
 
 struct TelemetryProjection<'a> {
     handle: &'a mut dyn TelemetryHandle,
@@ -273,16 +286,28 @@ fn make_telemetry_worker(
     }
 }
 
-pub fn stop_telemetry(deadline: std::time::Instant) {
-    stop_telemetry_inner(deadline, &TELEMETRY);
+pub fn stop_telemetry(deadline: std::time::Instant) -> Result<(), Error> {
+    stop_telemetry_inner(deadline, &TELEMETRY)
 }
 
-fn stop_telemetry_inner(deadline: std::time::Instant, telemetry_cell: &TelemetryCell) {
+fn stop_telemetry_inner(
+    deadline: std::time::Instant,
+    telemetry_cell: &TelemetryCell,
+) -> Result<(), Error> {
+    if TELEMETRY_USERS.fetch_sub(1, Ordering::AcqRel) != 1 {
+        return Ok(());
+    }
     with_telemetry_handle(telemetry_cell, |t| {
         dd_debug!("Stopping telemetry");
         t.handle.send_stop().ok();
         t.handle.wait_for_shutdown_deadline(deadline);
-    });
+        if std::time::Instant::now() >= deadline {
+            Err(Error::msg("Telemetry: shutdown timed out"))
+        } else {
+            Ok(())
+        }
+    })
+    .unwrap_or(Ok(()))
 }
 
 pub fn add_points<Points: IntoIterator<Item = (f64, TelemetryMetric)>>(points: Points) {
@@ -355,20 +380,25 @@ mod tests {
 
     use crate::{
         core::{
-            configuration::{Config, ConfigurationProvider},
-            telemetry::{
-                add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
-                TelemetryHandle, TelemetryMetric, TELEMETRY,
+            configuration::{Config, ConfigurationProvider}, telemetry::{
+                TELEMETRY, TelemetryHandle, TelemetryMetric, add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner, register_telemetry_user, stop_telemetry_inner,
             },
-        },
-        dd_debug, dd_error, dd_warn,
+        }, dd_debug, dd_error, dd_warn,
     };
 
-    use std::{any::Any, sync::OnceLock};
+    use std::{
+        any::Any,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, OnceLock,
+        },
+        time::{Duration, Instant},
+    };
 
     struct TestTelemetryHandle {
         pub logs: Vec<(String, data::LogLevel, Option<String>)>,
         pub configurations: Vec<data::Configuration>,
+        pub stop_calls: Arc<AtomicUsize>,
     }
 
     impl TestTelemetryHandle {
@@ -376,6 +406,7 @@ mod tests {
             TestTelemetryHandle {
                 logs: vec![],
                 configurations: vec![],
+                stop_calls: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
@@ -407,6 +438,7 @@ mod tests {
         }
 
         fn send_stop(&self) -> Result<(), anyhow::Error> {
+            self.stop_calls.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
 
@@ -445,6 +477,38 @@ mod tests {
                 seq_id: None,
             }]
         }
+    }
+
+    #[test]
+    fn test_stop_telemetry_stops_worker_only_for_last_user() {
+        // With more than one live processor sharing the process-global worker,
+        // an earlier shutdown must NOT stop it (the remaining users still need
+        // it, and the OnceLock cannot be re-initialized). Only the last user does.
+        let config = Config::builder().build();
+        let telemetry_cell = OnceLock::new();
+        let handle = TestTelemetryHandle::new();
+        let stop_calls = handle.stop_calls.clone();
+        init_telemetry_inner(&config, Some(Box::new(handle)), &telemetry_cell);
+
+        register_telemetry_user(&config);
+        register_telemetry_user(&config);
+        let deadline = Instant::now() + Duration::from_secs(60);
+
+        // First user leaves: worker must keep running.
+        stop_telemetry_inner(deadline, &telemetry_cell).unwrap();
+        assert_eq!(
+            stop_calls.load(Ordering::Relaxed),
+            0,
+            "worker must not be stopped while users remain"
+        );
+
+        // Last user leaves: worker is stopped exactly once.
+        stop_telemetry_inner(deadline, &telemetry_cell).unwrap();
+        assert_eq!(
+            stop_calls.load(Ordering::Relaxed),
+            1,
+            "last user must stop the worker"
+        );
     }
 
     #[test]

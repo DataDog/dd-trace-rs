@@ -8,7 +8,10 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use crate::{
@@ -21,7 +24,7 @@ use crate::{
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::{init_telemetry, stop_telemetry},
+        telemetry::{init_telemetry, register_telemetry_user, stop_telemetry},
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
@@ -411,6 +414,12 @@ pub(crate) struct DatadogSpanProcessor {
     config: Arc<Config>,
     rc_client_handle: Option<RemoteConfigClientHandle>,
     telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
+    /// Whether this processor still holds a telemetry-user registration. Starts
+    /// `true` only when telemetry is enabled (i.e. this processor registered),
+    /// and is cleared on the first shutdown so the paired [`stop_telemetry`]
+    /// (which decrements the global user count) runs exactly once — never for a
+    /// processor that never registered, and never twice if `shutdown` is repeated.
+    telemetry_user_active: AtomicBool,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -443,6 +452,7 @@ impl DatadogSpanProcessor {
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
             TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
         });
+        let telemetry_user_active = AtomicBool::new(register_telemetry_user(&config));
 
         Ok(Self {
             registry,
@@ -451,6 +461,7 @@ impl DatadogSpanProcessor {
             config,
             rc_client_handle,
             telemetry_metrics_handle,
+            telemetry_user_active,
         })
     }
 
@@ -717,7 +728,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                 })?;
         }
 
-        stop_telemetry(deadline);
+        if self.telemetry_user_active.swap(false, Ordering::AcqRel) {
+            stop_telemetry(deadline)
+                .map_err(|_| opentelemetry_sdk::error::OTelSdkError::Timeout(timeout))?;
+        }
         Ok(())
     }
 
