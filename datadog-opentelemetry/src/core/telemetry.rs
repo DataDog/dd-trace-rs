@@ -145,7 +145,7 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
-    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant);
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) -> Result<(), Error>;
 
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
@@ -213,8 +213,13 @@ impl TelemetryHandle for TelemetryHandleWrapper {
         self.handle.send_stop()
     }
 
-    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) {
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) -> Result<(), Error> {
         self.handle.wait_for_shutdown_deadline(deadline);
+        if std::time::Instant::now() >= deadline {
+            Err(Error::msg("Telemetry: shutdown timed out"))
+        } else {
+            Ok(())
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -286,26 +291,32 @@ fn make_telemetry_worker(
     }
 }
 
-pub fn stop_telemetry(deadline: std::time::Instant) -> Result<(), Error> {
-    stop_telemetry_inner(deadline, &TELEMETRY)
+pub fn trigger_stop_telemetry() -> bool {
+    trigger_stop_telemetry_inner(&TELEMETRY)
 }
 
-fn stop_telemetry_inner(
-    deadline: std::time::Instant,
-    telemetry_cell: &TelemetryCell,
-) -> Result<(), Error> {
+fn trigger_stop_telemetry_inner(telemetry_cell: &TelemetryCell) -> bool {
     if TELEMETRY_USERS.fetch_sub(1, Ordering::AcqRel) != 1 {
-        return Ok(());
+        return false;
     }
     with_telemetry_handle(telemetry_cell, |t| {
         dd_debug!("Stopping telemetry");
         t.handle.send_stop().ok();
-        t.handle.wait_for_shutdown_deadline(deadline);
-        if std::time::Instant::now() >= deadline {
-            Err(Error::msg("Telemetry: shutdown timed out"))
-        } else {
-            Ok(())
-        }
+    });
+    true
+}
+
+pub fn wait_telemetry_stopped(timeout: Duration) -> Result<(), Error> {
+    wait_telemetry_stopped_inner(timeout, &TELEMETRY)
+}
+
+fn wait_telemetry_stopped_inner(
+    timeout: Duration,
+    telemetry_cell: &TelemetryCell,
+) -> Result<(), Error> {
+    let deadline = std::time::Instant::now() + timeout;
+    with_telemetry_handle(telemetry_cell, |t| {
+        t.handle.wait_for_shutdown_deadline(deadline)
     })
     .unwrap_or(Ok(()))
 }
@@ -380,10 +391,14 @@ mod tests {
 
     use crate::{
         core::{
-            configuration::{Config, ConfigurationProvider}, telemetry::{
-                TELEMETRY, TelemetryHandle, TelemetryMetric, add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner, register_telemetry_user, stop_telemetry_inner,
+            configuration::{Config, ConfigurationProvider},
+            telemetry::{
+                add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
+                register_telemetry_user, trigger_stop_telemetry_inner,
+                wait_telemetry_stopped_inner, TelemetryHandle, TelemetryMetric, TELEMETRY,
             },
-        }, dd_debug, dd_error, dd_warn,
+        },
+        dd_debug, dd_error, dd_warn,
     };
 
     use std::{
@@ -392,7 +407,7 @@ mod tests {
             atomic::{AtomicUsize, Ordering},
             Arc, OnceLock,
         },
-        time::{Duration, Instant},
+        time::Duration,
     };
 
     struct TestTelemetryHandle {
@@ -442,7 +457,12 @@ mod tests {
             Ok(())
         }
 
-        fn wait_for_shutdown_deadline(&self, _deadline: std::time::Instant) {}
+        fn wait_for_shutdown_deadline(
+            &self,
+            _deadline: std::time::Instant,
+        ) -> Result<(), anyhow::Error> {
+            Ok(())
+        }
 
         fn as_any(&self) -> &dyn Any {
             self
@@ -481,9 +501,6 @@ mod tests {
 
     #[test]
     fn test_stop_telemetry_stops_worker_only_for_last_user() {
-        // With more than one live processor sharing the process-global worker,
-        // an earlier shutdown must NOT stop it (the remaining users still need
-        // it, and the OnceLock cannot be re-initialized). Only the last user does.
         let config = Config::builder().build();
         let telemetry_cell = OnceLock::new();
         let handle = TestTelemetryHandle::new();
@@ -492,23 +509,28 @@ mod tests {
 
         register_telemetry_user(&config);
         register_telemetry_user(&config);
-        let deadline = Instant::now() + Duration::from_secs(60);
 
-        // First user leaves: worker must keep running.
-        stop_telemetry_inner(deadline, &telemetry_cell).unwrap();
+        assert!(
+            !trigger_stop_telemetry_inner(&telemetry_cell),
+            "first of two users must not be the last"
+        );
         assert_eq!(
             stop_calls.load(Ordering::Relaxed),
             0,
-            "worker must not be stopped while users remain"
+            "worker must not be signalled to stop while users remain"
         );
 
-        // Last user leaves: worker is stopped exactly once.
-        stop_telemetry_inner(deadline, &telemetry_cell).unwrap();
+        assert!(
+            trigger_stop_telemetry_inner(&telemetry_cell),
+            "second of two users must be the last"
+        );
         assert_eq!(
             stop_calls.load(Ordering::Relaxed),
             1,
-            "last user must stop the worker"
+            "last user must signal the worker to stop"
         );
+
+        wait_telemetry_stopped_inner(Duration::from_secs(60), &telemetry_cell).unwrap();
     }
 
     #[test]

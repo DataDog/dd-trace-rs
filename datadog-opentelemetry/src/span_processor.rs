@@ -24,7 +24,9 @@ use crate::{
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::{init_telemetry, register_telemetry_user, stop_telemetry},
+        telemetry::{
+            init_telemetry, register_telemetry_user, trigger_stop_telemetry, wait_telemetry_stopped,
+        },
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
@@ -680,6 +682,8 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
             telemetry_metrics_handle.trigger_shutdown();
         }
+        let telemetry_last_user =
+            self.telemetry_user_active.swap(false, Ordering::AcqRel) && trigger_stop_telemetry();
 
         // Wait fot all tasks to finish, keeping in mind how much time is left
         // since the beginning of the call
@@ -728,8 +732,9 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
                 })?;
         }
 
-        if self.telemetry_user_active.swap(false, Ordering::AcqRel) {
-            stop_telemetry(deadline)
+        if telemetry_last_user {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            wait_telemetry_stopped(left)
                 .map_err(|_| opentelemetry_sdk::error::OTelSdkError::Timeout(timeout))?;
         }
         Ok(())
