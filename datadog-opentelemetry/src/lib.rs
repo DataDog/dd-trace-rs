@@ -291,9 +291,9 @@ pub(crate) mod sampling;
 mod span_processor;
 
 mod ddtrace_transform;
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
 mod logs_reader;
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
 mod metrics_reader;
 mod otlp_utils;
 mod span_exporter;
