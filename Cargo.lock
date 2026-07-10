@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "datadog-opentelemetry"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "propagator"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "datadog-opentelemetry",
  "http-body-util",
@@ -2924,7 +2924,7 @@ checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "simple_tracing"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "datadog-opentelemetry",
  "opentelemetry",
@@ -3290,7 +3290,7 @@ dependencies = [
 
 [[package]]
 name = "tools"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
