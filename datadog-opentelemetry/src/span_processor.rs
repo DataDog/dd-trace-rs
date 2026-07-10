@@ -8,10 +8,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     str::FromStr,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::{
@@ -24,9 +21,7 @@ use crate::{
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::{
-            init_telemetry, register_telemetry_user, trigger_stop_telemetry, wait_telemetry_stopped,
-        },
+        telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
@@ -416,12 +411,7 @@ pub(crate) struct DatadogSpanProcessor {
     config: Arc<Config>,
     rc_client_handle: Option<RemoteConfigClientHandle>,
     telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
-    /// Whether this processor still holds a telemetry-user registration. Starts
-    /// `true` only when telemetry is enabled (i.e. this processor registered),
-    /// and is cleared on the first shutdown so the paired [`stop_telemetry`]
-    /// (which decrements the global user count) runs exactly once — never for a
-    /// processor that never registered, and never twice if `shutdown` is repeated.
-    telemetry_user_active: AtomicBool,
+    telemetry_user: Mutex<Option<TelemetryUser>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -454,7 +444,7 @@ impl DatadogSpanProcessor {
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
             TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
         });
-        let telemetry_user_active = AtomicBool::new(register_telemetry_user(&config));
+        let telemetry_user = Mutex::new(TelemetryUser::register(&config));
 
         Ok(Self {
             registry,
@@ -463,7 +453,7 @@ impl DatadogSpanProcessor {
             config,
             rc_client_handle,
             telemetry_metrics_handle,
-            telemetry_user_active,
+            telemetry_user,
         })
     }
 
@@ -682,8 +672,12 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
             telemetry_metrics_handle.trigger_shutdown();
         }
-        let telemetry_last_user =
-            self.telemetry_user_active.swap(false, Ordering::AcqRel) && trigger_stop_telemetry();
+        let telemetry_last_user = self
+            .telemetry_user
+            .lock()
+            .ok()
+            .and_then(|mut user| user.take())
+            .is_some_and(TelemetryUser::trigger_stop);
 
         // Wait fot all tasks to finish, keeping in mind how much time is left
         // since the beginning of the call
@@ -733,9 +727,21 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         }
 
         if telemetry_last_user {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            wait_telemetry_stopped(left)
-                .map_err(|_| opentelemetry_sdk::error::OTelSdkError::Timeout(timeout))?;
+            // at least 1 second
+            let left = deadline
+                .saturating_duration_since(std::time::Instant::now())
+                .max(std::time::Duration::from_secs(1));
+            // NOTE: this wait is only bounded if libdatadog honors the deadline.
+            // Internally `wait_for_shutdown_deadline` blocks on a condvar with no
+            // timeout of its own; it relies on a tokio task, spawned on the
+            // worker's runtime, cancelling the worker once `left` elapses. That
+            // holds as long as the worker (and its runtime) is still alive, which
+            // it is here since we own the handle. If that ever stops being true
+            // this call could hang, so the real fix belongs upstream: bound the
+            // condvar wait itself (e.g. `wait_timeout_while`).
+            if let Err(e) = wait_telemetry_stopped(left) {
+                dd_debug!("DatadogSpanProcessor.shutdown_with_timeout: telemetry did not stop in time: {e}");
+            }
         }
         Ok(())
     }
