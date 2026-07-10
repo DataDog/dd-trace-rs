@@ -110,3 +110,34 @@ async fn test_telemetry_shutdown_refcount_across_providers() {
     // Last user: stops the real worker and waits for it to drain.
     shutdown_within_bound(provider2).await;
 }
+
+/// Reusing the telemetry lifecycle within a process: build a tracer, shut it
+/// down (which, as the last user, stops the process-global telemetry worker),
+/// then build and use another tracer and shut it down too.
+///
+/// Telemetry is a non-restartable singleton, so the second tracer shares the
+/// already-stopped worker — it does *not* get a fresh one. This test pins the
+/// behaviour that matters: the reuse degrades gracefully. Building and exercising
+/// the second tracer must not panic, its shutdown must not underflow the user
+/// count or hang, and both shutdowns must return cleanly.
+#[tokio::test]
+async fn test_reuse_telemetry_lifecycle_after_shutdown_is_safe() {
+    const SESSION_NAME: &str = "telemetry_shutdown/reuse";
+    let (cfg, _agent) = config_for(SESSION_NAME).await;
+
+    // First tracer: starts the global telemetry worker, stops it on shutdown.
+    let (first_provider, _) = make_test_tracer(cfg.clone());
+    first_provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op_before_shutdown", |_| {});
+    shutdown_within_bound(first_provider).await;
+
+    // Second tracer, built after the global worker was already stopped: registers
+    // a telemetry user again and drives telemetry through span activity. Must stay
+    // safe and shut down cleanly even though the underlying worker is not revived.
+    let (second_provider, _) = make_test_tracer(cfg.clone());
+    second_provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op_after_shutdown", |_| {});
+    shutdown_within_bound(second_provider).await;
+}
