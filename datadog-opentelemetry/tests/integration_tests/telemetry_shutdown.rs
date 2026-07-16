@@ -141,3 +141,28 @@ async fn test_reuse_telemetry_lifecycle_after_shutdown_is_safe() {
         .in_span("op_after_shutdown", |_| {});
     shutdown_within_bound(second_provider).await;
 }
+
+/// Stress the post-shutdown telemetry path. After the first iteration stops the
+/// process-global worker, every later iteration registers a user, pushes span
+/// activity (which feeds telemetry metrics) through the *stopped* handle, and
+/// then stops it again. Across many cycles this must never panic, error, or hang
+/// — guarding the "use a shutdown telemetry handle" path against regressions
+/// (e.g. a stopped-handle call that starts to `unwrap`, or a cycle that leaks a
+/// runtime and eventually errors).
+#[tokio::test]
+async fn test_post_shutdown_telemetry_use_is_panic_free_under_stress() {
+    const SESSION_NAME: &str = "telemetry_shutdown/stress";
+    const ITERATIONS: usize = 25;
+    const SPANS_PER_ITERATION: usize = 8;
+
+    let (cfg, _agent) = config_for(SESSION_NAME).await;
+
+    for iteration in 0..ITERATIONS {
+        let (provider, _) = make_test_tracer(cfg.clone());
+        let tracer = provider.tracer("telemetry_shutdown_test");
+        for span in 0..SPANS_PER_ITERATION {
+            tracer.in_span(format!("iter{iteration}_span{span}"), |_| {});
+        }
+        shutdown_within_bound(provider).await;
+    }
+}
