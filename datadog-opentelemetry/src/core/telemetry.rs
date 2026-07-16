@@ -584,6 +584,62 @@ mod tests {
     }
 
     #[test]
+    fn test_only_template_reaches_telemetry() {
+        use crate::propagation::datadog;
+        use std::collections::HashMap;
+
+        let config = Config::builder().build();
+
+        init_telemetry_inner(
+            &config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &TELEMETRY,
+        );
+
+        let malformed_trace_id = "not-a-valid-trace-id-secret";
+        let headers = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                malformed_trace_id.to_string(),
+            ),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+        ]);
+
+        assert!(datadog::extract(&headers, &config).is_none());
+
+        let t = TELEMETRY.get().unwrap().lock().unwrap();
+        let handle = t
+            .handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle");
+
+        let template = "Propagator (datadog): Error extracting trace_id {e}";
+        assert!(
+            handle
+                .logs
+                .iter()
+                .any(|(msg, lvl, _)| msg == template && *lvl == data::LogLevel::Error),
+            "expected the template to be sent to telemetry, got: {:?}",
+            handle.logs,
+        );
+
+        assert!(
+            !handle
+                .logs
+                .iter()
+                .any(|(msg, _, stack)| msg.contains(malformed_trace_id)
+                    || stack
+                        .as_deref()
+                        .is_some_and(|s| s.contains(malformed_trace_id))),
+            "the dynamic trace id leaked into telemetry: {:?}",
+            handle.logs,
+        );
+    }
+
+    #[test]
     fn test_notify_configuration_update() {
         let config = Config::builder().build();
         let telemetry_cell = OnceLock::new();
