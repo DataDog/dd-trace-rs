@@ -257,9 +257,17 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
         None => return Ok(None),
     };
 
-    let trace_id = trace_id
-        .parse::<u64>()
-        .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))?;
+    if trace_id.is_empty() {
+        dd_warn!("Propagator (datadog): Empty `trace_id` found in datadog carrier");
+        return Ok(None);
+    }
+
+    let trace_id = trace_id.parse::<u64>().map_err(|_| {
+        Error::extract(
+            format!("Failed to decode `trace_id`: \"{trace_id}\""),
+            "datadog",
+        )
+    })?;
     if trace_id == 0 {
         return Err(Error::extract("Invalid `trace_id` found", "datadog"));
     }
@@ -272,10 +280,12 @@ fn extract_parent_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
         None => return Ok(None),
     };
 
-    parent_id
-        .parse::<u64>()
-        .map(Some)
-        .map_err(|_| Error::extract("Failed to decode `parent_id`", "datadog"))
+    parent_id.parse::<u64>().map(Some).map_err(|_| {
+        Error::extract(
+            format!("Failed to decode `parent_id`: \"{parent_id}\""),
+            "datadog",
+        )
+    })
 }
 
 fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<Option<SamplingPriority>, Error> {
@@ -454,6 +464,27 @@ mod test {
         println!("{:?}", context.tags);
         assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
         assert_eq!(context.tags.get("_dd.p.dm"), None);
+    }
+
+    #[test]
+    fn test_extract_datadog_propagator_with_empty_traceid() {
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.test=value,any=tag".to_string(),
+            ),
+        ]);
+
+        let propagator = TracePropagationStyle::Datadog;
+
+        assert_eq!(
+            propagator.extract(&headers, &Config::builder().build()),
+            None
+        );
     }
 
     #[test]

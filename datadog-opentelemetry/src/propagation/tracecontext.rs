@@ -610,7 +610,10 @@ fn parse_traceparent_components(traceparent: &str) -> Option<(&str, &str, &str, 
 
 fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
     let (version, trace_id, span_id, flags, tail) = parse_traceparent_components(traceparent)
-        .ok_or(Error::extract("invalid traceparent", "traceparent"))?;
+        .ok_or(Error::extract(
+            format!("invalid traceparent: \"{traceparent}\""),
+            "traceparent",
+        ))?;
 
     let trace_id = extract_trace_id(trace_id)?;
 
@@ -664,8 +667,12 @@ fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Err
 }
 
 fn extract_trace_id(trace_id: &str) -> Result<u128, Error> {
-    let trace_id = u128::from_str_radix(trace_id, 16)
-        .map_err(|_| Error::extract("Failed to decode trace_id", "traceparent"))?;
+    let trace_id = u128::from_str_radix(trace_id, 16).map_err(|_| {
+        Error::extract(
+            format!("Failed to decode trace_id: \"{trace_id}\""),
+            "traceparent",
+        )
+    })?;
     if trace_id == 0 {
         return Err(Error::extract(
             "`0` value for trace_id is invalid",
@@ -676,8 +683,12 @@ fn extract_trace_id(trace_id: &str) -> Result<u128, Error> {
 }
 
 fn extract_span_id(span_id: &str) -> Result<u64, Error> {
-    let span_id = u64::from_str_radix(span_id, 16)
-        .map_err(|_| Error::extract("Failed to decode span_id", "traceparent"))?;
+    let span_id = u64::from_str_radix(span_id, 16).map_err(|_| {
+        Error::extract(
+            format!("Failed to decode span_id: \"{span_id}\""),
+            "traceparent",
+        )
+    })?;
     if span_id == 0 {
         return Err(Error::extract(
             "`0` value for span_id is invalid",
