@@ -10,15 +10,15 @@
 //! [`Config::update_sampling_rules_from_remote`] / [`Config::clear_remote_sampling_rules`].
 
 use crate::core::configuration::Config;
+use crate::core::utils::WorkerError::*;
 use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
-use anyhow::Result;
 use core::fmt;
 use libdd_common::Endpoint;
 use libdd_remote_config::fetch::{
     ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
 };
-use libdd_remote_config::file_change_tracker::Change;
+use libdd_remote_config::file_change_tracker::{Change, FilePath};
 use libdd_remote_config::file_storage::ParsedFileStorage;
 use libdd_remote_config::parse::{
     ParseError, ParserRegistry, RemoteConfigContent, RemoteConfigParsed,
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::thread::{self};
 use std::time::Duration;
 
-/// HTTP timeout for a single RC fetch. Matches the historical in-tree client.
+/// HTTP timeout for a single RC fetch
 const FETCH_TIMEOUT_MS: u64 = 3_000;
 
 // Custom deserializer that preserves explicit null as Some(Value::Null)
@@ -97,9 +97,132 @@ struct LibConfig {
 impl RemoteConfigContent for ApmTracingConfig {
     const PRODUCT: RemoteConfigProduct = RemoteConfigProduct::ApmTracing;
 
-    fn parse(data: &[u8]) -> std::result::Result<Self, ParseError> {
+    fn parse(data: &[u8]) -> Result<Self, ParseError> {
         Ok(serde_json::from_slice(data)?)
     }
+}
+
+/// Whether an APM_TRACING payload's `service_target` applies to this tracer.
+///
+/// Returns `false` when the payload explicitly targets a
+/// different service or env; a `*` or absent component always matches
+fn service_target_matches(service_target: Option<&ServiceTarget>, config: &Config) -> bool {
+    let Some(target) = service_target else {
+        return true;
+    };
+    if let Some(svc) = target.service.as_deref() {
+        if svc != "*" && !config.rc_service_target_matches(svc) {
+            crate::dd_debug!(
+                "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (not this tracer's service or extra services)",
+                svc
+            );
+            return false;
+        }
+    }
+    if let Some(target_env) = target.env.as_deref() {
+        let tracer_env = config.env().unwrap_or("");
+        if target_env != "*" && !target_env.eq_ignore_ascii_case(tracer_env) {
+            crate::dd_debug!(
+                "RemoteConfigClient: ignoring APM_TRACING config targeting env {:?} (tracer env is {:?})",
+                target_env,
+                tracer_env
+            );
+            return false;
+        }
+    }
+    true
+}
+
+/// Validate and extract the `tracing_sampling_rate` field of an RC payload.
+///
+/// Must be either absent/null (clear -> `None`) or a JSON number in `[0.0,
+/// 1.0]`. Any other value (out-of-range, non-finite, non-numeric) is a
+/// malformed payload and returns `Err` so the whole update is rejected.
+fn parse_sampling_rate(value: &Option<serde_json::Value>) -> anyhow::Result<Option<f64>> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(n)) => match n.as_f64() {
+            Some(r) if r.is_finite() && (0.0..=1.0).contains(&r) => Ok(Some(r)),
+            Some(r) => Err(anyhow::anyhow!(
+                "tracing_sampling_rate must be in [0.0, 1.0], got: {}",
+                r
+            )),
+            None => Err(anyhow::anyhow!(
+                "tracing_sampling_rate is not representable as f64"
+            )),
+        },
+        Some(other) => Err(anyhow::anyhow!(
+            "tracing_sampling_rate must be a JSON number or null, got: {}",
+            other
+        )),
+    }
+}
+
+/// Build the effective sampling-rule list to install from an RC payload.
+///
+/// `rules_value` is the non-null `tracing_sampling_rules` (if any) and `rate`
+/// the validated `tracing_sampling_rate`. Applies multi-source precedence:
+/// explicit RC rules replace env rules; otherwise env rules are kept in front
+/// of a synthetic catch-all built from the RC rate (or `DD_TRACE_SAMPLE_RATE`).
+/// Returns `Err` if `tracing_sampling_rules` is present but not a JSON array.
+fn build_remote_sampling_rules(
+    rules_value: Option<serde_json::Value>,
+    rate: Option<f64>,
+    config: &Config,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    // An explicit empty `tracing_sampling_rules: []` is treated the same as
+    // null/absent: RC has no rules to deliver, so env-side rules survive.
+    // Operators clear remote rules by sending `tracing_sampling_rules: null`
+    // (the conventional RC clear); an empty array is an unusual edge case and
+    // the lenient interpretation is safer than wiping env config silently.
+    let rc_has_explicit_rules = matches!(
+        rules_value,
+        Some(serde_json::Value::Array(ref arr)) if !arr.is_empty()
+    );
+
+    let mut rules: Vec<serde_json::Value> = match rules_value {
+        Some(serde_json::Value::Array(arr)) => arr,
+        Some(other) => {
+            return Err(anyhow::anyhow!(
+                "tracing_sampling_rules must be a JSON array, got: {}",
+                other
+            ));
+        }
+        None => Vec::new(),
+    };
+
+    // Multi-source precedence:
+    // - If RC delivered explicit rules, env rules are replaced.
+    // - If RC delivered only a rate, env rules survive and apply in front of the synthetic
+    //   catch-all.
+    if !rc_has_explicit_rules {
+        let env_rules = config.local_trace_sampling_rules();
+        if !env_rules.is_empty() {
+            let env_json = serde_json::to_value(&*env_rules)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize env sampling rules: {}", e))?;
+            let serde_json::Value::Array(env_arr) = env_json else {
+                return Err(anyhow::anyhow!(
+                    "BUG: serialized env sampling rules are not a JSON array"
+                ));
+            };
+            let mut composed = env_arr;
+            composed.append(&mut rules);
+            rules = composed;
+        }
+    }
+
+    // Effective catch-all rate: RC rate wins; otherwise fall back to
+    // DD_TRACE_SAMPLE_RATE if it's set (Option distinguishes unset from 1.0).
+    let catch_all_rate = rate.or_else(|| config.trace_sample_rate().filter(|r| r.is_finite()));
+    if let Some(r) = catch_all_rate {
+        // The global RC rate is a "local-user-like" fallback: it must produce
+        // DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC). Omit `provenance`;
+        // libdd-sampling deserializes it as "default" via its serde default,
+        // which maps to DM -3.
+        rules.push(serde_json::json!({ "sample_rate": r }));
+    }
+
+    Ok(rules)
 }
 
 /// Apply a parsed APM_TRACING config to the tracer's sampling state.
@@ -107,34 +230,13 @@ impl RemoteConfigContent for ApmTracingConfig {
 /// Returns `Err` on malformed payloads (out-of-range rate, non-numeric rate,
 /// non-array rules, or downstream rule-rejection by libdd-sampling) so the
 /// caller can report `ConfigApplyState::Error` to the agent and leave any
-/// prior remote override in place.
-fn apply_apm_tracing(tracing_config: &ApmTracingConfig, config: &Arc<Config>) -> Result<()> {
-    // Defense-in-depth target check: only apply a config whose service_target
-    // matches this tracer's service/env. The backend predicate already scopes
-    // delivery, but a stale or mistargeted payload must never install another
-    // service's/env's policy. A `*` (or absent) component applies regardless.
-    // Mismatch => ignore (no sampler mutation), mirroring dd-trace-py.
-    if let Some(target) = &tracing_config.service_target {
-        if let Some(svc) = target.service.as_deref() {
-            if svc != "*" && !config.rc_service_target_matches(svc) {
-                crate::dd_debug!(
-                    "RemoteConfigClient: ignoring APM_TRACING config targeting service {:?} (not this tracer's service or extra services)",
-                    svc
-                );
-                return Ok(());
-            }
-        }
-        if let Some(target_env) = target.env.as_deref() {
-            let tracer_env = config.env().unwrap_or("");
-            if target_env != "*" && !target_env.eq_ignore_ascii_case(tracer_env) {
-                crate::dd_debug!(
-                    "RemoteConfigClient: ignoring APM_TRACING config targeting env {:?} (tracer env is {:?})",
-                    target_env,
-                    tracer_env
-                );
-                return Ok(());
-            }
-        }
+/// prior remote override in place
+fn apply_apm_tracing(
+    tracing_config: &ApmTracingConfig,
+    config: &Arc<Config>,
+) -> anyhow::Result<()> {
+    if !service_target_matches(tracing_config.service_target.as_ref(), config) {
+        return Ok(());
     }
 
     let lib = &tracing_config.lib_config;
@@ -142,33 +244,7 @@ fn apply_apm_tracing(tracing_config: &ApmTracingConfig, config: &Arc<Config>) ->
     let any_field_present =
         lib.tracing_sampling_rules.is_some() || lib.tracing_sampling_rate.is_some();
 
-    // tracing_sampling_rate must be either null (clear) or a JSON number.
-    // Any other present-but-non-numeric value (string, bool, object) is a
-    // malformed payload — reject rather than silently treating it as a
-    // clear, which would wipe an active remote sampling policy.
-    let rate: Option<f64> = match &lib.tracing_sampling_rate {
-        None | Some(serde_json::Value::Null) => None,
-        Some(serde_json::Value::Number(n)) => match n.as_f64() {
-            Some(r) if r.is_finite() && (0.0..=1.0).contains(&r) => Some(r),
-            Some(r) => {
-                return Err(anyhow::anyhow!(
-                    "tracing_sampling_rate must be in [0.0, 1.0], got: {}",
-                    r
-                ));
-            }
-            None => {
-                return Err(anyhow::anyhow!(
-                    "tracing_sampling_rate is not representable as f64"
-                ));
-            }
-        },
-        Some(other) => {
-            return Err(anyhow::anyhow!(
-                "tracing_sampling_rate must be a JSON number or null, got: {}",
-                other
-            ));
-        }
-    };
+    let rate = parse_sampling_rate(&lib.tracing_sampling_rate)?;
     let rules_value = match &lib.tracing_sampling_rules {
         Some(v) if !v.is_null() => Some(v.clone()),
         _ => None,
@@ -187,66 +263,8 @@ fn apply_apm_tracing(tracing_config: &ApmTracingConfig, config: &Arc<Config>) ->
                 );
             }
         }
-        (rules_opt, rate_opt) => {
-            // An explicit empty `tracing_sampling_rules: []` is treated the
-            // same as null/absent: RC has no rules to deliver, so env-side
-            // rules survive. Operators clear remote rules by sending
-            // `tracing_sampling_rules: null` (the conventional RC clear);
-            // an empty array is an unusual edge case and the lenient
-            // interpretation is safer than wiping env config silently.
-            let rc_has_explicit_rules = matches!(
-                rules_opt,
-                Some(serde_json::Value::Array(ref arr)) if !arr.is_empty()
-            );
-
-            let mut rules: Vec<serde_json::Value> = match rules_opt {
-                Some(serde_json::Value::Array(arr)) => arr,
-                Some(other) => {
-                    return Err(anyhow::anyhow!(
-                        "tracing_sampling_rules must be a JSON array, got: {}",
-                        other
-                    ));
-                }
-                None => Vec::new(),
-            };
-
-            // Multi-source precedence:
-            // - If RC delivered explicit rules, env rules are replaced.
-            // - If RC delivered only a rate, env rules survive and apply in front of the synthetic
-            //   catch-all.
-            if !rc_has_explicit_rules {
-                let env_rules = config.local_trace_sampling_rules();
-                if !env_rules.is_empty() {
-                    let env_json = serde_json::to_value(&*env_rules).map_err(|e| {
-                        anyhow::anyhow!("Failed to serialize env sampling rules: {}", e)
-                    })?;
-                    let serde_json::Value::Array(env_arr) = env_json else {
-                        return Err(anyhow::anyhow!(
-                            "BUG: serialized env sampling rules are not a JSON array"
-                        ));
-                    };
-                    let mut composed = env_arr;
-                    composed.append(&mut rules);
-                    rules = composed;
-                }
-            }
-
-            // Effective catch-all rate: RC rate wins; otherwise fall back
-            // to DD_TRACE_SAMPLE_RATE if it's set (Option distinguishes
-            // unset from explicit 1.0).
-            let env_rate = config.trace_sample_rate();
-            let catch_all_rate: Option<f64> = match rate_opt {
-                Some(r) => Some(r),
-                None => env_rate.filter(|r| r.is_finite()),
-            };
-            if let Some(r) = catch_all_rate {
-                // The global RC rate is a "local-user-like" fallback: it must
-                // produce DM "-3" (LOCAL_USER), not "-12" (REMOTE_DYNAMIC).
-                // Omit `provenance`; libdd-sampling deserializes it as
-                // "default" via its serde default, which maps to DM -3.
-                rules.push(serde_json::json!({ "sample_rate": r }));
-            }
-
+        (rules_value, rate) => {
+            let rules = build_remote_sampling_rules(rules_value, rate, config)?;
             let rules_json = serde_json::to_string(&serde_json::Value::Array(rules))
                 .map_err(|e| anyhow::anyhow!("Failed to serialize sampling rules: {}", e))?;
 
@@ -298,7 +316,6 @@ impl RemoteConfigClientHandle {
     }
 
     pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
-        use crate::core::utils::WorkerError::*;
         if let Err(e) = self.worker_handle.wait_for_shutdown(timeout) {
             Err(match e {
                 ShutdownTimedOut => RemoteConfigClientError::ShutdownTimedOut,
@@ -498,7 +515,6 @@ fn apply_one(
 }
 
 fn apply_remove(file: &Arc<StoredApmFile>, config: &Arc<Config>) {
-    use libdd_remote_config::file_change_tracker::FilePath;
     let config_id = file.path().config_id.clone();
     crate::dd_debug!(
         "RemoteConfigClient: removing APM_TRACING config {}",
@@ -529,7 +545,7 @@ mod tests {
     /// through the same code path the worker uses. Used by handler tests so
     /// they exercise the registry-facing parser and the application step
     /// together.
-    fn apply_payload(payload: &[u8], config: &Arc<Config>) -> Result<()> {
+    fn apply_payload(payload: &[u8], config: &Arc<Config>) -> anyhow::Result<()> {
         let cfg = ApmTracingConfig::parse(payload).map_err(|e| anyhow::anyhow!("parse: {e}"))?;
         apply_apm_tracing(&cfg, config)
     }
