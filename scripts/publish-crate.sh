@@ -256,7 +256,7 @@ publish_crate() {
         return 1
     fi
     
-    local publish_cmd="cargo publish --package $crate_name --token $token --all-features"
+    local publish_cmd="cargo publish --locked --package $crate_name --token $token --all-features"
     
     if [ "$dry_run" = "true" ]; then
         publish_cmd="$publish_cmd --dry-run"
