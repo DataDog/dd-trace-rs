@@ -4,7 +4,10 @@
 use std::{
     any::Any,
     ops::DerefMut,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex, OnceLock,
+    },
     time::Duration,
 };
 
@@ -20,8 +23,25 @@ use super::telemetry_session;
 use crate::{dd_debug, dd_error, dd_warn};
 
 static TELEMETRY: TelemetryCell = OnceLock::new();
+static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 
 type TelemetryCell = OnceLock<Mutex<Telemetry>>;
+
+#[must_use = "dropping a TelemetryUser without calling `trigger_stop` leaks the registration and prevents telemetry from ever shutting down"]
+pub struct TelemetryUser(());
+
+impl TelemetryUser {
+    pub fn register(config: &Config) -> Option<TelemetryUser> {
+        config.telemetry_enabled().then(|| {
+            TELEMETRY_USERS.fetch_add(1, Ordering::AcqRel);
+            TelemetryUser(())
+        })
+    }
+
+    pub fn trigger_stop(self) -> bool {
+        trigger_stop_telemetry_inner(&TELEMETRY)
+    }
+}
 
 struct TelemetryProjection<'a> {
     handle: &'a mut dyn TelemetryHandle,
@@ -132,6 +152,8 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
 
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) -> Result<(), Error>;
+
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn Any;
 }
@@ -196,6 +218,15 @@ impl TelemetryHandle for TelemetryHandleWrapper {
 
     fn send_stop(&self) -> Result<(), anyhow::Error> {
         self.handle.send_stop()
+    }
+
+    fn wait_for_shutdown_deadline(&self, deadline: std::time::Instant) -> Result<(), Error> {
+        self.handle.wait_for_shutdown_deadline(deadline);
+        if std::time::Instant::now() >= deadline {
+            Err(Error::msg("Telemetry: shutdown timed out"))
+        } else {
+            Ok(())
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -267,16 +298,30 @@ fn make_telemetry_worker(
     }
 }
 
-#[allow(dead_code)]
-pub fn stop_telemetry() {
-    stop_telemetry_inner(&TELEMETRY);
-}
-
-fn stop_telemetry_inner(telemetry_cell: &TelemetryCell) {
+fn trigger_stop_telemetry_inner(telemetry_cell: &TelemetryCell) -> bool {
+    if TELEMETRY_USERS.fetch_sub(1, Ordering::AcqRel) != 1 {
+        return false;
+    }
     with_telemetry_handle(telemetry_cell, |t| {
         dd_debug!("Stopping telemetry");
         t.handle.send_stop().ok();
     });
+    true
+}
+
+pub fn wait_telemetry_stopped(timeout: Duration) -> Result<(), Error> {
+    wait_telemetry_stopped_inner(timeout, &TELEMETRY)
+}
+
+fn wait_telemetry_stopped_inner(
+    timeout: Duration,
+    telemetry_cell: &TelemetryCell,
+) -> Result<(), Error> {
+    let deadline = std::time::Instant::now() + timeout;
+    with_telemetry_handle(telemetry_cell, |t| {
+        t.handle.wait_for_shutdown_deadline(deadline)
+    })
+    .unwrap_or(Ok(()))
 }
 
 pub fn add_points<Points: IntoIterator<Item = (f64, TelemetryMetric)>>(points: Points) {
@@ -352,17 +397,29 @@ mod tests {
             configuration::{Config, ConfigurationProvider},
             telemetry::{
                 add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
-                TelemetryHandle, TelemetryMetric, TELEMETRY,
+                trigger_stop_telemetry_inner, wait_telemetry_stopped_inner, TelemetryHandle,
+                TelemetryMetric, TelemetryUser, TELEMETRY,
             },
         },
         dd_debug, dd_error, dd_warn,
     };
 
-    use std::{any::Any, sync::OnceLock};
+    use std::{
+        any::Any,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, OnceLock,
+        },
+        time::Duration,
+    };
 
     struct TestTelemetryHandle {
         pub logs: Vec<(String, data::LogLevel, Option<String>)>,
         pub configurations: Vec<data::Configuration>,
+        pub stop_calls: Arc<AtomicUsize>,
+        /// When set, `wait_for_shutdown_deadline` reports a timeout instead of
+        /// completing, simulating a worker that fails to stop before the deadline.
+        pub shutdown_times_out: bool,
     }
 
     impl TestTelemetryHandle {
@@ -370,6 +427,8 @@ mod tests {
             TestTelemetryHandle {
                 logs: vec![],
                 configurations: vec![],
+                stop_calls: Arc::new(AtomicUsize::new(0)),
+                shutdown_times_out: false,
             }
         }
     }
@@ -401,7 +460,19 @@ mod tests {
         }
 
         fn send_stop(&self) -> Result<(), anyhow::Error> {
+            self.stop_calls.fetch_add(1, Ordering::Relaxed);
             Ok(())
+        }
+
+        fn wait_for_shutdown_deadline(
+            &self,
+            _deadline: std::time::Instant,
+        ) -> Result<(), anyhow::Error> {
+            if self.shutdown_times_out {
+                Err(anyhow::Error::msg("Telemetry: shutdown timed out"))
+            } else {
+                Ok(())
+            }
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -437,6 +508,89 @@ mod tests {
                 seq_id: None,
             }]
         }
+    }
+
+    #[test]
+    fn test_stop_telemetry_stops_worker_only_for_last_user() {
+        let config = Config::builder().build();
+        let telemetry_cell = OnceLock::new();
+        let handle = TestTelemetryHandle::new();
+        let stop_calls = handle.stop_calls.clone();
+        init_telemetry_inner(&config, Some(Box::new(handle)), &telemetry_cell);
+
+        // Registration hands back a token only when telemetry is enabled. We
+        // release the count through `trigger_stop_telemetry_inner` (against the
+        // test cell) rather than the tokens' `trigger_stop` (which targets the
+        // global cell), so keep the tokens alive until the end of the test.
+        let _user1 =
+            TelemetryUser::register(&config).expect("registration returns a token when enabled");
+        let _user2 =
+            TelemetryUser::register(&config).expect("registration returns a token when enabled");
+
+        assert!(
+            !trigger_stop_telemetry_inner(&telemetry_cell),
+            "first of two users must not be the last"
+        );
+        assert_eq!(
+            stop_calls.load(Ordering::Relaxed),
+            0,
+            "worker must not be signalled to stop while users remain"
+        );
+
+        assert!(
+            trigger_stop_telemetry_inner(&telemetry_cell),
+            "second of two users must be the last"
+        );
+        assert_eq!(
+            stop_calls.load(Ordering::Relaxed),
+            1,
+            "last user must signal the worker to stop"
+        );
+
+        wait_telemetry_stopped_inner(Duration::from_secs(60), &telemetry_cell).unwrap();
+    }
+
+    #[test]
+    fn test_register_telemetry_user_disabled_returns_no_token() {
+        let config = Config::builder().set_telemetry_enabled(false).build();
+        // No token is issued when telemetry is disabled, so the user count is
+        // never incremented and such a processor can never trigger a stop. The
+        // increment lives inside the returned closure, so `None` proves it.
+        assert!(
+            TelemetryUser::register(&config).is_none(),
+            "disabled telemetry must not register a user"
+        );
+    }
+
+    #[test]
+    fn test_wait_telemetry_stopped_propagates_timeout() {
+        let config = Config::builder().build();
+        let telemetry_cell = OnceLock::new();
+        let mut handle = TestTelemetryHandle::new();
+        handle.shutdown_times_out = true;
+        init_telemetry_inner(&config, Some(Box::new(handle)), &telemetry_cell);
+
+        // A worker that fails to stop before the deadline must surface as an error
+        // rather than a silent success.
+        assert!(
+            wait_telemetry_stopped_inner(Duration::from_secs(60), &telemetry_cell).is_err(),
+            "a timed-out shutdown must propagate an error"
+        );
+    }
+
+    #[test]
+    fn test_wait_telemetry_stopped_disabled_is_ok() {
+        let config = Config::builder().set_telemetry_enabled(false).build();
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
+
+        // When telemetry is disabled the handle is never consulted, so waiting for
+        // shutdown is a no-op success (never a spurious timeout).
+        wait_telemetry_stopped_inner(Duration::from_secs(60), &telemetry_cell).unwrap();
     }
 
     #[test]
