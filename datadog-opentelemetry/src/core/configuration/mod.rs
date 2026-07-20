@@ -25,7 +25,10 @@ pub(crate) mod remote_config;
 mod sources;
 mod supported_configurations;
 
-pub use configuration::{Config, ConfigBuilder, OtlpProtocol, TracePropagationStyle};
+pub use configuration::{
+    BaggageTagKeyFilter, Config, ConfigBuilder, OtlpProtocol, TracePropagationBehaviorExtract,
+    TracePropagationStyle,
+};
 pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};
 
 mod sampling_rule_config;

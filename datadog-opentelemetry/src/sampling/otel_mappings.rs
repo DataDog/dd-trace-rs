@@ -295,11 +295,11 @@ impl crate::sampling::AttributeFactory for OtelAttributeFactory {
 /// - `RecordOnly` if the priority indicates the trace should be dropped
 pub(crate) fn priority_to_otel_decision(
     priority: crate::core::sampling::SamplingPriority,
-) -> opentelemetry::trace::SamplingDecision {
+) -> opentelemetry_sdk::trace::SamplingDecision {
     if priority.is_keep() {
-        opentelemetry::trace::SamplingDecision::RecordAndSample
+        opentelemetry_sdk::trace::SamplingDecision::RecordAndSample
     } else {
-        opentelemetry::trace::SamplingDecision::RecordOnly
+        opentelemetry_sdk::trace::SamplingDecision::RecordOnly
     }
 }
 

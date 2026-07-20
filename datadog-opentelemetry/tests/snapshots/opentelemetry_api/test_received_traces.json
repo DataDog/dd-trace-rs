@@ -2,27 +2,28 @@
   {
     "name": "client.request",
     "service": "unnamed-rust-service",
-    "resource": "test",
+    "resource": "kept-span",
     "trace_id": 0,
     "span_id": 1,
     "parent_id": 0,
     "type": "http",
     "meta": {
+      "_dd.p.dm": "-3",
+      "_dd.p.ksr": "1",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
-      "otel.trace_id": "69b987960000000076b816bfa5f386cf",
+      "otel.trace_id": "6a432ae900000000fadb9ed3e75ee6b8",
       "span.kind": "client",
-
-
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
-      "telemetry.sdk.version": "0.3.3"
+      "telemetry.sdk.version": "0.5.0"
     },
     "metrics": {
       "_dd.measured": 1.0,
-      "_sampling_priority_v1": 1.0,
+      "_dd.rule_psr": 1.0,
+      "_sampling_priority_v1": 2.0,
       "_top_level": 1.0
     },
     "duration": 1000,
-    "start": 1773766550861045000
+    "start": 1782786793752101000
   }]]

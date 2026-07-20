@@ -45,13 +45,7 @@ impl Sampler {
         // This is an Option to allow benchmarking different parts of sampling
         trace_registry: Option<TraceRegistry>,
     ) -> Self {
-        let internal_configs: Vec<libdd_sampling::SamplingRuleConfig> = cfg
-            .trace_sampling_rules()
-            .iter()
-            .cloned()
-            .map(Into::into)
-            .collect();
-        let rules = SamplingRule::from_configs(internal_configs);
+        let rules = SamplingRule::from_configs(cfg.effective_initial_rules());
         let sampler = DatadogSampler::new(rules, cfg.trace_rate_limit());
         Self {
             cfg,
@@ -83,13 +77,13 @@ impl ShouldSample for Sampler {
         span_kind: &opentelemetry::trace::SpanKind,
         attributes: &[opentelemetry::KeyValue],
         _links: &[opentelemetry::trace::Link],
-    ) -> opentelemetry::trace::SamplingResult {
+    ) -> opentelemetry_sdk::trace::SamplingResult {
         // If the library has been disabled, we make every span take a Drop decision
         // This way they will not store any data (attributes, name, errors, ...) and will not be
         // passed to span processors
         if !self.cfg.enabled() {
-            return opentelemetry::trace::SamplingResult {
-                decision: opentelemetry::trace::SamplingDecision::Drop,
+            return opentelemetry_sdk::trace::SamplingResult {
+                decision: opentelemetry_sdk::trace::SamplingDecision::Drop,
                 attributes: vec![],
                 trace_state: TraceState::NONE,
             };
@@ -180,15 +174,15 @@ impl ShouldSample for Sampler {
                     trace_propagation_data,
                 ) {
                     RegisterTracePropagationResult::Existing(sampling_decision) => {
-                        return opentelemetry::trace::SamplingResult {
+                        return opentelemetry_sdk::trace::SamplingResult {
                             // If at this point the sampling decision is still None, we will
                             // end up sending the span to the agent without a sampling priority,
                             // which will later take a decision.
                             // So the span is marked as RecordAndSample because we treat it as such
                             decision: if sampling_decision.priority.is_none_or(|p| p.is_keep()) {
-                                opentelemetry::trace::SamplingDecision::RecordAndSample
+                                opentelemetry_sdk::trace::SamplingDecision::RecordAndSample
                             } else {
-                                opentelemetry::trace::SamplingDecision::RecordOnly
+                                opentelemetry_sdk::trace::SamplingDecision::RecordOnly
                             },
                             attributes: Vec::new(),
                             trace_state: parent_context
@@ -201,7 +195,7 @@ impl ShouldSample for Sampler {
             }
         }
 
-        opentelemetry::trace::SamplingResult {
+        opentelemetry_sdk::trace::SamplingResult {
             decision: crate::sampling::otel_mappings::priority_to_otel_decision(
                 result.get_priority(),
             ),
@@ -220,10 +214,10 @@ mod tests {
     use super::*;
     use crate::core::configuration::SamplingRuleConfig;
     use opentelemetry::{
-        trace::{SamplingDecision, SpanContext, SpanKind, TraceId, TraceState},
+        trace::{SpanContext, SpanKind, TraceId, TraceState},
         Context, SpanId, TraceFlags,
     };
-    use opentelemetry_sdk::trace::ShouldSample;
+    use opentelemetry_sdk::trace::{SamplingDecision, ShouldSample};
     use std::collections::HashMap;
 
     #[test]

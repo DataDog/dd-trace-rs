@@ -16,18 +16,18 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.3.3" }
+//! datadog-opentelemetry = { version = "0.5.0" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
 //!
 //! #### Tracing
 //!
-//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
 //! #### Metrics
 //!
-//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.31.0/opentelemetry/metrics/index.html).
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html).
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 //!
 //! #### Logging
@@ -47,7 +47,7 @@
 //!
 //! Requires
 //! * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
 //! * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 //!
 //! ```no_run
@@ -73,7 +73,7 @@
 //! #### Opentelemetry trace API
 //!
 //! Requires
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `trace`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace`
 //!   feature enabled
 //!
 //! ```no_run
@@ -101,7 +101,7 @@
 //!
 //! Requires
 //! * the `metrics` feature of this crate to be enabled
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) with the `metrics`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics`
 //!   feature enabled
 //! * [`tokio`](https://docs.rs/tokio)
 //!
@@ -129,7 +129,7 @@
 //! Requires
 //! * the `logs` feature of this crate to be enabled
 //! * [`log`](https://docs.rs/log/0.4.29/log/)
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
 //! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The logger provider MUST be initialized within a tokio context
@@ -221,11 +221,11 @@
 //!
 //! * MSRV: 1.87
 //!
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.31.0/opentelemetry/) version: 0.31
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.32.1/tracing_opentelemetry/)
-//!   version: 0.32
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.31.0/opentelemetry_appender_log/)
-//!   version 0.31
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+//!   version: 0.33
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+//!   version 0.32
 //! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 //!
 //! ## Features
@@ -291,10 +291,9 @@ pub(crate) mod sampling;
 mod span_processor;
 
 mod ddtrace_transform;
-mod exporter;
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
 mod logs_reader;
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
 mod metrics_reader;
 mod otlp_utils;
 mod span_exporter;
@@ -555,13 +554,23 @@ fn make_tracer(
             .with_sampler(sampler) // Use the sampler created above
             .with_id_generator(trace_id::TraceidGenerator);
         if config.enabled() {
-            let span_processor = DatadogSpanProcessor::new(
+            match DatadogSpanProcessor::new(
                 config.clone(),
                 registry.clone(),
                 resource_slot.clone(),
                 Some(agent_response_handler),
-            );
-            tracer_provider_builder = tracer_provider_builder.with_span_processor(span_processor);
+            ) {
+                Ok(span_processor) => {
+                    tracer_provider_builder =
+                        tracer_provider_builder.with_span_processor(span_processor);
+                }
+                Err(e) => {
+                    crate::dd_error!(
+                        "Failed to initialize Datadog span processor: {}. Traces will not be exported.",
+                        e
+                    );
+                }
+            }
         }
         let tracer_provider = tracer_provider_builder.build();
 
@@ -607,9 +616,20 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
     // Collect attributes to add
     let mut attributes = Vec::new();
 
+    // The OpenTelemetry SDK falls back to a spec-defined default service name when none
+    // is configured: "unknown_service" or "unknown_service:<executable name>" (the latter
+    // since opentelemetry 0.32, which made the fallback spec-compliant). Treat either as unset.
+    let otel_service_is_default = otel_service_name
+        .as_ref()
+        .map(|name| {
+            let name = name.as_str();
+            name == "unknown_service" || name.starts_with("unknown_service:")
+        })
+        .unwrap_or(true);
+
     // Handle service name
-    if otel_service_name.is_none() || otel_service_name.unwrap().as_str() == "unknown_service" {
-        // If the OpenTelemetry service name is not set or is "unknown_service",
+    if otel_service_is_default {
+        // If the OpenTelemetry service name is not set or is the SDK default,
         // we override it with the Datadog service name.
         attributes.push((
             Key::from_static_str(SERVICE_NAME),
@@ -660,6 +680,7 @@ pub struct DatadogMetricsBuilder {
     config: Option<Config>,
     resource: Option<Resource>,
     export_interval: Option<std::time::Duration>,
+    views: Vec<metrics_reader::MetricView>,
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
@@ -683,6 +704,20 @@ impl DatadogMetricsBuilder {
         self
     }
 
+    /// Adds a view for customizing instrument aggregation before export.
+    pub fn with_view<T>(mut self, view: T) -> Self
+    where
+        T: Fn(
+                &opentelemetry_sdk::metrics::Instrument,
+            ) -> Option<opentelemetry_sdk::metrics::Stream>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.views.push(Arc::new(view));
+        self
+    }
+
     /// Initializes the metrics provider and sets it as the global meter provider.
     pub fn init(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let meter_provider = self.init_local();
@@ -693,7 +728,12 @@ impl DatadogMetricsBuilder {
     /// Initializes the metrics provider without setting it as the global meter provider.
     pub fn init_local(self) -> opentelemetry_sdk::metrics::SdkMeterProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        metrics_reader::create_meter_provider(Arc::new(config), self.resource, self.export_interval)
+        metrics_reader::create_meter_provider(
+            Arc::new(config),
+            self.resource,
+            self.export_interval,
+            self.views,
+        )
     }
 }
 
@@ -705,6 +745,163 @@ pub fn metrics() -> DatadogMetricsBuilder {
         config: None,
         resource: None,
         export_interval: None,
+        views: Vec::new(),
+    }
+}
+
+#[cfg(all(test, any(feature = "metrics-grpc", feature = "metrics-http")))]
+mod metrics_tests {
+    use std::sync::{Arc, Weak};
+    use std::time::Duration;
+
+    use opentelemetry::metrics::MeterProvider as _;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::{
+        InstrumentKind, ManualReader, Pipeline, SdkMeterProvider, Stream, Temporality,
+    };
+
+    use super::{metrics, DatadogMetricsBuilder};
+
+    const TEST_METER_NAME: &str = "test-meter";
+
+    /// Keeps a handle to the inner [`ManualReader`] so tests can call `collect`
+    /// after the [`SdkMeterProvider`] has taken ownership of the boxed reader.
+    #[derive(Debug)]
+    struct SharedManualReader(Arc<ManualReader>);
+
+    impl MetricReader for SharedManualReader {
+        fn register_pipeline(&self, pipeline: Weak<Pipeline>) {
+            self.0.register_pipeline(pipeline)
+        }
+
+        fn collect(&self, rm: &mut ResourceMetrics) -> OTelSdkResult {
+            self.0.collect(rm)
+        }
+
+        fn force_flush(&self) -> OTelSdkResult {
+            self.0.force_flush()
+        }
+
+        fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {
+            self.0.shutdown_with_timeout(timeout)
+        }
+
+        fn temporality(&self, kind: InstrumentKind) -> Temporality {
+            self.0.temporality(kind)
+        }
+    }
+
+    fn collect_metric_names(
+        datadog_metrics_builder: DatadogMetricsBuilder,
+        record_metrics: impl FnOnce(&opentelemetry::metrics::Meter),
+    ) -> Vec<String> {
+        let manual_reader = Arc::new(ManualReader::builder().build());
+        let reader = SharedManualReader(Arc::clone(&manual_reader));
+
+        let mut sdk_builder = SdkMeterProvider::builder().with_reader(reader);
+        for view in datadog_metrics_builder.views {
+            sdk_builder = sdk_builder.with_view(move |instrument| view(instrument));
+        }
+        let provider = sdk_builder.build();
+
+        let meter = provider.meter(TEST_METER_NAME);
+        record_metrics(&meter);
+
+        let mut resource_metrics = ResourceMetrics::default();
+        manual_reader.collect(&mut resource_metrics).unwrap();
+
+        resource_metrics
+            .scope_metrics()
+            .flat_map(|sm| sm.metrics())
+            .map(|m| m.name().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn test_metrics_with_view_renames_instrument() {
+        let metric_names = collect_metric_names(
+            metrics().with_view(|instrument| {
+                if instrument.name() == "test.counter" {
+                    Some(
+                        Stream::builder()
+                            .with_name("renamed.counter")
+                            .build()
+                            .unwrap(),
+                    )
+                } else {
+                    None
+                }
+            }),
+            |meter| {
+                let counter = meter.u64_counter("test.counter").build();
+                counter.add(1, &[]);
+            },
+        );
+
+        assert!(
+            metric_names.contains(&"renamed.counter".to_string()),
+            "expected view to rename `test.counter` to `renamed.counter`, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.counter".to_string()),
+            "original instrument name should not appear once renamed by the view, got: {metric_names:?}"
+        );
+    }
+
+    #[test]
+    fn test_metrics_with_view_multiple_renames_instruments() {
+        let metric_names = collect_metric_names(
+            metrics()
+                .with_view(|instrument| {
+                    if instrument.name() == "test.counter" {
+                        Some(
+                            Stream::builder()
+                                .with_name("renamed.counter")
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .with_view(|instrument| {
+                    if instrument.name() == "test.histogram" {
+                        Some(
+                            Stream::builder()
+                                .with_name("renamed.histogram")
+                                .build()
+                                .unwrap(),
+                        )
+                    } else {
+                        None
+                    }
+                }),
+            |meter| {
+                let counter = meter.u64_counter("test.counter").build();
+                let histogram = meter.f64_histogram("test.histogram").build();
+                counter.add(1, &[]);
+                histogram.record(1.0, &[]);
+            },
+        );
+
+        assert!(
+            metric_names.contains(&"renamed.counter".to_string()),
+            "expected first view to rename `test.counter`, got: {metric_names:?}"
+        );
+        assert!(
+            metric_names.contains(&"renamed.histogram".to_string()),
+            "expected second view to rename `test.histogram`, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.counter".to_string()),
+            "original counter name should not appear once renamed, got: {metric_names:?}"
+        );
+        assert!(
+            !metric_names.contains(&"test.histogram".to_string()),
+            "original histogram name should not appear once renamed, got: {metric_names:?}"
+        );
     }
 }
 

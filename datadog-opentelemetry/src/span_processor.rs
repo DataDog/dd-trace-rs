@@ -17,7 +17,7 @@ use crate::{
             remote_config::{
                 RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
             },
-            Config,
+            BaggageTagKeyFilter, Config,
         },
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
@@ -25,12 +25,12 @@ use crate::{
         utils::WorkerError,
     },
     create_dd_resource, dd_debug, dd_error,
-    exporter::AsyncExporterError,
-    span_exporter::DatadogExporter,
+    span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
     spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
     text_map_propagator::DatadogExtractData,
 };
 use opentelemetry::{
+    baggage::BaggageExt as _,
     global::ObjectSafeSpan,
     trace::{SpanContext, TraceContextExt, TraceState},
     Key, KeyValue, SpanId, TraceFlags, TraceId,
@@ -426,7 +426,7 @@ impl DatadogSpanProcessor {
         registry: TraceRegistry,
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
-    ) -> Self {
+    ) -> Result<Self, DatadogExporterInitError> {
         let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
             RemoteConfigClientWorker::start(config.clone())
                 .inspect_err(|e| {
@@ -439,24 +439,29 @@ impl DatadogSpanProcessor {
         } else {
             None
         };
-        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler);
+        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler)?;
         let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
             TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
         });
 
-        Self {
+        Ok(Self {
             registry,
             span_exporter,
             resource,
             config,
             rc_client_handle,
             telemetry_metrics_handle,
-        }
+        })
     }
 
-    /// If SpanContext is remote, recover [`DatadogExtractData`] from parent context:
-    /// - links generated during extraction are added to the root span as span links.
-    /// - sampling decision, origin and tags are returned to be stored as Trace propagation data
+    /// Adds the span links recorded in the parent context's [`DatadogExtractData`] to `span`.
+    ///
+    /// These links are produced during extraction — `terminated_context` links for conflicting
+    /// contexts (continue), or the `propagation_behavior_extract` link (restart). The full 128-bit
+    /// linked trace ID is reconstructed from `trace_id_high` (high 64) + `trace_id` (low 64).
+    ///
+    /// Sampling decision, origin and propagation tags from `DatadogExtractData` are handled
+    /// separately by the sampler, not here.
     fn add_remote_links(
         &self,
         span: &mut opentelemetry_sdk::trace::Span,
@@ -464,8 +469,13 @@ impl DatadogSpanProcessor {
     ) {
         if let Some(DatadogExtractData { links, .. }) = parent_ctx.get::<DatadogExtractData>() {
             links.iter().for_each(|link| {
+                // Reconstruct the full 128-bit trace ID: `link.trace_id` holds the low 64 bits and
+                // `link.trace_id_high` the upper 64. Casting the low bits alone would zero-extend
+                // and silently drop the high bits (e.g. an incoming `_dd.p.tid`).
+                let trace_id =
+                    (link.trace_id_high.unwrap_or(0) as u128) << 64 | link.trace_id as u128;
                 let link_ctx = SpanContext::new(
-                    TraceId::from(link.trace_id as u128),
+                    TraceId::from(trace_id),
                     SpanId::from(link.span_id),
                     TraceFlags::new(link.flags.unwrap_or_default() as u8),
                     false, // TODO: dd SpanLink doesn't have the remote field...
@@ -530,6 +540,28 @@ impl DatadogSpanProcessor {
     }
 }
 
+fn baggage_span_tags(
+    baggage: &opentelemetry::baggage::Baggage,
+    filter: &BaggageTagKeyFilter,
+) -> Vec<KeyValue> {
+    match filter {
+        BaggageTagKeyFilter::Disabled => vec![],
+        BaggageTagKeyFilter::All => baggage
+            .iter()
+            .map(|(k, (v, _))| KeyValue::new(format!("baggage.{}", k.as_str()), v.clone()))
+            .collect(),
+        BaggageTagKeyFilter::Keys(keys) => keys
+            .iter()
+            .filter_map(|key: &String| {
+                let otel_key = Key::from(key.clone());
+                baggage
+                    .get(&otel_key)
+                    .map(|value| KeyValue::new(format!("baggage.{key}"), value.clone()))
+            })
+            .collect(),
+    }
+}
+
 impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     fn on_start(
         &self,
@@ -543,14 +575,32 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let trace_id = span.span_context().trace_id().to_bytes();
         let span_id = span.span_context().span_id().to_bytes();
 
-        if parent_ctx.span().span_context().is_remote() {
+        // If the parent context has extract data, but has no active span, it means we are
+        // restarting a new trace, so we need to add its remote links and baggage tags and register
+        // the local root span.
+        // If the parent context has an active span, it means we are continuing an existing trace,
+        // so we need to register the span.
+        let is_local_root = if parent_ctx.span().span_context().is_remote()
+            || (!parent_ctx.has_active_span() && parent_ctx.get::<DatadogExtractData>().is_some())
+        {
             self.add_remote_links(span, parent_ctx);
             self.registry.register_local_root_span(trace_id, span_id);
+            true
         } else if !parent_ctx.has_active_span() {
             self.registry.register_local_root_span(trace_id, span_id);
+            true
         } else {
             self.registry
                 .register_span(trace_id, span_id, EMPTY_PROPAGATION_DATA);
+            false
+        };
+
+        // Apply baggage tags to any root span
+        if is_local_root {
+            for kv in baggage_span_tags(parent_ctx.baggage(), self.config.trace_baggage_tag_keys())
+            {
+                span.set_attribute(kv);
+            }
         }
     }
 
@@ -585,15 +635,10 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // Add propagation data before exporting the trace
         let trace_chunk = self.add_trace_propagation_data(trace);
         if let Err(e) = self.span_exporter.send_chunk(trace_chunk) {
-            match e {
-                AsyncExporterError::Panic(p) => {
-                    dd_error!("DatadogSpanProcessor.on_end message='Failed to export trace chunk' operation='DatadogExporter.export_chunk_no_wait' panic='{}'", p)
-                }
-                _ => dd_debug!(
-                    "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
-                    exporter_error_to_otel(&e, "export_chunk_no_wait")
-                ),
-            }
+            dd_debug!(
+                "DatadogSpanProcessor.on_end message='Failed to export trace chunk' error='{}'",
+                exporter_error_to_otel(&e, "export_chunk_no_wait")
+            );
         }
     }
 
@@ -609,6 +654,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let deadline = std::time::Instant::now() + timeout;
 
+        // Drain in-flight traces before triggering the runtime teardown. libdatadog's
+        // `force_flush` only notifies the worker; the subsequent `shutdown_async` cancels the
+        // worker biased-first, dropping any chunk it hadn't yet picked up. Waiting here is the
+        // only place that can ensure the export actually completes before cancellation.
+        let drain_left = deadline.saturating_duration_since(std::time::Instant::now());
+        let _ = self.span_exporter.flush_and_drain(drain_left);
+
         // Trigger all tasks shutdown
         self.span_exporter.trigger_shutdown();
         if let Some(rc_client_handle) = &self.rc_client_handle {
@@ -623,7 +675,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         self.span_exporter.wait_for_shutdown(left).map_err(|e| {
             let e = match e {
-                AsyncExporterError::TimedOut(_) => AsyncExporterError::TimedOut(timeout),
+                DatadogExporterError::TimedOut(_) => DatadogExporterError::TimedOut(timeout),
                 _ => e,
             };
             exporter_error_to_otel(&e, "wait_for_shutdown")
@@ -689,19 +741,19 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 }
 
-fn exporter_error_to_otel(e: &AsyncExporterError, operation: &str) -> OTelSdkError {
+fn exporter_error_to_otel(e: &DatadogExporterError, operation: &str) -> OTelSdkError {
     match e {
-        AsyncExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
-        AsyncExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
-        AsyncExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
+        DatadogExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        DatadogExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
+        DatadogExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
             "DatadogExporter.{operation}: the sender mutex was poisonned"
         )),
-        AsyncExporterError::BatchFull(_) => {
+        DatadogExporterError::BatchFull(_) => {
             OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: unexpected error"))
         }
-        AsyncExporterError::Panic(_) => {
-            OTelSdkError::InternalFailure(format!("DatadogExporter.{operation}: a panic happened"))
-        }
+        DatadogExporterError::TraceExporter(e) => OTelSdkError::InternalFailure(format!(
+            "DatadogExporter.{operation}: trace exporter error: {e}"
+        )),
     }
 }
 
@@ -741,7 +793,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             // .with_service_name("otel-service")
@@ -771,7 +823,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let attributes = [KeyValue::new("key_schema", "value_schema")];
 
@@ -810,7 +862,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("key1", "value1"))
@@ -839,7 +891,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
@@ -862,7 +914,7 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None);
+            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
@@ -1359,5 +1411,176 @@ mod tests {
             "Last flush is a complete one"
         );
         assert_eq!(metrics.trace_segments_closed, 1);
+    }
+
+    mod baggage_span_tags_tests {
+        use opentelemetry::{baggage::Baggage, KeyValue, Value};
+
+        use crate::{core::configuration::BaggageTagKeyFilter, span_processor::baggage_span_tags};
+
+        fn make_baggage(pairs: &[(&str, &str)]) -> Baggage {
+            pairs
+                .iter()
+                .map(|(k, v)| {
+                    opentelemetry::baggage::KeyValueMetadata::new(
+                        k.to_string(),
+                        v.to_string(),
+                        opentelemetry::baggage::BaggageMetadata::default(),
+                    )
+                })
+                .collect::<Baggage>()
+        }
+
+        fn attr(key: &str, val: &str) -> KeyValue {
+            KeyValue::new(key.to_string(), val.to_string())
+        }
+
+        #[test]
+        fn disabled_returns_empty() {
+            let baggage = make_baggage(&[("user.id", "123"), ("session.id", "abc")]);
+            let tags = baggage_span_tags(&baggage, &BaggageTagKeyFilter::Disabled);
+            assert!(tags.is_empty());
+        }
+
+        #[test]
+        fn wildcard_returns_all_keys() {
+            let baggage = make_baggage(&[("user.id", "123"), ("region", "us-east")]);
+            let mut tags = baggage_span_tags(&baggage, &BaggageTagKeyFilter::All);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 2);
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.user.id"
+                && kv.value == Value::String("123".into())));
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.region"
+                && kv.value == Value::String("us-east".into())));
+        }
+
+        #[test]
+        fn specific_keys_only_matches_listed() {
+            let baggage = make_baggage(&[
+                ("user.id", "42"),
+                ("session.id", "sess"),
+                ("region", "eu-west"),
+            ]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string()]);
+            let mut tags = baggage_span_tags(&baggage, &filter);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 2);
+            assert_eq!(tags[0], attr("baggage.session.id", "sess"));
+            assert_eq!(tags[1], attr("baggage.user.id", "42"));
+        }
+
+        #[test]
+        fn specific_keys_missing_from_baggage_skipped() {
+            let baggage = make_baggage(&[("user.id", "99")]);
+            let filter =
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "account.id".to_string()]);
+            let tags = baggage_span_tags(&baggage, &filter);
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0], attr("baggage.user.id", "99"));
+        }
+
+        #[test]
+        fn keys_are_case_sensitive() {
+            let baggage = make_baggage(&[("user.id", "1"), ("User.Id", "2")]);
+            let filter = BaggageTagKeyFilter::Keys(vec!["user.id".to_string()]);
+            let tags = baggage_span_tags(&baggage, &filter);
+            assert_eq!(tags.len(), 1);
+            assert_eq!(tags[0], attr("baggage.user.id", "1"));
+        }
+
+        #[test]
+        fn default_filter_tags_expected_keys() {
+            let baggage = make_baggage(&[
+                ("user.id", "u1"),
+                ("session.id", "s1"),
+                ("account.id", "a1"),
+                ("correlation_id", "c1"),
+            ]);
+            let filter = BaggageTagKeyFilter::Keys(vec![
+                "user.id".to_string(),
+                "session.id".to_string(),
+                "account.id".to_string(),
+            ]);
+            let mut tags = baggage_span_tags(&baggage, &filter);
+            tags.sort_by(|a, b| a.key.as_str().cmp(b.key.as_str()));
+            assert_eq!(tags.len(), 3);
+            assert!(tags.iter().any(|kv| kv.key.as_str() == "baggage.user.id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.session.id"));
+            assert!(tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.account.id"));
+            assert!(!tags
+                .iter()
+                .any(|kv| kv.key.as_str() == "baggage.correlation_id"));
+        }
+    }
+
+    mod baggage_tag_key_filter_parse_tests {
+        use std::str::FromStr;
+
+        use crate::core::configuration::BaggageTagKeyFilter;
+
+        #[test]
+        fn empty_string_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn whitespace_only_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("   ").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn star_is_all() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("*").unwrap(),
+                BaggageTagKeyFilter::All
+            );
+        }
+
+        #[test]
+        fn comma_separated_list_parsed() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str("user.id,session.id,account.id").unwrap(),
+                BaggageTagKeyFilter::Keys(vec![
+                    "user.id".to_string(),
+                    "session.id".to_string(),
+                    "account.id".to_string(),
+                ])
+            );
+        }
+
+        #[test]
+        fn whitespace_around_keys_trimmed() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(" user.id , session.id ").unwrap(),
+                BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string(),])
+            );
+        }
+
+        #[test]
+        fn comma_only_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(",").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
+
+        #[test]
+        fn all_commas_and_spaces_is_disabled() {
+            assert_eq!(
+                BaggageTagKeyFilter::from_str(", ,").unwrap(),
+                BaggageTagKeyFilter::Disabled
+            );
+        }
     }
 }

@@ -68,6 +68,10 @@ jobs:
         run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
+      - name: Add file attributes to JUnit XML
+        if: success() || failure()
+        shell: bash
+        run: cargo run -p tools --bin add_junit_file_attributes -- target/nextest/ci/junit.xml
       - name: Report Test Results
         if: success() || failure()
         uses: mikepenz/action-junit-report@db71d41eb79864e25ab0337e395c352e84523afe # v4.3.1
@@ -154,8 +158,10 @@ jobs:
     steps:
       - name: Checkout dd-trace-rs
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Pack dd-trace-rs
-        run: mkdir -p ./binaries/dd-trace-rs && cp -r datadog-opentelemetry Cargo.toml ./binaries/dd-trace-rs/
+      - name: Pack workspace source for system tests
+        # Reads [workspace] members from Cargo.toml and copies root dirs.
+        # New workspace crates are picked up automatically.
+        run: ./scripts/pack-system-tests-artifact.sh ./binaries/dd-trace-rs
       - name: Upload artifact
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
@@ -165,7 +171,7 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@173e2937029d6526610c4e050211993cef5b8be9  # main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@271863c89eb498754525cc8a7f59f46868a729e4  # main
     permissions:
       contents: read
       id-token: write
@@ -174,5 +180,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: 173e2937029d6526610c4e050211993cef5b8be9 # main
+      ref: 271863c89eb498754525cc8a7f59f46868a729e4 # main
       push_to_test_optimization: true

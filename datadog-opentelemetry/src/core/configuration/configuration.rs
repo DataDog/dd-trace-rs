@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::Path;
@@ -145,6 +145,23 @@ fn parse_temporality(s: String) -> Option<opentelemetry_sdk::metrics::Temporalit
     } else if s == "delta" || s.is_empty() {
         Some(opentelemetry_sdk::metrics::Temporality::Delta)
     } else {
+        None
+    }
+}
+
+/// Validates a global trace sample rate (`DD_TRACE_SAMPLE_RATE`). Returns
+/// `Some(rate)` only for finite values in `[0.0, 1.0]`; logs and returns `None`
+/// otherwise so the rate is treated as unset rather than installed as a
+/// catch-all rule that libdd-sampling would clamp (a negative value would drop
+/// all unmatched traffic, a value > 1.0 would keep all of it). Mirrors the
+/// range check applied to RC's `tracing_sampling_rate`.
+fn validate_trace_sample_rate(rate: f64) -> Option<f64> {
+    if rate.is_finite() && (0.0..=1.0).contains(&rate) {
+        Some(rate)
+    } else {
+        crate::dd_warn!(
+            "DD_TRACE_SAMPLE_RATE must be in [0.0, 1.0], got {rate}; treating as unset"
+        );
         None
     }
 }
@@ -292,6 +309,11 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         self.source() == ConfigSourceOrigin::Default
     }
 
+    /// Whether this configuration's value is excluded from configuration telemetry.
+    fn is_sensitive(&self) -> bool {
+        self.name.is_sensitive()
+    }
+
     fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
         let mut configurations = Vec::new();
         // Always include the default value
@@ -335,7 +357,13 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
 
 impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem<T> {
     /// Returns all configurations that were set for this configuration item.
+    ///
+    /// Configurations marked sensitive in the registry are excluded from
+    /// configuration telemetry, so this returns an empty list for them.
     fn get_all_configurations(&self) -> Vec<Configuration> {
+        if self.is_sensitive() {
+            return Vec::new();
+        }
         self.build_configurations_list(None)
     }
 }
@@ -458,13 +486,26 @@ impl<T: ConfigurationValueProvider + Clone + Deref> ConfigItemWithOverride<T> {
             ConfigItemRef::Ref(self.config_item.value())
         }
     }
+
+    /// Returns the env/code/default value, ignoring any remote-config override.
+    /// Use this when the caller must compose with RC-delivered values without
+    /// losing the locally-configured value to the override.
+    fn local_value(&self) -> ConfigItemRef<'_, T> {
+        ConfigItemRef::Ref(self.config_item.value())
+    }
 }
 
 impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     for ConfigItemWithOverride<T>
 {
     /// Returns all configurations that were set for this configuration item.
+    ///
+    /// Configurations marked sensitive in the registry are excluded from
+    /// configuration telemetry, so this returns an empty list for them.
     fn get_all_configurations(&self) -> Vec<Configuration> {
+        if self.config_item.is_sensitive() {
+            return Vec::new();
+        }
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
@@ -581,6 +622,35 @@ impl ConfigItemSourceUpdater<'_> {
         }
     }
 
+    /// Like [`Self::update_non_empty_string`], but uses the first non-empty value among the
+    /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
+    /// value on either key is treated the same as the key being absent. If neither key has a
+    /// non-empty value, the default is returned.
+    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
+        &self,
+        default: ConfigItemType,
+        fallback: SupportedConfigurations,
+        transform: F,
+    ) -> ConfigItemType
+    where
+        ParsedConfig: Clone + ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        F: FnOnce(String) -> ParsedConfig,
+    {
+        // Use the primary key if it has a non-empty value; otherwise fall back to `fallback`.
+        let result = self.sources.get(default.name());
+        let result = match result.value {
+            Some(ref config_key) if !config_key.value.is_empty() => result,
+            _ => self.sources.get(fallback),
+        };
+        match result.value {
+            Some(ref config_key) if !config_key.value.is_empty() => {
+                self.apply_result(default, result, transform)
+            }
+            _ => default,
+        }
+    }
+
     /// Updates a ConfigItem from sources with parsed value and transformation
     pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
         &self,
@@ -650,6 +720,25 @@ impl ExtraServicesTracker {
         }
     }
 
+    /// Returns true if `name` matches any tracked extra service
+    /// (case-insensitively), checking both the resolved set and the pending
+    /// queue. Read-only: does not drain the queue.
+    fn contains_service(&self, name: &str) -> bool {
+        if let Ok(set) = self.extra_services.lock() {
+            if set.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                return true;
+            }
+        }
+        if let Ok(queue) = self.extra_services_queue.lock() {
+            if let Some(ref q) = *queue {
+                if q.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn add_extra_services(
         &self,
         services: impl Iterator<Item = impl Deref<Target = str>>,
@@ -714,6 +803,47 @@ impl ExtraServicesTracker {
     }
 }
 
+/// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TracePropagationBehaviorExtract {
+    /// `continue` (default) - incoming trace context is used as the local trace context. Baggage
+    /// is propagated.
+    #[default]
+    Continue,
+    /// `restart` - starts a new trace with a fresh trace ID and sampling decision. Incoming
+    /// context is referenced via a span link with reason=propagation_behavior_extract. Baggage is
+    /// propagated.
+    Restart,
+    /// `ignore` - discards the entire incoming trace context. Creates new trace with no parent.
+    /// Baggage is discarded.
+    Ignore,
+}
+
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "" => Ok(TracePropagationBehaviorExtract::default()),
+            "continue" => Ok(TracePropagationBehaviorExtract::Continue),
+            "restart" => Ok(TracePropagationBehaviorExtract::Restart),
+            "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
+            _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
+        }
+    }
+}
+
+impl Display for TracePropagationBehaviorExtract {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let behavior = match self {
+            TracePropagationBehaviorExtract::Continue => "continue",
+            TracePropagationBehaviorExtract::Restart => "restart",
+            TracePropagationBehaviorExtract::Ignore => "ignore",
+        };
+        write!(f, "{behavior}")
+    }
+}
+
 /// Trace context propagation style.
 ///
 /// Defines how trace context is propagated across service boundaries.
@@ -725,6 +855,10 @@ pub enum TracePropagationStyle {
     TraceContext,
     /// W3C Baggage propagation format using the `baggage` header.
     Baggage,
+    /// B3 multi-header propagation format using `x-b3-*` headers.
+    B3Multi,
+    /// B3 single-header propagation format using the `b3` header.
+    B3SingleHeader,
     /// No propagation - trace context is not propagated.
     None,
 }
@@ -757,6 +891,8 @@ impl FromStr for TracePropagationStyle {
             "datadog" => Ok(TracePropagationStyle::Datadog),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "baggage" => Ok(TracePropagationStyle::Baggage),
+            "b3multi" => Ok(TracePropagationStyle::B3Multi),
+            "b3" => Ok(TracePropagationStyle::B3SingleHeader),
             "none" => Ok(TracePropagationStyle::None),
             _ => Err(format!("Unknown trace propagation style: '{s}'")),
         }
@@ -769,6 +905,8 @@ impl Display for TracePropagationStyle {
             TracePropagationStyle::Datadog => "datadog",
             TracePropagationStyle::TraceContext => "tracecontext",
             TracePropagationStyle::Baggage => "baggage",
+            TracePropagationStyle::B3Multi => "b3multi",
+            TracePropagationStyle::B3SingleHeader => "b3",
             TracePropagationStyle::None => "none",
         };
         write!(f, "{style}")
@@ -805,6 +943,51 @@ impl std::ops::Deref for ServiceName {
 impl Display for ServiceName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+/// Controls which baggage keys are promoted to span tags with a `"baggage."` prefix.
+#[derive(Clone, Debug, PartialEq)]
+pub enum BaggageTagKeyFilter {
+    /// Empty string: no baggage keys are added as span tags.
+    Disabled,
+    /// `"*"`: every baggage key is added as a span tag.
+    All,
+    /// A non-empty, non-wildcard list of exact (case-sensitive) baggage key names.
+    Keys(Vec<String>),
+}
+
+impl std::str::FromStr for BaggageTagKeyFilter {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            Ok(BaggageTagKeyFilter::Disabled)
+        } else if trimmed == "*" {
+            Ok(BaggageTagKeyFilter::All)
+        } else {
+            let keys: Vec<String> = trimmed
+                .split(',')
+                .map(|k| k.trim().to_string())
+                .filter(|k| !k.is_empty())
+                .collect();
+            if keys.is_empty() {
+                Ok(BaggageTagKeyFilter::Disabled)
+            } else {
+                Ok(BaggageTagKeyFilter::Keys(keys))
+            }
+        }
+    }
+}
+
+impl ConfigurationValueProvider for BaggageTagKeyFilter {
+    fn get_configuration_value(&self) -> String {
+        match self {
+            BaggageTagKeyFilter::Disabled => String::new(),
+            BaggageTagKeyFilter::All => "*".to_string(),
+            BaggageTagKeyFilter::Keys(keys) => keys.join(","),
+        }
     }
 }
 
@@ -868,8 +1051,8 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules);
-impl_config_value_provider!(option: String);
+impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
+impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
 /// Configuration for the Datadog Tracer
@@ -927,6 +1110,11 @@ pub struct Config {
     /// If a rule matches, the trace is sampled with the associated sample rate.
     trace_sampling_rules: SamplingRulesConfigItem,
 
+    /// Global trace sample rate (DD_TRACE_SAMPLE_RATE). `None` means unset
+    /// (no implicit catch-all; libdatadog's no-rule path samples at 100%).
+    /// `Some(rate)` installs a catch-all rule so the rate limiter applies.
+    trace_sample_rate: ConfigItem<Option<f64>>,
+
     /// Maximum number of spans to sample per second
     /// Only applied if trace_sampling_rules are matched
     trace_rate_limit: ConfigItem<i32>,
@@ -939,6 +1127,9 @@ pub struct Config {
     /// Whether to enable stats computation for the tracer
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
+
+    /// Whether to enable stats obfuscation for the tracer (for internal testing)
+    trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem<bool>,
 
     /// Whether we wait for trace chunk to have been flushed to the agent before returning to
     /// the critical path of the app
@@ -964,11 +1155,17 @@ pub struct Config {
     trace_partial_flush_enabled: ConfigItem<bool>,
     trace_partial_flush_min_spans: ConfigItem<usize>,
 
+    /// Trace propagation behavior extract
+    trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
+
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_style_extract: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_style_inject: ConfigItem<Option<Vec<TracePropagationStyle>>>,
     trace_propagation_extract_first: ConfigItem<bool>,
+
+    /// Which baggage keys are promoted to span tags with a `"baggage."` prefix.
+    trace_baggage_tag_keys: ConfigItem<BaggageTagKeyFilter>,
 
     /// Whether remote configuration is enabled
     remote_config_enabled: ConfigItem<bool>,
@@ -1101,7 +1298,11 @@ impl Config {
             tracer_version: default.tracer_version,
             language_version: default.language_version,
             language: default.language,
-            service: cisu.update_non_empty_string(default.service, ServiceName::Configured),
+            service: cisu.update_non_empty_string_with_fallback(
+                default.service,
+                SupportedConfigurations::OTEL_SERVICE_NAME,
+                ServiceName::Configured,
+            ),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
@@ -1130,12 +1331,19 @@ impl Config {
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
+            trace_sample_rate: cisu.update_parsed_with_transform(
+                default.trace_sample_rate,
+                validate_trace_sample_rate,
+            ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
             enabled: cisu.update_parsed(default.enabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
                 .update_parsed(default.trace_stats_computation_enabled),
+            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_parsed(
+                default.trace_stats_computation_experimental_client_obfuscation_enabled,
+            ),
             telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
                 .update_parsed(default.telemetry_log_collection_enabled),
@@ -1143,10 +1351,26 @@ impl Config {
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
-            trace_propagation_style: cisu
-                .update_parsed_with_transform(default.trace_propagation_style, |DdTags(tags)| {
-                    TracePropagationStyle::from_tags(Some(tags))
-                }),
+            trace_propagation_behavior_extract: cisu
+                .update_parsed(default.trace_propagation_behavior_extract),
+            // OTEL_PROPAGATORS is an alias/fallback for DD_TRACE_PROPAGATION_STYLE. An empty
+            // value on either key is treated as unset (consistent with the OTEL_SERVICE_NAME
+            // fallback). A value that parses to no recognized styles (e.g. only unsupported
+            // OpenTelemetry propagators like "jaeger") also falls back to the default rather
+            // than silently disabling propagation.
+            trace_propagation_style: {
+                let default_style = default.trace_propagation_style.value().clone();
+                cisu.update_non_empty_string_with_fallback(
+                    default.trace_propagation_style,
+                    SupportedConfigurations::OTEL_PROPAGATORS,
+                    move |styles| match TracePropagationStyle::from_tags(Some(
+                        DdTags::from_str(&styles).unwrap().0,
+                    )) {
+                        Some(styles) if styles.is_empty() => default_style,
+                        other => other,
+                    },
+                )
+            },
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
                 |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
@@ -1157,6 +1381,7 @@ impl Config {
             ),
             trace_propagation_extract_first: cisu
                 .update_parsed(default.trace_propagation_extract_first),
+            trace_baggage_tag_keys: cisu.update_parsed(default.trace_baggage_tag_keys),
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
@@ -1219,6 +1444,7 @@ impl Config {
             &self.dogstatsd_agent_port,
             &self.dogstatsd_agent_url,
             &self.trace_sampling_rules,
+            &self.trace_sample_rate,
             &self.trace_rate_limit,
             &self.enabled,
             &self.log_level_filter,
@@ -1228,10 +1454,12 @@ impl Config {
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
+            &self.trace_propagation_behavior_extract,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
             &self.trace_propagation_extract_first,
+            &self.trace_baggage_tag_keys,
             &self.remote_config_enabled,
             &self.remote_config_poll_interval,
             &self.datadog_tags_max_length,
@@ -1350,9 +1578,25 @@ impl Config {
         self.trace_sampling_rules.value()
     }
 
+    /// Returns the locally-configured (env/code/default) trace sampling rules,
+    /// ignoring any Remote Config override. Used by the RC handler to compose
+    /// env rules with RC-delivered values without losing them.
+    pub(crate) fn local_trace_sampling_rules(
+        &self,
+    ) -> impl Deref<Target = [SamplingRuleConfig]> + use<'_> {
+        self.trace_sampling_rules.local_value()
+    }
+
     /// Returns the maximum number of traces per second (rate limit).
     pub fn trace_rate_limit(&self) -> i32 {
         *self.trace_rate_limit.value()
+    }
+
+    /// Returns the configured global trace sample rate (DD_TRACE_SAMPLE_RATE),
+    /// or `None` if unset. Applied as a catch-all sample rate when no explicit
+    /// sampling rule matches.
+    pub fn trace_sample_rate(&self) -> Option<f64> {
+        *self.trace_sample_rate.value()
     }
 
     /// Returns whether tracing is enabled.
@@ -1363,6 +1607,13 @@ impl Config {
     /// Returns the configured log level filter.
     pub fn log_level_filter(&self) -> &LevelFilter {
         self.log_level_filter.value()
+    }
+
+    /// Returns whether client-side trace stats obfuscation is enabled.
+    pub fn trace_stats_computation_experimental_client_obfuscation_enabled(&self) -> bool {
+        *self
+            .trace_stats_computation_experimental_client_obfuscation_enabled
+            .value()
     }
 
     /// Returns whether client-side trace stats computation is enabled.
@@ -1388,7 +1639,7 @@ impl Config {
     }
 
     /// Static runtime id if the process
-    fn process_runtime_id() -> &'static str {
+    pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
         RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
@@ -1505,6 +1756,11 @@ impl Config {
         *self.trace_partial_flush_min_spans.value()
     }
 
+    /// Returns the trace propagation behavior when extracting trace context.
+    pub fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        *self.trace_propagation_behavior_extract.value()
+    }
+
     /// Returns the configured trace propagation styles for both injection and extraction.
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style.value().as_deref()
@@ -1523,6 +1779,11 @@ impl Config {
     /// Returns whether to stop extraction after the first successful propagator.
     pub fn trace_propagation_extract_first(&self) -> bool {
         *self.trace_propagation_extract_first.value()
+    }
+
+    /// Returns which baggage keys should be promoted to span tags.
+    pub fn trace_baggage_tag_keys(&self) -> &BaggageTagKeyFilter {
+        self.trace_baggage_tag_keys.value()
     }
 
     pub(crate) fn update_sampling_rules_from_remote(
@@ -1584,17 +1845,47 @@ impl Config {
         }
     }
 
-    pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
-        self.trace_sampling_rules.unset_override_value();
-        self.trace_sampling_rules.set_config_id(config_id);
-
-        // Fallback rules are locally defined, so "local" provenance is correct
-        let internal: Vec<libdd_sampling::SamplingRuleConfig> = self
-            .trace_sampling_rules()
+    /// Composes the rules that the sampler should see in the absence of any
+    /// active Remote Config override: locally-configured rules followed by an
+    /// implicit catch-all that applies `DD_TRACE_SAMPLE_RATE`.
+    ///
+    /// The catch-all is appended only when `DD_TRACE_SAMPLE_RATE` is explicitly
+    /// set. Its default is unset (`None`), in which case nothing is appended and
+    /// libdatadog's no-rule fallback samples unmatched spans at 100%. An explicit
+    /// value — including `1.0` — does install the catch-all, so `DD_TRACE_RATE_LIMIT`
+    /// applies to otherwise-unmatched spans. The rate is already validated to a
+    /// finite value in `[0.0, 1.0]` at ingestion; the `is_finite` guard below is
+    /// belt-and-suspenders.
+    pub(crate) fn effective_initial_rules(&self) -> Vec<libdd_sampling::SamplingRuleConfig> {
+        let mut rules: Vec<libdd_sampling::SamplingRuleConfig> = self
+            .local_trace_sampling_rules()
             .iter()
             .cloned()
             .map(Into::into)
             .collect();
+        if let Some(env_rate) = self.trace_sample_rate() {
+            if env_rate.is_finite() {
+                rules.push(libdd_sampling::SamplingRuleConfig {
+                    sample_rate: env_rate,
+                    service: None,
+                    name: None,
+                    resource: None,
+                    tags: HashMap::new(),
+                    // "default" is libdatadog's documented default provenance
+                    // (default_provenance() in libdd-sampling) and matches the
+                    // value the RC-rate catch-all path produces via serde omission.
+                    provenance: "default".to_string(),
+                });
+            }
+        }
+        rules
+    }
+
+    pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
+        self.trace_sampling_rules.unset_override_value();
+        self.trace_sampling_rules.set_config_id(config_id);
+
+        let internal = self.effective_initial_rules();
         self.remote_config_callbacks
             .lock()
             .unwrap()
@@ -1638,6 +1929,16 @@ impl Config {
             return Vec::new();
         }
         self.extra_services_tracker.get_extra_services()
+    }
+
+    /// Returns true if an RC `service_target.service` value applies to this
+    /// tracer: it matches the primary service or any advertised extra service,
+    /// compared case-insensitively. Used to guard which Remote Config sampling
+    /// payloads this tracer applies (a config that advertised extra service is
+    /// legitimately ours; service-name case can differ from the UI).
+    pub(crate) fn rc_service_target_matches(&self, target_service: &str) -> bool {
+        target_service.eq_ignore_ascii_case(&self.service())
+            || self.extra_services_tracker.contains_service(target_service)
     }
 
     /// Check if remote configuration is enabled
@@ -1707,12 +2008,17 @@ impl std::fmt::Debug for Config {
             .field("trace_agent_url", &self.trace_agent_url)
             .field("dogstatsd_agent_url", &self.dogstatsd_agent_url)
             .field("trace_sampling_rules", &self.trace_sampling_rules)
+            .field("trace_sample_rate", &self.trace_sample_rate)
             .field("trace_rate_limit", &self.trace_rate_limit)
             .field("enabled", &self.enabled)
             .field("log_level_filter", &self.log_level_filter)
             .field(
                 "trace_stats_computation_enabled",
                 &self.trace_stats_computation_enabled,
+            )
+            .field(
+                "trace_propagation_behavior_extract",
+                &self.trace_propagation_behavior_extract,
             )
             .field("trace_propagation_style", &self.trace_propagation_style)
             .field(
@@ -1727,6 +2033,7 @@ impl std::fmt::Debug for Config {
                 "trace_propagation_extract_first",
                 &self.trace_propagation_extract_first,
             )
+            .field("trace_baggage_tag_keys", &self.trace_baggage_tag_keys)
             .field("extra_services_tracker", &self.extra_services_tracker)
             .field("remote_config_enabled", &self.remote_config_enabled)
             .field(
@@ -1784,6 +2091,7 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES,
             ParsedSamplingRules::default(), // Empty rules by default
         ),
+        trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, None),
         trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
         enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
         log_level_filter: ConfigItem::new(
@@ -1796,6 +2104,10 @@ fn default_config() -> Config {
         trace_stats_computation_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
+        ),
+        trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem::new(
+            SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
+            false,
         ),
         trace_writer_synchronous_write: false,
         trace_writer_synchronous_timeout: Duration::from_secs(2),
@@ -1823,6 +2135,10 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_PARTIAL_FLUSH_MIN_SPANS,
             300,
         ),
+        trace_propagation_behavior_extract: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
+            TracePropagationBehaviorExtract::default(),
+        ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
             Some(vec![
@@ -1842,6 +2158,14 @@ fn default_config() -> Config {
         trace_propagation_extract_first: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_EXTRACT_FIRST,
             false,
+        ),
+        trace_baggage_tag_keys: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_BAGGAGE_TAG_KEYS,
+            BaggageTagKeyFilter::Keys(vec![
+                "user.id".to_string(),
+                "session.id".to_string(),
+                "account.id".to_string(),
+            ]),
         ),
         extra_services_tracker: ExtraServicesTracker::new(),
         remote_config_enabled: ConfigItem::new(
@@ -2334,6 +2658,36 @@ impl ConfigBuilder {
         self
     }
 
+    /// Global trace sample rate. Applied as a catch-all sample rate when no
+    /// explicit sampling rule matches.
+    ///
+    /// **Default**: `1.0`
+    ///
+    /// Env variable: `DD_TRACE_SAMPLE_RATE`
+    pub fn set_trace_sample_rate(&mut self, rate: f64) -> &mut Self {
+        // Only accept finite values in [0.0, 1.0]; an out-of-range value is
+        // logged and left unset rather than installed as a catch-all rule.
+        if let Some(rate) = validate_trace_sample_rate(rate) {
+            self.config.trace_sample_rate.set_code(Some(rate));
+        }
+        self
+    }
+
+    /// Set the trace propagation behavior extract.
+    ///
+    /// **Default**: `Continue`
+    ///
+    /// Env variable: `DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT`
+    pub fn set_trace_propagation_behavior_extract(
+        &mut self,
+        behavior: TracePropagationBehaviorExtract,
+    ) -> &mut Self {
+        self.config
+            .trace_propagation_behavior_extract
+            .set_code(behavior);
+        self
+    }
+
     /// A list of propagation styles to use for both extraction and injection. Supported values are
     /// `datadog` and `tracecontext`.
     ///
@@ -2384,6 +2738,16 @@ impl ConfigBuilder {
     /// Env variable: `DD_TRACE_PROPAGATION_EXTRACT_FIRST`
     pub fn set_trace_propagation_extract_first(&mut self, first: bool) -> &mut Self {
         self.config.trace_propagation_extract_first.set_code(first);
+        self
+    }
+
+    /// Controls which baggage keys are promoted to span tags with a `"baggage."` prefix.
+    ///
+    /// **Default**: `BaggageTagKeyFilter::Keys(["user.id", "session.id", "account.id"])`
+    ///
+    /// Env variable: `DD_TRACE_BAGGAGE_TAG_KEYS`
+    pub fn set_trace_baggage_tag_keys(&mut self, filter: BaggageTagKeyFilter) -> &mut Self {
+        self.config.trace_baggage_tag_keys.set_code(filter);
         self
     }
 
@@ -2524,6 +2888,7 @@ mod tests {
     use super::Config;
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
+    use crate::propagation::config::{get_extractors, get_injectors};
 
     #[test]
     fn test_config_from_source() {
@@ -2558,6 +2923,74 @@ mod tests {
 
         assert!(config.enabled());
         assert_eq!(*config.log_level_filter(), super::LevelFilter::Debug);
+    }
+
+    #[test]
+    fn test_otel_service_name_alias() {
+        // OTEL_SERVICE_NAME is an alias for DD_SERVICE
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_takes_precedence_over_otel_service_name() {
+        // DD_SERVICE has higher precedence than OTEL_SERVICE_NAME
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_SERVICE", "dd-service"),
+                ("OTEL_SERVICE_NAME", "otel-service"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "dd-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_empty_falls_through_to_otel_service_name() {
+        // An empty DD_SERVICE="" is treated as unset, so it falls through to OTEL_SERVICE_NAME.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "otel-service")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "otel-service");
+        assert!(!config.service_is_default());
+    }
+
+    #[test]
+    fn test_dd_service_and_otel_service_name_both_empty_uses_default() {
+        // When both are empty, neither has a usable value, so the default is used.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_SERVICE", ""), ("OTEL_SERVICE_NAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "unnamed-rust-service");
+        assert!(config.service_is_default());
+    }
+
+    #[test]
+    fn test_otel_service_name_empty_uses_default() {
+        // An empty OTEL_SERVICE_NAME="" is treated as unset and produces the default.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_SERVICE_NAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(&*config.service(), "unnamed-rust-service");
+        assert!(config.service_is_default());
     }
 
     #[test]
@@ -2640,7 +3073,17 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![
@@ -2654,6 +3097,25 @@ mod tests {
             Some(vec![TracePropagationStyle::TraceContext]).as_deref()
         );
         assert!(config.trace_propagation_extract_first())
+    }
+
+    #[test]
+    fn test_otel_propagators_sets_global_style_when_dd_absent() {
+        // OTEL_PROPAGATORS is used as a fallback when DD_TRACE_PROPAGATION_STYLE is not set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
     }
 
     #[test]
@@ -2746,7 +3208,18 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        assert_eq!(config.trace_propagation_style(), Some(vec![]).as_deref());
+        // An empty DD_TRACE_PROPAGATION_STYLE is treated as unset (no OTEL_PROPAGATORS
+        // fallback present), so the global style falls back to the default. The
+        // extract-specific key, set explicitly to empty, still yields an empty list.
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
         assert_eq!(
             config.trace_propagation_style_extract(),
             Some(vec![]).as_deref()
@@ -2788,6 +3261,20 @@ mod tests {
     }
 
     #[test]
+    fn test_propagation_behavior_extract_from_source() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT", "restart")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_behavior_extract(),
+            TracePropagationBehaviorExtract::Restart
+        );
+    }
+
+    #[test]
     fn test_propagation_style_baggage_parsed_from_env() {
         // "baggage" is recognised as a valid style value (case-insensitive) in all three env vars.
         let mut sources = CompositeSource::new();
@@ -2823,6 +3310,57 @@ mod tests {
             Some(vec![
                 TracePropagationStyle::Baggage,
                 TracePropagationStyle::TraceContext,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_propagation_style_b3_display() {
+        assert_eq!(TracePropagationStyle::B3Multi.to_string(), "b3multi");
+        assert_eq!(TracePropagationStyle::B3SingleHeader.to_string(), "b3");
+    }
+
+    #[test]
+    fn test_propagation_style_b3_parsed_from_env() {
+        // Both b3multi and b3 now parse from env (case-insensitive).
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                (
+                    "DD_TRACE_PROPAGATION_STYLE",
+                    "datadog,tracecontext,b3multi,b3",
+                ),
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "B3Multi,B3"),
+                ("DD_TRACE_PROPAGATION_STYLE_INJECT", "b3,b3multi"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_extract(),
+            Some(vec![
+                TracePropagationStyle::B3Multi,
+                TracePropagationStyle::B3SingleHeader,
+            ])
+            .as_deref()
+        );
+        assert_eq!(
+            config.trace_propagation_style_inject(),
+            Some(vec![
+                TracePropagationStyle::B3SingleHeader,
+                TracePropagationStyle::B3Multi,
             ])
             .as_deref()
         );
@@ -3041,6 +3579,48 @@ mod tests {
     }
 
     #[test]
+    fn test_clear_remote_rules_includes_env_rate_catch_all() {
+        // When DD_TRACE_SAMPLE_RATE is set and the remote override is cleared,
+        // the callback must receive [env_rules..., catch_all(env_rate)] so the
+        // sampler applies the env rate to unmatched spans.
+        let mut config_builder = Config::builder();
+        config_builder.set_trace_sample_rate(0.25);
+        config_builder.set_trace_sampling_rules(vec![SamplingRuleConfig {
+            sample_rate: 0.5,
+            name: Some("env_name".to_string()),
+            ..SamplingRuleConfig::default()
+        }]);
+        let config = config_builder.build();
+
+        let received = Arc::new(Mutex::new(Vec::<libdd_sampling::SamplingRuleConfig>::new()));
+        let clone = received.clone();
+        config.set_sampling_rules_callback(move |update| {
+            let RemoteConfigUpdate::SamplingRules(rules) = update;
+            *clone.lock().unwrap() = rules.clone();
+        });
+
+        // Install a remote override, then clear it.
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"provenance":"customer"}]"#,
+                None,
+            )
+            .unwrap();
+        config.clear_remote_sampling_rules(None);
+
+        let got = received.lock().unwrap();
+        assert_eq!(got.len(), 2, "expected env rule + env catch-all");
+        assert_eq!(got[0].sample_rate, 0.5);
+        assert_eq!(got[0].name.as_deref(), Some("env_name"));
+        assert_eq!(got[1].sample_rate, 0.25);
+        assert!(got[1].name.is_none());
+        assert!(got[1].service.is_none());
+        // env catch-all carries "default" provenance (libdatadog's documented
+        // default; maps to DM -3 in libdd-sampling).
+        assert_eq!(got[1].provenance, "default");
+    }
+
+    #[test]
     fn test_public_sampling_rule_config_ignores_provenance_in_json() {
         // The public SamplingRuleConfig should silently ignore a "provenance" field in JSON,
         // since serde skips unknown fields by default.
@@ -3240,6 +3820,39 @@ mod tests {
             .update_sampling_rules_from_remote("[]", None)
             .unwrap();
         assert_eq!(config.trace_sampling_rules.get_config_id(), None);
+    }
+
+    #[test]
+    fn test_local_trace_sampling_rules_bypasses_remote_override() {
+        let config = Config::builder()
+            .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                sample_rate: 0.5,
+                name: Some("env_name".to_string()),
+                ..SamplingRuleConfig::default()
+            }])
+            .build();
+
+        // With no RC override, local == public.
+        assert_eq!(config.local_trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+
+        // Set an RC override.
+        config
+            .update_sampling_rules_from_remote(
+                r#"[{"sample_rate":0.9,"service":"svc","provenance":"customer"}]"#,
+                None,
+            )
+            .unwrap();
+
+        // The public accessor reflects the override; the local one still
+        // returns the env-side value.
+        assert_eq!(config.trace_sampling_rules().len(), 1);
+        assert_eq!(config.trace_sampling_rules()[0].sample_rate, 0.9);
+
+        let local = config.local_trace_sampling_rules();
+        assert_eq!(local.len(), 1);
+        assert_eq!(local[0].sample_rate, 0.5);
+        assert_eq!(local[0].name.as_deref(), Some("env_name"));
     }
 
     #[test]
@@ -3585,5 +4198,356 @@ mod tests {
             .build();
 
         assert_eq!(config.remote_config_poll_interval(), 0.2);
+    }
+
+    #[test]
+    fn test_trace_sample_rate_defaults_to_none_when_unset() {
+        let config = Config::builder().build();
+        assert_eq!(config.trace_sample_rate(), None);
+    }
+
+    #[test]
+    fn test_trace_sample_rate_parses_from_env() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_SAMPLE_RATE", "0.25")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.trace_sample_rate(), Some(0.25));
+    }
+
+    #[test]
+    fn test_explicit_dd_trace_sample_rate_one_installs_catch_all() {
+        // Codex MEDIUM fix: explicit DD_TRACE_SAMPLE_RATE=1.0 must install a
+        // catch-all rule so the rate limiter applies. Unset is still distinct
+        // (no catch-all, libdatadog's 100% fallback).
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(1.0);
+        let config = builder.build();
+
+        let rules = config.effective_initial_rules();
+        assert_eq!(rules.len(), 1, "explicit 1.0 must install a catch-all");
+        assert_eq!(rules[0].sample_rate, 1.0);
+
+        // Unset: no catch-all.
+        let unset_config = Config::builder().build();
+        let unset_rules = unset_config.effective_initial_rules();
+        assert!(unset_rules.is_empty(), "unset must not install a catch-all");
+    }
+
+    #[test]
+    fn test_out_of_range_dd_trace_sample_rate_env_is_treated_as_unset() {
+        // Codex fix: a finite-but-out-of-range DD_TRACE_SAMPLE_RATE must be
+        // rejected at ingestion (treated as unset), not installed as a
+        // catch-all that libdd-sampling would clamp (negative -> drop all,
+        // >1.0 -> keep all) while still enabling the rate limiter.
+        for bad in ["1.5", "-0.5", "2", "inf", "-inf", "nan"] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_SAMPLE_RATE", bad)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(
+                config.trace_sample_rate(),
+                None,
+                "DD_TRACE_SAMPLE_RATE={bad} must be treated as unset"
+            );
+            assert!(
+                config.effective_initial_rules().is_empty(),
+                "DD_TRACE_SAMPLE_RATE={bad} must not install a catch-all rule"
+            );
+        }
+    }
+
+    #[test]
+    fn test_in_range_boundary_dd_trace_sample_rate_env_accepted() {
+        // Boundaries 0.0 and 1.0 are valid and must be accepted.
+        for (val, expected) in [("0.0", 0.0), ("1.0", 1.0)] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_SAMPLE_RATE", val)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(config.trace_sample_rate(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_out_of_range_set_trace_sample_rate_is_ignored() {
+        // The programmatic (code) setter must apply the same validation as the
+        // env path: an out-of-range rate is ignored, leaving the rate unset.
+        let mut builder = Config::builder();
+        builder.set_trace_sample_rate(42.0);
+        let config = builder.build();
+        assert_eq!(config.trace_sample_rate(), None);
+        assert!(config.effective_initial_rules().is_empty());
+
+        // A valid rate is still accepted.
+        let mut ok_builder = Config::builder();
+        ok_builder.set_trace_sample_rate(0.3);
+        assert_eq!(ok_builder.build().trace_sample_rate(), Some(0.3));
+    }
+
+    /// Collects every configuration entry reported via the telemetry
+    /// configuration list, mirroring the app-started reporting path.
+    fn collect_telemetry_configurations(config: &Config) -> Vec<Configuration> {
+        config
+            .get_telemetry_configuration()
+            .into_iter()
+            .flat_map(|provider| provider.get_all_configurations())
+            .collect()
+    }
+
+    #[test]
+    fn test_sensitive_otlp_headers_excluded_from_telemetry() {
+        const SENTINEL_OTLP_BASE: &str = "dd-api-key=SENTINEL_OTLP_BASE";
+        const SENTINEL_OTLP_METRICS: &str = "dd-api-key=SENTINEL_OTLP_METRICS";
+        const SENTINEL_OTLP_LOGS: &str = "dd-api-key=SENTINEL_OTLP_LOGS";
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                // Sensitive configurations, each with a distinct sentinel value.
+                ("OTEL_EXPORTER_OTLP_HEADERS", SENTINEL_OTLP_BASE),
+                ("OTEL_EXPORTER_OTLP_METRICS_HEADERS", SENTINEL_OTLP_METRICS),
+                ("OTEL_EXPORTER_OTLP_LOGS_HEADERS", SENTINEL_OTLP_LOGS),
+                // Non-sensitive exporter configurations that must still be reported.
+                ("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318"),
+                ("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"),
+                ("OTEL_EXPORTER_OTLP_TIMEOUT", "5000"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        // The values are still parsed and usable; only their telemetry
+        // reporting is suppressed.
+        assert_eq!(config.otlp_headers(), SENTINEL_OTLP_BASE);
+        assert_eq!(config.otlp_metrics_headers(), SENTINEL_OTLP_METRICS);
+        assert_eq!(config.otlp_logs_headers(), SENTINEL_OTLP_LOGS);
+
+        let configurations = collect_telemetry_configurations(&config);
+
+        // No sentinel value may appear in any reported configuration value.
+        for sentinel in [
+            SENTINEL_OTLP_BASE,
+            SENTINEL_OTLP_METRICS,
+            SENTINEL_OTLP_LOGS,
+        ] {
+            assert!(
+                !configurations.iter().any(|c| c.value.contains(sentinel)),
+                "sentinel value {sentinel:?} must not appear in telemetry configuration"
+            );
+        }
+
+        // Sensitive header configurations are omitted entirely (omit idiom).
+        for name in [
+            "OTEL_EXPORTER_OTLP_HEADERS",
+            "OTEL_EXPORTER_OTLP_METRICS_HEADERS",
+            "OTEL_EXPORTER_OTLP_LOGS_HEADERS",
+        ] {
+            assert!(
+                !configurations.iter().any(|c| c.name == name),
+                "expected {name} to be absent from configuration telemetry"
+            );
+        }
+
+        // Non-sensitive exporter configurations are still reported with their
+        // real values.
+        let value_for = |name: &str| {
+            configurations
+                .iter()
+                .filter(|c| c.name == name)
+                .max_by_key(|c| c.seq_id)
+                .map(|c| c.value.clone())
+        };
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_ENDPOINT").as_deref(),
+            Some("http://localhost:4318")
+        );
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_PROTOCOL").as_deref(),
+            Some("http/protobuf")
+        );
+        assert_eq!(
+            value_for("OTEL_EXPORTER_OTLP_TIMEOUT").as_deref(),
+            Some("5000")
+        );
+    }
+
+    #[test]
+    fn test_sensitive_config_item_get_all_configurations_is_empty() {
+        // The reusable mechanism applies at the ConfigItem level: a sensitive
+        // configuration reports no telemetry entries regardless of source.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_EXPORTER_OTLP_HEADERS", "dd-api-key=SENTINEL")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(
+            config.otlp_headers.get_all_configurations().is_empty(),
+            "sensitive ConfigItem must not report any configuration entries"
+        );
+
+        // A non-sensitive ConfigItem continues to report entries.
+        assert!(
+            !config.otlp_endpoint.get_all_configurations().is_empty(),
+            "non-sensitive ConfigItem should still report configuration entries"
+        );
+    }
+
+    #[test]
+    fn test_dd_propagation_style_takes_precedence_over_otel_propagators() {
+        // DD_TRACE_PROPAGATION_STYLE wins outright when both are set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE", "datadog"),
+                ("OTEL_PROPAGATORS", "b3,tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_all_unsupported_uses_default() {
+        // When OTEL_PROPAGATORS contains only unsupported values it parses to no valid
+        // styles; rather than disabling propagation, the global style falls back to the
+        // default set.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "jaeger")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_filters_unsupported_values() {
+        // Unknown propagator names (e.g. "jaeger") are dropped; supported ones are kept.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "jaeger,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::TraceContext]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_supports_baggage_and_none() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "baggage,none")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Baggage,
+                TracePropagationStyle::None,
+            ])
+            .as_deref()
+        );
+    }
+
+    #[test]
+    fn test_otel_propagators_inherited_by_extract_and_inject() {
+        // With only OTEL_PROPAGATORS set (no extract/inject), the effective extractors and
+        // injectors fall back to the global style fed by OTEL_PROPAGATORS.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "datadog,tracecontext")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let expected = [
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ];
+        assert_eq!(get_extractors(&config), &expected);
+        assert_eq!(get_injectors(&config), &expected);
+    }
+
+    #[test]
+    fn test_dd_extract_wins_while_inject_inherits_otel_propagators() {
+        // DD_TRACE_PROPAGATION_STYLE_EXTRACT set + OTEL_PROPAGATORS set (no global DD style):
+        // extract uses its own DD value; inject inherits the global style from OTEL_PROPAGATORS.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "datadog"),
+                ("OTEL_PROPAGATORS", "tracecontext"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(get_extractors(&config), &[TracePropagationStyle::Datadog]);
+        assert_eq!(
+            get_injectors(&config),
+            &[TracePropagationStyle::TraceContext]
+        );
+    }
+
+    #[test]
+    fn test_dd_style_in_lower_priority_source_beats_otel_propagators_in_higher() {
+        // DD_TRACE_PROPAGATION_STYLE present in ANY source beats OTEL_PROPAGATORS: the fallback
+        // helper checks the primary key across all sources before consulting the fallback. Here
+        // OTEL_PROPAGATORS sits in the higher-precedence (first-added) source and DD style in the
+        // lower-precedence (second-added) source, yet DD style still wins. This tests the
+        // cross-source behavior that the fallback helper uses.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("OTEL_PROPAGATORS", "b3")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_PROPAGATION_STYLE", "datadog")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![TracePropagationStyle::Datadog]).as_deref()
+        );
+    }
+
+    #[test]
+    fn test_no_propagation_env_uses_default() {
+        // Neither DD nor OTEL set -> default [datadog, tracecontext, baggage].
+        let sources = CompositeSource::new();
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_propagation_style(),
+            Some(vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Baggage,
+            ])
+            .as_deref()
+        );
     }
 }

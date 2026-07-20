@@ -11,6 +11,7 @@ use std::{
 };
 
 use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue as Scalar};
+use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText as _;
 
 use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
@@ -269,7 +270,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 1,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("name".into(), "john".into()),
                     (
                         "otel.trace_id".into(),
@@ -288,11 +289,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ("span.kind".into(), "server".into()),
                     ("_dd.span_events.has_exception".into(), "true".into()),
                 ]),
-                metrics: HashMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
+                metrics: VecMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
         Test {
@@ -350,7 +351,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 1,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("name".into(), "john".into()),
                     ("deployment.environment".into(), "prod".into()),
                     (
@@ -373,11 +374,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ("span.kind".into(), "server".into()),
                     ("_dd.span_events.has_exception".into(), "true".into()),
                 ]),
-                metrics: HashMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
+                metrics: VecMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
         Test {
@@ -444,7 +445,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 1,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("name".into(), "john".into()),
                     ("env".into(), "staging".into()),
                     (
@@ -482,7 +483,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ("http.useragent".into(), "sample_useragent".into()),
                     ("http.request.headers.example".into(), "test".into()),
                 ]),
-                metrics: HashMap::from_iter([
+                metrics: VecMap::from_iter([
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
                     (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 0.0),
@@ -490,7 +491,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
         Test {
@@ -545,7 +546,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 0,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("env".into(), "staging".into()),
                     ("container.id".into(), "cid".into()),
                     ("k8s.container.name".into(), "k8s-container".into()),
@@ -561,7 +562,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ),
                     ("span.kind".into(), "internal".into()),
                 ]),
-                metrics: HashMap::from_iter([
+                metrics: VecMap::from_iter([
                     ("approx".into(), 1.2),
                     ("count".into(), 2.0),
                     (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 1.0),
@@ -569,7 +570,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 r#type: "db".into(),
                 span_events: vec![],
                 span_links: vec![],
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
         Test {
@@ -622,7 +623,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 1,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("env".into(), "staging".into()),
                     ("otel.scope.name".into(), "ddtracer".into()),
                     ("otel.scope.version".into(), "v2".into()),
@@ -640,11 +641,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ),
                     ("span.kind".into(), "internal".into()),
                 ]),
-                metrics: HashMap::new(),
+                metrics: VecMap::new(),
                 r#type: "custom".into(),
                 span_events: vec![],
                 span_links: vec![],
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
         Test {
@@ -697,7 +698,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .as_nanos() as i64,
                 duration: 200000000,
                 error: 1,
-                meta: HashMap::from_iter([
+                meta: VecMap::from_iter([
                     ("env".into(), "staging".into()),
                     ("otel.scope.name".into(), "ddtracer".into()),
                     ("otel.scope.version".into(), "v2".into()),
@@ -715,11 +716,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ),
                     ("span.kind".into(), "internal".into()),
                 ]),
-                metrics: HashMap::new(),
+                metrics: VecMap::new(),
                 r#type: "custom".into(),
                 span_events: vec![],
                 span_links: vec![],
-                meta_struct: HashMap::new(),
+                meta_struct: VecMap::new(),
             },
         },
     ]
@@ -727,11 +728,9 @@ pub fn test_cases() -> Vec<Test<'static>> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        fmt::{Debug, Write},
-    };
+    use std::fmt::{Debug, Write};
 
+    use libdd_trace_utils::span::vec_map::VecMap;
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
@@ -772,8 +771,8 @@ mod tests {
 
     #[track_caller]
     fn hashmap_diff<'a, V: PartialEq + Debug>(
-        output: &HashMap<CowStr<'a>, V>,
-        expected: &HashMap<CowStr<'a>, V>,
+        output: &VecMap<CowStr<'a>, V>,
+        expected: &VecMap<CowStr<'a>, V>,
     ) {
         let mut a = Vec::from_iter(output);
         let mut b = Vec::from_iter(expected);
