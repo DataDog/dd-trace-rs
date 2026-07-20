@@ -23,7 +23,6 @@ use crate::{
     spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
 };
-use libdd_shared_runtime::{BasicRuntime, SharedRuntimeError};
 use opentelemetry::{
     baggage::BaggageExt as _,
     global::ObjectSafeSpan,
@@ -412,22 +411,6 @@ impl std::fmt::Debug for DatadogSpanProcessor {
     }
 }
 
-/// Builds the multi-thread tokio runtime shared by the span exporter and the
-/// remote-config client.
-///
-/// Created once by [`DatadogSpanProcessor::new`] and handed to both subsystems
-/// (each registers a [`Worker`](libdd_shared_runtime::Worker) on it) so they run
-/// on a single runtime instead of each spinning up their own. The `BasicRuntime`
-/// is owned and dropped off-thread by [`DatadogExporter`].
-fn build_shared_runtime() -> Result<Arc<BasicRuntime>, DatadogExporterInitError> {
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
-    Ok(Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime))))
-}
-
 impl DatadogSpanProcessor {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
@@ -436,29 +419,27 @@ impl DatadogSpanProcessor {
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Result<Self, DatadogExporterInitError> {
-        let shared_runtime = build_shared_runtime()?;
+        // The exporter owns the shared runtime and builds it on its own dedicated
+        // thread (never on this caller's thread), so a failed init can't drop a
+        // tokio runtime inline here — which would panic when `new` runs inside an
+        // existing runtime
+        let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler)?;
 
         if config.remote_config_enabled() && config.enabled() {
-            if let Err(e) = RemoteConfigClientWorker::start(config.clone(), &shared_runtime) {
+            if let Err(e) =
+                RemoteConfigClientWorker::start(config.clone(), span_exporter.shared_runtime())
+            {
                 dd_error!(
                     "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
                     e
                 );
             }
         }
-        // Clone the runtime for the exporter; keep the original to register the
-        // telemetry worker (which needs the exporter's queue-metrics fetcher).
-        let span_exporter = DatadogExporter::new(
-            config.clone(),
-            agent_response_handler,
-            Arc::clone(&shared_runtime),
-        )?;
         if config.telemetry_enabled() {
-            // Like RC, registered on `shared_runtime` and torn down with it.
             if let Err(e) = TelemetryMetricsCollector::start(
                 registry.clone(),
                 span_exporter.queue_metrics(),
-                &shared_runtime,
+                span_exporter.shared_runtime(),
             ) {
                 dd_error!(
                     "TelemetryMetricsCollector.start: Failed to start telemetry metrics collector: {}",
