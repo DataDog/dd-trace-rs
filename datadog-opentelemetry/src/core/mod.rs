@@ -13,7 +13,6 @@ mod error;
 pub mod log;
 pub(crate) mod telemetry;
 pub(crate) mod telemetry_session;
-pub(crate) mod utils;
 
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
