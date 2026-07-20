@@ -3,10 +3,11 @@
 
 //! Remote Configuration client.
 //!
-//! Drives [`libdd_remote_config::fetch::SingleChangesFetcher`] from a dedicated
-//! std thread running a single-threaded Tokio runtime, parses delivered files
-//! via a custom [`ApmTracingConfig`] parser (registered through
-//! [`RemoteConfigContent`]), and routes parsed payloads into
+//! Drives [`libdd_remote_config::fetch::SingleChangesFetcher`] as a
+//! [`Worker`] on the runtime shared with the trace exporter (see
+//! [`crate::span_processor`]), parses delivered files via a custom
+//! [`ApmTracingConfig`] parser (registered through [`RemoteConfigContent`]),
+//! and routes parsed payloads into
 //! [`Config::update_sampling_rules_from_remote`] / [`Config::clear_remote_sampling_rules`].
 
 use crate::core::configuration::Config;
@@ -431,13 +432,15 @@ fn apply_changes(
 ) {
     for change in changes {
         match change {
-            Change::Add(file) | Change::Update(file, _) => apply_one(&file, config, fetcher),
+            Change::Add(file) | Change::Update(file, _) => {
+                apply_add_or_update(&file, config, fetcher)
+            }
             Change::Remove(file) => apply_remove(&file, config),
         }
     }
 }
 
-fn apply_one(
+fn apply_add_or_update(
     file: &Arc<StoredApmFile>,
     config: &Arc<Config>,
     fetcher: &SingleChangesFetcher<ParsedFileStorage>,
