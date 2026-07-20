@@ -27,6 +27,7 @@ DOC_TOOLCHAIN="nightly"
 RUN_PUBLISH_DRY_RUN=true
 ALLOW_DIRTY=false
 CHECK_SYNC=true
+CODEX_JIRA_URL="https://datadoghq.atlassian.net/jira/software/c/projects/APMSP/boards/29727?quickFilter=32571"
 
 usage() {
     cat << EOF
@@ -78,6 +79,20 @@ if [ -z "$LEVEL_OR_VERSION" ]; then
     echo "" >&2
     usage
     exit 1
+fi
+
+echo -e "${BLUE}Codex Findings (Jira): $CODEX_JIRA_URL${NC}" >&2
+if [ -t 0 ]; then
+    read -r -p "Have you reviewed them for this release? [y/N] " codex_ack
+    case "$codex_ack" in
+        y|Y|yes|Yes) ;;
+        *)
+            echo -e "${RED}❌ Aborting: please review them before releasing.${NC}" >&2
+            exit 1
+            ;;
+    esac
+else
+    echo -e "${BLUE}⚠️  Reminder: review the Codex Findings before releasing.${NC}" >&2
 fi
 
 # A dirty tree means the resulting commit would include unrelated changes, so fail early with a
