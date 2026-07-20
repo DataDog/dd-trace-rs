@@ -23,4 +23,4 @@ pub(crate) const FUNCTION_TRIGGER_EVENT_SOURCE: &str = "function_trigger.event_s
 pub(crate) const FUNCTION_TRIGGER_EVENT_SOURCE_ARN: &str = "function_trigger.event_source_arn";
 
 // OpenTelemetry semantic convention keys
-pub(crate) use opentelemetry_semantic_conventions::attribute::{PEER_SERVICE, SERVICE_NAME};
+pub(crate) use opentelemetry_semantic_conventions::attribute::{SERVICE_NAME, SERVICE_PEER_NAME};

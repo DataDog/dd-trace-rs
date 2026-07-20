@@ -175,7 +175,7 @@ fn build_inferred_span(
         KeyValue::new(attr::SPAN_TYPE, span_data.r#type.clone()),
         KeyValue::new(attr::OPERATION_NAME, span_data.name.clone()),
         KeyValue::new(attr::OPERATION_NAME_CUSTOM, span_data.name.clone()),
-        KeyValue::new(attr::PEER_SERVICE, span_data.service.clone()),
+        KeyValue::new(attr::SERVICE_PEER_NAME, span_data.service.clone()),
     ];
     for (k, v) in &span_data.meta {
         attrs.push(KeyValue::new(k.clone(), v.clone()));
