@@ -16,7 +16,7 @@
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
-      "telemetry.sdk.version": "0.4.0"
+      "telemetry.sdk.version": "0.5.0"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,

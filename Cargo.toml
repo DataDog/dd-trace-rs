@@ -15,7 +15,7 @@ resolver = "2"
 [workspace.package]
 rust-version = "1.87.0"
 edition = "2021"
-version = "0.4.0"
+version = "0.5.0"
 license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 readme = "README.md"
@@ -23,18 +23,22 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
-# Libdatadog dependencies - change to a stable version once we release
-libdd-data-pipeline = { version = "6.0.0", features = [
+# Libdatadog dependencies
+libdd-data-pipeline = { version = "7.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "8.0.0", default-features = false }
-libdd-capabilities-impl = { version = "2.0.0", default-features = false }
-libdd-telemetry = { version = "5.0.1", default-features = false }
-libdd-common = { version = "4.2.0", default-features = false }
+libdd-trace-utils = { version = "9.0.0", default-features = false }
+libdd-capabilities-impl = { version = "3.0.0", default-features = false }
+libdd-telemetry = { version = "6.0.0", default-features = false }
+libdd-common = { version = "5.1.0", default-features = false }
 libdd-tinybytes = { version = "1.1.1", default-features = false }
-libdd-library-config = { version = "2.0.0", default-features = false }
-libdd-sampling = { version = "4.0.0", default-features = false }
+libdd-library-config = { version = "3.0.0", default-features = false }
+libdd-sampling = { version = "5.0.0", default-features = false }
+libdd-shared-runtime = { version = "2.0.0", default-features = false }
+libdd-remote-config = { version = "2.0.0", default-features = false, features = [
+    "client",
+] }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",
@@ -60,7 +64,6 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
-
 
 [profile.dev]
 debug = 2 # full debug info
