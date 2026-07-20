@@ -189,7 +189,7 @@ impl DatadogExporter {
             .expect("trace_buffer accessed after DatadogExporter::drop")
     }
 
-    fn shared_runtime(&self) -> &Arc<BasicRuntime> {
+    pub(crate) fn shared_runtime(&self) -> &Arc<BasicRuntime> {
         self.shared_runtime
             .as_ref()
             .expect("shared_runtime accessed after DatadogExporter::drop")

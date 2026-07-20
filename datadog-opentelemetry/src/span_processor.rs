@@ -415,10 +415,13 @@ impl std::fmt::Debug for DatadogSpanProcessor {
 /// Builds the multi-thread tokio runtime shared by the span exporter and the
 /// remote-config client.
 ///
-/// Created once by [`DatadogSpanProcessor::new`] and handed to both subsystems
-/// (each registers a [`Worker`](libdd_shared_runtime::Worker) on it) so they run
-/// on a single runtime instead of each spinning up their own. The `BasicRuntime`
-/// is owned and dropped off-thread by [`DatadogExporter`].
+/// Created once by [`DatadogSpanProcessor::new`], used to register the
+/// remote-config and telemetry [`Worker`](libdd_shared_runtime::Worker)s, then
+/// handed to [`DatadogExporter`], which becomes its sole owner. The exporter
+/// drops the `BasicRuntime` off-thread — on the success path via
+/// `Drop for DatadogExporter`, and on its own init failure via the dedicated
+/// build thread — so the runtime is never dropped inline on the caller's thread
+/// (which panics when `new` runs inside an existing tokio runtime).
 fn build_shared_runtime() -> Result<Arc<BasicRuntime>, DatadogExporterInitError> {
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -446,19 +449,20 @@ impl DatadogSpanProcessor {
                 );
             }
         }
-        // Clone the runtime for the exporter; keep the original to register the
-        // telemetry worker (which needs the exporter's queue-metrics fetcher).
-        let span_exporter = DatadogExporter::new(
-            config.clone(),
-            agent_response_handler,
-            Arc::clone(&shared_runtime),
-        )?;
+        // Hand the runtime to the exporter, which becomes its sole owner and
+        // drops it off-thread (see `Drop for DatadogExporter`). On the exporter's
+        // own init failure the runtime is dropped on its dedicated build thread —
+        // never inline here, since dropping a tokio runtime on the caller's
+        // thread panics when `new` runs inside an existing runtime. The telemetry
+        // worker is registered through the exporter's runtime handle.
+        let span_exporter =
+            DatadogExporter::new(config.clone(), agent_response_handler, shared_runtime)?;
         if config.telemetry_enabled() {
-            // Like RC, registered on `shared_runtime` and torn down with it.
+            // Like RC, registered on the shared runtime and torn down with it.
             if let Err(e) = TelemetryMetricsCollector::start(
                 registry.clone(),
                 span_exporter.queue_metrics(),
-                &shared_runtime,
+                span_exporter.shared_runtime(),
             ) {
                 dd_error!(
                     "TelemetryMetricsCollector.start: Failed to start telemetry metrics collector: {}",
