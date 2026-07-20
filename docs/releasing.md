@@ -31,8 +31,12 @@ It will:
 - verify that the rustdocs build and that the crate publishes cleanly (a `cargo publish` dry-run).
 
 Then review the working tree — especially the generated changelog, pruning it to customer-facing
-changes — and commit. The script requires `cargo-release` and `git-cliff`; pass `--help` to see its
-options (for example `--base-branch` to cut a hotfix from an older release line).
+changes — and commit. The script requires `cargo-release`, `git-cliff`, and `jq`; pass `--help` to
+see its options (for example `--base-branch` to cut a hotfix from an older release line).
+
+Because the changelog is built from the commit history since the previous release tag, the script
+needs the full history and tags — it refuses to run on a shallow clone. When invoking it from CI,
+check out with `fetch-depth: 0` (which also fetches tags) so the changelog range resolves correctly.
 
 The manual steps below remain valid and can always be followed instead.
 

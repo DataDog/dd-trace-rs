@@ -4,36 +4,24 @@ on:
   push:
     tags:
       - '*-v[0-9]+.[0-9]+.[0-9]+'
+env:
+  RUST_VERSION: 1.87.0
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: publish
     steps:
-      - name: "Checkout sources"
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
-
-      - name: "Resolve Rust version from Cargo.toml"
-        id: rust
-        shell: bash
-        run: |
-          version="$(grep -m1 '^rust-version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          if [ -z "${version}" ]; then
-            echo "::error::could not read rust-version from [workspace.package] in Cargo.toml"
-            exit 1
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      - name: "Install Rust ${{ steps.rust.outputs.version }}"
-        shell: bash
-        env:
-          RUST_VERSION: ${{ steps.rust.outputs.version }}
-        run: rustup install "${RUST_VERSION}" && rustup default "${RUST_VERSION}"
+      - name: "Install Rust ${RUST_VERSION}"
+        run: rustup install ${RUST_VERSION} && rustup default ${RUST_VERSION}
 
       - name: "Install nextest"
         uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # 2.49.15
         with:
           tool: nextest@0.9.96
+
+      - name: "Checkout sources"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
 
       - name: "Get tag"
         id: tag

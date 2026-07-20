@@ -122,8 +122,21 @@ if [ "$CHECK_SYNC" = true ]; then
     echo -e "${GREEN}✓ In sync with origin/$BASE_BRANCH ($remote_head)${NC}"
 fi
 
-if ! command -v git-cliff >/dev/null 2>&1; then
-    echo -e "${RED}❌ ERROR: git-cliff is required to generate the changelog (install: cargo install git-cliff).${NC}" >&2
+require_tool() {
+    local tool="$1" hint="$2"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo -e "${RED}❌ ERROR: $tool is required but was not found ($hint).${NC}" >&2
+        exit 1
+    fi
+}
+require_tool git-cliff "install: cargo install git-cliff"
+require_tool cargo-release "install: cargo install cargo-release"
+require_tool jq "install it via your package manager, e.g. apt-get install jq / brew install jq"
+
+# A shallow clone hides older commits and tags
+if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+    echo -e "${RED}❌ ERROR: shallow clone detected; the changelog needs full history and tags.${NC}" >&2
+    echo "   Run 'git fetch --unshallow --tags', or checkout with fetch-depth: 0 in CI." >&2
     exit 1
 fi
 
@@ -136,8 +149,7 @@ PREV_VERSION="$(crate_version)"
 echo -e "${BLUE}Current version: $PREV_VERSION${NC}"
 
 # Validate the argument: either a known semver level, or an exact version that is well-formed
-# and strictly greater than the current version. Levels are left to cargo-release, which always
-# produces a higher version.
+# and strictly greater than the current version
 case "$LEVEL_OR_VERSION" in
     major|minor|patch|release|rc|beta|alpha) ;;
     *)
@@ -195,7 +207,7 @@ fi
 
 # git-cliff renders the entries: a plain list with PR links, omitting chore/ci/docs/test
 # (see cliff.toml). Strip any leading blank lines it emits before the first bullet.
-commits="$(git cliff --config cliff.toml "${cliff_range[@]}" 2>/dev/null | sed '/./,$!d')"
+commits="$(git cliff --config cliff.toml ${cliff_range[@]+"${cliff_range[@]}"} 2>/dev/null | sed '/./,$!d')"
 if [ -z "$commits" ]; then
     commits="- _No changes._"
 fi
