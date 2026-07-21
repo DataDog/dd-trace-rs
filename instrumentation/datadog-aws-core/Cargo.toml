@@ -1,0 +1,21 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "datadog-aws-core"
+description = "Shared AWS request span utilities for Datadog AWS instrumentation crates."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+aws-smithy-runtime-api = { workspace = true }
+aws-smithy-types = { workspace = true }
+aws-types = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+tracing = { workspace = true }

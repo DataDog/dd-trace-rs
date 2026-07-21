@@ -1,0 +1,30 @@
+# Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "datadog-aws-sqs"
+description = "Datadog trace context injection for AWS SDK for Rust SQS operations."
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[features]
+internal-logs = ["opentelemetry/internal-logs"]
+
+[dependencies]
+datadog-aws-core = { workspace = true }
+aws-sdk-sqs = "1.97.0"
+aws-smithy-runtime-api = { workspace = true }
+aws-smithy-types = { workspace = true }
+serde_json = { workspace = true }
+opentelemetry = { workspace = true }
+
+[dev-dependencies]
+datadog-aws-core-test-utils = { path = "../datadog-aws-core-test-utils" }
+aws-types = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "net", "io-util"] }

@@ -1,0 +1,178 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+//! Integration tests for SnsInterceptor.
+
+use aws_types::SdkConfig;
+use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
+
+use datadog_aws_sns::ConfigExt as _;
+
+fn sns_client(cfg: &SdkConfig) -> aws_sdk_sns::Client {
+    let config = aws_sdk_sns::config::Builder::from(cfg)
+        .datadog_tracing()
+        .build();
+    aws_sdk_sns::Client::from_conf(config)
+}
+
+const TOPIC_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTopic";
+const TARGET_ARN: &str = "arn:aws:sns:us-east-1:111111111111:MyTarget";
+const HTTP_400: &str = "400";
+
+#[tokio::test]
+async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .publish()
+        .topic_arn(TOPIC_ARN)
+        .message("hello")
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(spans[0].name, "sns.request");
+    assert_eq!(attrs["aws.service"], "SNS");
+    assert_eq!(attrs["aws.operation"], "Publish");
+    assert_eq!(attrs["topicname"], "MyTopic");
+    assert_eq!(attrs["operation.name"], "aws.sns.request");
+    assert_eq!(attrs["resource.name"], "SNS.Publish");
+
+    let bodies = harness.server.bodies();
+    assert_eq!(bodies.len(), 1);
+    assert!(
+        bodies[0].contains("_datadog"),
+        "body should contain _datadog attribute name"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "body should indicate Binary data type"
+    );
+}
+
+#[tokio::test]
+async fn sns_publish_with_target_sets_targetname_tag() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .publish()
+        .target_arn(TARGET_ARN)
+        .message("hello")
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["targetname"], "MyTarget");
+    assert!(!attrs.contains_key("topicname"));
+}
+
+#[tokio::test]
+async fn sns_publish_batch_creates_span_with_topicname() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let entry = aws_sdk_sns::types::PublishBatchRequestEntry::builder()
+        .id("1")
+        .message("body")
+        .build()
+        .unwrap();
+
+    let _ = client
+        .publish_batch()
+        .topic_arn(TOPIC_ARN)
+        .publish_batch_request_entries(entry)
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(spans[0].name, "sns.request");
+    assert_eq!(attrs["aws.operation"], "PublishBatch");
+    assert_eq!(attrs["topicname"], "MyTopic");
+
+    let bodies = harness.server.bodies();
+    assert_eq!(bodies.len(), 1);
+    assert!(
+        bodies[0].contains("_datadog"),
+        "batch body should contain _datadog attribute"
+    );
+    assert!(
+        bodies[0].contains("Binary"),
+        "batch body should indicate Binary data type"
+    );
+}
+
+#[tokio::test]
+async fn sns_subscribe_creates_span_with_topicname() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .subscribe()
+        .topic_arn(TOPIC_ARN)
+        .protocol("sqs")
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], "Subscribe");
+    assert_eq!(attrs["topicname"], "MyTopic");
+}
+
+#[tokio::test]
+async fn sns_create_topic_uses_name_field_not_arn() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client.create_topic().name("MyNewTopic").send().await;
+
+    let spans = harness.finished_spans();
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], "CreateTopic");
+    assert_eq!(attrs["topicname"], "MyNewTopic");
+}
+
+#[tokio::test]
+async fn sns_get_topic_attributes_creates_span_with_topicname() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .get_topic_attributes()
+        .topic_arn(TOPIC_ARN)
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], "GetTopicAttributes");
+    assert_eq!(attrs["topicname"], "MyTopic");
+}
+
+#[tokio::test]
+async fn sns_error_response_sets_span_error_status() {
+    let harness = TestHarness::bad_request().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .publish()
+        .topic_arn(TOPIC_ARN)
+        .message("hello")
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["http.status_code"], HTTP_400);
+    assert!(matches!(
+        spans[0].status,
+        opentelemetry::trace::Status::Error { .. }
+    ));
+}
