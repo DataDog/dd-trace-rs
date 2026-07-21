@@ -135,6 +135,10 @@ impl Invocation {
         lambda_cx: &lambda_runtime::Context,
         cold_start: bool,
     ) -> Self {
+        // Capture the start time before any trigger extraction or span creation, so async
+        // inferred spans (which end at invocation start) measure the true propagation delay
+        // and do not include local parsing/instrumentation overhead.
+        let started_at = SystemTime::now();
         let extraction = extract_trigger(inferrer, payload);
         let inferred_spans = InferredSpanScope::start(
             tracer,
@@ -152,7 +156,7 @@ impl Invocation {
         Self {
             lambda_span,
             inferred_spans,
-            started_at: SystemTime::now(),
+            started_at,
         }
     }
 
@@ -238,6 +242,41 @@ mod tests {
 
     fn finished_spans(exporter: &InMemorySpanExporter) -> Vec<SpanData> {
         exporter.get_finished_spans().unwrap()
+    }
+
+    /// An SQS event payload carrying Datadog trace propagation headers. SQS triggers use
+    /// asynchronous invocation semantics, so the inferred `aws.sqs` span ends at invocation
+    /// start.
+    fn sqs_async_payload() -> String {
+        serde_json::json!({
+            "Records": [{
+                "messageId": "msg-001",
+                "receiptHandle": "receipt-001",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:test-queue",
+                "awsRegion": "us-east-1",
+                "body": "hello",
+                "md5OfBody": "d8e8fca2dc0f896fd7cb4cb0031ba249",
+                "attributes": {
+                    "SentTimestamp": "1718444400000",
+                    "ApproximateFirstReceiveTimestamp": "1718444400100",
+                    "ApproximateReceiveCount": "1",
+                    "SenderId": "AIDAIENQZJOLO23YVJ4VO"
+                },
+                "messageAttributes": {
+                    "_datadog": {
+                        "stringValue": serde_json::to_string(&serde_json::json!({
+                            "x-datadog-trace-id": "12345",
+                            "x-datadog-parent-id": "67890",
+                            "x-datadog-sampling-priority": "1"
+                        }))
+                        .unwrap(),
+                        "dataType": "String"
+                    }
+                }
+            }]
+        })
+        .to_string()
     }
 
     #[test]
@@ -362,35 +401,7 @@ mod tests {
     #[test]
     fn start_invocation_materializes_inferred_spans_for_sqs_events() {
         let (provider, _) = test_provider();
-        let payload = serde_json::json!({
-            "Records": [{
-                "messageId": "msg-001",
-                "receiptHandle": "receipt-001",
-                "eventSource": "aws:sqs",
-                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:test-queue",
-                "awsRegion": "us-east-1",
-                "body": "hello",
-                "md5OfBody": "d8e8fca2dc0f896fd7cb4cb0031ba249",
-                "attributes": {
-                    "SentTimestamp": "1718444400000",
-                    "ApproximateFirstReceiveTimestamp": "1718444400100",
-                    "ApproximateReceiveCount": "1",
-                    "SenderId": "AIDAIENQZJOLO23YVJ4VO"
-                },
-                "messageAttributes": {
-                    "_datadog": {
-                        "stringValue": serde_json::to_string(&serde_json::json!({
-                            "x-datadog-trace-id": "12345",
-                            "x-datadog-parent-id": "67890",
-                            "x-datadog-sampling-priority": "1"
-                        }))
-                        .unwrap(),
-                        "dataType": "String"
-                    }
-                }
-            }]
-        })
-        .to_string();
+        let payload = sqs_async_payload();
 
         let inferrer = crate::span_inferrer::build_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
@@ -401,5 +412,35 @@ mod tests {
             .span_context()
             .is_valid());
         assert!(!invocation.inferred_spans.is_empty());
+    }
+
+    #[test]
+    fn async_inferred_span_ends_before_root_span_starts() {
+        let (provider, exporter) = test_provider();
+        let payload = sqs_async_payload();
+
+        let inferrer = crate::span_inferrer::build_inferrer();
+        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let _: Result<(), String> = invocation.finish(Ok(()));
+        provider.force_flush().unwrap();
+
+        let spans = finished_spans(&exporter);
+        let root = spans
+            .iter()
+            .find(|s| s.name.as_ref() == ROOT_SPAN_NAME)
+            .expect("root span");
+        let inferred = spans
+            .iter()
+            .find(|s| s.name.as_ref() == "aws.sqs")
+            .expect("inferred sqs span");
+
+        assert!(
+            inferred.end_time < root.start_time,
+            "async inferred span must end before the root span starts: \
+             inferred end {:?}, root start {:?}",
+            inferred.end_time,
+            root.start_time
+        );
     }
 }
