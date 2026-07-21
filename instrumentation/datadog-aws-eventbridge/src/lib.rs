@@ -255,7 +255,7 @@ fn rewrite_json_object_field(
         value,
     })?;
     deserializer.end()?;
-    Ok(String::from_utf8(output).unwrap_or_else(|_| unreachable!("serde_json only emits UTF-8")))
+    Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 // Streams the top-level object, replacing or appending one field while
