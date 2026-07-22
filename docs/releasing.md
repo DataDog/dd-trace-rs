@@ -15,6 +15,9 @@ version-reference updates, the changelog generation, and the verification. It do
 tag, or publish, and it does not replace the surrounding steps: you still bump libdatadog (step 1),
 review the incoming commits (step 2), and merge, tag, and publish (steps 6–9) yourself.
 
+The script handles the rest of the steps (3–5) and it requires `cargo-release`, `git-cliff`, and
+`jq`.
+
 Run it from the tip of the branch you are releasing (usually `main`, up to date with `origin`):
 
 ```text
@@ -30,9 +33,8 @@ It will:
 - prepend a `CHANGELOG.md` section listing the commits since the previous release tag,
 - verify that the rustdocs build and that the crate publishes cleanly (a `cargo publish` dry-run).
 
-Then review the working tree — especially the generated changelog, pruning it to customer-facing
-changes — and commit. The script requires `cargo-release`, `git-cliff`, and `jq`; pass `--help` to
-see its options (for example `--base-branch` to cut a hotfix from an older release line).
+Then review the working tree — especially the generated changelog, pruning it to user-facing
+changes — and commit.
 
 Because the changelog is built from the commit history since the previous release tag, the script
 needs the full history and tags — it refuses to run on a shallow clone. When invoking it from CI,
@@ -49,7 +51,7 @@ The manual steps below remain valid and can always be followed instead.
 2. Check the commits that are going in the new release, by creating a draft release in github
    <https://github.com/DataDog/dd-trace-rs/releases/new>
 
-3. Append to the CHANGELOG.md, adding only additions/removal/fixes that affect customers
+3. Append to the CHANGELOG.md, adding only additions/removal/fixes that affect users
 
 4. Check that the README and rustdocs are up to date with the current feature set and that they
    render correctly on github. rustdocs can be generated using the following command
