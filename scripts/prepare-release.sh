@@ -36,9 +36,8 @@ Usage: $(basename "$0") [OPTIONS] <LEVEL|VERSION>
 Prepares a $PACKAGE release proposal in the working tree (no commit/tag/publish).
 
 Arguments:
-    <LEVEL|VERSION>     A semver level (major|minor|patch) or an exact stable
-                        version (e.g. 0.6.0). Prereleases are not supported
-                        (the publish workflow only triggers on stable X.Y.Z tags).
+    <LEVEL|VERSION>     A semver level (major|minor|patch|release|rc|beta|alpha)
+                        or an exact version (e.g. 0.6.0 or 0.6.0-rc.1).
 
 Options:
     -h, --help                  Show this help message
@@ -149,27 +148,34 @@ crate_version() {
 PREV_VERSION="$(crate_version)"
 echo -e "${BLUE}Current version: $PREV_VERSION${NC}"
 
-# Validate the argument: a stable semver level, or an exact stable version that is well-formed and
-# strictly greater than the current version. Prereleases are rejected: cargo-release skips the
-# pre-release-replacements for prerelease versions (their `prerelease` flag defaults to false), and
-# the publish workflow only triggers on stable X.Y.Z tags anyway.
+# Validate the argument: a semver level (including the prerelease levels), or an exact version
+# (stable X.Y.Z or a prerelease X.Y.Z-<suffix>). For exact versions the requested value must differ
+# from the current one and, when both are stable, be strictly greater. The monotonic check is
+# limited to stable-vs-stable because `sort -V` mis-orders prereleases (it ranks 1.0.0-rc.1 above
+# 1.0.0), which would otherwise wrongly reject finalizing a prerelease.
 case "$LEVEL_OR_VERSION" in
-    major|minor|patch) ;;
-    release|rc|beta|alpha)
-        echo -e "${RED}❌ ERROR: prerelease level '$LEVEL_OR_VERSION' is not supported; use major|minor|patch or a stable version.${NC}" >&2
-        exit 1
-        ;;
+    major|minor|patch|release|rc|beta|alpha) ;;
     *)
-        if ! printf '%s' "$LEVEL_OR_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo -e "${RED}❌ ERROR: '$LEVEL_OR_VERSION' is not a supported level or stable version${NC}" >&2
-            echo "   Expected major|minor|patch or a stable semver version (e.g. 0.6.0); prereleases are not supported." >&2
+        if ! printf '%s' "$LEVEL_OR_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo -e "${RED}❌ ERROR: '$LEVEL_OR_VERSION' is not a valid version or release level${NC}" >&2
+            echo "   Expected a level (major|minor|patch|release|rc|beta|alpha) or a semver version (e.g. 0.6.0 or 0.6.0-rc.1)." >&2
             exit 1
         fi
-        highest="$(printf '%s\n%s\n' "$PREV_VERSION" "$LEVEL_OR_VERSION" | sort -V | tail -n1)"
-        if [ "$LEVEL_OR_VERSION" = "$PREV_VERSION" ] || [ "$highest" != "$LEVEL_OR_VERSION" ]; then
-            echo -e "${RED}❌ ERROR: version $LEVEL_OR_VERSION must be greater than the current version $PREV_VERSION${NC}" >&2
+        if [ "$LEVEL_OR_VERSION" = "$PREV_VERSION" ]; then
+            echo -e "${RED}❌ ERROR: version $LEVEL_OR_VERSION is the same as the current version${NC}" >&2
             exit 1
         fi
+        # Only guard ordering when neither version is a prerelease (contains a '-').
+        case "$PREV_VERSION$LEVEL_OR_VERSION" in
+            *-*) ;;
+            *)
+                highest="$(printf '%s\n%s\n' "$PREV_VERSION" "$LEVEL_OR_VERSION" | sort -V | tail -n1)"
+                if [ "$highest" != "$LEVEL_OR_VERSION" ]; then
+                    echo -e "${RED}❌ ERROR: version $LEVEL_OR_VERSION must be greater than the current version $PREV_VERSION${NC}" >&2
+                    exit 1
+                fi
+                ;;
+        esac
         ;;
 esac
 
@@ -192,7 +198,12 @@ fi
 # The instrumentation crates are a separate workspace, so cargo-release does not touch them.
 # Bump their datadog-opentelemetry dependency pin (kept as major.minor to match the existing
 # style) and refresh that workspace's lockfile so it stays consistent with the released version.
-version_req="$(printf '%s' "$NEW_VERSION" | cut -d. -f1,2)"
+# For a stable release keep the pin as major.minor; for a prerelease pin the exact version, since a
+# caret requirement on major.minor (e.g. "0.6") does not match a prerelease (0.6.0-rc.1 < 0.6.0).
+case "$NEW_VERSION" in
+    *-*) version_req="$NEW_VERSION" ;;
+    *)   version_req="$(printf '%s' "$NEW_VERSION" | cut -d. -f1,2)" ;;
+esac
 lambda_manifest="instrumentation/datadog-aws-lambda/Cargo.toml"
 echo -e "${BLUE}--- Bumping datadog-opentelemetry pin in $lambda_manifest to $version_req ---${NC}"
 sed -i -E "s|(datadog-opentelemetry = \{ version = \")[^\"]+|\1${version_req}|g" "$lambda_manifest"
