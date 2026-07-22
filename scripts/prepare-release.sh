@@ -36,8 +36,9 @@ Usage: $(basename "$0") [OPTIONS] <LEVEL|VERSION>
 Prepares a $PACKAGE release proposal in the working tree (no commit/tag/publish).
 
 Arguments:
-    <LEVEL|VERSION>     A semver level (major|minor|patch|release|rc|beta|alpha)
-                        or an exact version (e.g. 0.5.0).
+    <LEVEL|VERSION>     A semver level (major|minor|patch) or an exact stable
+                        version (e.g. 0.6.0). Prereleases are not supported
+                        (the publish workflow only triggers on stable X.Y.Z tags).
 
 Options:
     -h, --help                  Show this help message
@@ -148,14 +149,20 @@ crate_version() {
 PREV_VERSION="$(crate_version)"
 echo -e "${BLUE}Current version: $PREV_VERSION${NC}"
 
-# Validate the argument: either a known semver level, or an exact version that is well-formed
-# and strictly greater than the current version
+# Validate the argument: a stable semver level, or an exact stable version that is well-formed and
+# strictly greater than the current version. Prereleases are rejected: cargo-release skips the
+# pre-release-replacements for prerelease versions (their `prerelease` flag defaults to false), and
+# the publish workflow only triggers on stable X.Y.Z tags anyway.
 case "$LEVEL_OR_VERSION" in
-    major|minor|patch|release|rc|beta|alpha) ;;
+    major|minor|patch) ;;
+    release|rc|beta|alpha)
+        echo -e "${RED}❌ ERROR: prerelease level '$LEVEL_OR_VERSION' is not supported; use major|minor|patch or a stable version.${NC}" >&2
+        exit 1
+        ;;
     *)
-        if ! printf '%s' "$LEVEL_OR_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
-            echo -e "${RED}❌ ERROR: '$LEVEL_OR_VERSION' is not a valid version or release level${NC}" >&2
-            echo "   Expected a level (major|minor|patch|release|rc|beta|alpha) or a semver version (e.g. 0.6.0)." >&2
+        if ! printf '%s' "$LEVEL_OR_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo -e "${RED}❌ ERROR: '$LEVEL_OR_VERSION' is not a supported level or stable version${NC}" >&2
+            echo "   Expected major|minor|patch or a stable semver version (e.g. 0.6.0); prereleases are not supported." >&2
             exit 1
         fi
         highest="$(printf '%s\n%s\n' "$PREV_VERSION" "$LEVEL_OR_VERSION" | sort -V | tail -n1)"
