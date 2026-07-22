@@ -19,6 +19,12 @@ ALLOWED_CRATES=(
 
 LIBDATADOG_OWNERS="github:datadog:libdatadog-owners"
 
+# Semver version with an optional prerelease suffix (e.g. 1.2.3 or 1.2.3-rc.1).
+VERSION_REGEX='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'
+# Full release tag: {crate-name}-v{version}. Used with `[[ ... =~ $TAG_REGEX ]]` (unquoted);
+# on match, BASH_REMATCH[1] is the crate name and BASH_REMATCH[2] is the version.
+TAG_REGEX="^(.+)-v(${VERSION_REGEX})$"
+
 usage() {
     cat << EOF
 Usage: $(basename "$0") [OPTIONS] <tag1> [tag2] [tag3] ...
@@ -61,7 +67,7 @@ validate_tag() {
     local tag=$1
     
     # Check format: {crate-name}-v{semver}
-    if [[ ! "$tag" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    if [[ ! "$tag" =~ $TAG_REGEX ]]; then
         echo -e "${RED}❌ Invalid tag format: $tag${NC}" >&2
         echo "   Expected format: {crate-name}-v{version} (e.g., libdd-common-v1.0.0)" >&2
         return 1
@@ -104,7 +110,7 @@ sort_tags() {
     local -a final_sorted=()
     for allowed in "${ALLOWED_CRATES[@]}"; do
         for tag in "${sorted_tags[@]}"; do
-            if [[ "$tag" =~ ^${allowed}-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if [[ "$tag" =~ ^${allowed}-v${VERSION_REGEX}$ ]]; then
                 final_sorted+=("$tag")
             fi
         done
@@ -186,7 +192,7 @@ publish_crate() {
     echo "Processing tag: $tag" >&2
     
     # Extract crate name and version
-    if [[ "$tag" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    if [[ "$tag" =~ $TAG_REGEX ]]; then
         local crate_name="${BASH_REMATCH[1]}"
         local crate_version="${BASH_REMATCH[2]}"
         echo "Crate: $crate_name" >&2
@@ -256,7 +262,7 @@ publish_crate() {
         return 1
     fi
     
-    local publish_cmd="cargo publish --package $crate_name --token $token --all-features"
+    local publish_cmd="cargo publish --locked --package $crate_name --token $token --all-features"
     
     if [ "$dry_run" = "true" ]; then
         publish_cmd="$publish_cmd --dry-run"
@@ -286,7 +292,7 @@ check_crate_only() {
     echo "Processing tag: $tag" >&2
     
     # Extract crate name and version
-    if [[ "$tag" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    if [[ "$tag" =~ $TAG_REGEX ]]; then
         local crate_name="${BASH_REMATCH[1]}"
         local crate_version="${BASH_REMATCH[2]}"
         echo "Crate: $crate_name" >&2
@@ -338,7 +344,7 @@ check_publication_status() {
         if check_crate_only "$tag"; then
             ((++published))
         else
-            if [[ "$tag" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            if [[ "$tag" =~ $TAG_REGEX ]]; then
                 ((++not_published))
             else
                 ((++failed))
