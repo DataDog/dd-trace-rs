@@ -204,17 +204,18 @@ CHANGELOG="$PACKAGE/CHANGELOG.md"
 # The previous tag: the most recent release tag reachable from HEAD (not merely the
 # highest version, which may live on another branch).
 previous_tag="$(git describe --tags --abbrev=0 --match "$PACKAGE-v*" 2>/dev/null || true)"
-if [ -n "$previous_tag" ]; then
-    cliff_range=("$previous_tag..HEAD")
-    echo "Listing commits since $previous_tag" >&2
-else
-    cliff_range=()   # no prior release tag: include all history
-    echo "No previous $PACKAGE release tag found; listing all history" >&2
-fi
 
-# git-cliff renders the entries: a plain list with PR links, omitting chore/ci/docs/test
-# (see cliff.toml). Strip any leading blank lines it emits before the first bullet.
-commits="$(git cliff --config cliff.toml ${cliff_range[@]+"${cliff_range[@]}"} 2>/dev/null | sed '/./,$!d')"
+# git-cliff renders the entries: a plain list with PR links, omitting chore/ci/docs/test (see
+# cliff.toml). Pass an explicit range when there is a previous tag; otherwise omit the range so
+# git-cliff walks all history. (An empty-string range argument makes git-cliff error, so the two
+# cases are branched rather than relying on array expansion.) Strip leading blank lines it emits.
+if [ -n "$previous_tag" ]; then
+    echo "Listing commits since $previous_tag" >&2
+    commits="$(git cliff --config cliff.toml "$previous_tag..HEAD" 2>/dev/null | sed '/./,$!d')"
+else
+    echo "No previous $PACKAGE release tag found; listing all history" >&2
+    commits="$(git cliff --config cliff.toml 2>/dev/null | sed '/./,$!d')"
+fi
 if [ -z "$commits" ]; then
     commits="- _No changes._"
 fi
