@@ -166,7 +166,7 @@ required-features = ["test-utils"]
 # File paths are relative to this manifest (datadog-opentelemetry/).
 pre-release-replacements = [
     { file = "../README.md", search = 'datadog-opentelemetry = \{ version = "[^"]+" \}', replace = 'datadog-opentelemetry = { version = "{{version}}" }', min = 1, prerelease = true },
-    { file = "../README.md", search = 'docs\.rs/datadog-opentelemetry/[0-9]+\.[0-9]+\.[0-9]+/', replace = 'docs.rs/datadog-opentelemetry/{{version}}/', min = 1, prerelease = true },
+    { file = "../README.md", search = 'docs\.rs/datadog-opentelemetry/[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?/', replace = 'docs.rs/datadog-opentelemetry/{{version}}/', min = 1, prerelease = true },
     { file = "src/lib.rs", search = 'datadog-opentelemetry = \{ version = "[^"]+" \}', replace = 'datadog-opentelemetry = { version = "{{version}}" }', min = 1, prerelease = true },
-    { file = "../.github/ISSUE_TEMPLATE/bug_report.yml", search = 'placeholder: "[0-9]+\.[0-9]+\.[0-9]+"', replace = 'placeholder: "{{version}}"', min = 1, prerelease = true },
+    { file = "../.github/ISSUE_TEMPLATE/bug_report.yml", search = 'placeholder: "[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?"', replace = 'placeholder: "{{version}}"', min = 1, prerelease = true },
 ]
