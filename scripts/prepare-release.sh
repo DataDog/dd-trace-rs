@@ -27,6 +27,7 @@ DOC_TOOLCHAIN="nightly"
 RUN_PUBLISH_DRY_RUN=true
 ALLOW_DIRTY=false
 CHECK_SYNC=true
+CHECK_CODEX=true
 CODEX_JIRA_URL="https://datadoghq.atlassian.net/jira/software/c/projects/APMSP/boards/29727?quickFilter=32571"
 
 usage() {
@@ -44,6 +45,7 @@ Options:
         --base-branch <NAME>    Branch to release from and verify sync against (default: $BASE_BRANCH).
                                 Use a hotfix/release branch to cut a hotfix from an older line.
         --allow-dirty           Proceed even if the working tree has uncommitted changes
+        --no-codex-check        Skip the Codex Findings review prompt/reminder
         --no-sync-check         Skip verifying HEAD matches the latest origin/<base-branch> commit
         --no-publish-dry-run    Skip the 'cargo publish --dry-run' verification step
         --doc-toolchain <NAME>  Rust toolchain used for the rustdocs build (default: $DOC_TOOLCHAIN)
@@ -61,6 +63,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help) usage; exit 0 ;;
         --base-branch) BASE_BRANCH="$2"; shift 2 ;;
         --allow-dirty) ALLOW_DIRTY=true; shift ;;
+        --no-codex-check) CHECK_CODEX=false; shift ;;
         --no-sync-check) CHECK_SYNC=false; shift ;;
         --no-publish-dry-run) RUN_PUBLISH_DRY_RUN=false; shift ;;
         --doc-toolchain) DOC_TOOLCHAIN="$2"; shift 2 ;;
@@ -81,18 +84,20 @@ if [ -z "$LEVEL_OR_VERSION" ]; then
     exit 1
 fi
 
-echo -e "${BLUE}Codex Findings (Jira): $CODEX_JIRA_URL${NC}" >&2
-if [ -t 0 ]; then
-    read -r -p "Have you reviewed them for this release? [y/N] " codex_ack
-    case "$codex_ack" in
-        y|Y|yes|Yes) ;;
-        *)
-            echo -e "${RED}❌ Aborting: please review them before releasing.${NC}" >&2
-            exit 1
-            ;;
-    esac
-else
-    echo -e "${BLUE}⚠️  Reminder: review the Codex Findings before releasing.${NC}" >&2
+if [ "$CHECK_CODEX" = true ]; then
+    echo -e "${BLUE}Codex Findings (Jira): $CODEX_JIRA_URL${NC}" >&2
+    if [ -t 0 ]; then
+        read -r -p "Have you reviewed them for this release? [y/N] " codex_ack
+        case "$codex_ack" in
+            y|Y|yes|Yes) ;;
+            *)
+                echo -e "${RED}❌ Aborting: please review them before releasing.${NC}" >&2
+                exit 1
+                ;;
+        esac
+    else
+        echo -e "${BLUE}⚠️  Reminder: review the Codex Findings before releasing.${NC}" >&2
+    fi
 fi
 
 # A dirty tree means the resulting commit would include unrelated changes, so fail early with a

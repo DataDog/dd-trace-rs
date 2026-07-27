@@ -1,0 +1,166 @@
+name: Release - Open a release PR
+
+# Opens a `chore(release): proposal vX.Y.Z` pull request that bumps the crate
+# version and updates all version references (docs + changelog). It does NOT
+# tag or publish: after this PR is merged, tag the commit to trigger publishing
+# (see docs/releasing.md and .github/workflows/publish.yaml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver level (major | minor | patch | rc | beta | alpha) or an exact version (e.g. 0.6.0 or 0.6.0-rc.1)"
+        required: true
+        type: string
+      base-branch:
+        description: "Branch to release from and target the PR at. Use a hotfix/release branch to cut a hotfix from an older line."
+        required: false
+        type: string
+        default: main
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Enable OIDC
+      contents: write
+      pull-requests: write
+    env:
+      RUSTUP_TOOLCHAIN: 1.92.0
+    steps:
+      - uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
+        id: octo-sts
+        # A non-protected branch can't mint a token (see the STS policy). Don't fail the job; the
+        # steps below detect the missing token and fall back to a test run (unsigned push, no PR).
+        continue-on-error: true
+        with:
+          scope: DataDog/dd-trace-rs
+          policy: self.write.pr
+
+      - name: "Checkout sources"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
+        with:
+          # Release from (and later target the PR at) the chosen base branch.
+          ref: ${{ inputs.base-branch }}
+          # Full history + tags so prepare-release.sh can list commits since the last release tag.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+
+      - name: "Install cargo-release"
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # 2.3.1
+        with:
+          tool: cargo-release@1.1.2
+
+      - name: "Install git-cliff"
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # 2.3.1
+        with:
+          tool: git-cliff@2.13.1
+
+      - name: "Prepare release proposal"
+        id: prepare
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+        run: ./scripts/prepare-release.sh --no-codex-check --base-branch "${BASE_BRANCH}" "${VERSION}"
+
+      - name: Configure Git for signing
+        env:
+          GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          # GET /user is not allowed with installation tokens; use GET /users/ACTOR (who triggered the workflow).
+          GITHUB_USER_RESPONSE=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/users/${GITHUB_ACTOR}")
+          GIT_USER_NAME=$(echo "${GITHUB_USER_RESPONSE}" | jq -r '.login // empty')
+          GIT_USER_ID=$(echo "${GITHUB_USER_RESPONSE}" | jq -r '.id // empty')
+          if [[ -z "$GIT_USER_NAME" ]]; then
+            GIT_USER_NAME="${GITHUB_ACTOR}"
+            GIT_USER_EMAIL="${GITHUB_ACTOR}@users.noreply.github.com"
+          else
+            GIT_USER_EMAIL="${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+          fi
+          echo "GIT_USER_NAME: $GIT_USER_NAME"
+          echo "GIT_USER_EMAIL: $GIT_USER_EMAIL"
+          git config --global user.name "$GIT_USER_NAME"
+          git config --global user.email "$GIT_USER_EMAIL"
+
+      - name: "Create local release commit"
+        id: commit
+        shell: bash
+        env:
+          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
+        run: |
+          base_sha="$(git rev-parse HEAD)"
+
+          git commit -am "chore(release): proposal v${NEW_VERSION}"
+
+          # Timestamp the branch so re-runs (and test runs) never collide on an existing branch.
+          TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+
+          # commit-headless expects the new commits oldest -> newest, space-separated.
+          commits="$(git log --reverse "${base_sha}".. --format='%H' | tr '\n' ' ' | xargs)"
+          {
+            echo "base_sha=${base_sha}"
+            echo "commits=${commits}"
+            echo "branch=release/proposal-v${NEW_VERSION}/${TIMESTAMP}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "Push verified commit"
+        if: steps.octo-sts.outcome == 'success'
+        uses: DataDog/commit-headless@action/v2.0.3
+        with:
+          branch: ${{ steps.commit.outputs.branch }}
+          head-sha: ${{ steps.commit.outputs.base_sha }}
+          command: push
+          commits: "${{ steps.commit.outputs.commits }}"
+
+      - name: "Open proposal pull request"
+        if: steps.octo-sts.outcome == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
+          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
+          PREV_VERSION: ${{ steps.prepare.outputs.prev_version }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+        run: |
+          body="$(cat <<EOF
+          Automated release proposal: bumps \`datadog-opentelemetry\` from v${PREV_VERSION} to v${NEW_VERSION}.
+
+          Generated by the **Release proposal** workflow. It bumps the workspace version,
+          updates version references in \`README.md\`, \`src/lib.rs\`, the bug-report template, and
+          the \`datadog-aws-lambda\` dependency pin, and opens a new \`## ${NEW_VERSION}\` changelog section.
+
+          ### Before merging
+          - [ ] Review the auto-populated \`## ${NEW_VERSION}\` changelog; prune to user-facing changes.
+          - [ ] Confirm the libdatadog dependencies are on their intended versions.
+          - [ ] Review the Codex Findings in Jira for new vulnerabilities since the last release:
+                https://datadoghq.atlassian.net/jira/software/c/projects/APMSP/boards/29727?quickFilter=32571
+          - [ ] Confirm README and rustdocs render correctly.
+
+          ### After merging
+          Tag the merge commit as \`datadog-opentelemetry-v${NEW_VERSION}\` and push it to trigger publishing.
+          EOF
+          )"
+
+          if ! gh pr create --base "${BASE_BRANCH}" --head "${BRANCH}" \
+                --title "chore(release): proposal v${NEW_VERSION}" \
+                --body "${body}"; then
+            echo "PR creation failed (a PR for ${BRANCH} may already exist)."
+          fi
+
+      - name: "Test run (no STS token): push unsigned, skip PR"
+        if: steps.octo-sts.outcome != 'success'
+        shell: bash
+        env:
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
+        run: |
+          echo "::warning::No STS token was minted (expected on a non-protected branch). Running in test mode:"
+          echo "  - pushing an UNSIGNED commit to '${BRANCH}'"
+          echo "  - NOT opening a pull request"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "::notice::Test run complete for v${NEW_VERSION}. Pushed unsigned branch '${BRANCH}'; no PR was opened."
