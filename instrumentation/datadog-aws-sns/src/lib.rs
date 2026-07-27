@@ -40,8 +40,11 @@ use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Blob;
 use opentelemetry::{global, otel_debug, Context, KeyValue};
 
-use datadog_aws_core as aws_core;
-use datadog_aws_core::attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME};
+use datadog_aws_core::{
+    attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME},
+    finish_request_span, request_span_trace_headers, start_request_span, update_request_span,
+    AwsRequestMetadata,
+};
 
 const TRACER_NAME: &str = "datadog-aws-sns";
 const SPAN_NAME: &str = "sns.request";
@@ -87,7 +90,7 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        let Some(metadata) = aws_core::AwsRequestMetadata::from_config_bag(cfg) else {
+        let Some(metadata) = AwsRequestMetadata::from_config_bag(cfg) else {
             return Ok(());
         };
 
@@ -129,7 +132,7 @@ impl Intercept for SnsInterceptor {
         ]
         .into_iter()
         .flatten();
-        let span_context = aws_core::start_request_span(
+        let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
@@ -148,7 +151,7 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::update_request_span(context, cfg);
+        update_request_span(context, cfg);
         Ok(())
     }
 
@@ -158,7 +161,7 @@ impl Intercept for SnsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::finish_request_span(context, cfg);
+        finish_request_span(context, cfg);
         Ok(())
     }
 }
@@ -184,7 +187,7 @@ fn inject(span_context: &Context, input: &mut Input) {
 }
 
 fn build_datadog_attribute(span_context: &Context) -> Option<MessageAttributeValue> {
-    let trace_headers = aws_core::request_span_trace_headers(span_context);
+    let trace_headers = request_span_trace_headers(span_context);
     if trace_headers.is_empty() {
         return None;
     }

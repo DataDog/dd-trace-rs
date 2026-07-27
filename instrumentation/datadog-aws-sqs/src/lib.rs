@@ -38,9 +38,10 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, otel_debug, Context, KeyValue};
 
-use datadog_aws_core as aws_core;
-use datadog_aws_core::attribute_keys::{
-    CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_SYSTEM, QUEUE_NAME,
+use datadog_aws_core::{
+    attribute_keys::{CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_SYSTEM, QUEUE_NAME},
+    finish_request_span, request_span_context, request_span_trace_headers, start_request_span,
+    update_request_span, AwsRequestMetadata,
 };
 
 const TRACER_NAME: &str = "datadog-aws-sqs";
@@ -157,7 +158,7 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        let Some(metadata) = aws_core::AwsRequestMetadata::from_config_bag(cfg) else {
+        let Some(metadata) = AwsRequestMetadata::from_config_bag(cfg) else {
             return Ok(());
         };
 
@@ -195,7 +196,7 @@ impl Intercept for SqsInterceptor {
         .into_iter()
         .flatten();
 
-        let span_context = aws_core::start_request_span(
+        let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
@@ -215,7 +216,7 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::update_request_span(context, cfg);
+        update_request_span(context, cfg);
         Ok(())
     }
 
@@ -233,19 +234,18 @@ impl Intercept for SqsInterceptor {
             return Ok(());
         };
 
-        let Some(request_span_context) = aws_core::request_span_context(cfg) else {
+        let Some(request_span_context) = request_span_context(cfg) else {
             return Ok(());
         };
+        let request_span = request_span_context.span();
 
         if let Some(output) = output.downcast_ref::<SendMessageOutput>() {
             if let Some(message_id) = output.message_id() {
-                request_span_context
-                    .span()
-                    .set_attributes([message_id_attribute(message_id)]);
+                request_span.set_attributes([message_id_attribute(message_id)]);
             }
         } else if let Some(output) = output.downcast_ref::<ReceiveMessageOutput>() {
             let messages = output.messages();
-            request_span_context.span().add_event(
+            request_span.add_event(
                 SQS_RECEIVE_MESSAGES_EVENT,
                 vec![KeyValue::new(
                     MESSAGING_BATCH_MESSAGE_COUNT,
@@ -256,7 +256,7 @@ impl Intercept for SqsInterceptor {
             for message in messages {
                 if let Some(message_context) = extract_context(message) {
                     let message_span_context = message_context.span().span_context().clone();
-                    request_span_context.span().add_link(
+                    request_span.add_link(
                         message_span_context,
                         message
                             .message_id()
@@ -277,7 +277,7 @@ impl Intercept for SqsInterceptor {
         _runtime_components: &RuntimeComponents,
         cfg: &mut ConfigBag,
     ) -> Result<(), BoxError> {
-        aws_core::finish_request_span(context, cfg);
+        finish_request_span(context, cfg);
         Ok(())
     }
 }
@@ -287,7 +287,7 @@ impl Intercept for SqsInterceptor {
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
 /// that supports injection; all other operations are no-ops.
 fn inject(span_context: &Context, input: &mut Input) {
-    inject_with_trace_headers(input, || aws_core::request_span_trace_headers(span_context));
+    inject_with_trace_headers(input, || request_span_trace_headers(span_context));
 }
 
 fn inject_with_trace_headers(
