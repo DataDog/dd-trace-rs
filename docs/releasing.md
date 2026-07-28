@@ -4,16 +4,47 @@
 
 > [!CAUTION]
 > Before releasing, check the Codex Security Scanning results board and ensure there are no new
-> vulnerabilities discovered since the last release.
-> If new vulnerabilities exist for the commit being released, discuss with the team whether
-> releasing is safe, or if it should be delayed to resolve the vulnerability.
+> vulnerabilities discovered since the last release. If new vulnerabilities exist for the commit
+> being released, discuss with the team whether releasing is safe, or if it should be delayed to
+> resolve the vulnerability.
+
+### Preparing the release with the GitHub workflow (recommended)
+
+The **Release - Open a release PR** workflow (`.github/workflows/release-proposal-dispatch.yaml`)
+runs the preparation on CI and opens the proposal pull request for you. It runs
+`scripts/prepare-release.sh` (see below), commits the result as a verified (signed) commit, and
+opens a `chore(release): proposal vX.Y.Z` PR that targets the base branch.
+
+Trigger it from the GH UI ("Release - Open a release PR" → **Run workflow**) or with the CLI:
+
+```text
+gh workflow run release-proposal-dispatch.yaml --ref main \
+  -f version=minor      # major | minor | patch | rc | beta | alpha, or an exact 0.6.0 / 0.6.0-rc.1
+```
+
+Inputs:
+
+- `version` — the semver level or exact version to release.
+- `base-branch` — branch to release from and target the PR at (default `main`).
+
+> [!IMPORTANT]
+> Always **dispatch the workflow from `main`** (`--ref main`). Minting the PR token is restricted to
+> protected branches, so to cut a hotfix from an older line keep `--ref main` and set the
+> `base-branch` input (e.g. `-f base-branch=hotfix/0.5.x`) do not dispatch directly from the hotfix
+> branch. Dispatching from a non-protected branch instead runs in a test mode that pushes an
+> unsigned branch and skips the PR (handy for trying the workflow out). The proposal branch name is
+> `release/proposal-v<version>`; the run fails if that branch already exists.
+
+After the workflow opens the PR, review it (especially the generated changelog), merge it, then
+continue with the tag and publish steps (6–9 below). The workflow does **not** tag or publish.
 
 ### Preparing the release with the helper script
 
-`scripts/prepare-release.sh` automates most of the preparation below — the version bump, the
-version-reference updates, the changelog generation, and the verification. It does **not** commit,
-tag, or publish, and it does not replace the surrounding steps: you still bump libdatadog (step 1),
-review the incoming commits (step 2), and merge, tag, and publish (steps 6–9) yourself.
+`scripts/prepare-release.sh` (which the workflow above runs) can also be run locally. It automates
+most of the preparation below — the version bump, the version-reference updates, the changelog
+generation, and the verification. It does **not** commit, tag, or publish, and it does not replace
+the surrounding steps: you still bump libdatadog (step 1), review the incoming commits (step 2), and
+merge, tag, and publish (steps 6–9) yourself.
 
 The script handles the rest of the steps (3–5) and it requires `cargo-release`, `git-cliff`, and
 `jq`.
@@ -88,6 +119,5 @@ git push origin $TAG
 8. Once the tag has been pushed, the publish job will need to be approved by another member of the
    apm-rust github group
 
-9. Make a github release, from the previous release to the new tag.
-   You can auto-generate the release notes.
-   <https://github.com/DataDog/dd-trace-rs/releases/new>
+9. Make a github release, from the previous release to the new tag. You can auto-generate the
+   release notes. <https://github.com/DataDog/dd-trace-rs/releases/new>
