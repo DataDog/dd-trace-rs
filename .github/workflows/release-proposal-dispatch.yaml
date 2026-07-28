@@ -97,16 +97,24 @@ jobs:
 
           git commit -am "chore(release): proposal v${NEW_VERSION}"
 
-          # Timestamp the branch so re-runs (and test runs) never collide on an existing branch.
-          TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-
           # commit-headless expects the new commits oldest -> newest, space-separated.
           commits="$(git log --reverse "${base_sha}".. --format='%H' | tr '\n' ' ' | xargs)"
           {
             echo "base_sha=${base_sha}"
             echo "commits=${commits}"
-            echo "branch=release/proposal-v${NEW_VERSION}/${TIMESTAMP}"
+            echo "branch=release/proposal-v${NEW_VERSION}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: "Fail if the proposal branch already exists"
+        shell: bash
+        env:
+          BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            echo "::error::Branch '${BRANCH}' already exists on origin. Delete it (or finish its proposal) before re-running."
+            exit 1
+          fi
+          echo "Branch '${BRANCH}' does not exist yet."
 
       - name: "Push verified commit"
         if: steps.octo-sts.outcome == 'success'
