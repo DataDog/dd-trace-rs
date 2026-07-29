@@ -18,7 +18,7 @@ use opentelemetry::{
     global,
     trace::{Tracer, TracerProvider as _},
 };
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::{error::OTelSdkError, trace::SdkTracerProvider};
 
 use crate::integration_tests::make_test_agent;
 
@@ -214,4 +214,98 @@ async fn test_scoped_provider_drop_without_shutdown_releases_telemetry() {
         .tracer("telemetry_shutdown_test")
         .in_span("op_after_drop", |_| {});
     drop_within_bound(second_provider).await;
+}
+
+/// With telemetry disabled no `TelemetryUser` is registered, so shutdown must
+/// skip the telemetry stop/wait entirely and still return cleanly. This covers
+/// the branch none of the other tests reach (they all run telemetry-enabled).
+#[tokio::test]
+async fn test_shutdown_with_telemetry_disabled_completes() {
+    const SESSION_NAME: &str = "telemetry_shutdown/disabled";
+    let test_agent = make_test_agent(SESSION_NAME).await;
+    let mut cfg = Config::builder();
+    cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string());
+    cfg.set_telemetry_enabled(false);
+    let cfg = Arc::new(cfg.build());
+    assert!(
+        !cfg.telemetry_enabled(),
+        "this test must run with telemetry disabled"
+    );
+
+    let (tracer_provider, _propagator) = make_test_tracer(cfg);
+    tracer_provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op", |_| {});
+
+    shutdown_within_bound(tracer_provider).await;
+}
+
+/// Shutting several providers down *concurrently* races the shared atomic user
+/// count from multiple threads. Exactly one of them is the last user (that stop
+/// happens once, no underflow), and every shutdown must return cleanly without
+/// deadlock. Complements the sequential refcount test above.
+#[tokio::test]
+async fn test_concurrent_shutdown_of_multiple_providers() {
+    const SESSION_NAME: &str = "telemetry_shutdown/concurrent";
+    const PROVIDERS: usize = 4;
+    let (cfg, _agent) = config_for(SESSION_NAME).await;
+
+    let mut providers = Vec::with_capacity(PROVIDERS);
+    for _ in 0..PROVIDERS {
+        let (provider, _) = make_test_tracer(cfg.clone());
+        provider
+            .tracer("telemetry_shutdown_test")
+            .in_span("op", |_| {});
+        providers.push(provider);
+    }
+
+    // Kick off all shutdowns at once on the blocking pool, then join each within
+    // the bound. A refcount race (double last-user stop, or underflow) would
+    // surface as a panic/error; a deadlock as a timeout.
+    let tasks: Vec<_> = providers
+        .into_iter()
+        .map(|provider| tokio::task::spawn_blocking(move || provider.shutdown()))
+        .collect();
+
+    for task in tasks {
+        match tokio::time::timeout(SHUTDOWN_BOUND, task).await {
+            Err(_) => panic!("a concurrent shutdown did not return within {SHUTDOWN_BOUND:?}"),
+            Ok(join) => join
+                .expect("shutdown task panicked")
+                .expect("concurrent shutdown returned an error"),
+        }
+    }
+}
+
+/// Reusing the *same* provider handle for shutdown twice must be idempotent: the
+/// SDK short-circuits the second call (returning `AlreadyShutdown`) so our
+/// telemetry-user token is taken/decremented exactly once — never underflowing
+/// the count — and neither call panics or hangs.
+#[tokio::test]
+async fn test_repeated_shutdown_on_same_provider_is_idempotent() {
+    const SESSION_NAME: &str = "telemetry_shutdown/repeated";
+    let (cfg, _agent) = config_for(SESSION_NAME).await;
+
+    let (provider, _) = make_test_tracer(cfg);
+    provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op", |_| {});
+
+    // First shutdown: stops telemetry as the last user, returns Ok.
+    let first = provider.clone();
+    tokio::task::spawn_blocking(move || first.shutdown())
+        .await
+        .expect("shutdown task panicked")
+        .expect("first shutdown should succeed");
+
+    // Second shutdown on the same handle: must report AlreadyShutdown, not
+    // re-trigger the telemetry stop (which would underflow the user count).
+    let second = provider.clone();
+    let result = tokio::task::spawn_blocking(move || second.shutdown())
+        .await
+        .expect("shutdown task panicked");
+    assert!(
+        matches!(result, Err(OTelSdkError::AlreadyShutdown)),
+        "repeated shutdown must report AlreadyShutdown, got {result:?}"
+    );
 }
