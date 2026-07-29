@@ -39,6 +39,22 @@ async fn shutdown_within_bound(provider: SdkTracerProvider) {
     }
 }
 
+/// Drops `provider` (assumed to be its last reference) off the async worker
+/// thread, letting the SDK's `Drop` trigger shutdown, and fails if that does not
+/// complete within `SHUTDOWN_BOUND`. Dropping on a blocking thread avoids stalling
+/// the test's runtime with the blocking shutdown that `Drop` performs.
+async fn drop_within_bound(provider: SdkTracerProvider) {
+    let handle = tokio::task::spawn_blocking(move || drop(provider));
+    match tokio::time::timeout(SHUTDOWN_BOUND, handle).await {
+        Err(_) => {
+            panic!(
+                "dropping the tracer provider did not complete shutdown within {SHUTDOWN_BOUND:?}"
+            )
+        }
+        Ok(join) => join.expect("provider drop panicked"),
+    }
+}
+
 /// Spins up a test agent and builds a config pointed at it, asserting telemetry
 /// is enabled (so the worker is actually exercised). The returned agent guard
 /// must be kept alive for the duration of the test.
@@ -165,4 +181,37 @@ async fn test_post_shutdown_telemetry_use_is_panic_free_under_stress() {
         }
         shutdown_within_bound(provider).await;
     }
+}
+
+/// Scoped usage where the provider is a plain object that is *dropped* rather
+/// than `shutdown()` explicitly. The SDK triggers shutdown from `Drop` on the
+/// last reference, which must still release the telemetry-user registration and
+/// stop the worker (as the last user). Building and using another scoped provider
+/// afterwards, then dropping it too, must likewise stay safe.
+///
+/// This exercises the SDK-`Drop` -> `shutdown_with_timeout` -> token-release path,
+/// which the explicit-`shutdown()` tests above do not.
+#[tokio::test]
+async fn test_scoped_provider_drop_without_shutdown_releases_telemetry() {
+    const SESSION_NAME: &str = "telemetry_shutdown/scoped_drop";
+    let (cfg, _agent) = config_for(SESSION_NAME).await;
+
+    // First scoped provider: use it, then drop it WITHOUT calling shutdown().
+    // The temporary tracer from `.tracer(...)` is dropped at the end of the
+    // statement, so `first_provider` is the sole remaining reference and its drop
+    // triggers the SDK shutdown that releases the telemetry user.
+    let (first_provider, _) = make_test_tracer(cfg.clone());
+    first_provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op_before_drop", |_| {});
+    drop_within_bound(first_provider).await;
+
+    // A second scoped provider registers a telemetry user again and drives
+    // telemetry; dropping it must likewise stay safe and complete cleanly even
+    // though the underlying worker was already stopped.
+    let (second_provider, _) = make_test_tracer(cfg.clone());
+    second_provider
+        .tracer("telemetry_shutdown_test")
+        .in_span("op_after_drop", |_| {});
+    drop_within_bound(second_provider).await;
 }
