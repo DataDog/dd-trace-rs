@@ -35,21 +35,9 @@ jobs:
     steps:
       - uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
         id: octo-sts
-        continue-on-error: true
         with:
           scope: DataDog/dd-trace-rs
           policy: self.write.pr
-
-      # A protected ref is expected to mint a token, so a failure there is a real problem (policy,
-      # app installation, or octo-sts outage). Fail fast instead of silently degrading to a test run
-      # that pushes an unsigned branch and opens no PR.
-      - name: "Fail if no STS token was minted on a protected branch"
-        if: steps.octo-sts.outcome != 'success' && github.ref_protected
-        shell: bash
-        run: |
-          echo "::error::No STS token was minted on protected ref '${GITHUB_REF}'. Check the" \
-               ".github/chainguard/self.write.pr.sts.yaml policy and the dd-octo-sts app installation."
-          exit 1
 
       - name: "Checkout sources"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
@@ -137,16 +125,15 @@ jobs:
           echo "Branch '${BRANCH}' does not exist yet."
 
       - name: "Push verified commit"
-        if: steps.octo-sts.outcome == 'success'
         uses: DataDog/commit-headless@action/v2.0.3
         with:
           branch: ${{ steps.commit.outputs.branch }}
           head-sha: ${{ steps.commit.outputs.base_sha }}
+          create-branch: true
           command: push
           commits: "${{ steps.commit.outputs.commits }}"
 
       - name: "Open proposal pull request"
-        if: steps.octo-sts.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
@@ -181,16 +168,3 @@ jobs:
                  "pushed, so open the PR manually against '${BASE_BRANCH}', or delete the branch and re-run."
             exit 1
           fi
-
-      - name: "Test run (no STS token): push unsigned, skip PR"
-        if: steps.octo-sts.outcome != 'success' && !github.ref_protected
-        shell: bash
-        env:
-          BRANCH: ${{ steps.commit.outputs.branch }}
-          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
-        run: |
-          echo "::warning::No STS token was minted (expected on a non-protected branch). Running in test mode:"
-          echo "  - pushing an UNSIGNED commit to '${BRANCH}'"
-          echo "  - NOT opening a pull request"
-          git push origin "HEAD:refs/heads/${BRANCH}"
-          echo "::notice::Test run complete for v${NEW_VERSION}. Pushed unsigned branch '${BRANCH}'; no PR was opened."
