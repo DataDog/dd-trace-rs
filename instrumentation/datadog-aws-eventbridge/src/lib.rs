@@ -177,17 +177,17 @@ fn inject(span_context: &Context, input: &mut Input) {
         };
 
         for entry in entries.iter_mut() {
-            let mut trace_ctx = datadog_attr.clone();
-            if let (Some(ctx), Some(name)) =
-                (trace_ctx.as_object_mut(), entry.event_bus_name.as_deref())
-            {
-                ctx.insert(
-                    DATADOG_RESOURCE_NAME_KEY.into(),
-                    serde_json::Value::String(name.into()),
+            let Some(detail) = entry.detail.as_deref() else {
+                // The SDK type permits missing detail, even though EventBridge
+                // requires it for a successful PutEvents entry. Preserve that
+                // invalid request instead of creating a payload solely to carry
+                // trace context.
+                otel_debug!(
+                    name: "EventBridge.Inject.DetailMissing",
+                    action = "context injection skipped",
                 );
-            }
-
-            let detail = entry.detail.as_deref().unwrap_or("{}");
+                continue;
+            };
             // EventBridge limits the total PutEvents request size, computed from all
             // entry fields across all entries, not the detail field alone. This coarse
             // guard only avoids parsing detail payloads that are already too large to fit.
@@ -198,6 +198,16 @@ fn inject(span_context: &Context, input: &mut Input) {
                     action = "context injection skipped",
                 );
                 continue;
+            }
+
+            let mut trace_ctx = datadog_attr.clone();
+            if let (Some(ctx), Some(name)) =
+                (trace_ctx.as_object_mut(), entry.event_bus_name.as_deref())
+            {
+                ctx.insert(
+                    DATADOG_RESOURCE_NAME_KEY.into(),
+                    serde_json::Value::String(name.into()),
+                );
             }
 
             let new_detail =
@@ -376,6 +386,21 @@ mod tests {
             entries[0].detail.as_deref(),
             Some(r#"["not","an","object"]"#)
         );
+    }
+
+    #[test]
+    fn skips_injection_for_missing_put_events_detail() {
+        let entry = PutEventsRequestEntry::builder()
+            .source("my.source")
+            .detail_type("MyDetailType")
+            .build();
+        let mut input = Input::erase(PutEventsInput::builder().entries(entry).build().unwrap());
+
+        inject(&Context::new(), &mut input);
+
+        let input = input.downcast_ref::<PutEventsInput>().unwrap();
+        let entries = input.entries.as_ref().unwrap();
+        assert_eq!(entries[0].detail.as_deref(), None);
     }
 
     #[test]
