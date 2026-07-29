@@ -41,7 +41,9 @@ use aws_smithy_types::Blob;
 use opentelemetry::{global, otel_debug, Context, KeyValue};
 
 use datadog_aws_core::{
-    attribute_keys::{DATADOG_ATTRIBUTE_KEY, TARGET_NAME, TOPIC_NAME},
+    attribute_keys::{
+        DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT, TARGET_NAME, TOPIC_NAME,
+    },
     finish_request_span, request_span_trace_headers, start_request_span, update_request_span,
     AwsRequestMetadata,
 };
@@ -98,6 +100,7 @@ impl Intercept for SnsInterceptor {
         let mut direct_topic_name = None;
         let mut topic_arn = None;
         let mut target_arn = None;
+        let mut batch_message_count = None;
         if let Some(input) = input.downcast_ref::<PublishInput>() {
             topic_arn = input.topic_arn.as_deref();
             target_arn = input.target_arn.as_deref();
@@ -105,6 +108,12 @@ impl Intercept for SnsInterceptor {
             direct_topic_name = input.name.as_deref();
         } else if let Some(input) = input.downcast_ref::<PublishBatchInput>() {
             topic_arn = input.topic_arn.as_deref();
+            batch_message_count = Some(
+                input
+                    .publish_batch_request_entries
+                    .as_ref()
+                    .map_or(0, Vec::len) as i64,
+            );
         } else if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
             topic_arn = input.topic_arn.as_deref();
         } else if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {
@@ -129,6 +138,7 @@ impl Intercept for SnsInterceptor {
         let service_tags = [
             topic_name.map(|name| KeyValue::new(TOPIC_NAME, name.to_owned())),
             target_name.map(|name| KeyValue::new(TARGET_NAME, name.to_owned())),
+            batch_message_count.map(|count| KeyValue::new(MESSAGING_BATCH_MESSAGE_COUNT, count)),
         ]
         .into_iter()
         .flatten();

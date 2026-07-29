@@ -4,6 +4,7 @@
 //! Integration tests for SnsInterceptor.
 
 use aws_types::SdkConfig;
+use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
 
 use datadog_aws_sns::ConfigExt as _;
@@ -81,11 +82,17 @@ async fn sns_publish_batch_creates_span_with_topicname() {
         .message("body")
         .build()
         .unwrap();
+    let entry2 = aws_sdk_sns::types::PublishBatchRequestEntry::builder()
+        .id("2")
+        .message("body2")
+        .build()
+        .unwrap();
 
     let _ = client
         .publish_batch()
         .topic_arn(TOPIC_ARN)
         .publish_batch_request_entries(entry)
+        .publish_batch_request_entries(entry2)
         .send()
         .await;
 
@@ -94,6 +101,7 @@ async fn sns_publish_batch_creates_span_with_topicname() {
     assert_eq!(spans[0].name, "sns.request");
     assert_eq!(attrs["aws.operation"], "PublishBatch");
     assert_eq!(attrs["topicname"], "MyTopic");
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "2");
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);

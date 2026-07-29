@@ -45,7 +45,10 @@ use serde::Serializer as _;
 use serde_json::value::RawValue;
 
 use datadog_aws_core::{
-    attribute_keys::{DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, RULE_NAME, START_TIME_KEY},
+    attribute_keys::{
+        DATADOG_ATTRIBUTE_KEY, DATADOG_RESOURCE_NAME_KEY, MESSAGING_BATCH_MESSAGE_COUNT, RULE_NAME,
+        START_TIME_KEY,
+    },
     finish_request_span, request_span_trace_headers, start_request_span, update_request_span,
     AwsRequestMetadata,
 };
@@ -101,6 +104,7 @@ impl Intercept for EventBridgeInterceptor {
 
         let input = context.input();
         let mut rule_name = None;
+        let mut batch_message_count = None;
         if let Some(input) = input.downcast_ref::<PutRuleInput>() {
             rule_name = input.name.as_deref();
         } else if let Some(input) = input.downcast_ref::<DescribeRuleInput>() {
@@ -115,11 +119,16 @@ impl Intercept for EventBridgeInterceptor {
             rule_name = input.rule.as_deref();
         } else if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
             rule_name = input.rule.as_deref();
+        } else if let Some(input) = input.downcast_ref::<PutEventsInput>() {
+            batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
         }
 
-        let service_tags = [rule_name.map(|name| KeyValue::new(RULE_NAME, name.to_owned()))]
-            .into_iter()
-            .flatten();
+        let service_tags = [
+            rule_name.map(|name| KeyValue::new(RULE_NAME, name.to_owned())),
+            batch_message_count.map(|count| KeyValue::new(MESSAGING_BATCH_MESSAGE_COUNT, count)),
+        ]
+        .into_iter()
+        .flatten();
         let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,

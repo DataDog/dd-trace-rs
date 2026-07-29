@@ -22,10 +22,13 @@ pub const AWS_PARTITION: &str = "aws.partition";
 pub const AWS_AGENT: &str = "aws.agent";
 pub const AWS_REQUEST_ID: &str = "aws.request_id";
 
+// Messaging span attributes.
+pub const MESSAGING_SYSTEM: &str = "messaging.system";
+pub const MESSAGING_BATCH_MESSAGE_COUNT: &str = "messaging.batch.message_count";
+
 // SQS aws.sdk span attributes.
 pub const CLOUD_RESOURCE_ID: &str = "cloud.resource_id";
 pub const QUEUE_NAME: &str = "queuename";
-pub const MESSAGING_SYSTEM: &str = "messaging.system";
 
 // SNS aws.sdk span attributes.
 pub const TOPIC_NAME: &str = "topicname";

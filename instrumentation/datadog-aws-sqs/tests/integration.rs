@@ -5,6 +5,7 @@
 
 use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
 use aws_types::SdkConfig;
+use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
@@ -115,6 +116,7 @@ async fn sqs_send_message_batch_creates_span_and_injects_into_all_entries() {
     assert_eq!(spans[0].name, "sqs.request");
     assert_eq!(attrs["aws.operation"], "SendMessageBatch");
     assert_eq!(attrs["queuename"], "MyQueue");
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "2");
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
@@ -144,12 +146,10 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
         attrs["cloud.resource_id"],
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
     );
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "0");
     assert_eq!(spans[0].events.events.len(), 1);
     assert_eq!(spans[0].events.events[0].name, "sqs.receive.messages");
-    assert_eq!(
-        spans[0].events.events[0].attributes,
-        vec![KeyValue::new("messaging.batch.message_count", 0)]
-    );
+    assert!(spans[0].events.events[0].attributes.is_empty());
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
@@ -213,12 +213,11 @@ async fn sqs_receive_message_links_span_to_message_context() {
         spans[0].links.links[0].attributes,
         vec![KeyValue::new(MESSAGING_MESSAGE_ID, "message-id")]
     );
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "1");
     assert_eq!(spans[0].events.events.len(), 1);
     assert_eq!(spans[0].events.events[0].name, "sqs.receive.messages");
-    assert_eq!(
-        spans[0].events.events[0].attributes,
-        vec![KeyValue::new("messaging.batch.message_count", 1)]
-    );
+    assert!(spans[0].events.events[0].attributes.is_empty());
 }
 
 #[tokio::test]

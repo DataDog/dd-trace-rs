@@ -39,7 +39,10 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, otel_debug, Context, KeyValue};
 
 use datadog_aws_core::{
-    attribute_keys::{CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_SYSTEM, QUEUE_NAME},
+    attribute_keys::{
+        CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT, MESSAGING_SYSTEM,
+        QUEUE_NAME,
+    },
     finish_request_span, request_span_context, request_span_trace_headers, start_request_span,
     update_request_span, AwsRequestMetadata,
 };
@@ -49,7 +52,6 @@ const SPAN_NAME: &str = "sqs.request";
 const SPAN_OPERATION_NAME: &str = "aws.sqs.request";
 const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
-const MESSAGING_BATCH_MESSAGE_COUNT: &str = "messaging.batch.message_count";
 const SQS_RECEIVE_MESSAGES_EVENT: &str = "sqs.receive.messages";
 
 /// AWS SDK interceptor that creates Datadog spans and injects trace context into SQS requests.
@@ -164,10 +166,12 @@ impl Intercept for SqsInterceptor {
 
         let input = context.input();
         let mut queue_url = None;
+        let mut batch_message_count = None;
         if let Some(input) = input.downcast_ref::<SendMessageInput>() {
             queue_url = input.queue_url.as_deref();
         } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
             queue_url = input.queue_url.as_deref();
+            batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
         } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
             queue_url = input.queue_url.as_deref();
         } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
@@ -192,6 +196,7 @@ impl Intercept for SqsInterceptor {
             Some(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs")),
             queue_name.map(|name| KeyValue::new(QUEUE_NAME, name.to_string())),
             cloud_resource_id.map(|id| KeyValue::new(CLOUD_RESOURCE_ID, id)),
+            batch_message_count.map(|count| KeyValue::new(MESSAGING_BATCH_MESSAGE_COUNT, count)),
         ]
         .into_iter()
         .flatten();
@@ -245,13 +250,11 @@ impl Intercept for SqsInterceptor {
             }
         } else if let Some(output) = output.downcast_ref::<ReceiveMessageOutput>() {
             let messages = output.messages();
-            request_span.add_event(
-                SQS_RECEIVE_MESSAGES_EVENT,
-                vec![KeyValue::new(
-                    MESSAGING_BATCH_MESSAGE_COUNT,
-                    messages.len() as i64,
-                )],
-            );
+            request_span.set_attributes([KeyValue::new(
+                MESSAGING_BATCH_MESSAGE_COUNT,
+                messages.len() as i64,
+            )]);
+            request_span.add_event(SQS_RECEIVE_MESSAGES_EVENT, Vec::new());
 
             for message in messages {
                 if let Some(message_context) = extract_context(message) {

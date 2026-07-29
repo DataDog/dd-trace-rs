@@ -5,6 +5,7 @@
 
 use aws_sdk_eventbridge::types::PutEventsRequestEntry;
 use aws_types::SdkConfig;
+use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     span_attrs, split_traceparent, TestHarness,
 };
@@ -40,6 +41,7 @@ async fn eventbridge_put_events_creates_span_and_injects_detail() {
     assert_eq!(attrs["operation.name"], "aws.eventbridge.request");
     assert_eq!(attrs["resource.name"], "EventBridge.PutEvents");
     assert!(!attrs.contains_key("rulename"));
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "1");
 
     let bodies = harness.server.bodies();
     assert_eq!(bodies.len(), 1);
@@ -77,7 +79,9 @@ async fn eventbridge_put_events_with_bus_name_creates_span() {
 
     let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
-    assert_eq!(span_attrs(&spans[0])["aws.operation"], "PutEvents");
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], "PutEvents");
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "1");
 }
 
 #[tokio::test]
@@ -106,7 +110,9 @@ async fn eventbridge_put_events_multi_entry_creates_single_span() {
 
     let spans = harness.finished_spans();
     assert_eq!(spans.len(), 1);
-    assert_eq!(span_attrs(&spans[0])["aws.operation"], "PutEvents");
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], "PutEvents");
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "2");
 }
 
 #[tokio::test]
