@@ -188,9 +188,11 @@ fn inject(span_context: &Context, input: &mut Input) {
                 );
                 continue;
             };
+
             // EventBridge limits the total PutEvents request size, computed from all
             // entry fields across all entries, not the detail field alone. This coarse
-            // guard only avoids parsing detail payloads that are already too large to fit.
+            // guard is not request-size validation; it only avoids parsing a detail
+            // payload that is larger than the entire allowed request.
             if detail.len() > MAX_EVENT_DETAIL_BYTES {
                 otel_debug!(
                     name: "EventBridge.Inject.DetailSizeExceeded",
