@@ -18,6 +18,10 @@ on:
         type: string
         default: main
 
+concurrency:
+  group: release-proposal-dispatch-group
+  cancel-in-progress: false
+
 jobs:
   propose:
     runs-on: ubuntu-latest
@@ -26,16 +30,26 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      RUSTUP_TOOLCHAIN: 1.92.0
+      # Deliberately above the crate's `rust-version` (1.87.0): cargo-release 1.1.2 needs >= 1.91
+      RUST_VERSION: 1.92.0
     steps:
       - uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
         id: octo-sts
-        # A non-protected branch can't mint a token (see the STS policy). Don't fail the job; the
-        # steps below detect the missing token and fall back to a test run (unsigned push, no PR).
         continue-on-error: true
         with:
           scope: DataDog/dd-trace-rs
           policy: self.write.pr
+
+      # A protected ref is expected to mint a token, so a failure there is a real problem (policy,
+      # app installation, or octo-sts outage). Fail fast instead of silently degrading to a test run
+      # that pushes an unsigned branch and opens no PR.
+      - name: "Fail if no STS token was minted on a protected branch"
+        if: steps.octo-sts.outcome != 'success' && github.ref_protected
+        shell: bash
+        run: |
+          echo "::error::No STS token was minted on protected ref '${GITHUB_REF}'. Check the" \
+               ".github/chainguard/self.write.pr.sts.yaml policy and the dd-octo-sts app installation."
+          exit 1
 
       - name: "Checkout sources"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
@@ -45,9 +59,13 @@ jobs:
           # Full history + tags so prepare-release.sh can list commits since the last release tag.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      # nightly is required by prepare-release.sh's rustdoc check (RUSTDOCFLAGS="--cfg docsrs").
+      - name: "Install Rust toolchains"
+        shell: bash
+        run: |
+          rustup install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup toolchain install nightly --profile minimal
 
       - name: "Install cargo-release"
         uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # 2.3.1
@@ -67,7 +85,7 @@ jobs:
           BASE_BRANCH: ${{ inputs.base-branch }}
         run: ./scripts/prepare-release.sh --no-codex-check --base-branch "${BASE_BRANCH}" "${VERSION}"
 
-      - name: Configure Git for signing
+      - name: Configure Git author
         env:
           GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -95,7 +113,9 @@ jobs:
         run: |
           base_sha="$(git rev-parse HEAD)"
 
-          git commit -am "chore(release): proposal v${NEW_VERSION}"
+          git add -A
+          git --no-pager diff --cached --stat
+          git commit -m "chore(release): proposal v${NEW_VERSION}"
 
           # commit-headless expects the new commits oldest -> newest, space-separated.
           commits="$(git log --reverse "${base_sha}".. --format='%H' | tr '\n' ' ' | xargs)"
@@ -157,11 +177,13 @@ jobs:
           if ! gh pr create --base "${BASE_BRANCH}" --head "${BRANCH}" \
                 --title "chore(release): proposal v${NEW_VERSION}" \
                 --body "${body}"; then
-            echo "PR creation failed (a PR for ${BRANCH} may already exist)."
+            echo "::error::Failed to open the proposal pull request for '${BRANCH}'. The branch was" \
+                 "pushed, so open the PR manually against '${BASE_BRANCH}', or delete the branch and re-run."
+            exit 1
           fi
 
       - name: "Test run (no STS token): push unsigned, skip PR"
-        if: steps.octo-sts.outcome != 'success'
+        if: steps.octo-sts.outcome != 'success' && !github.ref_protected
         shell: bash
         env:
           BRANCH: ${{ steps.commit.outputs.branch }}

@@ -30,10 +30,12 @@ Inputs:
 > [!IMPORTANT]
 > Always **dispatch the workflow from `main`** (`--ref main`). Minting the PR token is restricted to
 > protected branches, so to cut a hotfix from an older line keep `--ref main` and set the
-> `base-branch` input (e.g. `-f base-branch=hotfix/0.5.x`) do not dispatch directly from the hotfix
-> branch. Dispatching from a non-protected branch instead runs in a test mode that pushes an
-> unsigned branch and skips the PR (handy for trying the workflow out). The proposal branch name is
-> `release/proposal-v<version>`; the run fails if that branch already exists.
+> `base-branch` input (e.g. `-f base-branch=hotfix/0.5.x`); do not dispatch directly from the
+> hotfix branch. Dispatching from a non-protected branch instead runs in a test mode that pushes an
+> unsigned branch and skips the PR (handy for trying the workflow out). Failing to mint the token
+> from a protected branch is instead treated as a broken policy or app installation and fails the
+> job. The proposal branch name is `release/proposal-v<version>`; the run fails if that branch
+> already exists.
 
 After the workflow opens the PR, review it (especially the generated changelog), merge it, then
 continue with the tag and publish steps (6–9 below). The workflow does **not** tag or publish.
