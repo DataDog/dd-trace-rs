@@ -127,14 +127,16 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p datadog-opentelemetry --no-dep
 
 6. Merge the bump commit in `main`
 
-7. Tag the bump commit with the release version. The tag should follow the following format:
-   `datadog-opentelemetry-v0.0.0`, then push it to github.
+7. Tag the release commit with the version. Set `BUMP_COMMIT_HASH` to the commit being released —
+   the version-bump merge commit on `main` for a normal release, or the hotfix merge commit on the
+   `hotfix/<major>.<minor>.x` branch for a hotfix (do **not** tag `main` for a hotfix). The tag must
+   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github.
 
 ```text
 VERSION="0.0.0" # Placeholder, please replace!
 BUMP_COMMIT_HASH="PUT THE HASH HERE" # Placeholder, please replace!
 TAG="datadog-opentelemetry-v$VERSION"
-git tag $TAG main -m "Release v$VERSION of datadog-opentelemetry"
+git tag $TAG $BUMP_COMMIT_HASH -m "Release v$VERSION of datadog-opentelemetry"
 echo "Tagged release $TAG"
 ```
 
