@@ -3,7 +3,7 @@
 
 //! Integration tests for SqsInterceptor.
 
-use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
+use aws_sdk_sqs::types::{DeleteMessageBatchRequestEntry, SendMessageBatchRequestEntry};
 use aws_types::SdkConfig;
 use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{
@@ -244,9 +244,22 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
 
+    let entry1 = DeleteMessageBatchRequestEntry::builder()
+        .id("1")
+        .receipt_handle("handle1")
+        .build()
+        .unwrap();
+    let entry2 = DeleteMessageBatchRequestEntry::builder()
+        .id("2")
+        .receipt_handle("handle2")
+        .build()
+        .unwrap();
+
     let _ = client
         .delete_message_batch()
         .queue_url(QUEUE_URL)
+        .entries(entry1)
+        .entries(entry2)
         .send()
         .await;
 
@@ -255,6 +268,7 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "DeleteMessageBatch");
     assert_eq!(attrs["queuename"], "MyQueue");
+    assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "2");
 }
 
 #[tokio::test]

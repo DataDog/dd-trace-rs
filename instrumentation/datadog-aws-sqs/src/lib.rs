@@ -178,6 +178,7 @@ impl Intercept for SqsInterceptor {
             queue_url = input.queue_url.as_deref();
         } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
             queue_url = input.queue_url.as_deref();
+            batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
         }
         let mut queue_name = None;
         let mut cloud_resource_id = None;
