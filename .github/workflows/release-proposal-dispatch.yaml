@@ -137,6 +137,7 @@ jobs:
       - name: "Push verified commit"
         uses: DataDog/commit-headless@action/v2.0.3
         with:
+          token: ${{ steps.octo-sts.outputs.token }}
           branch: ${{ steps.commit.outputs.branch }}
           head-sha: ${{ steps.commit.outputs.base_sha }}
           create-branch: true
