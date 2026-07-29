@@ -71,7 +71,17 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           BASE_BRANCH: ${{ inputs.base-branch }}
-        run: ./scripts/prepare-release.sh --no-codex-check --base-branch "${BASE_BRANCH}" "${VERSION}"
+        run: |
+          # The script comes from base-branch, not from this workflow's ref, so a hotfix line cut
+          # from a tag that predates the release automation will not have it.
+          if [ ! -x ./scripts/prepare-release.sh ]; then
+            echo "::error::'${BASE_BRANCH}' has no scripts/prepare-release.sh. Backport the release" \
+                 "automation to that branch first (see docs/releasing.md, 'Cutting a hotfix')."
+            exit 1
+          fi
+          # No --no-codex-check: the script only prompts when stdin is a TTY, so in CI it just logs a
+          # reminder. Not passing it keeps this working with any branch whose script predates the flag.
+          ./scripts/prepare-release.sh --base-branch "${BASE_BRANCH}" "${VERSION}"
 
       - name: Configure Git author
         env:

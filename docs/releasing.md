@@ -37,6 +37,37 @@ Inputs:
 After the workflow opens the PR, review it (especially the generated changelog), merge it, then
 continue with the tag and publish steps (6–9 below). The workflow does **not** tag or publish.
 
+### Cutting a hotfix
+
+A hotfix is released from a `hotfix/<major>.<minor>.x` branch instead of `main`, so `main` can keep
+moving. The workflow always runs `main`'s YAML but the **base branch's**
+`scripts/prepare-release.sh`, and releases up to and including v0.5.0 predate the release
+automation — a branch cut from one of those tags carries none of it, so it has to be backported
+before the workflow can prepare a proposal.
+
+1. Create the branch from the release tag being patched, and push it:
+
+```text
+git switch -c hotfix/0.5.x datadog-opentelemetry-v0.5.0
+git push -u origin hotfix/0.5.x
+```
+
+2. Land the fix on that branch (usually a cherry-pick from `main`). If the branch has no
+   `scripts/prepare-release.sh`, backport the release automation too: that script, `cliff.toml`, and
+   the `[package.metadata.release]` block in `datadog-opentelemetry/Cargo.toml`. Without them the
+   workflow fails at the prepare step.
+
+3. Dispatch the workflow **from `main`** (not from the hotfix branch), targeting the hotfix line:
+
+```text
+gh workflow run release-proposal-dispatch.yaml --ref main \
+  -f version=patch -f base-branch=hotfix/0.5.x
+```
+
+4. Review and merge the proposal PR into `hotfix/0.5.x`, then tag that merge commit and push the
+   tag to publish (steps 7–9 below). The changelog covers only the commits since the tag the
+   branch was cut from, so it stays scoped to the hotfix.
+
 ### Preparing the release with the helper script
 
 `scripts/prepare-release.sh` (which the workflow above runs) can also be run locally. It automates
