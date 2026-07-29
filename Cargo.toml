@@ -74,3 +74,8 @@ debug = false
 incremental = false
 opt-level = 3
 
+[workspace.metadata.release]
+shared-version = true
+publish = false
+tag = false
+push = false

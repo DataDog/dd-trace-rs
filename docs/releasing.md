@@ -8,6 +8,42 @@
 > If new vulnerabilities exist for the commit being released, discuss with the team whether
 > releasing is safe, or if it should be delayed to resolve the vulnerability.
 
+### Preparing the release with the helper script
+
+`scripts/prepare-release.sh` automates most of the preparation below — the version bump, the
+version-reference updates, the changelog generation, and the verification. It does **not** commit,
+tag, or publish, and it does not replace the surrounding steps: you still bump libdatadog (step 1),
+review the incoming commits (step 2), and merge, tag, and publish (steps 6–9) yourself.
+
+The script handles the rest of the steps (3–5) and it requires `cargo-release`, `git-cliff`, and
+`jq`.
+
+Run it from the tip of the branch you are releasing (usually `main`, up to date with `origin`):
+
+```text
+./scripts/prepare-release.sh <minor|major|patch|VERSION>   # e.g. "minor" or "0.6.0"
+```
+
+It will:
+
+- verify your checkout is in sync with the release branch,
+- bump the workspace crate version,
+- update the version references in `README.md`, `src/lib.rs`, the bug-report issue template, and the
+  `datadog-aws-lambda` dependency pin (plus its lockfile),
+- prepend a `CHANGELOG.md` section listing the commits since the previous release tag,
+- verify that the rustdocs build and that the crate publishes cleanly (a `cargo publish` dry-run).
+
+Then review the working tree — especially the generated changelog, pruning it to user-facing
+changes — and commit.
+
+Because the changelog is built from the commit history since the previous release tag, the script
+needs the full history and tags — it refuses to run on a shallow clone. When invoking it from CI,
+check out with `fetch-depth: 0` (which also fetches tags) so the changelog range resolves correctly.
+
+The manual steps below remain valid and can always be followed instead.
+
+### Manual steps
+
 1. Bump libdatadog dependencies to their latest version. Unless there are specific reasons not to,
    we should make a fresh release of libdatadog crates just before dd-trace-rs releases to benefit
    from upgrades
@@ -15,7 +51,7 @@
 2. Check the commits that are going in the new release, by creating a draft release in github
    <https://github.com/DataDog/dd-trace-rs/releases/new>
 
-3. Append to the CHANGELOG.md, adding only additions/removal/fixes that affect customers
+3. Append to the CHANGELOG.md, adding only additions/removal/fixes that affect users
 
 4. Check that the README and rustdocs are up to date with the current feature set and that they
    render correctly on github. rustdocs can be generated using the following command
