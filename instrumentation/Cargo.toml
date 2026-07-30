@@ -22,3 +22,12 @@ opentelemetry_sdk = { version = "0.32.1", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
 tracing = { version = "0.1", default-features = false }
 tokio = { version = "1.44.1" }
+
+# POC: datadog-aws-lambda path-depends on datadog-opentelemetry, which now pulls the unpublished
+# libdd-otel-telemetry crate from git. Patches are per-workspace, so this workspace needs the same
+# source unification as the root Cargo.toml. Revert once libdd-otel-telemetry is published.
+[patch.crates-io]
+libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", branch = "munir/otel-telemetry-libdatadog" }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "munir/otel-telemetry-libdatadog" }
+libdd-capabilities = { git = "https://github.com/DataDog/libdatadog", branch = "munir/otel-telemetry-libdatadog" }
+libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", branch = "munir/otel-telemetry-libdatadog" }
