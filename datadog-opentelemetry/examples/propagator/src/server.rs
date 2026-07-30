@@ -27,7 +27,9 @@ use opentelemetry_stdout::{LogExporter, SpanExporter};
 use std::{convert::Infallible, net::SocketAddr, sync::OnceLock};
 use tokio::net::TcpListener;
 use tracing::info;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer as TracingLayer,
+};
 
 fn get_tracer() -> &'static BoxedTracer {
     static TRACER: OnceLock<BoxedTracer> = OnceLock::new();
@@ -242,8 +244,41 @@ fn init_logs() -> SdkLoggerProvider {
         .with_log_processor(EnrichWithBaggageLogProcessor)
         .with_simple_exporter(LogExporter::default())
         .build();
-    let otel_layer = OpenTelemetryTracingBridge::new(&logger_provider);
-    tracing_subscriber::registry().with(otel_layer).init();
+
+    // The tracer emits its own diagnostics through `tracing`, under the `datadog_opentelemetry`
+    // target, so this subscriber decides where they end up. How verbose they are is a separate
+    // question, answered by `DD_LOG_LEVEL` / `set_log_level_filter` — see `init_tracer`.
+    //
+    // This bridge turns events into OpenTelemetry log records, which then have to be exported. The
+    // crates the exporters themselves are built on are excluded for that reason: bridging their
+    // events would make every export produce more records to export.
+    // `libdd` covers every `libdd_*` crate, since directives match targets by prefix. Those crates
+    // are the trace transport, and they log from async tasks where the SDK's context-based
+    // suppression cannot reach them.
+    let otel_filter = EnvFilter::new("info")
+        .add_directive(
+            "datadog_opentelemetry=debug"
+                .parse()
+                .expect("valid filter directive"),
+        )
+        .add_directive("libdd=off".parse().expect("valid filter directive"))
+        .add_directive("hyper=off".parse().expect("valid filter directive"))
+        .add_directive("tonic=off".parse().expect("valid filter directive"))
+        .add_directive("h2=off".parse().expect("valid filter directive"));
+    let otel_layer = OpenTelemetryTracingBridge::new(&logger_provider).with_filter(otel_filter);
+
+    // Also print to the console, so the tracer's own debug diagnostics stay readable locally.
+    let fmt_filter = EnvFilter::new("info").add_directive(
+        "datadog_opentelemetry=debug"
+            .parse()
+            .expect("valid filter directive"),
+    );
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(fmt_filter);
+
+    tracing_subscriber::registry()
+        .with(otel_layer)
+        .with(fmt_layer)
+        .init();
 
     logger_provider
 }
@@ -252,8 +287,11 @@ fn init_logs() -> SdkLoggerProvider {
 async fn main() {
     use hyper_util::server::conn::auto::Builder;
 
-    let provider = init_tracer();
+    // Install the subscriber before initialising the tracer. Diagnostics emitted before a
+    // subscriber exists are printed to stdout/stderr instead of being routed, so doing this first
+    // is what puts the tracer's start-up messages through the layers configured above.
     let logger_provider = init_logs();
+    let provider = init_tracer();
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     let listener = TcpListener::bind(addr).await.unwrap();
 
