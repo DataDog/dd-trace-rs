@@ -300,8 +300,6 @@ mod span_exporter;
 mod spans_metrics;
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
 mod telemetry_logs_exporter;
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
 

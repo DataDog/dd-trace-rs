@@ -35,9 +35,7 @@ fn assert_meter_can_create_instruments(meter: &opentelemetry::metrics::Meter) {
         .build();
 }
 
-fn create_meter_provider_with_config(
-    config: Config,
-) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+fn create_meter_provider_with_config(config: Config) -> impl opentelemetry::metrics::MeterProvider {
     metrics()
         .with_config(config)
         .with_export_interval(TEST_EXPORT_INTERVAL)
@@ -46,7 +44,7 @@ fn create_meter_provider_with_config(
 
 fn create_meter_provider_with_config_no_interval(
     config: Config,
-) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+) -> impl opentelemetry::metrics::MeterProvider {
     metrics().with_config(config).init()
 }
 

@@ -491,7 +491,7 @@ dependencies = [
  "clap",
  "criterion-plot",
  "is-terminal",
- "itertools 0.10.5",
+ "itertools",
  "num-traits",
  "once_cell",
  "oorandom",
@@ -512,7 +512,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b50826342786a51a89e2da3a28f1c32b06e387201bc2d19791f622c673706b1"
 dependencies = [
  "cast",
- "itertools 0.10.5",
+ "itertools",
 ]
 
 [[package]]
@@ -596,6 +596,7 @@ dependencies = [
  "libdd-common",
  "libdd-data-pipeline",
  "libdd-library-config",
+ "libdd-otel-telemetry",
  "libdd-sampling",
  "libdd-shared-runtime",
  "libdd-telemetry",
@@ -1315,15 +1316,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1461,11 +1453,12 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 [[package]]
 name = "libdd-capabilities"
 version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a946c29c5fe7cc2adec7a66a35f7cfc138ba75c988d09a7a99c12de7d3b9a7"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#0009cd5e39e3a35ed8c8817fa85dd613437577f3"
 dependencies = [
  "anyhow",
  "bytes",
+ "futures-channel",
+ "futures-util",
  "http",
  "thiserror 1.0.69",
 ]
@@ -1473,9 +1466,9 @@ dependencies = [
 [[package]]
 name = "libdd-capabilities-impl"
 version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e948ad5c65d8598fd3889762ea4767b9a521ebfb2f7b72f6e52162aa4d7f353"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#0009cd5e39e3a35ed8c8817fa85dd613437577f3"
 dependencies = [
+ "anyhow",
  "bytes",
  "http",
  "http-body-util",
@@ -1487,8 +1480,7 @@ dependencies = [
 [[package]]
 name = "libdd-common"
 version = "5.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59de587e652491cb19fd8b7d8e59901794ca56e3961c8c1b97707479d7fe7ec8"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#0009cd5e39e3a35ed8c8817fa85dd613437577f3"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1599,6 +1591,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "libdd-otel-telemetry"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#0009cd5e39e3a35ed8c8817fa85dd613437577f3"
+dependencies = [
+ "libdd-shared-runtime",
+ "opentelemetry",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "tracing",
+]
+
+[[package]]
 name = "libdd-sampling"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1613,8 +1617,7 @@ dependencies = [
 [[package]]
 name = "libdd-shared-runtime"
 version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bab1ad16a0bfcf1ce826e2314c162b04daf4324c71da5a28583ea40e76be8772"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#0009cd5e39e3a35ed8c8817fa85dd613437577f3"
 dependencies = [
  "async-trait",
  "futures",
@@ -2232,7 +2235,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools",
  "proc-macro2",
  "quote",
  "syn",

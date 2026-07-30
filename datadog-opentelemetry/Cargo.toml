@@ -68,6 +68,7 @@ libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
 libdd-shared-runtime = { workspace = true }
+libdd-otel-telemetry = { workspace = true }
 percent-encoding = "2.3.1"
 
 [target.'cfg(target_os="linux")'.dependencies]
@@ -101,13 +102,13 @@ criterion = "0.5.1"
 
 [features]
 default = []
+# POC: metrics OTLP export is now centralized in libdd-otel-telemetry, which brings its own
+# opentelemetry-otlp dependency. These feature flags no longer pull opentelemetry-otlp into this
+# crate directly; libdd-otel-telemetry is always compiled with its `grpc` feature (see root
+# Cargo.toml), so both grpc and http/protobuf runtime protocols are available.
 metrics = ["metrics-grpc"]
-metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
-metrics-http = [
-    "opentelemetry-otlp",
-    "opentelemetry-otlp/http-proto",
-    "opentelemetry-otlp/reqwest-blocking-client",
-]
+metrics-grpc = []
+metrics-http = []
 logs = ["logs-grpc"]
 logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
 logs-http = [
