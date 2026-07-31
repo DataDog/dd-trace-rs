@@ -38,7 +38,7 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use opentelemetry::{global, otel_debug, Context, KeyValue};
+use opentelemetry::{global, Context, KeyValue};
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::Serializer as _;
@@ -182,7 +182,7 @@ fn inject(span_context: &Context, input: &mut Input) {
                 // requires it for a successful PutEvents entry. Preserve that
                 // invalid request instead of creating a payload solely to carry
                 // trace context.
-                otel_debug!(
+                tracing::debug!(
                     name: "EventBridge.Inject.DetailMissing",
                     action = "context injection skipped",
                 );
@@ -194,7 +194,7 @@ fn inject(span_context: &Context, input: &mut Input) {
             // guard is not request-size validation; it only avoids parsing a detail
             // payload that is larger than the entire allowed request.
             if detail.len() > MAX_EVENT_DETAIL_BYTES {
-                otel_debug!(
+                tracing::debug!(
                     name: "EventBridge.Inject.DetailSizeExceeded",
                     max_size_bytes = MAX_EVENT_DETAIL_BYTES,
                     action = "context injection skipped",
@@ -216,9 +216,9 @@ fn inject(span_context: &Context, input: &mut Input) {
                 match rewrite_json_object_field(detail, DATADOG_ATTRIBUTE_KEY, &trace_ctx) {
                     Ok(detail) => detail,
                     Err(err) => {
-                        otel_debug!(
+                        tracing::debug!(
                             name: "EventBridge.Inject.DetailRewriteFailed",
-                            reason = err.to_string(),
+                            reason = %err,
                             action = "context injection skipped",
                         );
                         continue;
@@ -252,9 +252,9 @@ fn build_datadog_attribute(span_context: &Context) -> Option<serde_json::Value> 
     match attribute() {
         Ok(attr) => Some(attr),
         Err(err) => {
-            otel_debug!(
+            tracing::debug!(
                 name: "EventBridge.Inject.DatadogAttributeBuildFailed",
-                reason = err.to_string(),
+                reason = %err,
                 action = "context injection skipped",
             );
             None

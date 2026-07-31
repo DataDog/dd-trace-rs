@@ -38,7 +38,7 @@ use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Blob;
-use opentelemetry::{global, otel_debug, Context, KeyValue};
+use opentelemetry::{global, Context, KeyValue};
 
 use datadog_aws_core::{
     attribute_keys::{
@@ -214,9 +214,9 @@ fn build_datadog_attribute(span_context: &Context) -> Option<MessageAttributeVal
     match attribute() {
         Ok(attr) => Some(attr),
         Err(err) => {
-            otel_debug!(
+            tracing::debug!(
                 name: "Sns.Inject.DatadogAttributeBuildFailed",
-                reason = err.to_string(),
+                reason = %err,
                 action = "context injection skipped",
             );
             None
@@ -232,7 +232,7 @@ fn inject_message_attribute(
     if attrs.len() < MAX_MESSAGE_ATTRIBUTES || attrs.contains_key(DATADOG_ATTRIBUTE_KEY) {
         attrs.insert(DATADOG_ATTRIBUTE_KEY.to_string(), datadog_attr);
     } else {
-        otel_debug!(
+        tracing::debug!(
             name: "Sns.Inject.MessageAttributesFull",
             max_message_attributes = MAX_MESSAGE_ATTRIBUTES,
             action = "context injection skipped",
