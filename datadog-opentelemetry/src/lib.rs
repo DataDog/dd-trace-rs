@@ -251,10 +251,16 @@ pub use core::configuration;
 pub use core::log;
 
 #[cfg(feature = "_memory-profiling")]
-#[cfg_attr(docsrs, doc(cfg(feature = "memory-profiling")))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "memory-profiling", feature = "memory-profiling-alloc-only")))
+)]
 pub mod memory_profiling;
 #[cfg(feature = "_memory-profiling")]
-#[cfg_attr(docsrs, doc(cfg(feature = "memory-profiling")))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "memory-profiling", feature = "memory-profiling-alloc-only")))
+)]
 pub use memory_profiling::memory_profiling;
 
 #[cfg(feature = "test-utils")]

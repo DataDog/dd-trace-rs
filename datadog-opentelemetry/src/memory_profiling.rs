@@ -18,7 +18,7 @@
 //!
 //! This crate only emits sampled allocation events; it does not collect or
 //! export them. Run an out-of-process profiler such as
-//! [`dd-otel-host-profiler`](https://github.com/DataDog/dd-otel-host-profiler)
+//! [`datadog-agent`](https://github.com/DataDog/datadog-agent)
 //! alongside the instrumented process to collect and ship samples to
 //! Datadog.
 
@@ -41,4 +41,20 @@ impl DatadogMemoryProfilerBuilder {
 /// Starts building a memory profiling configuration.
 pub fn memory_profiling() -> DatadogMemoryProfilerBuilder {
     DatadogMemoryProfilerBuilder { _private: () }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::alloc::System;
+
+    #[test]
+    fn builder_init_does_not_panic() {
+        memory_profiling().init();
+    }
+
+    #[test]
+    fn sampled_allocator_default_constructs() {
+        let _alloc = SampledAllocator::<System>::DEFAULT;
+    }
 }

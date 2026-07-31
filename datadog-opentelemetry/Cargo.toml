@@ -109,9 +109,7 @@ logs-http = [
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
 _unstable_propagation = []
-# Emits sampled allocation USDT probes for out-of-process profilers (e.g.
-# dd-otel-host-profiler) to pick up. Depends on libdatadog's in-progress
-# sgg/heap-prof-poc branch; see the workspace Cargo.toml comment.
+# Emits sampled allocation USDT probes for out-of-process profilers to pick up.
 #
 # `memory-profiling` includes live-heap (retained-heap) tracking: sampled
 # allocations are flagged and frees are sampled so the profiler can
