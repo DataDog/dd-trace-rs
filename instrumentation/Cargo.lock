@@ -732,7 +732,6 @@ dependencies = [
  "aws-types",
  "opentelemetry",
  "serde_json",
- "tracing",
 ]
 
 [[package]]
