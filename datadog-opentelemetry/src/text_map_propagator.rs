@@ -31,6 +31,7 @@ pub struct DatadogExtractData {
     pub origin: Option<String>,
     pub internal_tags: HashMap<String, String>,
     pub sampling: Sampling,
+    pub ot: Option<String>,
 }
 
 impl DatadogExtractData {
@@ -40,6 +41,7 @@ impl DatadogExtractData {
             tags,
             links,
             sampling,
+            tracestate,
             ..
         }: SpanContext,
     ) -> Self {
@@ -59,6 +61,7 @@ impl DatadogExtractData {
             origin,
             internal_tags,
             sampling,
+            ot: tracestate.and_then(|ts| ts.ot),
         }
     }
 }
@@ -153,6 +156,7 @@ impl DatadogPropagator {
             origin: propagation_data.origin.as_deref(),
             tags,
             tracestate,
+            ot: propagation_data.ot,
         };
 
         self.inner.inject(dd_span_context, &mut injector)
@@ -194,6 +198,7 @@ impl DatadogPropagator {
                 origin: None,
                 internal_tags: HashMap::new(),
                 sampling: Sampling::default(),
+                ot: None,
             }),
             ExtractResult::Passthrough => cx.clone(),
             ExtractResult::Ignore => return cx.clone(),
@@ -650,6 +655,7 @@ pub mod tests {
                         mechanism: None,
                     },
                     tags: Some(tags),
+                    ot: None,
                 },
             );
 

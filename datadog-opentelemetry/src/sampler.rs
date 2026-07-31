@@ -7,16 +7,41 @@ use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
 
+use libdd_sampling::OtelConsistentSampling;
+
 use crate::{
     core::{
         configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
     },
+    propagation::tracecontext::{ot_extract_rv, ot_set_rv_th},
     sampling::{DatadogSampler, OtelSamplingData, SamplingRule, SamplingRulesCallback},
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},
     TraceRegistry,
 };
+
+/// Single source of truth for the outbound OTel `ot` member (APMAPI-2181).
+///
+/// * local root + probability decision (`derived` = Some) → emit the derived `rv;th` pair as-is;
+///   any inbound value is ignored (A1).
+/// * local root + non-probability decision (`derived` = None) → erase `th`, keep an inherited `rv`
+///   if present, fabricate nothing otherwise (A4).
+/// * inherited decision (`is_local_root` = false) → forward the inbound value unchanged
+///   (A2/A2b/A3/A5/A6).
+pub(crate) fn resolve_outbound_ot(
+    is_local_root: bool,
+    derived: Option<OtelConsistentSampling>,
+    inbound: Option<String>,
+) -> Option<String> {
+    match (is_local_root, derived) {
+        (true, Some(ocs)) => ot_set_rv_th(inbound.as_deref(), Some(ocs.rv), Some(ocs.th)),
+        (true, None) => inbound
+            .as_deref()
+            .and_then(|raw| ot_set_rv_th(Some(raw), ot_extract_rv(raw), None)),
+        (false, _) => inbound,
+    }
+}
 
 /// OpenTelemetry sampler implementation for Datadog tracing.
 ///
@@ -101,6 +126,8 @@ impl ShouldSample for Sampler {
             .filter(|c| !is_parent_deferred && c.has_active_span())
             .map(|c| c.span().span_context().trace_flags().is_sampled());
 
+        let trace_id_u128 = u128::from_be_bytes(trace_id.to_bytes());
+
         let data = OtelSamplingData::new(
             is_parent_sampled,
             &trace_id,
@@ -114,19 +141,20 @@ impl ShouldSample for Sampler {
             result.get_trace_root_sampling_info()
         {
             // If the parent was deferred, we try to merge propagation tags with what we extracted
-            let (mut tags, origin) = if is_parent_deferred {
+            let (mut tags, origin, inbound_ot) = if is_parent_deferred {
                 if let Some(DatadogExtractData {
                     internal_tags,
                     origin,
+                    ot,
                     ..
                 }) = parent_context.and_then(|c| c.get())
                 {
-                    (Some(internal_tags.clone()), origin.clone())
+                    (Some(internal_tags.clone()), origin.clone(), ot.clone())
                 } else {
-                    (None, None)
+                    (None, None, None)
                 }
             } else {
-                (None, None)
+                (None, None, None)
             };
             let mechanism = trace_root_info.mechanism();
             tags.get_or_insert_default().insert(
@@ -141,6 +169,11 @@ impl ShouldSample for Sampler {
                 },
                 origin,
                 tags,
+                ot: resolve_outbound_ot(
+                    true,
+                    trace_root_info.otel_consistent_sampling(&trace_id_u128),
+                    inbound_ot,
+                ),
             })
         } else if let Some(remote_ctx) =
             parent_context.filter(|c| c.span().span_context().is_remote())
@@ -149,6 +182,7 @@ impl ShouldSample for Sampler {
                 sampling,
                 origin,
                 internal_tags,
+                ot,
                 ..
             }) = remote_ctx.get()
             {
@@ -160,6 +194,7 @@ impl ShouldSample for Sampler {
                     origin: origin.clone(),
                     sampling_decision,
                     tags: Some(internal_tags.clone()),
+                    ot: resolve_outbound_ot(false, None, ot.clone()),
                 })
             } else {
                 None
@@ -213,12 +248,62 @@ impl ShouldSample for Sampler {
 mod tests {
     use super::*;
     use crate::core::configuration::SamplingRuleConfig;
+    use libdd_sampling::OtelConsistentSampling;
     use opentelemetry::{
         trace::{SpanContext, SpanKind, TraceId, TraceState},
         Context, SpanId, TraceFlags,
     };
     use opentelemetry_sdk::trace::{SamplingDecision, ShouldSample};
     use std::collections::HashMap;
+
+    #[test]
+    fn resolve_outbound_ot_covers_a1_a2_a4() {
+        let derived = OtelConsistentSampling {
+            rv: 0xef284ace7a91e1,
+            th: 0xe6666666666666,
+        };
+        let inbound_pair = "rv:1234567890abcd;th:0ccccccccccccd".to_string();
+        let inbound_rv_only = "rv:1234567890abcd".to_string();
+
+        // A1: local root + probability -> emit the derived pair as-is (inbound ignored).
+        assert_eq!(
+            super::resolve_outbound_ot(true, Some(derived), Some(inbound_pair.clone())),
+            Some("rv:ef284ace7a91e1;th:e6666666666666".to_string())
+        );
+        // A4: local root + non-probability (derived None) -> erase th, keep inherited rv
+        assert_eq!(
+            super::resolve_outbound_ot(true, None, Some(inbound_pair)),
+            Some("rv:1234567890abcd".to_string())
+        );
+        // A4 (nothing inherited): local root + non-probability + no inbound -> None
+        assert_eq!(super::resolve_outbound_ot(true, None, None), None);
+        // A2/A2b: inherited decision -> forward inbound unchanged (rv-only kept)
+        assert_eq!(
+            super::resolve_outbound_ot(false, None, Some(inbound_rv_only.clone())),
+            Some(inbound_rv_only)
+        );
+        // A5/A6: inherited with no (or empty) inbound -> None / forwarded as-is
+        assert_eq!(super::resolve_outbound_ot(false, None, None), None);
+        assert_eq!(
+            super::resolve_outbound_ot(false, None, Some(String::new())),
+            Some(String::new())
+        );
+    }
+
+    // restart/ignore: the inbound `ot` is dropped (DatadogExtractData.ot = None)
+    // and the restarted root re-enters the local-root branch, so it emits its
+    // own freshly-derived pair rather than forwarding the previous trace's.
+    #[test]
+    fn resolve_outbound_ot_restart_rederives() {
+        let derived = OtelConsistentSampling {
+            rv: 0xf0948a54d43b8e,
+            th: 0xe6666666666666,
+        };
+        assert_eq!(
+            super::resolve_outbound_ot(true, Some(derived), None),
+            Some("rv:f0948a54d43b8e;th:e6666666666666".to_string())
+        );
+    }
 
     #[test]
     fn test_create_sampler_with_sampling_rules() {

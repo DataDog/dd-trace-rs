@@ -37,6 +37,58 @@ const INVALID_CHAR_REPLACEMENT: char = '_';
 static TRACECONTEXT_HEADER_KEYS: LazyLock<[String; 2]> =
     LazyLock::new(|| [TRACEPARENT_KEY.to_owned(), TRACESTATE_KEY.to_owned()]);
 
+fn ot_parse_hex_56(s: &str, exact_len: Option<usize>) -> Option<u64> {
+    if s.is_empty() || s.len() > 14 {
+        return None;
+    }
+    if exact_len.filter(|n| s.len() != *n).is_some() {
+        return None;
+    }
+    if !s
+        .bytes()
+        .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        return None;
+    }
+    u64::from_str_radix(s, 16).ok()
+}
+
+/// Extract `rv` from a raw `ot` member value, ignoring everything else.
+pub(crate) fn ot_extract_rv(raw: &str) -> Option<u64> {
+    raw.split(';').find_map(|item| match item.split_once(':') {
+        Some(("rv", v)) => ot_parse_hex_56(v, Some(14)),
+        _ => None,
+    })
+}
+
+/// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
+/// appending everything else, in order, after the new pair. `None` when
+/// nothing is left to emit.
+pub(crate) fn ot_set_rv_th(raw: Option<&str>, rv: Option<u64>, th: Option<u64>) -> Option<String> {
+    let format_th = |v: u64| {
+        if v == 0 {
+            "0".to_string()
+        } else {
+            format!("{v:014x}").trim_end_matches('0').to_string()
+        }
+    };
+    let others = raw
+        .into_iter()
+        .flat_map(|s| s.split(';'))
+        .filter(|item| !matches!(item.split_once(':'), Some(("rv", _)) | Some(("th", _))));
+
+    let rv_part = rv.map(|v| format!("rv:{v:014x}"));
+    let th_part = th.map(|v| format!("th:{}", format_th(v)));
+
+    let parts: Vec<&str> = rv_part
+        .as_deref()
+        .into_iter()
+        .chain(th_part.as_deref())
+        .chain(others)
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(";"))
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Traceparent {
     pub sampling_priority: SamplingPriority,
@@ -55,6 +107,8 @@ pub struct Tracestate {
     pub(crate) lower_order_trace_id: Option<String>,
     pub(crate) propagation_tags: Option<HashMap<String, String>>,
     pub(crate) additional_values: Option<Vec<(String, String)>>,
+    /// Raw inbound OTel field (useful for consistent-probability member value)
+    pub(crate) ot: Option<String>,
 }
 
 /// Code inspired, and copied, by OpenTelemetry Rust project.
@@ -105,6 +159,7 @@ impl FromStr for Tracestate {
 
         let mut dd: Option<HashMap<String, String>> = None;
         let mut additional_values = vec![];
+        let mut ot: Option<String> = None;
 
         for v in ts_v {
             let (key, value) = v.split_once('=').unwrap_or(("", ""));
@@ -132,6 +187,8 @@ impl FromStr for Tracestate {
                         })
                         .collect(),
                 );
+            } else if key == "ot" {
+                ot = Some(value.to_string());
             } else {
                 additional_values.push((key.to_string(), value.to_string()));
             }
@@ -143,6 +200,7 @@ impl FromStr for Tracestate {
             lower_order_trace_id: None,
             propagation_tags: None,
             additional_values: None,
+            ot: None,
         };
 
         // the original order must be maintained
@@ -188,6 +246,7 @@ impl FromStr for Tracestate {
         };
 
         tracestate.propagation_tags = propagation_tags;
+        tracestate.ot = ot;
 
         Ok(tracestate)
     }
@@ -376,6 +435,8 @@ fn append_dd_propagation_tags(context: &InjectSpanContext, tags_buffer: &mut Buf
 
 fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     let mut tracestate = String::with_capacity(256);
+    let mut member_count = 1;
+
     tracestate.push_str("dd=");
 
     // Use a single String buffer to build the entire tracestate, avoiding intermediate allocations
@@ -445,9 +506,19 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         dd_parts.truncate(index_before_tags);
     }
 
+    if let Some(ot) = context.ot.as_deref() {
+        member_count += 1;
+        let mut ot_part = buf_appender(&mut tracestate);
+        ot_part.push_str(super::const_concat!(TRACESTATE_VALUES_SEPARATOR, "ot=",));
+        ot_part.push_str(ot);
+    }
+
     // Add additional tracestate values if present
     if let Some(ts) = &context.tracestate {
-        for part in ts.additional_values().take(TRACESTATE_MAX_MEMBERS - 1) {
+        for part in ts
+            .additional_values()
+            .take(TRACESTATE_MAX_MEMBERS - member_count)
+        {
             tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
             tracestate.push_str(part)
         }
@@ -955,6 +1026,7 @@ mod test {
             tracestate: Some(InjectTraceState::from_header(
                 "other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4".to_owned(),
             )),
+            ot: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -975,6 +1047,112 @@ mod test {
         );
     }
 
+    /// Builds a minimal local-root `InjectSpanContext` carrying `ot`, injects
+    /// it, and returns the emitted `tracestate` string. Used by the OTel
+    /// consistent-probability emission tests (APMAPI-2181, system-tests #7372).
+    fn inject_with_ot(trace_id: u128, ot: Option<&str>) -> String {
+        let mut tags = HashMap::new();
+        let mut context = InjectSpanContext {
+            trace_id,
+            span_id: 0x5555_eeee_6666_ffff,
+            sampling: Sampling {
+                priority: Some(priority::AUTO_KEEP),
+                mechanism: Some(mechanism::DEFAULT),
+            },
+            origin: None,
+            tags: &mut tags,
+            is_remote: false,
+            tracestate: None,
+            ot: ot.map(str::to_string),
+        };
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
+        carrier.get(TRACESTATE_KEY).cloned().unwrap_or_default()
+    }
+
+    // A1: probability decision emits rv;th matching the golden table (rate 0.1,
+    // th = e6666666666666).
+    #[test]
+    fn emits_ot_on_probability_decision_rate_0_1() {
+        let table = [
+            (1u128, "f0948a54d43b8e"),
+            (10, "65cd67504a538e"),
+            (100, "fa060922e7438e"),
+            (18444899399302180863, "ef284ace7a91e1"),
+        ];
+        for (tid, rv) in table {
+            let injected = inject_with_ot(tid, Some(&format!("rv:{rv};th:e6666666666666")));
+            assert!(
+                injected.contains(&format!("ot=rv:{rv};th:e6666666666666")),
+                "tid {tid}: got {injected}"
+            );
+        }
+    }
+
+    // A4: non-probability local decision erases th, forwards inherited rv.
+    #[test]
+    fn force_keep_clears_th_forwards_rv() {
+        let injected = inject_with_ot(10, Some("rv:1234567890abcd"));
+        assert!(injected.contains("ot=rv:1234567890abcd"), "got {injected}");
+        assert!(!injected.contains("th:"), "got {injected}");
+    }
+
+    // A5: no ot to emit -> none fabricated.
+    #[test]
+    fn sampled_without_ot_not_fabricated() {
+        let injected = inject_with_ot(10, None);
+        assert!(!injected.contains("ot="), "got {injected}");
+    }
+
+    // ot is derived from trace id + rate, so it's emitted even on drop
+    // (rate 0.1, trace_id 10 -> DROP: rv 65cd67504a538e < th e6666666666666).
+    #[test]
+    fn probability_drop_still_emits_ot() {
+        let injected = inject_with_ot(10, Some("rv:65cd67504a538e;th:e6666666666666"));
+        assert!(
+            injected.contains("ot=rv:65cd67504a538e;th:e6666666666666"),
+            "got {injected}"
+        );
+    }
+
+    // #7372 ordering: `ot` sits right after `dd=`, before other vendors.
+    #[test]
+    fn ot_is_emitted_after_dd_before_other_vendors() {
+        let mut tags = HashMap::new();
+        let mut context = InjectSpanContext {
+            trace_id: 0x1111aaaa2222bbbb3333cccc4444dddd,
+            span_id: 0x5555_eeee_6666_ffff,
+            sampling: Sampling {
+                priority: Some(priority::AUTO_KEEP),
+                mechanism: Some(mechanism::DEFAULT),
+            },
+            origin: None,
+            tags: &mut tags,
+            is_remote: false,
+            tracestate: Some(InjectTraceState::from_header("congo=xyz".to_owned())),
+            ot: Some("rv:ef284ace7a91e1;th:e6666666666666".to_string()),
+        };
+        let mut carrier: HashMap<String, String> = HashMap::new();
+        TracePropagationStyle::TraceContext.inject(
+            &mut context,
+            &mut carrier,
+            &Config::builder().build(),
+        );
+        let ts = &carrier[TRACESTATE_KEY];
+        assert!(
+            ts.contains("ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz"),
+            "got {ts}"
+        );
+        let dd = ts.find("dd=").unwrap();
+        let ot = ts.find("ot=").unwrap();
+        let congo = ts.find("congo=").unwrap();
+        assert!(dd < ot && ot < congo, "expected dd<ot<congo, got {ts}");
+    }
+
     #[test]
     fn test_inject_traceparent_with_256_max_length() {
         let origin = "abc".repeat(200);
@@ -989,6 +1167,7 @@ mod test {
             tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
             tracestate: None,
+            ot: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1028,6 +1207,7 @@ mod test {
             tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
             tracestate: Some(InjectTraceState::from_header(tracestate)),
+            ot: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1138,6 +1318,37 @@ mod test {
     }
 
     #[test]
+    fn parses_ot_member_and_removes_it_from_additional_values() {
+        let ts: Tracestate = "dd=s:2;t.dm:-3,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            ts.ot.as_deref(),
+            Some("rv:ef284ace7a91e1;th:e6666666666666")
+        );
+        // ot removed from remainder; congo preserved
+        let additional = ts.additional_values.unwrap();
+        assert!(additional.iter().all(|(k, _)| k != "ot"));
+        assert!(additional.iter().any(|(k, v)| k == "congo" && v == "xyz"));
+    }
+
+    #[test]
+    fn ot_is_kept_raw_at_extraction_even_if_malformed() {
+        let ts: Tracestate = "dd=s:1,ot=rv:not-hex-garbage;th:not-hex-either,congo=xyz123"
+            .parse()
+            .unwrap();
+        // no parsing/validation happens at extraction; forwarded verbatim
+        assert_eq!(
+            ts.ot.as_deref(),
+            Some("rv:not-hex-garbage;th:not-hex-either")
+        );
+        let additional = ts.additional_values.unwrap();
+        assert!(additional
+            .iter()
+            .any(|(k, v)| k == "congo" && v == "xyz123"));
+    }
+
+    #[test]
     fn test_replace_chars() {
         let tests = vec![
             ("ac", "ac"),
@@ -1152,5 +1363,53 @@ mod test {
         for (input, expected) in tests {
             assert_eq!(replace_chars(input, |c| c == b'b', '_'), expected);
         }
+    }
+
+    #[test]
+    fn ot_set_rv_th_formats_rv_padded_and_th_trimmed() {
+        assert_eq!(
+            ot_set_rv_th(None, Some(0x0028d980cf4f1c), None).as_deref(),
+            Some("rv:0028d980cf4f1c")
+        );
+        assert_eq!(
+            ot_set_rv_th(None, None, Some(0x80000000000000)).as_deref(),
+            Some("th:8")
+        );
+        assert_eq!(ot_set_rv_th(None, None, Some(0)).as_deref(), Some("th:0"));
+        assert_eq!(ot_set_rv_th(None, None, None), None);
+    }
+
+    #[test]
+    fn ot_set_rv_th_replaces_old_pair_and_keeps_others() {
+        assert_eq!(
+            ot_set_rv_th(
+                Some("rv:1234567890abcd;th:e6666666666666"),
+                Some(0xf0948a54d43b8e),
+                None
+            )
+            .as_deref(),
+            Some("rv:f0948a54d43b8e")
+        );
+
+        // unrecognized sub-keys are kept, in order, after the new pair
+        assert_eq!(
+            ot_set_rv_th(
+                Some("rv:1234567890abcd;fut:abc;th:e6666666666666"),
+                Some(0xf0948a54d43b8e),
+                Some(0xe6666666666666)
+            )
+            .as_deref(),
+            Some("rv:f0948a54d43b8e;th:e6666666666666;fut:abc")
+        );
+    }
+
+    #[test]
+    fn ot_extract_rv_finds_rv_regardless_of_position() {
+        assert_eq!(
+            ot_extract_rv("th:e6666666666666;rv:f0948a54d43b8e"),
+            Some(0xf0948a54d43b8e)
+        );
+        assert_eq!(ot_extract_rv("th:e6666666666666"), None);
+        assert_eq!(ot_extract_rv("rv:not-hex-garbage"), None);
     }
 }

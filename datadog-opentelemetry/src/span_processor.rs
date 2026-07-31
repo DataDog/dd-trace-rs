@@ -48,6 +48,7 @@ pub(crate) struct TracePropagationData {
     pub sampling_decision: SamplingDecision,
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
+    pub ot: Option<String>,
 }
 
 const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
@@ -57,6 +58,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
         mechanism: None,
     },
     tags: None,
+    ot: None,
 };
 
 #[derive(Debug)]
@@ -959,6 +961,7 @@ mod tests {
                                                     "dd.p.tid".to_string(),
                                                     "foobar".to_string(),
                                                 )])),
+                                                ot: None,
                                             },
                                         );
                                     }

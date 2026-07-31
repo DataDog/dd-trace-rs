@@ -168,19 +168,30 @@ async fn test_sampling_extraction() {
                     propagator.inject(&mut injected);
                 }
             }
+            let tracestate = injected.get("tracestate").unwrap();
+            // The `dd=` member is the first, comma-separated tracestate member.
+            let dd_member = tracestate
+                .split(',')
+                .next()
+                .unwrap()
+                .strip_prefix("dd=")
+                .unwrap();
             assert_subset(
-                injected
-                    .get("tracestate")
-                    .unwrap()
-                    .strip_prefix("dd=")
-                    .unwrap()
-                    .split(';')
-                    .map(String::from),
+                dd_member.split(';').map(String::from),
                 [
                     "s:2".to_string(),
                     "t.dm:-3".to_string(),
                     format!("p:{span_id:016x}"),
                 ],
+            );
+            // A probability sampling rule (rate 1.0) emits the OTel `ot`
+            // consistent-probability member (APMAPI-2181): rv derived from the
+            // trace id, th:0 for rate 1.0 ("keep all").
+            assert!(
+                tracestate
+                    .split(',')
+                    .any(|m| m.starts_with("ot=rv:") && m.ends_with(";th:0")),
+                "expected an ot=rv:…;th:0 member, got {tracestate}"
             );
 
             assert_subset(
