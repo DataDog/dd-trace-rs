@@ -148,6 +148,11 @@ impl DatadogPropagator {
             &mut HashMap::new()
         };
 
+        let ot = propagation_data.ot.take().or_else(|| {
+            cx.get::<DatadogExtractData>()
+                .and_then(|extract_data| extract_data.ot.clone())
+        });
+
         let dd_span_context = &mut InjectSpanContext {
             trace_id: u128::from_be_bytes(trace_id),
             span_id: u64::from_be_bytes(otel_span_context.span_id().to_bytes()),
@@ -156,7 +161,7 @@ impl DatadogPropagator {
             origin: propagation_data.origin.as_deref(),
             tags,
             tracestate,
-            ot: propagation_data.ot,
+            ot,
         };
 
         self.inner.inject(dd_span_context, &mut injector)
@@ -684,6 +689,39 @@ pub mod tests {
                 injected_trace_state.get("foo").unwrap_or_default()
             )
         }
+    }
+
+    #[test]
+    fn extract_inject_w3c_passthrough_forwards_ot_without_span_registration() {
+        let builder = Config::builder();
+        let config = Arc::new(builder.build());
+        let registry = TraceRegistry::new(config.clone());
+        let propagator = DatadogPropagator::new(config, registry);
+
+        let mut extractor = HashMap::new();
+        extractor.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        extractor.insert(
+            TRACESTATE_KEY.to_string(),
+            "dd=s:2,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz".to_string(),
+        );
+
+        let extracted_context = propagator.extract(&extractor);
+
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            injected_trace_state.contains("ot=rv:ef284ace7a91e1;th:e6666666666666"),
+            "expected inbound `ot` to be forwarded unchanged, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
     }
 
     #[test]
