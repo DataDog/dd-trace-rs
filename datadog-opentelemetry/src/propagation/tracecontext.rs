@@ -26,6 +26,7 @@ pub const TRACESTATE_KEY: &str = "tracestate";
 const TRACESTATE_MAX_MEMBERS: usize = 32;
 
 const TRACESTATE_DD_KEY_MAX_LENGTH: usize = 256;
+const TRACESTATE_OT_KEY_MAX_LENGTH: usize = 256;
 const TRACESTATE_VALUES_SEPARATOR: &str = ",";
 const TRACESTATE_DD_PAIR_SEPARATOR: &str = ";";
 const TRACESTATE_SAMPLING_PRIORITY_KEY: &str = "s";
@@ -86,7 +87,22 @@ pub(crate) fn ot_set_rv_th(raw: Option<&str>, rv: Option<u64>, th: Option<u64>) 
         .chain(th_part.as_deref())
         .chain(others)
         .collect();
-    (!parts.is_empty()).then(|| parts.join(";"))
+    join_capped(&parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+}
+
+/// Joins leading `parts` with `;` capping length under `max_len`
+fn join_capped(parts: &[&str], max_len: usize) -> Option<String> {
+    let mut len = 0;
+    let mut count = 0;
+    for part in parts {
+        let sep_len = if count == 0 { 0 } else { 1 };
+        if len + sep_len + part.len() > max_len {
+            break;
+        }
+        len += sep_len + part.len();
+        count += 1;
+    }
+    (count > 0).then(|| parts[..count].join(";"))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1401,6 +1417,29 @@ mod test {
             .as_deref(),
             Some("rv:f0948a54d43b8e;th:e6666666666666;fut:abc")
         );
+    }
+
+    #[test]
+    fn ot_set_rv_th_caps_length_dropping_trailing_subkeys() {
+        let huge = "z".repeat(300);
+        let raw = format!("fut:{huge}");
+        let result =
+            ot_set_rv_th(Some(&raw), Some(0x1234567890abcd), Some(0xe6666666666666)).unwrap();
+        assert!(result.len() <= 256, "got len {}", result.len());
+        assert_eq!(result, "rv:1234567890abcd;th:e6666666666666");
+
+        let raw = (0..40)
+            .map(|i| format!("k{i}:{}", "a".repeat(10)))
+            .collect::<Vec<_>>()
+            .join(";");
+        let result =
+            ot_set_rv_th(Some(&raw), Some(0x1234567890abcd), Some(0xe6666666666666)).unwrap();
+        assert!(result.len() <= 256, "got len {}", result.len());
+        assert!(!result.ends_with(';'));
+        assert!(result.starts_with("rv:1234567890abcd;th:e6666666666666"));
+        for part in result.split(';') {
+            assert!(part.starts_with("rv:") || part.starts_with("th:") || raw.contains(part));
+        }
     }
 
     #[test]
