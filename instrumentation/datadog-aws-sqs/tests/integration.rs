@@ -5,6 +5,7 @@
 
 use aws_sdk_sqs::types::{DeleteMessageBatchRequestEntry, SendMessageBatchRequestEntry};
 use aws_types::SdkConfig;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
@@ -28,6 +29,22 @@ const QUEUE_URL_TRAILING: &str = "https://sqs.us-east-1.amazonaws.com/1234567890
 const HTTP_200: &str = "200";
 const HTTP_400: &str = "400";
 const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
+
+fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> String {
+    serde_json::json!({
+        "Type": "Notification",
+        "MessageId": "sns-message-id",
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:MyTopic",
+        "Message": "hello",
+        "MessageAttributes": {
+            "_datadog": {
+                "Type": data_type,
+                "Value": value.into()
+            }
+        }
+    })
+    .to_string()
+}
 
 #[tokio::test]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
@@ -218,6 +235,110 @@ async fn sqs_receive_message_links_span_to_message_context() {
     assert_eq!(spans[0].events.events.len(), 1);
     assert_eq!(spans[0].events.events[0].name, "sqs.receive.messages");
     assert!(spans[0].events.events[0].attributes.is_empty());
+}
+
+#[tokio::test]
+async fn sqs_receive_message_links_span_to_sns_envelope_string_context() {
+    let message_span_context = SpanContext::new(
+        TraceId::from_hex("11111111111111111111111111111111").unwrap(),
+        SpanId::from_hex("2222222222222222").unwrap(),
+        TraceFlags::SAMPLED,
+        true,
+        TraceState::NONE,
+    );
+    let datadog_attr = serde_json::json!({
+        "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+    })
+    .to_string();
+    let sns_body = sns_envelope_body("String", datadog_attr);
+    let response_body = serde_json::json!({
+        "Messages": [
+            {
+                "MessageId": "sqs-message-id",
+                "ReceiptHandle": "receipt-handle",
+                "Body": sns_body
+            }
+        ]
+    })
+    .to_string();
+
+    let harness = TestHarness::ok_with_body(response_body).await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let output = client
+        .receive_message()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.messages().len(), 1);
+    let extracted_context = datadog_aws_sqs::extract_context(&output.messages()[0]).unwrap();
+    assert_eq!(
+        extracted_context.span().span_context(),
+        &message_span_context
+    );
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].links.links.len(), 1);
+    assert_eq!(spans[0].links.links[0].span_context, message_span_context);
+    assert_eq!(
+        spans[0].links.links[0].attributes,
+        vec![KeyValue::new(MESSAGING_MESSAGE_ID, "sqs-message-id")]
+    );
+}
+
+#[tokio::test]
+async fn sqs_receive_message_links_span_to_sns_envelope_context() {
+    let message_span_context = SpanContext::new(
+        TraceId::from_hex("11111111111111111111111111111111").unwrap(),
+        SpanId::from_hex("2222222222222222").unwrap(),
+        TraceFlags::SAMPLED,
+        true,
+        TraceState::NONE,
+    );
+    let datadog_attr = BASE64_STANDARD.encode(
+        serde_json::to_vec(&serde_json::json!({
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+        }))
+        .unwrap(),
+    );
+    let sns_body = sns_envelope_body("Binary", datadog_attr);
+    let response_body = serde_json::json!({
+        "Messages": [
+            {
+                "MessageId": "sqs-message-id",
+                "ReceiptHandle": "receipt-handle",
+                "Body": sns_body
+            }
+        ]
+    })
+    .to_string();
+
+    let harness = TestHarness::ok_with_body(response_body).await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let output = client
+        .receive_message()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.messages().len(), 1);
+    let extracted_context = datadog_aws_sqs::extract_context(&output.messages()[0]).unwrap();
+    assert_eq!(
+        extracted_context.span().span_context(),
+        &message_span_context
+    );
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].links.links.len(), 1);
+    assert_eq!(spans[0].links.links[0].span_context, message_span_context);
+    assert_eq!(
+        spans[0].links.links[0].attributes,
+        vec![KeyValue::new(MESSAGING_MESSAGE_ID, "sqs-message-id")]
+    );
 }
 
 #[tokio::test]

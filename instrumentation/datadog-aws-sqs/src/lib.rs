@@ -18,6 +18,7 @@
 //! let client = aws_sdk_sqs::Client::from_conf(config);
 //! ```
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use aws_sdk_sqs::operation::delete_message::DeleteMessageInput;
@@ -34,9 +35,11 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, Context, KeyValue};
+use serde::Deserialize;
 
 use datadog_aws_core::{
     attribute_keys::{
@@ -82,7 +85,10 @@ impl ConfigExt for aws_sdk_sqs::config::Builder {
     }
 }
 
-/// Extracts an OpenTelemetry context from an SQS message's `_datadog` message attribute.
+/// Extracts an OpenTelemetry context from an SQS message.
+///
+/// Context is read from the SQS `_datadog` message attribute when present, or from the
+/// `_datadog` attribute inside an SNS notification envelope in the message body.
 ///
 /// Returns `None` when the message does not contain a valid Datadog propagation attribute.
 pub fn extract_context(message: &Message) -> Option<Context> {
@@ -102,44 +108,150 @@ fn extract_context_with_propagator(
 }
 
 fn datadog_trace_headers(message: &Message) -> Option<HashMap<String, String>> {
-    let attrs = message.message_attributes.as_ref()?;
-    let datadog_attr = attrs.get(DATADOG_ATTRIBUTE_KEY)?;
+    if let Some(datadog_attr) = message
+        .message_attributes
+        .as_ref()
+        .and_then(|attrs| attrs.get(DATADOG_ATTRIBUTE_KEY))
+    {
+        return trace_headers_from_sqs_message_attribute(datadog_attr);
+    }
 
-    let trace_headers: HashMap<String, String> = if let Some(json) = datadog_attr.string_value() {
-        match serde_json::from_str(json) {
-            Ok(headers) => headers,
-            Err(err) => {
-                tracing::debug!(
-                    name: "Sqs.Extract.DatadogAttributeParseFailed",
-                    reason = %err,
-                    action = "context extraction skipped",
-                );
-                return None;
-            }
-        }
+    trace_headers_from_sns_envelope(message)
+}
+
+fn trace_headers_from_sqs_message_attribute(
+    datadog_attr: &MessageAttributeValue,
+) -> Option<HashMap<String, String>> {
+    if let Some(json) = datadog_attr.string_value() {
+        parse_trace_headers_from_str(json, "Sqs.Extract.DatadogAttributeParseFailed")
     } else if let Some(bytes) = datadog_attr.binary_value() {
-        match serde_json::from_slice(bytes.as_ref()) {
-            Ok(headers) => headers,
-            Err(err) => {
-                tracing::debug!(
-                    name: "Sqs.Extract.DatadogBinaryAttributeParseFailed",
-                    reason = %err,
-                    action = "context extraction skipped",
-                );
-                return None;
-            }
-        }
+        parse_trace_headers_from_slice(
+            bytes.as_ref(),
+            "Sqs.Extract.DatadogBinaryAttributeParseFailed",
+        )
     } else {
         tracing::debug!(
             name: "Sqs.Extract.DatadogAttributeMissingValue",
             action = "context extraction skipped",
         );
-        return None;
-    };
-
-    Some(trace_headers)
+        None
+    }
 }
 
+fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, String>> {
+    let body = message.body()?;
+    if !body.contains(DATADOG_ATTRIBUTE_KEY) || !body.contains("\"MessageAttributes\"") {
+        return None;
+    }
+
+    let datadog_attr = match sns_envelope_datadog_attribute(body) {
+        Ok(Some(datadog_attr)) => datadog_attr,
+        Ok(None) => return None,
+        Err(err) => {
+            tracing::debug!(
+                name: "Sqs.Extract.SnsEnvelopeParseFailed",
+                reason = %err,
+                action = "context extraction skipped",
+            );
+            return None;
+        }
+    };
+
+    match datadog_attr.data_type.as_ref() {
+        "Binary" => {
+            let bytes = match BASE64_STANDARD.decode(datadog_attr.value.as_ref()) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    tracing::debug!(
+                        name: "Sqs.Extract.SnsEnvelopeDatadogBinaryDecodeFailed",
+                        reason = %err,
+                        action = "context extraction skipped",
+                    );
+                    return None;
+                }
+            };
+            parse_trace_headers_from_slice(
+                &bytes,
+                "Sqs.Extract.SnsEnvelopeDatadogBinaryAttributeParseFailed",
+            )
+        }
+        "String" => parse_trace_headers_from_str(
+            datadog_attr.value.as_ref(),
+            "Sqs.Extract.SnsEnvelopeDatadogAttributeParseFailed",
+        ),
+        data_type => {
+            tracing::debug!(
+                name: "Sqs.Extract.SnsEnvelopeDatadogAttributeUnsupportedType",
+                data_type,
+                action = "context extraction skipped",
+            );
+            None
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SnsEnvelope<'a> {
+    #[serde(rename = "MessageAttributes", borrow)]
+    message_attributes: Option<SnsMessageAttributes<'a>>,
+}
+
+#[derive(Deserialize)]
+struct SnsMessageAttributes<'a> {
+    #[serde(rename = "_datadog", borrow)]
+    datadog: Option<SnsEnvelopeDatadogAttribute<'a>>,
+}
+
+#[derive(Deserialize)]
+struct SnsEnvelopeDatadogAttribute<'a> {
+    #[serde(rename = "Type", borrow)]
+    data_type: Cow<'a, str>,
+    #[serde(rename = "Value", borrow)]
+    value: Cow<'a, str>,
+}
+
+fn sns_envelope_datadog_attribute(
+    body: &str,
+) -> Result<Option<SnsEnvelopeDatadogAttribute<'_>>, serde_json::Error> {
+    let envelope: SnsEnvelope<'_> = serde_json::from_str(body)?;
+    Ok(envelope
+        .message_attributes
+        .and_then(|attributes| attributes.datadog))
+}
+
+fn parse_trace_headers_from_str(
+    json: &str,
+    failure_name: &'static str,
+) -> Option<HashMap<String, String>> {
+    match serde_json::from_str(json) {
+        Ok(headers) => Some(headers),
+        Err(err) => {
+            tracing::debug!(
+                name = failure_name,
+                reason = %err,
+                action = "context extraction skipped",
+            );
+            None
+        }
+    }
+}
+
+fn parse_trace_headers_from_slice(
+    json: &[u8],
+    failure_name: &'static str,
+) -> Option<HashMap<String, String>> {
+    match serde_json::from_slice(json) {
+        Ok(headers) => Some(headers),
+        Err(err) => {
+            tracing::debug!(
+                name = failure_name,
+                reason = %err,
+                action = "context extraction skipped",
+            );
+            None
+        }
+    }
+}
 fn extract_context_from_trace_headers(
     trace_headers: &HashMap<String, String>,
     propagator: &dyn TextMapPropagator,
@@ -406,6 +518,22 @@ mod tests {
         TraceContextPropagator::new()
     }
 
+    fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> String {
+        serde_json::json!({
+            "Type": "Notification",
+            "MessageId": "sns-message-id",
+            "TopicArn": "arn:aws:sns:us-east-1:123456789012:MyTopic",
+            "Message": "hello",
+            "MessageAttributes": {
+                "_datadog": {
+                    "Type": data_type,
+                    "Value": value.into()
+                }
+            }
+        })
+        .to_string()
+    }
+
     #[test]
     fn skips_injection_when_message_attributes_are_full() {
         let mut builder = SendMessageInput::builder()
@@ -560,6 +688,52 @@ mod tests {
         let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_reads_sns_envelope_string_datadog_message_attribute() {
+        let datadog_attr = serde_json::json!({
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+        })
+        .to_string();
+        let message = Message::builder()
+            .body(sns_envelope_body("String", datadog_attr))
+            .build();
+        let propagator = trace_context_propagator();
+        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_reads_sns_envelope_binary_datadog_message_attribute() {
+        let datadog_attr = BASE64_STANDARD.encode(
+            serde_json::to_vec(&serde_json::json!({
+                "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+            }))
+            .unwrap(),
+        );
+        let message = Message::builder()
+            .body(sns_envelope_body("Binary", datadog_attr))
+            .build();
+        let propagator = trace_context_propagator();
+        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_returns_none_for_unsupported_sns_envelope_datadog_attribute_type() {
+        let datadog_attr = serde_json::json!({
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+        })
+        .to_string();
+        let message = Message::builder()
+            .body(sns_envelope_body("String.Array", datadog_attr))
+            .build();
+        let propagator = trace_context_propagator();
+
+        assert!(extract_context_with_propagator(&message, &propagator).is_none());
     }
 
     #[test]

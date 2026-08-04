@@ -17,6 +17,8 @@ datadog-aws-core = { workspace = true }
 aws-sdk-sqs = "1.97.0"
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
+base64 = "0.22.1"
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 opentelemetry = { workspace = true }
 tracing = { workspace = true }
