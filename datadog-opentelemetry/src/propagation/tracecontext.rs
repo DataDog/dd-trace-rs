@@ -462,7 +462,23 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
 }
 
 /// Extract trace context from a carrier using W3C Trace Context format.
+///
+/// `DatadogCompositePropagator` calls `try_extract` instead; this is for direct
+/// callers of the public propagation API (`_unstable_propagation`/`test-utils`).
+#[allow(dead_code)]
 pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+    match try_extract(carrier)? {
+        Ok(context) => Some(context),
+        Err(e) => {
+            dd_error!("Propagator (tracecontext): Failed to extract traceparent: {e}");
+            None
+        }
+    }
+}
+
+/// Same as [`extract`], but returns the error instead of logging it. The composite
+/// propagator uses this so it can log once, after checking if another format recovered.
+pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext, Error>> {
     let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
     match extract_traceparent(tp) {
@@ -521,7 +537,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 None
             };
 
-            Some(SpanContext {
+            Some(Ok(SpanContext {
                 trace_id: traceparent.trace_id,
                 span_id: traceparent.span_id,
                 sampling: Sampling {
@@ -533,12 +549,9 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
                 links: Vec::new(),
                 is_remote: true,
                 tracestate,
-            })
+            }))
         }
-        Err(e) => {
-            dd_error!("Propagator (tracecontext): Failed to extract traceparent: {e}");
-            None
-        }
+        Err(e) => Some(Err(e)),
     }
 }
 
@@ -732,7 +745,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(
@@ -772,7 +786,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags["_dd.p.dm"], "-0");
@@ -794,7 +809,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags["_dd.p.dm"], "-0");
@@ -816,7 +832,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
@@ -838,7 +855,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.tags.get("_dd.p.dm"), None);
@@ -853,9 +871,9 @@ mod test {
 
         let propagator = TracePropagationStyle::TraceContext;
 
-        let context = propagator.extract(&headers, &Config::builder().build());
+        let context = propagator.try_extract(&headers, &Config::builder().build());
 
-        assert!(context.is_none());
+        assert!(matches!(context, Some(Err(_))));
     }
 
     #[test]
@@ -874,7 +892,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert!(context.sampling.priority.is_some());
@@ -897,7 +916,8 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let tracestate = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context")
             .tracestate
             .expect("tracestate should be extracted");
