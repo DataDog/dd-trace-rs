@@ -204,6 +204,8 @@ fn build_datadog_attribute(span_context: &Context) -> Option<MessageAttributeVal
 
     let attribute = || -> Result<MessageAttributeValue, BoxError> {
         let json_bytes = serde_json::to_vec(&trace_headers)?;
+        // Use Binary for SNS: SNS subscription filter policies can silently fail when JSON is
+        // carried as a String message attribute. Keep this aligned with other Datadog tracers.
         MessageAttributeValue::builder()
             .data_type("Binary")
             .binary_value(Blob::new(json_bytes))
