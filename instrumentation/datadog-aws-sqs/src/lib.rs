@@ -21,11 +21,23 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use aws_sdk_sqs::operation::add_permission::AddPermissionInput;
+use aws_sdk_sqs::operation::change_message_visibility::ChangeMessageVisibilityInput;
+use aws_sdk_sqs::operation::change_message_visibility_batch::ChangeMessageVisibilityBatchInput;
 use aws_sdk_sqs::operation::delete_message::DeleteMessageInput;
 use aws_sdk_sqs::operation::delete_message_batch::DeleteMessageBatchInput;
+use aws_sdk_sqs::operation::delete_queue::DeleteQueueInput;
+use aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesInput;
+use aws_sdk_sqs::operation::list_dead_letter_source_queues::ListDeadLetterSourceQueuesInput;
+use aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsInput;
+use aws_sdk_sqs::operation::purge_queue::PurgeQueueInput;
 use aws_sdk_sqs::operation::receive_message::{ReceiveMessageInput, ReceiveMessageOutput};
+use aws_sdk_sqs::operation::remove_permission::RemovePermissionInput;
 use aws_sdk_sqs::operation::send_message::{SendMessageInput, SendMessageOutput};
 use aws_sdk_sqs::operation::send_message_batch::SendMessageBatchInput;
+use aws_sdk_sqs::operation::set_queue_attributes::SetQueueAttributesInput;
+use aws_sdk_sqs::operation::tag_queue::TagQueueInput;
+use aws_sdk_sqs::operation::untag_queue::UntagQueueInput;
 use aws_sdk_sqs::types::{Message, MessageAttributeValue};
 use aws_smithy_runtime_api::box_error::BoxError;
 use aws_smithy_runtime_api::client::interceptors::context::{
@@ -277,21 +289,8 @@ impl Intercept for SqsInterceptor {
         };
 
         let input = context.input();
-        let mut queue_url = None;
-        let mut batch_message_count = None;
-        if let Some(input) = input.downcast_ref::<SendMessageInput>() {
-            queue_url = input.queue_url.as_deref();
-        } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
-            queue_url = input.queue_url.as_deref();
-            batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
-        } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
-            queue_url = input.queue_url.as_deref();
-        } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
-            queue_url = input.queue_url.as_deref();
-        } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
-            queue_url = input.queue_url.as_deref();
-            batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
-        }
+        let queue_url = queue_url_from_input(input);
+        let batch_message_count = batch_message_count_from_input(input);
         let mut queue_name = None;
         let mut cloud_resource_id = None;
         if let Some(url) = queue_url {
@@ -398,6 +397,56 @@ impl Intercept for SqsInterceptor {
     }
 }
 
+fn queue_url_from_input(input: &Input) -> Option<&str> {
+    if let Some(input) = input.downcast_ref::<AddPermissionInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<ChangeMessageVisibilityInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<ChangeMessageVisibilityBatchInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<DeleteMessageInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<DeleteQueueInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<GetQueueAttributesInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<ListDeadLetterSourceQueuesInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<ListQueueTagsInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<PurgeQueueInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<ReceiveMessageInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<RemovePermissionInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<SendMessageInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<SetQueueAttributesInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<TagQueueInput>() {
+        input.queue_url.as_deref()
+    } else if let Some(input) = input.downcast_ref::<UntagQueueInput>() {
+        input.queue_url.as_deref()
+    } else {
+        None
+    }
+}
+
+fn batch_message_count_from_input(input: &Input) -> Option<i64> {
+    if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
+        return Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
+    }
+
+    input
+        .downcast_ref::<DeleteMessageBatchInput>()
+        .map(|input| input.entries.as_ref().map_or(0, Vec::len) as i64)
+}
+
 /// Dispatches trace context injection based on the concrete operation input type.
 ///
 /// Only `SendMessage` and `SendMessageBatch` carry a message attributes payload
@@ -494,10 +543,14 @@ fn inject_message_attribute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aws_sdk_sqs::types::SendMessageBatchRequestEntry;
+    use aws_sdk_sqs::types::{
+        ChangeMessageVisibilityBatchRequestEntry, DeleteMessageBatchRequestEntry,
+        QueueAttributeName, SendMessageBatchRequestEntry,
+    };
     use opentelemetry_sdk::propagation::TraceContextPropagator;
 
     const TEST_TRACE_HEADER_KEY: &str = "test_context_injected";
+    const TEST_QUEUE_URL: &str = "https://sqs.us-east-1.amazonaws.com/123456789012/MyQueue";
 
     fn test_trace_headers() -> HashMap<String, String> {
         HashMap::from([(TEST_TRACE_HEADER_KEY.to_string(), "true".to_string())])
@@ -532,6 +585,150 @@ mod tests {
             }
         })
         .to_string()
+    }
+
+    fn assert_queue_url_extracted(input: Input) {
+        assert_eq!(queue_url_from_input(&input), Some(TEST_QUEUE_URL));
+    }
+
+    #[test]
+    fn extracts_queue_url_from_all_queue_scoped_inputs() {
+        assert_queue_url_extracted(Input::erase(
+            AddPermissionInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .label("test")
+                .aws_account_ids("123456789012")
+                .actions("SendMessage")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            ChangeMessageVisibilityInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .receipt_handle("handle")
+                .visibility_timeout(30)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            ChangeMessageVisibilityBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(
+                    ChangeMessageVisibilityBatchRequestEntry::builder()
+                        .id("1")
+                        .receipt_handle("handle")
+                        .visibility_timeout(30)
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            DeleteMessageInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .receipt_handle("handle")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            DeleteMessageBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(
+                    DeleteMessageBatchRequestEntry::builder()
+                        .id("1")
+                        .receipt_handle("handle")
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            DeleteQueueInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            GetQueueAttributesInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .attribute_names(QueueAttributeName::All)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            ListDeadLetterSourceQueuesInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            ListQueueTagsInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            PurgeQueueInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            ReceiveMessageInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            RemovePermissionInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .label("test")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            SendMessageInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .message_body("hello")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            SendMessageBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(
+                    SendMessageBatchRequestEntry::builder()
+                        .id("1")
+                        .message_body("hello")
+                        .build()
+                        .unwrap(),
+                )
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            SetQueueAttributesInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .attributes(QueueAttributeName::VisibilityTimeout, "30")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            TagQueueInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .tags("env", "test")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_url_extracted(Input::erase(
+            UntagQueueInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .tag_keys("env")
+                .build()
+                .unwrap(),
+        ));
     }
 
     #[test]

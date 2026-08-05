@@ -393,6 +393,50 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
 }
 
 #[tokio::test]
+async fn sqs_queue_scoped_operations_create_spans_with_queue_tags() {
+    let harness = TestHarness::ok().await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let _ = client.purge_queue().queue_url(QUEUE_URL).send().await;
+    let _ = client.delete_queue().queue_url(QUEUE_URL).send().await;
+    let _ = client
+        .get_queue_attributes()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await;
+    let _ = client
+        .change_message_visibility()
+        .queue_url(QUEUE_URL)
+        .receipt_handle("handle")
+        .visibility_timeout(30)
+        .send()
+        .await;
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 4);
+    let mut operations = Vec::new();
+    for span in spans {
+        let attrs = span_attrs(&span);
+        operations.push(attrs["aws.operation"].clone());
+        assert_eq!(attrs["queuename"], "MyQueue");
+        assert_eq!(
+            attrs["cloud.resource_id"],
+            "arn:aws:sqs:us-east-1:123456789012:MyQueue"
+        );
+    }
+    operations.sort();
+    assert_eq!(
+        operations,
+        [
+            "ChangeMessageVisibility",
+            "DeleteQueue",
+            "GetQueueAttributes",
+            "PurgeQueue",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn sqs_queue_url_trailing_slash_parsed_correctly() {
     let harness = TestHarness::ok().await;
     let client = sqs_client(&harness.sdk_config());
