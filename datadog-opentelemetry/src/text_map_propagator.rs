@@ -10,6 +10,7 @@ use crate::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
+        tracecontext::ot_sanitize,
         DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
     },
 };
@@ -148,10 +149,15 @@ impl DatadogPropagator {
             &mut HashMap::new()
         };
 
-        let ot = propagation_data.ot.take().or_else(|| {
-            cx.get::<DatadogExtractData>()
-                .and_then(|extract_data| extract_data.ot.clone())
-        });
+        let ot = propagation_data
+            .ot
+            .take()
+            .or_else(|| {
+                cx.get::<DatadogExtractData>()
+                    .and_then(|extract_data| extract_data.ot.clone())
+            })
+            .as_deref()
+            .and_then(ot_sanitize);
 
         let dd_span_context = &mut InjectSpanContext {
             trace_id: u128::from_be_bytes(trace_id),
@@ -717,6 +723,36 @@ pub mod tests {
         assert!(
             injected_trace_state.contains("ot=rv:ef284ace7a91e1;th:e6666666666666"),
             "expected inbound `ot` to be forwarded unchanged, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
+    }
+
+    #[test]
+    fn extract_inject_w3c_passthrough_drops_malformed_ot_subkeys() {
+        let config = Arc::new(Config::builder().build());
+        let propagator = DatadogPropagator::new(config.clone(), TraceRegistry::new(config));
+        let extractor = HashMap::from([
+            (
+                TRACEPARENT_KEY.to_string(),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                TRACESTATE_KEY.to_string(),
+                "dd=s:2,ot=rv:not-hex;th:invalid;future:value,congo=xyz".to_string(),
+            ),
+        ]);
+
+        let extracted_context = propagator.extract(&extractor);
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            injected_trace_state.contains("ot=future:value"),
+            "expected malformed subkeys to be removed, got {injected_trace_state}"
         );
         assert!(
             injected_trace_state.contains("congo=xyz"),

@@ -62,6 +62,19 @@ pub(crate) fn ot_extract_rv(raw: &str) -> Option<u64> {
     })
 }
 
+/// Removes malformed `rv`/`th` subkeys, preserving valid and unknown subkeys.
+pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
+    let parts: Vec<_> = raw
+        .split(';')
+        .filter(|item| match item.split_once(':') {
+            Some(("rv", value)) => ot_parse_hex_56(value, Some(14)).is_some(),
+            Some(("th", value)) => ot_parse_hex_56(value, None).is_some(),
+            _ => true,
+        })
+        .collect();
+    join_capped(&parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+}
+
 /// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
 /// appending everything else, in order, after the new pair. `None` when
 /// nothing is left to emit.
@@ -1379,6 +1392,18 @@ mod test {
         for (input, expected) in tests {
             assert_eq!(replace_chars(input, |c| c == b'b', '_'), expected);
         }
+    }
+
+    #[test]
+    fn ot_sanitize_drops_malformed_known_subkeys() {
+        assert_eq!(
+            ot_sanitize("rv:not-hex;th:invalid;future:value"),
+            Some("future:value".to_string())
+        );
+        assert_eq!(
+            ot_sanitize("rv:1234567890abcd;th:e6666666666666;future:value"),
+            Some("rv:1234567890abcd;th:e6666666666666;future:value".to_string())
+        );
     }
 
     #[test]
