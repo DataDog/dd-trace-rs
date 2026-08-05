@@ -727,21 +727,14 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         }
 
         if telemetry_last_user {
-            // at least 1 second
-            let left = deadline
-                .saturating_duration_since(std::time::Instant::now())
-                .max(std::time::Duration::from_secs(1));
-            // NOTE: this wait is only bounded if libdatadog honors the deadline.
-            // Internally `wait_for_shutdown_deadline` blocks on a condvar with no
-            // timeout of its own; it relies on a tokio task, spawned on the
-            // worker's runtime, cancelling the worker once `left` elapses. That
-            // holds as long as the worker (and its runtime) is still alive, which
-            // it is here since we own the handle. If that ever stops being true
-            // this call could hang, so the real fix belongs upstream: bound the
-            // condvar wait itself (e.g. `wait_timeout_while`).
-            if let Err(e) = wait_telemetry_stopped(left) {
-                dd_debug!("DatadogSpanProcessor.shutdown_with_timeout: telemetry did not stop in time: {e}");
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Err(opentelemetry_sdk::error::OTelSdkError::Timeout(timeout));
             }
+            wait_telemetry_stopped(left).map_err(|e| {
+                dd_debug!("DatadogSpanProcessor.shutdown_with_timeout: telemetry did not stop in time: {e}");
+                opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+            })?;
         }
         Ok(())
     }
