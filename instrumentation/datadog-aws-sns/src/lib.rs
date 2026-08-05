@@ -20,7 +20,10 @@
 
 use std::collections::HashMap;
 
+use aws_sdk_sns::operation::add_permission::AddPermissionInput;
+use aws_sdk_sns::operation::confirm_subscription::ConfirmSubscriptionInput;
 use aws_sdk_sns::operation::create_topic::CreateTopicInput;
+use aws_sdk_sns::operation::delete_topic::DeleteTopicInput;
 use aws_sdk_sns::operation::get_topic_attributes::GetTopicAttributesInput;
 use aws_sdk_sns::operation::list_subscriptions_by_topic::ListSubscriptionsByTopicInput;
 use aws_sdk_sns::operation::publish::PublishInput;
@@ -114,6 +117,12 @@ impl Intercept for SnsInterceptor {
                     .as_ref()
                     .map_or(0, Vec::len) as i64,
             );
+        } else if let Some(input) = input.downcast_ref::<AddPermissionInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<ConfirmSubscriptionInput>() {
+            topic_arn = input.topic_arn.as_deref();
+        } else if let Some(input) = input.downcast_ref::<DeleteTopicInput>() {
+            topic_arn = input.topic_arn.as_deref();
         } else if let Some(input) = input.downcast_ref::<GetTopicAttributesInput>() {
             topic_arn = input.topic_arn.as_deref();
         } else if let Some(input) = input.downcast_ref::<ListSubscriptionsByTopicInput>() {

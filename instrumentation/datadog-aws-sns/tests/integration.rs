@@ -165,6 +165,38 @@ async fn sns_get_topic_attributes_creates_span_with_topicname() {
 }
 
 #[tokio::test]
+async fn sns_other_topic_arn_operations_create_spans_with_topicname() {
+    let harness = TestHarness::ok().await;
+    let client = sns_client(&harness.sdk_config());
+
+    let _ = client
+        .add_permission()
+        .topic_arn(TOPIC_ARN)
+        .label("test-policy")
+        .aws_account_id("111111111111")
+        .action_name("Publish")
+        .send()
+        .await;
+    let _ = client
+        .confirm_subscription()
+        .topic_arn(TOPIC_ARN)
+        .token("test-token")
+        .send()
+        .await;
+    let _ = client.delete_topic().topic_arn(TOPIC_ARN).send().await;
+
+    let spans = harness.finished_spans();
+    let attrs_by_operation = spans
+        .iter()
+        .map(span_attrs)
+        .map(|attrs| (attrs["aws.operation"].clone(), attrs))
+        .collect::<std::collections::HashMap<_, _>>();
+    for operation in ["AddPermission", "ConfirmSubscription", "DeleteTopic"] {
+        assert_eq!(attrs_by_operation[operation]["topicname"], "MyTopic");
+    }
+}
+
+#[tokio::test]
 async fn sns_error_response_sets_span_error_status() {
     let harness = TestHarness::bad_request().await;
     let client = sns_client(&harness.sdk_config());
