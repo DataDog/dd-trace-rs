@@ -99,8 +99,9 @@ impl ConfigExt for aws_sdk_sqs::config::Builder {
 
 /// Extracts an OpenTelemetry context from an SQS message.
 ///
-/// Context is read from the SQS `_datadog` message attribute when present, or from the
-/// `_datadog` attribute inside an SNS notification envelope in the message body.
+/// Context is read from the SQS `_datadog` message attribute when present, from the
+/// `_datadog` attribute inside an SNS notification envelope in the message body, or
+/// from the `_datadog` field inside the `detail` object of an EventBridge envelope.
 ///
 /// Returns `None` when the message does not contain a valid Datadog propagation attribute.
 pub fn extract_context(message: &Message) -> Option<Context> {
@@ -129,6 +130,7 @@ fn datadog_trace_headers(message: &Message) -> Option<HashMap<String, String>> {
     }
 
     trace_headers_from_sns_envelope(message)
+        .or_else(|| trace_headers_from_eventbridge_envelope(message))
 }
 
 fn trace_headers_from_sqs_message_attribute(
@@ -229,6 +231,44 @@ fn sns_envelope_datadog_attribute(
     Ok(envelope
         .message_attributes
         .and_then(|attributes| attributes.datadog))
+}
+
+fn trace_headers_from_eventbridge_envelope(message: &Message) -> Option<HashMap<String, String>> {
+    let body = message.body()?;
+    if !body.contains(DATADOG_ATTRIBUTE_KEY) || !body.contains("\"detail\"") {
+        return None;
+    }
+
+    match eventbridge_envelope_datadog_attribute(body) {
+        Ok(Some(trace_headers)) => Some(trace_headers),
+        Ok(None) => None,
+        Err(err) => {
+            tracing::debug!(
+                name: "Sqs.Extract.EventBridgeEnvelopeParseFailed",
+                reason = %err,
+                action = "context extraction skipped",
+            );
+            None
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct EventBridgeEnvelope {
+    detail: Option<EventBridgeDetail>,
+}
+
+#[derive(Deserialize)]
+struct EventBridgeDetail {
+    #[serde(rename = "_datadog")]
+    datadog: Option<HashMap<String, String>>,
+}
+
+fn eventbridge_envelope_datadog_attribute(
+    body: &str,
+) -> Result<Option<HashMap<String, String>>, serde_json::Error> {
+    let envelope: EventBridgeEnvelope = serde_json::from_str(body)?;
+    Ok(envelope.detail.and_then(|detail| detail.datadog))
 }
 
 fn parse_trace_headers_from_str(
@@ -587,6 +627,21 @@ mod tests {
         .to_string()
     }
 
+    fn eventbridge_envelope_body(detail: impl Into<serde_json::Value>) -> String {
+        serde_json::json!({
+            "version": "0",
+            "id": "event-id",
+            "detail-type": "SampleMessage",
+            "source": "rust-sqs-consumer-sample",
+            "account": "123456789012",
+            "time": "2026-08-04T00:00:00Z",
+            "region": "us-east-1",
+            "resources": [],
+            "detail": detail.into()
+        })
+        .to_string()
+    }
+
     fn assert_queue_url_extracted(input: Input) {
         assert_eq!(queue_url_from_input(&input), Some(TEST_QUEUE_URL));
     }
@@ -917,6 +972,34 @@ mod tests {
         let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_reads_eventbridge_detail_datadog_attribute() {
+        let message = Message::builder()
+            .body(eventbridge_envelope_body(serde_json::json!({
+                "message": "hello",
+                "_datadog": {
+                    "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+                }
+            })))
+            .build();
+        let propagator = trace_context_propagator();
+        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_returns_none_for_eventbridge_detail_without_datadog_attribute() {
+        let message = Message::builder()
+            .body(eventbridge_envelope_body(serde_json::json!({
+                "message": "hello"
+            })))
+            .build();
+        let propagator = trace_context_propagator();
+
+        assert!(extract_context_with_propagator(&message, &propagator).is_none());
     }
 
     #[test]
