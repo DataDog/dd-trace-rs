@@ -61,6 +61,12 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
     ot: None,
 };
 
+impl Default for TracePropagationData {
+    fn default() -> Self {
+        EMPTY_PROPAGATION_DATA
+    }
+}
+
 #[derive(Debug)]
 struct InnerTraceRegistry {
     registry: BHashMap<[u8; 16], Trace>,
@@ -235,11 +241,10 @@ impl InnerTraceRegistry {
         }
     }
 
-    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> &TracePropagationData {
-        match self.registry.get(&trace_id) {
-            Some(trace) => &trace.propagation_data,
-            None => &EMPTY_PROPAGATION_DATA,
-        }
+    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> Option<&TracePropagationData> {
+        self.registry
+            .get(&trace_id)
+            .map(|trace| &trace.propagation_data)
     }
 
     fn get_metrics(&mut self) -> TraceRegistryMetrics {
@@ -352,15 +357,15 @@ impl TraceRegistry {
 
     /// Retrieves the trace propagation data for a given trace ID.
     ///
-    /// Returns the sampling decision, origin, and internal tags associated with the trace.
+    /// Returns the sampling decision, origin, and internal tags when the trace is registered.
     #[allow(private_interfaces)]
-    pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
+    pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> Option<TracePropagationData> {
         let inner = self
             .get_shard(trace_id)
             .read()
             .expect("Failed to acquire lock on trace registry");
 
-        inner.get_trace_propagation_data(trace_id).clone()
+        inner.get_trace_propagation_data(trace_id).cloned()
     }
 
     /// Aggregates and returns metrics from all registry shards.

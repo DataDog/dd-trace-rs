@@ -339,7 +339,9 @@ mod tests {
         sampler.should_sample(Some(&parent), trace_id, "test", &SpanKind::Server, &[], &[]);
 
         assert_eq!(
-            registry.get_trace_propagation_data(trace_id.to_bytes()).ot,
+            registry
+                .get_trace_propagation_data(trace_id.to_bytes())
+                .and_then(|data| data.ot),
             Some("rv:f0948a54d43b8e;th:e6666666666668".to_string())
         );
     }
