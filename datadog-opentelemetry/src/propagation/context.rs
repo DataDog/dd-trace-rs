@@ -117,7 +117,7 @@ pub struct InjectSpanContext<'a> {
     /// W3C tracestate data to inject.
     pub tracestate: Option<InjectTraceState>,
     /// The OTel consistent-probability `ot` member to emit, if any.
-    pub ot: Option<String>,
+    pub ot_member: Option<&'a str>,
 }
 
 #[cfg(test)]
@@ -142,7 +142,7 @@ pub(crate) fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'
                 },
             ))
         }),
-        ot: c.tracestate.as_ref().and_then(|ts| ts.ot.clone()),
+        ot_member: c.tracestate.as_ref().and_then(|ts| ts.ot_member.as_deref()),
     }
 }
 

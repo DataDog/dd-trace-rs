@@ -62,7 +62,7 @@ impl DatadogExtractData {
             origin,
             internal_tags,
             sampling,
-            ot: tracestate.and_then(|ts| ts.ot),
+            ot: tracestate.and_then(|ts| ts.ot_member),
         }
     }
 }
@@ -170,7 +170,7 @@ impl DatadogPropagator {
             origin: propagation_data.origin.as_deref(),
             tags,
             tracestate,
-            ot,
+            ot_member: ot.as_deref(),
         };
 
         self.inner.inject(dd_span_context, &mut injector)

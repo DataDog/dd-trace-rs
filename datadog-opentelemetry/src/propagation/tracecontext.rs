@@ -136,8 +136,7 @@ pub struct Tracestate {
     pub(crate) lower_order_trace_id: Option<String>,
     pub(crate) propagation_tags: Option<HashMap<String, String>>,
     pub(crate) additional_values: Option<Vec<(String, String)>>,
-    /// Raw inbound OTel field (useful for consistent-probability member value)
-    pub(crate) ot: Option<String>,
+    pub(crate) ot_member: Option<String>,
 }
 
 /// Code inspired, and copied, by OpenTelemetry Rust project.
@@ -229,7 +228,7 @@ impl FromStr for Tracestate {
             lower_order_trace_id: None,
             propagation_tags: None,
             additional_values: None,
-            ot: None,
+            ot_member: None,
         };
 
         // the original order must be maintained
@@ -275,7 +274,7 @@ impl FromStr for Tracestate {
         };
 
         tracestate.propagation_tags = propagation_tags;
-        tracestate.ot = ot;
+        tracestate.ot_member = ot;
 
         Ok(tracestate)
     }
@@ -535,7 +534,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         dd_parts.truncate(index_before_tags);
     }
 
-    if let Some(ot) = context.ot.as_deref() {
+    if let Some(ot) = context.ot_member {
         member_count += 1;
         let mut ot_part = buf_appender(&mut tracestate);
         ot_part.push_str(super::const_concat!(TRACESTATE_VALUES_SEPARATOR, "ot=",));
@@ -1055,7 +1054,7 @@ mod test {
             tracestate: Some(InjectTraceState::from_header(
                 "other=bleh,atel=test,dd=s:2;o:foo_bar_;t.dm:-4".to_owned(),
             )),
-            ot: None,
+            ot_member: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1092,7 +1091,7 @@ mod test {
             tags: &mut tags,
             is_remote: false,
             tracestate: None,
-            ot: ot.map(str::to_string),
+            ot_member: ot,
         };
         let mut carrier: HashMap<String, String> = HashMap::new();
         TracePropagationStyle::TraceContext.inject(
@@ -1163,7 +1162,7 @@ mod test {
             tags: &mut tags,
             is_remote: false,
             tracestate: Some(InjectTraceState::from_header("congo=xyz".to_owned())),
-            ot: Some("rv:ef284ace7a91e1;th:e6666666666666".to_string()),
+            ot_member: Some("rv:ef284ace7a91e1;th:e6666666666666"),
         };
         let mut carrier: HashMap<String, String> = HashMap::new();
         TracePropagationStyle::TraceContext.inject(
@@ -1196,7 +1195,7 @@ mod test {
             tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
             tracestate: None,
-            ot: None,
+            ot_member: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1236,7 +1235,7 @@ mod test {
             tags: &mut HashMap::from([("_dd.p.foo".to_string(), "abc".to_string())]),
             is_remote: false,
             tracestate: Some(InjectTraceState::from_header(tracestate)),
-            ot: None,
+            ot_member: None,
         };
 
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1352,7 +1351,7 @@ mod test {
             .parse()
             .unwrap();
         assert_eq!(
-            ts.ot.as_deref(),
+            ts.ot_member.as_deref(),
             Some("rv:ef284ace7a91e1;th:e6666666666666")
         );
         // ot removed from remainder; congo preserved
@@ -1368,7 +1367,7 @@ mod test {
             .unwrap();
         // no parsing/validation happens at extraction; forwarded verbatim
         assert_eq!(
-            ts.ot.as_deref(),
+            ts.ot_member.as_deref(),
             Some("rv:not-hex-garbage;th:not-hex-either")
         );
         let additional = ts.additional_values.unwrap();

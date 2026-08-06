@@ -26,7 +26,7 @@ fn span_context_to_inject(c: &mut SpanContext) -> InjectSpanContext<'_> {
         tags: &mut c.tags,
         is_remote: c.is_remote,
         tracestate: None,
-        ot: None,
+        ot_member: None,
     }
 }
 
