@@ -3,19 +3,24 @@
 
 //! Lifecycle management for a single Lambda invocation.
 //!
-//! Each invocation produces one *root span* (`aws.lambda`) that wraps the handler call.
+//! Each invocation produces:
+//! - Zero or more *inferred spans* derived from the trigger payload (e.g., an SQS span)
+//! - One *root span* (`aws.lambda`) that wraps the handler call
 //!
 //! Typical usage:
-//! 1. [`Invocation::start`] — create the root span before the handler runs.
+//! 1. [`Invocation::start`] — create all spans before the handler runs.
 //! 2. [`Invocation::handler_context`] — pass the returned context to the handler so its OTel spans
 //!    are correctly parented.
-//! 3. [`Invocation::finish`] — record errors and end the span after the handler returns.
+//! 3. [`Invocation::finish`] — record errors and end all spans after the handler returns.
 
 use crate::attribute_keys as attr;
+use crate::span_inferrer::{extract_trigger, InferredSpanScope, TriggerContext};
+use libdd_trace_inferrer::SpanInferrer;
 
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
+use std::time::SystemTime;
 
 pub(crate) static TRACER_NAME: &str = "datadog-lambda-rs";
 pub(crate) const ROOT_SPAN_NAME: &str = "aws.lambda";
@@ -34,9 +39,12 @@ pub(crate) struct LambdaSpan {
 impl LambdaSpan {
     /// Creates and starts the `aws.lambda` root span.
     ///
-    /// The span is parented to the ambient OTel context, which is typically a new root trace.
+    /// The span is parented to `trigger.parent_cx` when that context contains a valid
+    /// span (i.e., a propagated or inferred upstream span exists). Otherwise it falls
+    /// back to the ambient OTel context, which is typically a new root trace.
     pub(crate) fn start(
         tracer: &SdkTracer,
+        trigger: &TriggerContext,
         lambda_cx: &lambda_runtime::Context,
         cold_start: bool,
     ) -> Self {
@@ -45,27 +53,44 @@ impl LambdaSpan {
 
         tracing::debug!(request_id, "creating invocation root span");
 
-        let parent_cx = Context::current();
+        let effective_cx = if trigger.parent_cx.span().span_context().is_valid() {
+            trigger.parent_cx.clone()
+        } else {
+            Context::current()
+        };
 
         let mut builder = tracer.span_builder(ROOT_SPAN_NAME);
         builder.span_kind = Some(SpanKind::Server);
-        let attrs = vec![
+        let mut attrs = vec![
             KeyValue::new(attr::OPERATION_NAME, ROOT_SPAN_NAME),
             KeyValue::new(attr::LANGUAGE, "rust"),
             KeyValue::new(attr::RESOURCE_NAME, function_name.clone()),
             KeyValue::new(attr::SPAN_TYPE, "serverless"),
             KeyValue::new(attr::REQUEST_ID, request_id.clone()),
             KeyValue::new(attr::COLD_START, cold_start),
+            KeyValue::new(attr::ASYNC_INVOCATION, trigger.is_async),
             KeyValue::new(attr::FUNCTION_ARN, lambda_cx.invoked_function_arn.clone()),
             KeyValue::new(attr::FUNCTION_VERSION, lambda_cx.env_config.version.clone()),
             KeyValue::new(attr::FUNCTION_NAME, function_name.to_lowercase()),
             KeyValue::new(attr::RESOURCE_NAMES, function_name.clone()),
             KeyValue::new(attr::DD_ORIGIN, "lambda"),
         ];
+        if let Some(ref source) = trigger.event_source {
+            attrs.push(KeyValue::new(
+                attr::FUNCTION_TRIGGER_EVENT_SOURCE,
+                source.clone(),
+            ));
+        }
+        if let Some(ref arn) = trigger.event_source_arn {
+            attrs.push(KeyValue::new(
+                attr::FUNCTION_TRIGGER_EVENT_SOURCE_ARN,
+                arn.clone(),
+            ));
+        }
         builder.attributes = Some(attrs);
 
-        let span = tracer.build_with_context(builder, &parent_cx);
-        let cx = parent_cx.with_span(span);
+        let span = tracer.build_with_context(builder, &effective_cx);
+        let cx = effective_cx.with_span(span);
 
         Self { cx, request_id }
     }
@@ -90,21 +115,49 @@ impl LambdaSpan {
 
 /// Owns the full lifecycle of a single Lambda invocation's tracing state.
 ///
-/// Holds the root span created for the handler call.
+/// Holds the root span and all inferred spans created from the trigger payload.
 /// Call [`start`](Self::start) before the handler, then [`finish`](Self::finish) after.
 pub(crate) struct Invocation {
     /// The `aws.lambda` root span for this invocation.
     lambda_span: LambdaSpan,
+    /// Inferred spans derived from the trigger payload (e.g., SQS, SNS).
+    /// May be empty when the payload has no recognisable trigger.
+    inferred_spans: InferredSpanScope,
+    /// Wall-clock time at invocation start, used to compute inferred span durations.
+    started_at: SystemTime,
 }
 
 impl Invocation {
     pub(crate) fn start(
         tracer: &SdkTracer,
+        inferrer: &SpanInferrer,
+        payload: &str,
         lambda_cx: &lambda_runtime::Context,
         cold_start: bool,
     ) -> Self {
-        let lambda_span = LambdaSpan::start(tracer, lambda_cx, cold_start);
-        Self { lambda_span }
+        // Capture the start time before any trigger extraction or span creation, so async
+        // inferred spans (which end at invocation start) measure the true propagation delay
+        // and do not include local parsing/instrumentation overhead.
+        let started_at = SystemTime::now();
+        let extraction = extract_trigger(inferrer, payload);
+        let inferred_spans = InferredSpanScope::start(
+            tracer,
+            &extraction.upstream_cx,
+            &extraction.inference_result,
+        );
+        let trigger = TriggerContext {
+            parent_cx: inferred_spans.innermost_context(&extraction.upstream_cx),
+            is_async: extraction.is_async,
+            event_source: extraction.event_source,
+            event_source_arn: extraction.event_source_arn,
+        };
+        let lambda_span = LambdaSpan::start(tracer, &trigger, lambda_cx, cold_start);
+
+        Self {
+            lambda_span,
+            inferred_spans,
+            started_at,
+        }
     }
 
     /// Returns the OTel context to use as the active context during handler execution.
@@ -117,7 +170,7 @@ impl Invocation {
         self.lambda_span.cx.clone()
     }
 
-    /// Records any handler error and ends the root span.
+    /// Records any handler error and ends all spans.
     ///
     /// The result is returned unchanged; this method only has side effects
     /// (error attributes, span end times).
@@ -125,17 +178,29 @@ impl Invocation {
     where
         Err: std::fmt::Display,
     {
+        let invocation_end = SystemTime::now();
+
         if let Err(ref err) = result {
             self.lambda_span.set_error(err);
         }
-        self.lambda_span.finish();
+        self.finish_spans(invocation_end);
         result
+    }
+
+    /// Ends all spans in the correct order: inferred spans first, then the root span.
+    ///
+    /// Inferred spans must be ended before the root span so that timing relationships
+    /// are correct in the Datadog backend.
+    fn finish_spans(self, invocation_end: SystemTime) {
+        self.inferred_spans.end(self.started_at, invocation_end);
+        self.lambda_span.finish();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::span_inferrer::TriggerContext;
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceFlags, TraceId, TraceState, TracerProvider as _,
     };
@@ -159,6 +224,15 @@ mod tests {
         cx
     }
 
+    fn test_trigger() -> TriggerContext {
+        TriggerContext {
+            parent_cx: Context::current(),
+            is_async: false,
+            event_source: None,
+            event_source_arn: None,
+        }
+    }
+
     fn find_attr<'a>(attrs: &'a [KeyValue], key: &str) -> Option<&'a Value> {
         attrs
             .iter()
@@ -170,14 +244,53 @@ mod tests {
         exporter.get_finished_spans().unwrap()
     }
 
+    /// An SQS event payload carrying Datadog trace propagation headers. SQS triggers use
+    /// asynchronous invocation semantics, so the inferred `aws.sqs` span ends at invocation
+    /// start.
+    fn sqs_async_payload() -> String {
+        serde_json::json!({
+            "Records": [{
+                "messageId": "msg-001",
+                "receiptHandle": "receipt-001",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:123456789:test-queue",
+                "awsRegion": "us-east-1",
+                "body": "hello",
+                "md5OfBody": "d8e8fca2dc0f896fd7cb4cb0031ba249",
+                "attributes": {
+                    "SentTimestamp": "1718444400000",
+                    "ApproximateFirstReceiveTimestamp": "1718444400100",
+                    "ApproximateReceiveCount": "1",
+                    "SenderId": "AIDAIENQZJOLO23YVJ4VO"
+                },
+                "messageAttributes": {
+                    "_datadog": {
+                        "stringValue": serde_json::to_string(&serde_json::json!({
+                            "x-datadog-trace-id": "12345",
+                            "x-datadog-parent-id": "67890",
+                            "x-datadog-sampling-priority": "1"
+                        }))
+                        .unwrap(),
+                        "dataType": "String"
+                    }
+                }
+            }]
+        })
+        .to_string()
+    }
+
     #[test]
     fn sets_expected_attributes_on_root_span() {
         let (provider, exporter) = test_provider();
         let tracer = provider.tracer("test");
 
         let lambda_cx = test_lambda_cx();
+        let trigger = TriggerContext {
+            is_async: true,
+            ..test_trigger()
+        };
 
-        let span = LambdaSpan::start(&tracer, &lambda_cx, true);
+        let span = LambdaSpan::start(&tracer, &trigger, &lambda_cx, true);
         span.finish();
         provider.force_flush().unwrap();
 
@@ -207,6 +320,10 @@ mod tests {
             Some(&Value::String("my-function".into()))
         );
         assert_eq!(find_attr(attrs, "cold_start"), Some(&Value::Bool(true)));
+        assert_eq!(
+            find_attr(attrs, "async_invocation"),
+            Some(&Value::Bool(true))
+        );
     }
 
     #[test]
@@ -222,11 +339,13 @@ mod tests {
             true,
             TraceState::default(),
         );
-        let _guard = Context::current()
-            .with_remote_span_context(parent_sc)
-            .attach();
+        let parent_cx = Context::current().with_remote_span_context(parent_sc);
+        let trigger = TriggerContext {
+            parent_cx,
+            ..test_trigger()
+        };
 
-        let span = LambdaSpan::start(&tracer, &test_lambda_cx(), false);
+        let span = LambdaSpan::start(&tracer, &trigger, &test_lambda_cx(), false);
         assert_eq!(span.cx.span().span_context().trace_id(), trace_id);
     }
 
@@ -234,7 +353,14 @@ mod tests {
     async fn error_handler_sets_error_attributes() {
         let (provider, exporter) = test_provider();
         let invocation = Invocation {
-            lambda_span: LambdaSpan::start(&provider.tracer("test"), &test_lambda_cx(), false),
+            lambda_span: LambdaSpan::start(
+                &provider.tracer("test"),
+                &test_trigger(),
+                &test_lambda_cx(),
+                false,
+            ),
+            inferred_spans: InferredSpanScope::empty(),
+            started_at: SystemTime::now(),
         };
 
         let _: Result<(), String> = invocation.finish(Err::<(), String>("boom".to_string()));
@@ -253,7 +379,14 @@ mod tests {
     async fn successful_handler_sets_no_error_attributes() {
         let (provider, exporter) = test_provider();
         let invocation = Invocation {
-            lambda_span: LambdaSpan::start(&provider.tracer("test"), &test_lambda_cx(), false),
+            lambda_span: LambdaSpan::start(
+                &provider.tracer("test"),
+                &test_trigger(),
+                &test_lambda_cx(),
+                false,
+            ),
+            inferred_spans: InferredSpanScope::empty(),
+            started_at: SystemTime::now(),
         };
 
         let _: Result<(), String> = invocation.finish(Ok(()));
@@ -263,5 +396,51 @@ mod tests {
         let attrs = &spans[0].attributes;
         assert!(find_attr(attrs, "error").is_none());
         assert!(find_attr(attrs, "error.message").is_none());
+    }
+
+    #[test]
+    fn start_invocation_materializes_inferred_spans_for_sqs_events() {
+        let (provider, _) = test_provider();
+        let payload = sqs_async_payload();
+
+        let inferrer = crate::span_inferrer::build_inferrer();
+        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        assert!(invocation
+            .handler_context()
+            .span()
+            .span_context()
+            .is_valid());
+        assert!(!invocation.inferred_spans.is_empty());
+    }
+
+    #[test]
+    fn async_inferred_span_ends_before_root_span_starts() {
+        let (provider, exporter) = test_provider();
+        let payload = sqs_async_payload();
+
+        let inferrer = crate::span_inferrer::build_inferrer();
+        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let _: Result<(), String> = invocation.finish(Ok(()));
+        provider.force_flush().unwrap();
+
+        let spans = finished_spans(&exporter);
+        let root = spans
+            .iter()
+            .find(|s| s.name.as_ref() == ROOT_SPAN_NAME)
+            .expect("root span");
+        let inferred = spans
+            .iter()
+            .find(|s| s.name.as_ref() == "aws.sqs")
+            .expect("inferred sqs span");
+
+        assert!(
+            inferred.end_time < root.start_time,
+            "async inferred span must end before the root span starts: \
+             inferred end {:?}, root start {:?}",
+            inferred.end_time,
+            root.start_time
+        );
     }
 }
