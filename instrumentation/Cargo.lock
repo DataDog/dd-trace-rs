@@ -963,7 +963,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-inferrer"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=david.ogbureke%2Flibdd-trace-inferrer#3d602313b31724e8d287e0c6a22d29919374998e"
+source = "git+https://github.com/DataDog/libdatadog?branch=ygree%2Flibdd-trace-inferrer#a85ddcea99b4fb0fa34c355f37ae85d846e1f768"
 dependencies = [
  "base64 0.22.1",
  "chrono",
