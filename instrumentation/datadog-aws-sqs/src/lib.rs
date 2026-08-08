@@ -52,6 +52,7 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, Context, KeyValue};
 use serde::Deserialize;
+use serde_json::Value;
 
 use datadog_aws_core::{
     attribute_keys::{
@@ -100,8 +101,9 @@ impl ConfigExt for aws_sdk_sqs::config::Builder {
 /// Extracts an OpenTelemetry context from an SQS message.
 ///
 /// Context is read from the SQS `_datadog` message attribute when present, from the
-/// `_datadog` attribute inside an SNS notification envelope in the message body, or
-/// from the `_datadog` field inside the `detail` object of an EventBridge envelope.
+/// `_datadog` attribute inside an SNS notification envelope in the message body,
+/// from the `_datadog` field inside the `detail` object of an EventBridge envelope,
+/// or from an EventBridge event inside an SNS notification's `Message` field.
 ///
 /// Returns `None` when the message does not contain a valid Datadog propagation attribute.
 pub fn extract_context(message: &Message) -> Option<Context> {
@@ -154,13 +156,14 @@ fn trace_headers_from_sqs_message_attribute(
 
 fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, String>> {
     let body = message.body()?;
-    if !body.contains(DATADOG_ATTRIBUTE_KEY) || !body.contains("\"MessageAttributes\"") {
+    if !body.contains(DATADOG_ATTRIBUTE_KEY)
+        || (!body.contains("\"MessageAttributes\"") && !body.contains("\"Message\""))
+    {
         return None;
     }
 
-    let datadog_attr = match sns_envelope_datadog_attribute(body) {
-        Ok(Some(datadog_attr)) => datadog_attr,
-        Ok(None) => return None,
+    let envelope = match sns_envelope(body) {
+        Ok(envelope) => envelope,
         Err(err) => {
             tracing::debug!(
                 name: "Sqs.Extract.SnsEnvelopeParseFailed",
@@ -171,6 +174,25 @@ fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, 
         }
     };
 
+    let datadog_attr = match envelope
+        .message_attributes
+        .and_then(|attributes| attributes.datadog)
+    {
+        Some(datadog_attr) => datadog_attr,
+        None => {
+            return envelope
+                .message
+                .as_deref()
+                .and_then(trace_headers_from_eventbridge_body);
+        }
+    };
+
+    trace_headers_from_sns_datadog_attribute(datadog_attr)
+}
+
+fn trace_headers_from_sns_datadog_attribute(
+    datadog_attr: SnsEnvelopeDatadogAttribute<'_>,
+) -> Option<HashMap<String, String>> {
     match datadog_attr.data_type.as_ref() {
         "Binary" => {
             let bytes = match BASE64_STANDARD.decode(datadog_attr.value.as_ref()) {
@@ -204,10 +226,27 @@ fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, 
     }
 }
 
+fn trace_headers_from_eventbridge_body(body: &str) -> Option<HashMap<String, String>> {
+    match eventbridge_envelope_datadog_attribute(body) {
+        Ok(Some(trace_headers)) => Some(trace_headers),
+        Ok(None) => None,
+        Err(err) => {
+            tracing::debug!(
+                name: "Sqs.Extract.EventBridgeEnvelopeParseFailed",
+                reason = %err,
+                action = "context extraction skipped",
+            );
+            None
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct SnsEnvelope<'a> {
     #[serde(rename = "MessageAttributes", borrow)]
     message_attributes: Option<SnsMessageAttributes<'a>>,
+    #[serde(rename = "Message", borrow)]
+    message: Option<Cow<'a, str>>,
 }
 
 #[derive(Deserialize)]
@@ -224,13 +263,8 @@ struct SnsEnvelopeDatadogAttribute<'a> {
     value: Cow<'a, str>,
 }
 
-fn sns_envelope_datadog_attribute(
-    body: &str,
-) -> Result<Option<SnsEnvelopeDatadogAttribute<'_>>, serde_json::Error> {
-    let envelope: SnsEnvelope<'_> = serde_json::from_str(body)?;
-    Ok(envelope
-        .message_attributes
-        .and_then(|attributes| attributes.datadog))
+fn sns_envelope(body: &str) -> Result<SnsEnvelope<'_>, serde_json::Error> {
+    serde_json::from_str(body)
 }
 
 fn trace_headers_from_eventbridge_envelope(message: &Message) -> Option<HashMap<String, String>> {
@@ -239,36 +273,64 @@ fn trace_headers_from_eventbridge_envelope(message: &Message) -> Option<HashMap<
         return None;
     }
 
-    match eventbridge_envelope_datadog_attribute(body) {
-        Ok(Some(trace_headers)) => Some(trace_headers),
-        Ok(None) => None,
-        Err(err) => {
-            tracing::debug!(
-                name: "Sqs.Extract.EventBridgeEnvelopeParseFailed",
-                reason = %err,
-                action = "context extraction skipped",
-            );
-            None
-        }
-    }
+    trace_headers_from_eventbridge_body(body)
 }
 
 #[derive(Deserialize)]
 struct EventBridgeEnvelope {
-    detail: Option<EventBridgeDetail>,
-}
-
-#[derive(Deserialize)]
-struct EventBridgeDetail {
-    #[serde(rename = "_datadog")]
-    datadog: Option<HashMap<String, String>>,
+    detail: Option<Value>,
 }
 
 fn eventbridge_envelope_datadog_attribute(
     body: &str,
 ) -> Result<Option<HashMap<String, String>>, serde_json::Error> {
     let envelope: EventBridgeEnvelope = serde_json::from_str(body)?;
-    Ok(envelope.detail.and_then(|detail| detail.datadog))
+    Ok(envelope.detail.as_ref().and_then(trace_headers_from_detail))
+}
+
+fn trace_headers_from_detail(detail: &Value) -> Option<HashMap<String, String>> {
+    detail
+        .as_object()
+        .and_then(|detail| detail.get(DATADOG_ATTRIBUTE_KEY))
+        .and_then(trace_headers_from_datadog_value)
+}
+
+fn trace_headers_from_datadog_value(value: &Value) -> Option<HashMap<String, String>> {
+    match value {
+        Value::Object(_) => serde_json::from_value(value.clone()).ok(),
+        Value::String(json_or_base64) => parse_trace_headers_from_str_or_base64(
+            json_or_base64,
+            "Sqs.Extract.EventBridgeDatadogAttributeParseFailed",
+            "Sqs.Extract.EventBridgeDatadogBinaryAttributeParseFailed",
+        ),
+        _ => None,
+    }
+}
+
+fn parse_trace_headers_from_str_or_base64(
+    json_or_base64: &str,
+    json_failure_name: &'static str,
+    binary_failure_name: &'static str,
+) -> Option<HashMap<String, String>> {
+    match serde_json::from_str(json_or_base64) {
+        Ok(headers) => Some(headers),
+        Err(json_err) => match BASE64_STANDARD.decode(json_or_base64) {
+            Ok(bytes) => parse_trace_headers_from_slice(&bytes, binary_failure_name),
+            Err(base64_err) => {
+                tracing::debug!(
+                    name = json_failure_name,
+                    reason = %json_err,
+                    action = "context extraction skipped",
+                );
+                tracing::debug!(
+                    name = binary_failure_name,
+                    reason = %base64_err,
+                    action = "context extraction skipped",
+                );
+                None
+            }
+        },
+    }
 }
 
 fn parse_trace_headers_from_str(
@@ -975,6 +1037,28 @@ mod tests {
     }
 
     #[test]
+    fn extract_context_reads_eventbridge_detail_datadog_attribute_inside_sns_message() {
+        let eventbridge_body = eventbridge_envelope_body(serde_json::json!({
+            "message": "hello through eventbridge sns",
+            "_datadog": {
+                "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+            }
+        }));
+        let sns_body = serde_json::json!({
+            "Type": "Notification",
+            "MessageId": "sns-message-id",
+            "TopicArn": "arn:aws:sns:us-east-1:123456789012:MyTopic",
+            "Message": eventbridge_body
+        })
+        .to_string();
+        let message = Message::builder().body(sns_body).build();
+        let propagator = trace_context_propagator();
+        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
     fn extract_context_reads_eventbridge_detail_datadog_attribute() {
         let message = Message::builder()
             .body(eventbridge_envelope_body(serde_json::json!({
@@ -982,6 +1066,26 @@ mod tests {
                 "_datadog": {
                     "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
                 }
+            })))
+            .build();
+        let propagator = trace_context_propagator();
+        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+
+        assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_reads_eventbridge_detail_base64_datadog_attribute() {
+        let datadog_attr = BASE64_STANDARD.encode(
+            serde_json::to_vec(&serde_json::json!({
+                "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+            }))
+            .unwrap(),
+        );
+        let message = Message::builder()
+            .body(eventbridge_envelope_body(serde_json::json!({
+                "message": "hello through sns eventbridge pipe",
+                "_datadog": datadog_attr
             })))
             .build();
         let propagator = trace_context_propagator();

@@ -46,6 +46,21 @@ fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> St
     .to_string()
 }
 
+fn eventbridge_envelope_body(detail: impl Into<serde_json::Value>) -> String {
+    serde_json::json!({
+        "version": "0",
+        "id": "event-id",
+        "detail-type": "SampleMessage",
+        "source": "rust-sqs-consumer-sample",
+        "account": "123456789012",
+        "time": "2026-08-04T00:00:00Z",
+        "region": "us-east-1",
+        "resources": [],
+        "detail": detail.into()
+    })
+    .to_string()
+}
+
 #[tokio::test]
 async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     let response_body = serde_json::json!({
@@ -310,6 +325,122 @@ async fn sqs_receive_message_links_span_to_sns_envelope_context() {
                 "MessageId": "sqs-message-id",
                 "ReceiptHandle": "receipt-handle",
                 "Body": sns_body
+            }
+        ]
+    })
+    .to_string();
+
+    let harness = TestHarness::ok_with_body(response_body).await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let output = client
+        .receive_message()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.messages().len(), 1);
+    let extracted_context = datadog_aws_sqs::extract_context(&output.messages()[0]).unwrap();
+    assert_eq!(
+        extracted_context.span().span_context(),
+        &message_span_context
+    );
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].links.links.len(), 1);
+    assert_eq!(spans[0].links.links[0].span_context, message_span_context);
+    assert_eq!(
+        spans[0].links.links[0].attributes,
+        vec![KeyValue::new(MESSAGING_MESSAGE_ID, "sqs-message-id")]
+    );
+}
+
+#[tokio::test]
+async fn sqs_receive_message_links_span_to_eventbridge_inside_sns_message_context() {
+    let message_span_context = SpanContext::new(
+        TraceId::from_hex("11111111111111111111111111111111").unwrap(),
+        SpanId::from_hex("2222222222222222").unwrap(),
+        TraceFlags::SAMPLED,
+        true,
+        TraceState::NONE,
+    );
+    let eventbridge_body = eventbridge_envelope_body(serde_json::json!({
+        "message": "hello through eventbridge sns",
+        "_datadog": {
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+        }
+    }));
+    let sns_body = serde_json::json!({
+        "Type": "Notification",
+        "MessageId": "sns-message-id",
+        "TopicArn": "arn:aws:sns:us-east-1:123456789012:MyTopic",
+        "Timestamp": "2026-08-04T00:00:01.000Z",
+        "Message": eventbridge_body
+    })
+    .to_string();
+    let response_body = serde_json::json!({
+        "Messages": [
+            {
+                "MessageId": "sqs-message-id",
+                "ReceiptHandle": "receipt-handle",
+                "Body": sns_body
+            }
+        ]
+    })
+    .to_string();
+
+    let harness = TestHarness::ok_with_body(response_body).await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let output = client
+        .receive_message()
+        .queue_url(QUEUE_URL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(output.messages().len(), 1);
+    let extracted_context = datadog_aws_sqs::extract_context(&output.messages()[0]).unwrap();
+    assert_eq!(
+        extracted_context.span().span_context(),
+        &message_span_context
+    );
+
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].links.links.len(), 1);
+    assert_eq!(spans[0].links.links[0].span_context, message_span_context);
+    assert_eq!(
+        spans[0].links.links[0].attributes,
+        vec![KeyValue::new(MESSAGING_MESSAGE_ID, "sqs-message-id")]
+    );
+}
+
+#[tokio::test]
+async fn sqs_receive_message_links_span_to_sns_eventbridge_pipe_context() {
+    let message_span_context = SpanContext::new(
+        TraceId::from_hex("11111111111111111111111111111111").unwrap(),
+        SpanId::from_hex("2222222222222222").unwrap(),
+        TraceFlags::SAMPLED,
+        true,
+        TraceState::NONE,
+    );
+    let datadog_attr = BASE64_STANDARD.encode(
+        serde_json::to_vec(&serde_json::json!({
+            "traceparent": "00-11111111111111111111111111111111-2222222222222222-01"
+        }))
+        .unwrap(),
+    );
+    let eventbridge_body = eventbridge_envelope_body(serde_json::json!({
+        "message": "test",
+        "_datadog": datadog_attr
+    }));
+    let response_body = serde_json::json!({
+        "Messages": [
+            {
+                "MessageId": "sqs-message-id",
+                "ReceiptHandle": "receipt-handle",
+                "Body": eventbridge_body
             }
         ]
     })
