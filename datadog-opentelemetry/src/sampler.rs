@@ -138,7 +138,7 @@ impl ShouldSample for Sampler {
             result.get_trace_root_sampling_info()
         {
             let inbound_ot = parent_context
-                .and_then(|context| context.get::<DatadogExtractData>())
+                .and_then(|c| c.get::<DatadogExtractData>())
                 .and_then(|data| data.ot.clone());
             // If the parent was deferred, we try to merge propagation tags with what we extracted
             let (mut tags, origin) = if is_parent_deferred {
@@ -146,7 +146,7 @@ impl ShouldSample for Sampler {
                     internal_tags,
                     origin,
                     ..
-                }) = parent_context.and_then(|context| context.get())
+                }) = parent_context.and_then(|c| c.get())
                 {
                     (Some(internal_tags.clone()), origin.clone())
                 } else {

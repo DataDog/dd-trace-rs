@@ -151,7 +151,7 @@ impl DatadogPropagator {
             Some(ot) => Some(ot),
             None if !is_trace_registered => cx
                 .get::<DatadogExtractData>()
-                .and_then(|extract_data| extract_data.ot.clone()),
+                .and_then(|data| data.ot.clone()),
             None => None,
         };
         let ot = ot.as_deref().and_then(ot_sanitize);

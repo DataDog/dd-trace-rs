@@ -169,12 +169,9 @@ async fn test_sampling_extraction() {
                 }
             }
             let tracestate = injected.get("tracestate").unwrap();
-            // The `dd=` member is the first, comma-separated tracestate member.
             let dd_member = tracestate
                 .split(',')
-                .next()
-                .unwrap()
-                .strip_prefix("dd=")
+                .find_map(|member| member.strip_prefix("dd="))
                 .unwrap();
             assert_subset(
                 dd_member.split(';').map(String::from),
