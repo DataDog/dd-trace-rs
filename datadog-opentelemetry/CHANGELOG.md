@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (Aug 13, 2026)
+
+- Only error when no extractor recovers a real trace [SVLS-9550] in https://github.com/DataDog/dd-trace-rs/pull/284
+
 ## 0.5.0 (Jul 10, 2026)
 
 - Upgrade opentelemetry to 0.32 in https://github.com/DataDog/dd-trace-rs/pull/270
