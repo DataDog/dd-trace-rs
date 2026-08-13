@@ -236,9 +236,10 @@
 //! * `logs` enabled the log provider
 //! * `logs-grpc` enabled the log provider, with GRPC OTLP export
 //! * `logs-http` enabled the log provider, with HTTP OTLP export
-//! * `memory-profiling` enables sampled allocation events for out-of-process profilers to collect,
+//! * Experimental features
+//!     * `memory-profiling` enables sampled allocation events for out-of-process profilers to collect,
 //!   including live-heap (retained) tracking
-//! * `memory-profiling-alloc-only` is the same but with live-heap tracking compiled out (allocation
+//!     * `memory-profiling-alloc-only` is the same but with live-heap tracking compiled out (allocation
 //!   profiling only, lower overhead); enable this *or* `memory-profiling`, not both
 
 #![deny(missing_docs)]
