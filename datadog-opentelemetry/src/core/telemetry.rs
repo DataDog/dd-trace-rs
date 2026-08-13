@@ -136,7 +136,7 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
 }
 
 struct TelemetryHandleWrapper {
-    handle: TelemetryWorkerHandle,
+    handle: TelemetryWorkerHandle<libdd_capabilities_impl::NativeCapabilities>,
     metrics_context: [OnceLock<ContextKey>; TELEMETRY_METRICS_COUNT],
 }
 

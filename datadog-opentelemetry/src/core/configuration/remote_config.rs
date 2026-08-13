@@ -390,18 +390,18 @@ impl RemoteConfigClientWorker {
         let target = build_target(&self.config);
         let runtime_id = self.config.runtime_id().to_string();
 
-        let agentless_enabled = self.config.agentless_rc_endpoint().is_some();
+        let agentless = self
+            .config
+            .agentless_rc_endpoint()
+            .is_some()
+            .then(|| AgentlessConfig::new(HOSTNAME.clone(), &self.endpoint).ok())
+            .flatten();
         let options = ConfigOptions {
             invariants: ConfigInvariants {
                 language: self.config.language().to_string(),
                 tracer_version: self.config.tracer_version().to_string(),
                 endpoint: self.endpoint.clone(),
-                agentless: agentless_enabled.then(|| AgentlessConfig {
-                    hostname: HOSTNAME.clone(),
-                    config_root_override_path: None,
-                    director_root_override_path: None,
-                    agent_uuid: None,
-                }),
+                agentless,
             },
             products: vec![
                 RemoteConfigProduct::ApmTracing,
@@ -417,14 +417,21 @@ impl RemoteConfigClientWorker {
             ],
         };
 
-        let mut fetcher =
-            match SingleChangesFetcher::new(storage, target, runtime_id, options).await {
-                Ok(f) => f,
-                Err(e_) => {
-                    crate::dd_debug!("RemoteConfigClient: init failed {}", e_);
-                    return;
-                }
-            };
+        let mut fetcher = match SingleChangesFetcher::new(
+            storage,
+            target,
+            runtime_id,
+            options,
+            libdd_capabilities_impl::NativeHttpClient::new_without_connection_pooling(),
+        )
+        .await
+        {
+            Ok(f) => f,
+            Err(e_) => {
+                crate::dd_debug!("RemoteConfigClient: init failed {}", e_);
+                return;
+            }
+        };
 
         loop {
             fetcher.set_extra_services(self.config.get_extra_services());
@@ -477,34 +484,28 @@ fn build_endpoint(config: &Config) -> Result<Endpoint, RemoteConfigClientError> 
 /// Translate `Config` identity (service / env / version / global tags) into the
 /// [`Target`] used by `libdd-remote-config` for server-side scoping.
 fn build_target(config: &Config) -> Target {
-    Target {
-        service: config.service().to_string(),
-        env: config.env().unwrap_or_default().to_string(),
-        app_version: config.version().unwrap_or_default().to_string(),
-        tags: convert_global_tags(config),
-        process_tags: vec![],
-    }
+    Target::new(
+        config.service().to_string(),
+        config.env().unwrap_or_default().to_string(),
+        config.version().unwrap_or_default().to_string(),
+        convert_global_tags(config),
+        vec![],
+    )
 }
 
 /// Convert the tracer's `global_tags` iterator into `libdd-common` [`Tag`]
 /// values.
-fn convert_global_tags(config: &Config) -> Vec<Tag> {
+fn convert_global_tags(config: &Config) -> Vec<String> {
     config
         .global_tags()
-        .filter_map(|(key, value)| match Tag::new(key, value) {
-            Ok(tag) => Some(tag),
-            Err(e) => {
-                crate::dd_debug!(
-                    "RemoteConfigClient: skipping invalid global tag {key}:{value}: {e}"
-                );
-                None
-            }
-        })
+        .map(|(key, value)| format!("{key}:{value}"))
         .collect()
 }
 
 type StoredApmFile =
     libdd_remote_config::file_storage::RawFile<anyhow::Result<Option<RemoteConfigParsed>>>;
+
+type Fetcher = SingleChangesFetcher<ParsedFileStorage, libdd_capabilities_impl::NativeHttpClient>;
 
 /// Dispatcher invoked once per fetcher poll. Routes each [`Change`] to the
 /// matching application path and reports the apply state back to the fetcher
@@ -512,7 +513,7 @@ type StoredApmFile =
 fn apply_changes(
     changes: Vec<Change<Arc<StoredApmFile>, anyhow::Result<Option<RemoteConfigParsed>>>>,
     config: &Arc<Config>,
-    fetcher: &SingleChangesFetcher<ParsedFileStorage>,
+    fetcher: &Fetcher,
 ) {
     for change in changes {
         match change {
@@ -525,7 +526,7 @@ fn apply_changes(
 fn apply_one(
     file: &Arc<StoredApmFile>,
     config: &Arc<Config>,
-    fetcher: &SingleChangesFetcher<ParsedFileStorage>,
+    fetcher: &Fetcher,
 ) {
     let contents = file.contents();
     let state = match &*contents {
