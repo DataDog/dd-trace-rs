@@ -1075,9 +1075,8 @@ mod test {
         );
     }
 
-    /// Builds a minimal local-root `InjectSpanContext` carrying `ot`, injects
-    /// it, and returns the emitted `tracestate` string. Used by the OTel
-    /// consistent-probability emission tests (APMAPI-2181, system-tests #7372).
+    /// Builds a local-root `InjectSpanContext`, injects it, and returns its
+    /// emitted `tracestate` string.
     fn inject_with_ot(trace_id: u128, ot: Option<&str>) -> String {
         let mut tags = HashMap::new();
         let mut context = InjectSpanContext {

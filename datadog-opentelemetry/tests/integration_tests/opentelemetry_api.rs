@@ -181,9 +181,8 @@ async fn test_sampling_extraction() {
                     format!("p:{span_id:016x}"),
                 ],
             );
-            // A probability sampling rule (rate 1.0) emits the OTel `ot`
-            // consistent-probability member (APMAPI-2181): rv derived from the
-            // trace id, th:0 for rate 1.0 ("keep all").
+            // A probability sampling rule with rate 1.0 emits an OTel `ot`
+            // member with `rv` from the trace ID and `th:0`.
             assert!(
                 tracestate
                     .split(',')
