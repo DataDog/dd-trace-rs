@@ -236,10 +236,12 @@
 //! * `logs` enabled the log provider
 //! * `logs-grpc` enabled the log provider, with GRPC OTLP export
 //! * `logs-http` enabled the log provider, with HTTP OTLP export
-//! * `memory-profiling` enables sampled allocation events for out-of-process profilers to collect,
-//!   including live-heap (retained) tracking
-//! * `memory-profiling-alloc-only` is the same but with live-heap tracking compiled out (allocation
-//!   profiling only, lower overhead); enable this *or* `memory-profiling`, not both
+//! * Experimental features
+//!     * `memory-profiling` enables sampled allocation events for out-of-process profilers to
+//!       collect, including live-heap (retained) tracking
+//!     * `memory-profiling-alloc-only` is the same but with live-heap tracking compiled out
+//!       (allocation profiling only, lower overhead).  `memory-profiling` is a superset of this
+//!       feature flag so you don't need to enable both
 
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
