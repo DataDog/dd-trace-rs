@@ -27,8 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write # Enable OIDC
-      contents: write
-      pull-requests: write
+      contents: read
     env:
       # Deliberately above the crate's `rust-version` (1.87.0): cargo-release 1.1.2 needs >= 1.91
       RUST_VERSION: 1.92.0
