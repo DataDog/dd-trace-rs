@@ -1,0 +1,180 @@
+name: Release - Open a release PR
+
+# Opens a `chore(release): proposal vX.Y.Z` pull request that bumps the crate
+# version and updates all version references (docs + changelog). It does NOT
+# tag or publish: after this PR is merged, tag the commit to trigger publishing
+# (see docs/releasing.md and .github/workflows/publish.yaml).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver level (major | minor | patch | rc | beta | alpha) or an exact version (e.g. 0.6.0 or 0.6.0-rc.1)"
+        required: true
+        type: string
+      base-branch:
+        description: "Branch to release from and target the PR at. Use a hotfix/release branch to cut a hotfix from an older line."
+        required: false
+        type: string
+        default: main
+
+concurrency:
+  group: release-proposal-dispatch-group
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # Enable OIDC
+      contents: read
+    env:
+      # Deliberately above the crate's `rust-version` (1.87.0): cargo-release 1.1.2 needs >= 1.91
+      RUST_VERSION: 1.92.0
+    steps:
+      - uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
+        id: octo-sts
+        with:
+          scope: DataDog/dd-trace-rs
+          policy: self.write.pr
+
+      - name: "Checkout sources"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # 4.2.2
+        with:
+          # Release from (and later target the PR at) the chosen base branch.
+          ref: ${{ inputs.base-branch }}
+          # Full history + tags so prepare-release.sh can list commits since the last release tag.
+          fetch-depth: 0
+
+      # nightly is required by prepare-release.sh's rustdoc check (RUSTDOCFLAGS="--cfg docsrs").
+      - name: "Install Rust toolchains"
+        shell: bash
+        run: |
+          rustup install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup toolchain install nightly --profile minimal
+
+      - name: "Install cargo-release"
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # 2.3.1
+        with:
+          tool: cargo-release@1.1.2
+
+      - name: "Install git-cliff"
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # 2.3.1
+        with:
+          tool: git-cliff@2.13.1
+
+      - name: "Prepare release proposal"
+        id: prepare
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+        run: |
+          # The script comes from base-branch, not from this workflow's ref, so a hotfix line cut
+          # from a tag that predates the release automation will not have it.
+          if [ ! -x ./scripts/prepare-release.sh ]; then
+            echo "::error::'${BASE_BRANCH}' has no scripts/prepare-release.sh. Backport the release" \
+                 "automation to that branch first (see docs/releasing.md, 'Cutting a hotfix')."
+            exit 1
+          fi
+          # No --no-codex-check: the script only prompts when stdin is a TTY, so in CI it just logs a
+          # reminder. Not passing it keeps this working with any branch whose script predates the flag.
+          ./scripts/prepare-release.sh --base-branch "${BASE_BRANCH}" "${VERSION}"
+
+      - name: Configure Git author
+        env:
+          GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          # GET /user is not allowed with installation tokens; use GET /users/ACTOR (who triggered the workflow).
+          GITHUB_USER_RESPONSE=$(curl -s -H "Authorization: token ${GH_TOKEN}" "https://api.github.com/users/${GITHUB_ACTOR}")
+          GIT_USER_NAME=$(echo "${GITHUB_USER_RESPONSE}" | jq -r '.login // empty')
+          GIT_USER_ID=$(echo "${GITHUB_USER_RESPONSE}" | jq -r '.id // empty')
+          if [[ -z "$GIT_USER_NAME" ]]; then
+            GIT_USER_NAME="${GITHUB_ACTOR}"
+            GIT_USER_EMAIL="${GITHUB_ACTOR}@users.noreply.github.com"
+          else
+            GIT_USER_EMAIL="${GIT_USER_ID}+${GIT_USER_NAME}@users.noreply.github.com"
+          fi
+          echo "GIT_USER_NAME: $GIT_USER_NAME"
+          echo "GIT_USER_EMAIL: $GIT_USER_EMAIL"
+          git config --global user.name "$GIT_USER_NAME"
+          git config --global user.email "$GIT_USER_EMAIL"
+
+      - name: "Create local release commit"
+        id: commit
+        shell: bash
+        env:
+          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
+        run: |
+          base_sha="$(git rev-parse HEAD)"
+
+          git add -A
+          git --no-pager diff --cached --stat
+          git commit -m "chore(release): proposal v${NEW_VERSION}"
+
+          # commit-headless expects the new commits oldest -> newest, space-separated.
+          commits="$(git log --reverse "${base_sha}".. --format='%H' | tr '\n' ' ' | xargs)"
+          {
+            echo "base_sha=${base_sha}"
+            echo "commits=${commits}"
+            echo "branch=release/proposal-v${NEW_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: "Fail if the proposal branch already exists"
+        shell: bash
+        env:
+          BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "${BRANCH}" >/dev/null 2>&1; then
+            echo "::error::Branch '${BRANCH}' already exists on origin. Delete it (or finish its proposal) before re-running."
+            exit 1
+          fi
+          echo "Branch '${BRANCH}' does not exist yet."
+
+      - name: "Push verified commit"
+        uses: DataDog/commit-headless@action/v2.0.3
+        with:
+          token: ${{ steps.octo-sts.outputs.token }}
+          branch: ${{ steps.commit.outputs.branch }}
+          head-sha: ${{ steps.commit.outputs.base_sha }}
+          create-branch: true
+          command: push
+          commits: "${{ steps.commit.outputs.commits }}"
+
+      - name: "Open proposal pull request"
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.octo-sts.outputs.token }}
+          NEW_VERSION: ${{ steps.prepare.outputs.new_version }}
+          PREV_VERSION: ${{ steps.prepare.outputs.prev_version }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          BASE_BRANCH: ${{ inputs.base-branch }}
+        run: |
+          body="$(cat <<EOF
+          Automated release proposal: bumps \`datadog-opentelemetry\` from v${PREV_VERSION} to v${NEW_VERSION}.
+
+          Generated by the **Release proposal** workflow. It bumps the workspace version,
+          updates version references in \`README.md\`, \`src/lib.rs\`, the bug-report template, and
+          the \`datadog-aws-lambda\` dependency pin, and opens a new \`## ${NEW_VERSION}\` changelog section.
+
+          ### Before merging
+          - [ ] Review the auto-populated \`## ${NEW_VERSION}\` changelog; prune to user-facing changes.
+          - [ ] Confirm the libdatadog dependencies are on their intended versions.
+          - [ ] Review the Codex Findings in Jira for new vulnerabilities since the last release:
+                https://datadoghq.atlassian.net/jira/software/c/projects/APMSP/boards/29727?quickFilter=32571
+          - [ ] Confirm README and rustdocs render correctly.
+
+          ### After merging
+          Tag the merge commit as \`datadog-opentelemetry-v${NEW_VERSION}\` and push it to trigger publishing.
+          EOF
+          )"
+
+          if ! gh pr create --base "${BASE_BRANCH}" --head "${BRANCH}" \
+                --title "chore(release): proposal v${NEW_VERSION}" \
+                --body "${body}"; then
+            echo "::error::Failed to open the proposal pull request for '${BRANCH}'. The branch was" \
+                 "pushed, so open the PR manually against '${BASE_BRANCH}', or delete the branch and re-run."
+            exit 1
+          fi
