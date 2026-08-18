@@ -1634,9 +1634,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-common"
-version = "5.1.0"
+version = "5.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59de587e652491cb19fd8b7d8e59901794ca56e3961c8c1b97707479d7fe7ec8"
+checksum = "350fb68fd76193dceecbadd8add17732f5f2ca0b0c7806d62da0bd110af53410"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1796,9 +1796,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "5.0.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc6c34dd818feb6a2c1de996017d2f8e3190615c62fa5513f3b9559bce727dfb"
+checksum = "e709eca79e8f161d915947dc5d83b23081f28ca7f6f1bb0abdb4d646a4e016da"
 dependencies = [
  "libdd-common",
  "lru",
