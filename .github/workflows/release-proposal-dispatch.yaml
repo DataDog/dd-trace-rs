@@ -32,7 +32,7 @@ jobs:
       # Deliberately above the crate's `rust-version` (1.87.0): cargo-release 1.1.2 needs >= 1.91
       RUST_VERSION: 1.92.0
     steps:
-      - name: "Validate base-branch is a trusted protected branch"
+      - name: "Validate base-branch requires reviewed pull requests"
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_BRANCH: ${{ inputs.base-branch }}
@@ -41,14 +41,13 @@ jobs:
             echo "::error::base-branch '${BASE_BRANCH}' is not a valid ref."
             exit 1
           fi
-          
           encoded="$(jq -rn --arg b "$BASE_BRANCH" '$b | @uri')"
-          protected="$(gh api "repos/${GITHUB_REPOSITORY}/branches/${encoded}" --jq '.protected' 2>/dev/null || echo error)"
-          if [ "$protected" != "true" ]; then
-            echo "::error::base-branch '${BASE_BRANCH}' is not an existing protected branch (got '${protected}'); refusing to run its code with a privileged token."
+          has_pr_rule="$(gh api "repos/${GITHUB_REPOSITORY}/rules/branches/${encoded}" --jq 'any(.[]?; .type == "pull_request")' 2>/dev/null || echo error)"
+          if [ "$has_pr_rule" != "true" ]; then
+            echo "::error::base-branch '${BASE_BRANCH}' does not require pull requests (no active 'pull_request' rule); refusing to run its code with a privileged token."
             exit 1
           fi
-          echo "base-branch '${BASE_BRANCH}' is a protected branch."
+          echo "base-branch '${BASE_BRANCH}' requires pull requests; treating it as trusted."
 
       - uses: DataDog/dd-octo-sts-action@acaa02eee7e3bb0839e4272dacb37b8f3b58ba80 # v1.0.3
         id: octo-sts
