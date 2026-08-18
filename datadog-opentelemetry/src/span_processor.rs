@@ -643,8 +643,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+        // Previously this called `DatadogExporter::force_flush`, which only notified the
+        // background worker and could return while a chunk was still queued. Drain pending
+        // spans (bounded by the force-flush timeout) so the export completes before returning.
+        // See APMSP-3915.
+        let timeout = self.config.trace_writer_force_flush_timeout();
         self.span_exporter
-            .force_flush()
+            .flush_and_drain(timeout)
             .map_err(|e| exporter_error_to_otel(&e, "force_flush"))
     }
 
