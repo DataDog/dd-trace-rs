@@ -13,7 +13,7 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-datadog-opentelemetry = { version = "0.4", path = "../../datadog-opentelemetry" }
+datadog-opentelemetry = { version = "0.5", path = "../../datadog-opentelemetry" }
 lambda_runtime = "0.13"
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
@@ -22,6 +22,6 @@ opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs"] 
 tracing = { workspace = true }
 
 [dev-dependencies]
-datadog-opentelemetry = { version = "0.4", path = "../../datadog-opentelemetry", features = ["test-utils"] }
+datadog-opentelemetry = { version = "0.5", path = "../../datadog-opentelemetry", features = ["test-utils"] }
 opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs", "testing"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

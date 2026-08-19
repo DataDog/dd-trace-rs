@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.4.0" }
+//! datadog-opentelemetry = { version = "0.5.1" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
@@ -236,6 +236,12 @@
 //! * `logs` enabled the log provider
 //! * `logs-grpc` enabled the log provider, with GRPC OTLP export
 //! * `logs-http` enabled the log provider, with HTTP OTLP export
+//! * Experimental features
+//!     * `memory-profiling` enables sampled allocation events for out-of-process profilers to
+//!       collect, including live-heap (retained) tracking
+//!     * `memory-profiling-alloc-only` is the same but with live-heap tracking compiled out
+//!       (allocation profiling only, lower overhead).  `memory-profiling` is a superset of this
+//!       feature flag so you don't need to enable both
 
 #![deny(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -245,6 +251,19 @@ pub(crate) mod core;
 // Public re-exports
 pub use core::configuration;
 pub use core::log;
+
+#[cfg(feature = "_memory-profiling")]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "memory-profiling", feature = "memory-profiling-alloc-only")))
+)]
+pub mod memory_profiling;
+#[cfg(feature = "_memory-profiling")]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "memory-profiling", feature = "memory-profiling-alloc-only")))
+)]
+pub use memory_profiling::memory_profiling;
 
 #[cfg(feature = "test-utils")]
 #[allow(missing_docs)]
@@ -291,9 +310,9 @@ pub(crate) mod sampling;
 mod span_processor;
 
 mod ddtrace_transform;
-#[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
+#[cfg(any(feature = "logs-grpc", feature = "logs-http", docsrs))]
 mod logs_reader;
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http", docsrs))]
 mod metrics_reader;
 mod otlp_utils;
 mod span_exporter;
