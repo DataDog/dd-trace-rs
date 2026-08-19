@@ -178,6 +178,11 @@ impl DatadogExporter {
         // `TraceExporterBuilder::build` drives async setup via `tokio::runtime::Runtime::block_on`,
         // which panics when called from inside an existing tokio runtime (e.g. a `#[tokio::test]`).
         // Run construction on a dedicated std thread so the builder is outside any caller context.
+        //
+        // The shared runtime is also built *inside* this thread (not on the caller's), so it never
+        // exists on the caller's thread: neither a build failure (dropped here) nor a spawn failure
+        // (no runtime created) can drop a tokio runtime inline on the caller — which would panic
+        // when `new` runs inside an existing runtime.
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("datadog-trace-init".into())
@@ -196,7 +201,7 @@ impl DatadogExporter {
             .expect("trace_buffer accessed after DatadogExporter::drop")
     }
 
-    fn shared_runtime(&self) -> &Arc<BasicRuntime> {
+    pub(crate) fn shared_runtime(&self) -> &Arc<BasicRuntime> {
         self.shared_runtime
             .as_ref()
             .expect("shared_runtime accessed after DatadogExporter::drop")
@@ -326,6 +331,15 @@ fn build_response_handler(agent_response_handler: Option<AgentResponseHandler>) 
     })
 }
 
+fn build_shared_runtime() -> Result<Arc<BasicRuntime>, DatadogExporterInitError> {
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
+    Ok(Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime))))
+}
+
 /// Drives trace-exporter construction on a dedicated std thread. `TraceExporterBuilder::build`
 /// runs async setup through `Runtime::block_on`, which panics when called from inside an existing
 /// tokio runtime — this function must therefore run on a fresh std thread.
@@ -333,12 +347,7 @@ fn build_on_dedicated_thread(
     config: Arc<Config>,
     response_handler: ResponseHandler,
 ) -> Result<DatadogExporter, DatadogExporterInitError> {
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
-    let shared_runtime = Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime)));
+    let shared_runtime = build_shared_runtime()?;
 
     let trace_exporter = build_trace_exporter(&config, &shared_runtime)
         .map_err(DatadogExporterInitError::TraceExporter)?;

@@ -3,16 +3,16 @@
 
 //! Remote Configuration client.
 //!
-//! Drives [`libdd_remote_config::fetch::SingleChangesFetcher`] from a dedicated
-//! std thread running a single-threaded Tokio runtime, parses delivered files
-//! via a custom [`ApmTracingConfig`] parser (registered through
-//! [`RemoteConfigContent`]), and routes parsed payloads into
+//! Drives [`libdd_remote_config::fetch::SingleChangesFetcher`] as a
+//! [`Worker`] on the runtime shared with the trace exporter (see
+//! [`crate::span_processor`]), parses delivered files via a custom
+//! [`ApmTracingConfig`] parser (registered through [`RemoteConfigContent`]),
+//! and routes parsed payloads into
 //! [`Config::update_sampling_rules_from_remote`] / [`Config::clear_remote_sampling_rules`].
 
 use crate::core::configuration::Config;
-use crate::core::utils::WorkerError::*;
-use crate::core::utils::{ShutdownSignaler, WorkerHandle};
 
+use async_trait::async_trait;
 use core::fmt;
 use libdd_common::Endpoint;
 use libdd_remote_config::fetch::{
@@ -24,9 +24,9 @@ use libdd_remote_config::parse::{
     ParseError, ParserRegistry, RemoteConfigContent, RemoteConfigParsed,
 };
 use libdd_remote_config::{RemoteConfigCapabilities, RemoteConfigProduct, Target};
+use libdd_shared_runtime::{BasicRuntime, SharedRuntime, Worker};
 use serde::Deserialize;
 use std::sync::Arc;
-use std::thread::{self};
 use std::time::Duration;
 
 /// HTTP timeout for a single RC fetch
@@ -283,131 +283,64 @@ fn apply_apm_tracing(
 #[derive(Debug, Clone)]
 pub enum RemoteConfigClientError {
     InvalidAgentUri,
-    HandleMutexPoisoned,
-    WorkerPanicked(String),
-    ShutdownTimedOut,
+    SpawnFailed(String),
 }
 
 impl fmt::Display for RemoteConfigClientError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidAgentUri => write!(f, "invalid agent URI"),
-            Self::HandleMutexPoisoned => write!(f, "handle mutex poisoned"),
-            Self::WorkerPanicked(msg) => write!(f, "remote config worker panicked: {}", msg),
-            Self::ShutdownTimedOut => write!(f, "shutdown timed out"),
+            Self::SpawnFailed(msg) => write!(f, "failed to spawn remote config worker: {}", msg),
         }
     }
 }
 
-pub struct RemoteConfigClientHandle {
-    cancel_token: tokio_util::sync::CancellationToken,
-    worker_handle: WorkerHandle,
-}
-
-impl Drop for RemoteConfigClientHandle {
-    fn drop(&mut self) {
-        self.trigger_shutdown();
-    }
-}
-
-impl RemoteConfigClientHandle {
-    pub fn trigger_shutdown(&self) {
-        self.cancel_token.cancel();
-    }
-
-    pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), RemoteConfigClientError> {
-        if let Err(e) = self.worker_handle.wait_for_shutdown(timeout) {
-            Err(match e {
-                ShutdownTimedOut => RemoteConfigClientError::ShutdownTimedOut,
-                HandleMutexPoisoned => RemoteConfigClientError::HandleMutexPoisoned,
-                WorkerPanicked(p) => RemoteConfigClientError::WorkerPanicked(p),
-            })
-        } else {
-            Ok(())
-        }
-    }
-}
-
-/// Receiver for shutdown signals through the cancellation token.
+/// Remote Config poll loop, run as a [`Worker`] on the runtime shared with the
+/// trace exporter (see [`crate::span_processor`]).
 ///
-/// When this struct is dropped, it signals that the worker has finished to the
-/// matching [`WorkerHandle`].
-struct RemoteConfigClientShutdownReceiver {
-    cancel_token: tokio_util::sync::CancellationToken,
-    shutdown_finished: Arc<ShutdownSignaler>,
-}
-
-impl Drop for RemoteConfigClientShutdownReceiver {
-    fn drop(&mut self) {
-        self.shutdown_finished.signal_shutdown();
-    }
-}
-
+/// The worker has no independent shutdown: it is registered on the shared
+/// runtime via [`SharedRuntime::spawn_worker`] and torn down when the runtime's
+/// `shutdown_async` runs during the exporter's shutdown — the same lifecycle as
+/// the trace-export worker. [`Worker::trigger`] (the poll interval) is the
+/// cancellation point; a fetch already in [`Worker::run`] completes before the
+/// worker is paused.
 pub struct RemoteConfigClientWorker {
     config: Arc<Config>,
-    endpoint: Endpoint,
-    shutdown_receiver: RemoteConfigClientShutdownReceiver,
+    fetcher: SingleChangesFetcher<ParsedFileStorage>,
+    poll_period: Duration,
+    /// Built lazily on the first [`Worker::trigger`] because `tokio::time::interval`
+    /// must be constructed inside a runtime context, and `start` runs on the
+    /// caller's (non-runtime) thread.
+    poll_interval: Option<tokio::time::Interval>,
+}
+
+impl fmt::Debug for RemoteConfigClientWorker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RemoteConfigClientWorker")
+            .finish_non_exhaustive()
+    }
 }
 
 impl RemoteConfigClientWorker {
-    pub fn start(config: Arc<Config>) -> Result<RemoteConfigClientHandle, RemoteConfigClientError> {
+    pub fn start(
+        config: Arc<Config>,
+        shared_runtime: &Arc<BasicRuntime>,
+    ) -> Result<(), RemoteConfigClientError> {
         let endpoint = build_endpoint(&config)?;
-        let cancel_token = tokio_util::sync::CancellationToken::new();
-        let shutdown_finished = ShutdownSignaler::new();
-        let shutdown_receiver = RemoteConfigClientShutdownReceiver {
-            cancel_token: cancel_token.clone(),
-            shutdown_finished: shutdown_finished.clone(),
-        };
-        let worker = Self {
-            config,
-            endpoint,
-            shutdown_receiver,
-        };
-        let join_handle = thread::spawn(move || worker.run());
-        Ok(RemoteConfigClientHandle {
-            cancel_token,
-            worker_handle: WorkerHandle::new(shutdown_finished, join_handle),
-        })
-    }
 
-    fn run(self) {
-        crate::dd_debug!("RemoteConfigClient: started client worker");
-
-        let rt = match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(e) => {
-                crate::dd_debug!("RemoteConfigClient: Failed to create Tokio runtime: {}", e);
-                return;
-            }
-        };
-
-        rt.block_on(self.run_loop());
-    }
-
-    async fn run_loop(self) {
-        let registry = match ParserRegistry::new().with::<ApmTracingConfig>() {
-            Ok(r) => r,
-            Err(e) => {
-                crate::dd_debug!(
-                    "RemoteConfigClient: failed to register ApmTracingConfig parser: {}",
-                    e
-                );
-                return;
-            }
-        };
+        let registry = ParserRegistry::new()
+            .with::<ApmTracingConfig>()
+            .map_err(|e| RemoteConfigClientError::SpawnFailed(format!("parser registry: {e}")))?;
         let storage = ParsedFileStorage::with_registry(Arc::new(registry));
 
-        let target = build_target(&self.config);
-        let runtime_id = self.config.runtime_id().to_string();
+        let target = build_target(&config);
+        let runtime_id = config.runtime_id().to_string();
 
         let options = ConfigOptions {
             invariants: ConfigInvariants {
-                language: self.config.language().to_string(),
-                tracer_version: self.config.tracer_version().to_string(),
-                endpoint: self.endpoint.clone(),
+                language: config.language().to_string(),
+                tracer_version: config.tracer_version().to_string(),
+                endpoint,
             },
             products: vec![RemoteConfigProduct::ApmTracing],
             capabilities: vec![
@@ -416,25 +349,45 @@ impl RemoteConfigClientWorker {
             ],
         };
 
-        let mut fetcher = SingleChangesFetcher::new(storage, target, runtime_id, options);
+        let fetcher = SingleChangesFetcher::new(storage, target, runtime_id, options);
+        let poll_period = Duration::from_secs_f64(config.remote_config_poll_interval());
 
-        let mut poll_interval = tokio::time::interval(Duration::from_secs_f64(
-            self.config.remote_config_poll_interval(),
-        ));
-        poll_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let worker = Self {
+            config,
+            fetcher,
+            poll_period,
+            poll_interval: None,
+        };
 
-        loop {
-            tokio::select! {
-                _ = self.shutdown_receiver.cancel_token.cancelled() => break,
-                _ = poll_interval.tick() => {
-                    fetcher.set_extra_services(self.config.get_extra_services());
-                    match fetcher.fetch_changes().await {
-                        Ok(changes) => apply_changes(changes, &self.config, &fetcher),
-                        Err(e) => crate::dd_debug!("RemoteConfigClient: fetch failed: {}", e),
-                    }
-                }
-            }
+        shared_runtime
+            .spawn_worker(worker, false)
+            .map(|_handle| ())
+            .map_err(|e| RemoteConfigClientError::SpawnFailed(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl Worker for RemoteConfigClientWorker {
+    async fn run(&mut self) {
+        self.fetcher
+            .set_extra_services(self.config.get_extra_services());
+        match self.fetcher.fetch_changes().await {
+            Ok(changes) => apply_changes(changes, &self.config, &self.fetcher),
+            Err(e) => crate::dd_debug!("RemoteConfigClient: fetch failed: {}", e),
         }
+    }
+
+    async fn trigger(&mut self) {
+        let period = self.poll_period;
+        let interval = self.poll_interval.get_or_insert_with(|| {
+            let mut interval = tokio::time::interval(period);
+            // The first `tick()` completes immediately, so the first `trigger`
+            // fires one poll right away — matching the historical client's
+            // startup fetch.
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval
+        });
+        interval.tick().await;
     }
 }
 
@@ -479,13 +432,15 @@ fn apply_changes(
 ) {
     for change in changes {
         match change {
-            Change::Add(file) | Change::Update(file, _) => apply_one(&file, config, fetcher),
+            Change::Add(file) | Change::Update(file, _) => {
+                apply_add_or_update(&file, config, fetcher)
+            }
             Change::Remove(file) => apply_remove(&file, config),
         }
     }
 }
 
-fn apply_one(
+fn apply_add_or_update(
     file: &Arc<StoredApmFile>,
     config: &Arc<Config>,
     fetcher: &SingleChangesFetcher<ParsedFileStorage>,

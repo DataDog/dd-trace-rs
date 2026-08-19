@@ -425,6 +425,7 @@ version = "0.5.1"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "async-trait",
  "criterion",
  "ctor",
  "foldhash 0.1.5",
@@ -453,7 +454,6 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "uuid",
 ]
 
