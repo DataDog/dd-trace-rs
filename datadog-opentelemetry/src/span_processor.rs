@@ -731,7 +731,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
 fn exporter_error_to_otel(e: &DatadogExporterError, operation: &str) -> OTelSdkError {
     match e {
-        DatadogExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        DatadogExporterError::AlreadyClosed => OTelSdkError::AlreadyShutdown,
         DatadogExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
         DatadogExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
             "DatadogExporter.{operation}: the sender mutex was poisonned"

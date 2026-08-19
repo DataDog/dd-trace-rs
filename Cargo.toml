@@ -24,18 +24,18 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies
-libdd-data-pipeline = { version = "7.0.0", features = [
+libdd-data-pipeline = { version = "8.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "9.0.0", default-features = false }
-libdd-capabilities-impl = { version = "3.0.0", default-features = false }
-libdd-telemetry = { version = "6.0.0", default-features = false }
-libdd-common = { version = "5.1.0", default-features = false }
-libdd-tinybytes = { version = "1.1.1", default-features = false }
+libdd-trace-utils = { version = "10.1.0", default-features = false }
+libdd-capabilities-impl = { version = "4.0.0", default-features = false }
+libdd-telemetry = { version = "7.0.0", default-features = false }
+libdd-common = { version = "5.2.0", default-features = false }
+libdd-tinybytes = { version = "1.1.2", default-features = false }
 libdd-library-config = { version = "3.0.0", default-features = false }
 libdd-sampling = { version = "6.0.0", default-features = false }
-libdd-shared-runtime = { version = "2.0.0", default-features = false }
+libdd-shared-runtime = { version = "3.0.0", default-features = false }
 libdd-remote-config = { version = "2.0.0", default-features = false, features = [
     "client",
 ] }

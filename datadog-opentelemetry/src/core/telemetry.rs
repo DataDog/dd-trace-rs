@@ -12,6 +12,7 @@ use std::{
 };
 
 use anyhow::Error;
+use libdd_capabilities_impl::NativeCapabilities;
 use libdd_telemetry::{
     data::{self, Configuration},
     metrics::ContextKey,
@@ -190,7 +191,7 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
 }
 
 struct TelemetryHandleWrapper {
-    handle: TelemetryWorkerHandle,
+    handle: TelemetryWorkerHandle<NativeCapabilities>,
     metrics_context: [OnceLock<ContextKey>; TELEMETRY_METRICS_COUNT],
 }
 
@@ -318,7 +319,7 @@ fn make_telemetry_worker(
         builder.config.parent_session_id = inst.parent_session_id;
         // builder.config.debug_enabled = true;
 
-        builder.run().map(|handle| {
+        builder.run::<NativeCapabilities>().map(|handle| {
             Box::new(TelemetryHandleWrapper {
                 handle,
                 metrics_context: [const { OnceLock::new() }; TELEMETRY_METRICS_COUNT],
@@ -533,8 +534,8 @@ mod tests {
         fn get_all_configurations(&self) -> Vec<data::Configuration> {
             vec![data::Configuration {
                 name: self.name.clone(),
-                value: self.value.clone(),
-                origin: self.origin.clone(),
+                value: Some(self.value.clone()),
+                origin: self.origin,
                 config_id: self.config_id.clone(),
                 seq_id: None,
             }]
@@ -837,7 +838,7 @@ mod tests {
 
         let sent_config = &handle.configurations[0];
         assert_eq!(sent_config.name, "DD_SERVICE");
-        assert_eq!(sent_config.value, "test");
+        assert_eq!(sent_config.value.as_deref(), Some("test"));
         assert_eq!(sent_config.origin, data::ConfigurationOrigin::EnvVar);
         assert_eq!(sent_config.config_id, config_id);
     }
