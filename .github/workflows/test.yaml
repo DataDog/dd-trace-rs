@@ -14,6 +14,9 @@ jobs:
   test:
     name: "cargo test --workspace #${{ matrix.platform }} ${{ matrix.rust_version }}"
     runs-on: ${{ matrix.platform }}
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         platform: [windows-latest, ubuntu-latest, macos-14]
@@ -79,8 +82,16 @@ jobs:
           report_paths: "target/nextest/ci/junit.xml"
           check_name: "[${{ matrix.platform }}:${{ matrix.rust_version }}] test report"
           include_passed: true
+      - name: Get Datadog credentials via dd-sts
+        id: dd-sts
+        if: success() || failure()
+        continue-on-error: true
+        uses: DataDog/dd-sts-action@639d841c72f15e4e77747bd726ef8105ce971da2
+        with:
+          policy: public-datadog-dd-trace-rs
       - name: Upload test results to Datadog
         if: success() || failure()
+        continue-on-error: true
         shell: bash
         run: |
           # Download datadog-ci binary
@@ -123,7 +134,7 @@ jobs:
             --tags rustc:${{ matrix.rust_version }},arch:${{ runner.arch }},os:${{ runner.os }},platform:${{ matrix.platform }} \
             target/nextest/ci/junit.xml
         env:
-          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+          DD_API_KEY: ${{ steps.dd-sts.outputs.api_key }}
 
   cross-centos7:
     name: build and test using cross - on centos7
