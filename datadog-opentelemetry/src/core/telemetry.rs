@@ -27,19 +27,50 @@ static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 
 type TelemetryCell = OnceLock<Mutex<Telemetry>>;
 
-#[must_use = "dropping a TelemetryUser without calling `trigger_stop` leaks the registration and prevents telemetry from ever shutting down"]
-pub struct TelemetryUser(());
+pub(crate) struct TelemetryUser<'a> {
+    users: &'a AtomicUsize,
+    cell: &'a TelemetryCell,
+    released: bool,
+}
 
-impl TelemetryUser {
-    pub fn register(config: &Config) -> Option<TelemetryUser> {
+impl TelemetryUser<'static> {
+    pub(crate) fn register(config: &Config) -> Option<TelemetryUser<'static>> {
+        TelemetryUser::register_with(&TELEMETRY_USERS, &TELEMETRY, config)
+    }
+}
+
+impl<'a> TelemetryUser<'a> {
+    fn register_with(
+        users: &'a AtomicUsize,
+        cell: &'a TelemetryCell,
+        config: &Config,
+    ) -> Option<TelemetryUser<'a>> {
         config.telemetry_enabled().then(|| {
-            TELEMETRY_USERS.fetch_add(1, Ordering::AcqRel);
-            TelemetryUser(())
+            users.fetch_add(1, Ordering::AcqRel);
+            TelemetryUser {
+                users,
+                cell,
+                released: false,
+            }
         })
     }
 
-    pub fn trigger_stop(self) -> bool {
-        trigger_stop_telemetry_inner(&TELEMETRY)
+    pub(crate) fn trigger_stop(mut self) -> bool {
+        self.release()
+    }
+
+    fn release(&mut self) -> bool {
+        if self.released {
+            return false;
+        }
+        self.released = true;
+        trigger_stop_telemetry_inner(self.users, self.cell)
+    }
+}
+
+impl Drop for TelemetryUser<'_> {
+    fn drop(&mut self) {
+        self.release();
     }
 }
 
@@ -298,8 +329,8 @@ fn make_telemetry_worker(
     }
 }
 
-fn trigger_stop_telemetry_inner(telemetry_cell: &TelemetryCell) -> bool {
-    if TELEMETRY_USERS.fetch_sub(1, Ordering::AcqRel) != 1 {
+fn trigger_stop_telemetry_inner(users: &AtomicUsize, telemetry_cell: &TelemetryCell) -> bool {
+    if users.fetch_sub(1, Ordering::AcqRel) != 1 {
         return false;
     }
     with_telemetry_handle(telemetry_cell, |t| {
@@ -397,8 +428,8 @@ mod tests {
             configuration::{Config, ConfigurationProvider},
             telemetry::{
                 add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
-                trigger_stop_telemetry_inner, wait_telemetry_stopped_inner, TelemetryHandle,
-                TelemetryMetric, TelemetryUser, TELEMETRY,
+                wait_telemetry_stopped_inner, TelemetryHandle, TelemetryMetric, TelemetryUser,
+                TELEMETRY,
             },
         },
         dd_debug, dd_error, dd_warn,
@@ -513,22 +544,20 @@ mod tests {
     #[test]
     fn test_stop_telemetry_stops_worker_only_for_last_user() {
         let config = Config::builder().build();
+        let users = AtomicUsize::new(0);
         let telemetry_cell = OnceLock::new();
         let handle = TestTelemetryHandle::new();
         let stop_calls = handle.stop_calls.clone();
         init_telemetry_inner(&config, Some(Box::new(handle)), &telemetry_cell);
 
-        // Registration hands back a token only when telemetry is enabled. We
-        // release the count through `trigger_stop_telemetry_inner` (against the
-        // test cell) rather than the tokens' `trigger_stop` (which targets the
-        // global cell), so keep the tokens alive until the end of the test.
-        let _user1 =
-            TelemetryUser::register(&config).expect("registration returns a token when enabled");
-        let _user2 =
-            TelemetryUser::register(&config).expect("registration returns a token when enabled");
+        let user1 = TelemetryUser::register_with(&users, &telemetry_cell, &config)
+            .expect("registration when enabled");
+        let user2 = TelemetryUser::register_with(&users, &telemetry_cell, &config)
+            .expect("registration when enabled");
+        assert_eq!(users.load(Ordering::Relaxed), 2, "two users registered");
 
         assert!(
-            !trigger_stop_telemetry_inner(&telemetry_cell),
+            !user1.trigger_stop(),
             "first of two users must not be the last"
         );
         assert_eq!(
@@ -536,29 +565,71 @@ mod tests {
             0,
             "worker must not be signalled to stop while users remain"
         );
+        assert_eq!(users.load(Ordering::Relaxed), 1);
 
-        assert!(
-            trigger_stop_telemetry_inner(&telemetry_cell),
-            "second of two users must be the last"
-        );
+        assert!(user2.trigger_stop(), "second of two users must be the last");
         assert_eq!(
             stop_calls.load(Ordering::Relaxed),
             1,
             "last user must signal the worker to stop"
         );
+        assert_eq!(users.load(Ordering::Relaxed), 0);
 
         wait_telemetry_stopped_inner(Duration::from_secs(60), &telemetry_cell).unwrap();
     }
 
     #[test]
-    fn test_register_telemetry_user_disabled_returns_no_token() {
+    fn test_registration_release_is_exactly_once() {
+        let config = Config::builder().build();
+        let users = AtomicUsize::new(0);
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            &config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
+
+        // Dropped without an explicit `release`: the Drop safety net releases it.
+        {
+            let _user = TelemetryUser::register_with(&users, &telemetry_cell, &config)
+                .expect("registration when enabled");
+            assert_eq!(users.load(Ordering::Relaxed), 1, "register increments");
+        }
+        assert_eq!(
+            users.load(Ordering::Relaxed),
+            0,
+            "dropping a registration must release it"
+        );
+
+        // Explicit `release` then drop: released exactly once
+        let user = TelemetryUser::register_with(&users, &telemetry_cell, &config)
+            .expect("registration when enabled");
+        assert_eq!(users.load(Ordering::Relaxed), 1);
+        assert!(user.trigger_stop(), "sole user is the last");
+        assert_eq!(users.load(Ordering::Relaxed), 0);
+
+        assert_eq!(
+            users.load(Ordering::Relaxed),
+            0,
+            "a second release (on drop) must be a no-op"
+        );
+    }
+
+    #[test]
+    fn test_register_disabled_does_not_count() {
         let config = Config::builder().set_telemetry_enabled(false).build();
-        // No token is issued when telemetry is disabled, so the user count is
-        // never incremented and such a processor can never trigger a stop. The
-        // increment lives inside the returned closure, so `None` proves it.
+        let users = AtomicUsize::new(0);
+        let telemetry_cell = OnceLock::new();
+        // No registration when telemetry is disabled, so the count is never
+        // incremented and such a user can never trigger a stop.
         assert!(
-            TelemetryUser::register(&config).is_none(),
+            TelemetryUser::register_with(&users, &telemetry_cell, &config).is_none(),
             "disabled telemetry must not register a user"
+        );
+        assert_eq!(
+            users.load(Ordering::Relaxed),
+            0,
+            "count untouched when disabled"
         );
     }
 

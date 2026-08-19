@@ -411,7 +411,7 @@ pub(crate) struct DatadogSpanProcessor {
     config: Arc<Config>,
     rc_client_handle: Option<RemoteConfigClientHandle>,
     telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
-    telemetry_user: Mutex<Option<TelemetryUser>>,
+    telemetry_user: Mutex<Option<TelemetryUser<'static>>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
