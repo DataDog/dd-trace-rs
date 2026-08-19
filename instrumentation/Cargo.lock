@@ -1167,22 +1167,25 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libdd-capabilities"
-version = "2.1.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43a946c29c5fe7cc2adec7a66a35f7cfc138ba75c988d09a7a99c12de7d3b9a7"
+checksum = "e67c40cbfd0a7bbc2944237cd9ed481cbe803b1835679527d9898272758f5a7b"
 dependencies = [
  "anyhow",
  "bytes",
+ "futures-channel",
+ "futures-util",
  "http",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "libdd-capabilities-impl"
-version = "3.0.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e948ad5c65d8598fd3889762ea4767b9a521ebfb2f7b72f6e52162aa4d7f353"
+checksum = "1fc1d0afa0f84914ec64f5d206c37a2f4ff625109e6c081f7a82adb849e69e2b"
 dependencies = [
+ "anyhow",
  "bytes",
  "http",
  "http-body-util",
@@ -1224,15 +1227,16 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "433f9bfe60850c0638a273dfb2bd873f5abc12c9983ce74ebffe055a7a3c21c9"
+checksum = "ecfc85fff58f2589e473af6a81e9ff4c19fe5386aad4c72ab787a7bb889b60d9"
 dependencies = [
  "anyhow",
  "arc-swap",
  "async-trait",
  "bytes",
  "either",
+ "futures",
  "getrandom 0.2.17",
  "http",
  "http-body-util",
@@ -1257,28 +1261,32 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "web-time",
 ]
 
 [[package]]
 name = "libdd-ddsketch"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3f04a8501bc5f52f005f637beb18c900c69ad6deedb5f3104cd0a8c36bc8046"
+checksum = "827db9addada0e19a8371241e54fe4f27e9101c5a1dc30a13cf42dea5220e3f0"
 dependencies = [
  "prost",
 ]
 
 [[package]]
 name = "libdd-dogstatsd-client"
-version = "4.0.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c29c7bd569824c4d8ffe7171bb77e6b69c2161517ed75436ff458b40d41a663d"
+checksum = "74c277a83676a4897e5fc3331758d34adda6db6ac5b9e51c1918eba067b2c127"
 dependencies = [
  "anyhow",
+ "async-trait",
  "cadence",
  "http",
  "libdd-common",
+ "libdd-shared-runtime",
  "serde",
+ "tokio",
  "tracing",
 ]
 
@@ -1343,9 +1351,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-shared-runtime"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bab1ad16a0bfcf1ce826e2314c162b04daf4324c71da5a28583ea40e76be8772"
+checksum = "55749d4e255a4fd6544036338f895235418e530198e2ecb2e4b493267d0c6397"
 dependencies = [
  "async-trait",
  "futures",
@@ -1361,46 +1369,50 @@ dependencies = [
 
 [[package]]
 name = "libdd-telemetry"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c791d810acbe99b0c7fc4285824f4e27a4b2b9137d4aec8a5df220ca55b34942"
+checksum = "004aebda20a6ca15304c3129f997bce6756bfa5b4980163716761d72ef3630f2"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64",
  "bytes",
  "futures",
+ "getrandom 0.2.17",
  "hashbrown 0.15.5",
  "http",
- "http-body-util",
  "libc",
+ "libdd-capabilities",
  "libdd-common",
  "libdd-ddsketch",
  "libdd-shared-runtime",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "sys-info",
  "tokio",
  "tokio-util",
  "tracing",
  "uuid",
+ "web-time",
  "winver",
 ]
 
 [[package]]
 name = "libdd-tinybytes"
-version = "1.1.1"
+version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97db80e3f3f9d19643ac444d6267951a5dab622ad9828c51149d49150625cfe8"
+checksum = "1d3e6ade71c21b86ab81fa8d905f9f26733336f1a904bb826b9ac1972b3c8289"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "libdd-trace-normalization"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4184666070c137e058b2c16acd147c3f045b51de3efe81e0bec62044f29fc6c6"
+checksum = "a643220a54228ef837631b5036f34fc13fc8ee2e307a74ac011232c062393fc5"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
@@ -1408,9 +1420,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-obfuscation"
-version = "5.0.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d313153f515b9dd31a483bc7e4d432ecb76e53dd33f67f4eeaa415319372b68d"
+checksum = "8b5709cd8d3e058e5d9056affbf6aae7464b49eb461afc49945576285d1f457b"
 dependencies = [
  "anyhow",
  "fluent-uri",
@@ -1425,9 +1437,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-protobuf"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "210492f004b4c343cca736aab2a8c93109034e0c00111bc7376661370439a11c"
+checksum = "3b1bc3bd67115bec00669d84a29b7b52ef1d61f36dfb49b273b2fee3346bf18f"
 dependencies = [
  "prost",
  "serde",
@@ -1436,13 +1448,14 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f23a575e3ecccfbbbd1612ddb1cb8b08e0c12ae0a62052ef995f05d93976a55b"
+checksum = "23d3cc84f8d144752fa51abe59d3a7a3a956b9a479897fb9689a2e1bac458ac2"
 dependencies = [
  "anyhow",
  "arc-swap",
  "async-trait",
+ "futures",
  "hashbrown 0.15.5",
  "http",
  "libdd-capabilities",
@@ -1460,13 +1473,14 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
 name = "libdd-trace-utils"
-version = "9.0.0"
+version = "10.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2529075e0b7494767011c027750951f302b3ee8a5f5d15ab7a6e95e88a755182"
+checksum = "3f5dcd936e7be2edbde4e9cd11af0f1a227e5af239205e56ee8f137e8bb2869f"
 dependencies = [
  "anyhow",
  "base64",
@@ -1478,6 +1492,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "indexmap 2.14.0",
+ "itoa",
  "libdd-capabilities",
  "libdd-capabilities-impl",
  "libdd-common",
@@ -2855,6 +2870,16 @@ name = "web-sys"
 version = "0.3.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

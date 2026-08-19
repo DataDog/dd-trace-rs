@@ -223,12 +223,12 @@ impl DatadogExporter {
         match self.trace_buffer().send_chunk(buffered) {
             Ok(()) => Ok(()),
             Err(e) => {
-                // `BatchFull` and `AlreadyShutdown` are outright rejections, so the export side
+                // `BatchFull` and `AlreadyClosed` are outright rejections, so the export side
                 // will never decrement. Late errors from `wait_flush_done` (sync
                 // mode) mean the chunk is still queued.
                 if matches!(
                     e,
-                    TraceBufferError::BatchFull(_) | TraceBufferError::AlreadyShutdown
+                    TraceBufferError::BatchFull(_) | TraceBufferError::AlreadyClosed
                 ) {
                     cancel_pending(&self.pending_spans, n);
                 }
@@ -281,7 +281,7 @@ impl DatadogExporter {
             .lock()
             .map_err(|_| TraceBufferError::MutexPoisoned)?
             .take()
-            .ok_or(TraceBufferError::AlreadyShutdown)?;
+            .ok_or(TraceBufferError::AlreadyClosed)?;
         let runtime_result = match rx.recv_timeout(timeout) {
             Ok(res) => res,
             Err(mpsc::RecvTimeoutError::Timeout) => return Err(TraceBufferError::TimedOut(timeout)),
@@ -298,7 +298,7 @@ impl DatadogExporter {
             Ok(()) => Ok(()),
             Err(SharedRuntimeError::ShutdownTimedOut(d)) => Err(TraceBufferError::TimedOut(d)),
             Err(SharedRuntimeError::LockFailed(_)) => Err(TraceBufferError::MutexPoisoned),
-            Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyShutdown),
+            Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyClosed),
             Err(e) => Err(TraceBufferError::TraceExporter(TraceExporterError::Internal(
                 libdd_data_pipeline::trace_exporter::error::InternalErrorKind::InvalidWorkerState(
                     e.to_string(),
@@ -406,7 +406,7 @@ fn decrement_pending(pending: &PendingSpans, n: usize) {
 }
 
 /// Like `decrement_pending` but does NOT count the spans as exported. Used when chunks are
-/// rejected outright (BatchFull / AlreadyShutdown) — the spans were never handed to the
+/// rejected outright (BatchFull / AlreadyClosed) — the spans were never handed to the
 /// background worker, so they should not advance the flush barrier.
 fn cancel_pending(pending: &PendingSpans, n: usize) {
     let (lock, _) = &**pending;
