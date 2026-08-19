@@ -4170,7 +4170,8 @@ mod tests {
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration_after_rc.value.as_deref().unwrap()).unwrap(),
+            ParsedSamplingRules::from_str(active_configuration_after_rc.value.as_deref().unwrap())
+                .unwrap(),
             expected_rc
         );
 
@@ -4362,7 +4363,9 @@ mod tests {
             SENTINEL_OTLP_LOGS,
         ] {
             assert!(
-                !configurations.iter().any(|c| c.value.as_deref().is_some_and(|v| v.contains(sentinel))),
+                !configurations
+                    .iter()
+                    .any(|c| c.value.as_deref().is_some_and(|v| v.contains(sentinel))),
                 "sentinel value {sentinel:?} must not appear in telemetry configuration"
             );
         }
