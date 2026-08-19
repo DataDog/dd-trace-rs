@@ -8,7 +8,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
         configuration::{remote_config::RemoteConfigClientWorker, BaggageTagKeyFilter, Config},
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::init_telemetry,
+        telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
     create_dd_resource, dd_debug, dd_error,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
@@ -403,6 +403,7 @@ pub(crate) struct DatadogSpanProcessor {
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Config>,
+    telemetry_user: Mutex<Option<TelemetryUser<'static>>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -447,12 +448,14 @@ impl DatadogSpanProcessor {
                 );
             }
         }
+        let telemetry_user = Mutex::new(TelemetryUser::register(&config));
 
         Ok(Self {
             registry,
             span_exporter,
             resource,
             config,
+            telemetry_user,
         })
     }
 
@@ -673,6 +676,12 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         // (`shutdown_async` stops every worker on the shared runtime), so they
         // need no separate trigger/wait.
         self.span_exporter.trigger_shutdown();
+        let telemetry_last_user = self
+            .telemetry_user
+            .lock()
+            .ok()
+            .and_then(|mut user| user.take())
+            .is_some_and(TelemetryUser::trigger_stop);
 
         // Wait for the runtime shutdown to finish, keeping in mind how much time
         // is left since the beginning of the call.
@@ -684,6 +693,17 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             };
             exporter_error_to_otel(&e, "wait_for_shutdown")
         })?;
+
+        if telemetry_last_user {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Err(opentelemetry_sdk::error::OTelSdkError::Timeout(timeout));
+            }
+            wait_telemetry_stopped(left).map_err(|e| {
+                dd_debug!("DatadogSpanProcessor.shutdown_with_timeout: telemetry did not stop in time: {e}");
+                opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+            })?;
+        }
         Ok(())
     }
 
