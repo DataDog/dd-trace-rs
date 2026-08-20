@@ -301,6 +301,7 @@ impl InjectTraceState {
         self.header.split(',').filter(|part| {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
             key != "dd"
+                && key != "ot"
                 && !value.is_empty()
                 && Tracestate::valid_key(key)
                 && Tracestate::valid_value(value)
@@ -1164,7 +1165,9 @@ mod test {
             origin: None,
             tags: &mut tags,
             is_remote: false,
-            tracestate: Some(InjectTraceState::from_header("congo=xyz".to_owned())),
+            tracestate: Some(InjectTraceState::from_header(
+                "ot=rv:11111111111111;th:0,congo=xyz".to_owned(),
+            )),
             ot_member: Some("rv:ef284ace7a91e1;th:e6666666666666"),
         };
         let mut carrier: HashMap<String, String> = HashMap::new();
@@ -1178,6 +1181,7 @@ mod test {
             ts.contains("ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz"),
             "got {ts}"
         );
+        assert!(!ts.contains("ot=rv:11111111111111;th:0"), "got {ts}");
         let dd = ts.find("dd=").unwrap();
         let ot = ts.find("ot=").unwrap();
         let congo = ts.find("congo=").unwrap();
