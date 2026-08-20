@@ -10,6 +10,7 @@ use crate::{
         baggage::extract_baggage,
         config::{get_extractors, get_injectors},
         context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
+        tracecontext::ot_sanitize,
         DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
     },
 };
@@ -31,6 +32,7 @@ pub struct DatadogExtractData {
     pub origin: Option<String>,
     pub internal_tags: HashMap<String, String>,
     pub sampling: Sampling,
+    pub ot: Option<String>,
 }
 
 impl DatadogExtractData {
@@ -40,6 +42,7 @@ impl DatadogExtractData {
             tags,
             links,
             sampling,
+            tracestate,
             ..
         }: SpanContext,
     ) -> Self {
@@ -59,6 +62,7 @@ impl DatadogExtractData {
             origin,
             internal_tags,
             sampling,
+            ot: tracestate.and_then(|ts| ts.ot_member),
         }
     }
 }
@@ -110,7 +114,9 @@ impl DatadogPropagator {
         }
 
         let trace_id = otel_span_context.trace_id().to_bytes();
-        let mut propagation_data = self.registry.get_trace_propagation_data(trace_id);
+        let trace_propagation_data = self.registry.get_trace_propagation_data(trace_id);
+        let is_trace_registered = trace_propagation_data.is_some();
+        let mut propagation_data = trace_propagation_data.unwrap_or_default();
 
         // get Trace's sampling decision and if it is not present obtain it from otel's SpanContext
         // flags
@@ -139,6 +145,17 @@ impl DatadogPropagator {
             Some(InjectTraceState::from_header(otel_tracestate.header()))
         };
 
+        // If the trace is not registered yet, fall back to the `ot` value that was
+        // extracted from the incoming context (if any).
+        let ot = match propagation_data.ot.take() {
+            Some(ot) => Some(ot),
+            None if !is_trace_registered => cx
+                .get::<DatadogExtractData>()
+                .and_then(|data| data.ot.clone()),
+            None => None,
+        };
+        let ot = ot.as_deref().and_then(ot_sanitize);
+
         let tags = if let Some(propagation_tags) = &mut propagation_data.tags {
             propagation_tags
         } else {
@@ -153,6 +170,7 @@ impl DatadogPropagator {
             origin: propagation_data.origin.as_deref(),
             tags,
             tracestate,
+            ot_member: ot.as_deref(),
         };
 
         self.inner.inject(dd_span_context, &mut injector)
@@ -194,6 +212,7 @@ impl DatadogPropagator {
                 origin: None,
                 internal_tags: HashMap::new(),
                 sampling: Sampling::default(),
+                ot: None,
             }),
             ExtractResult::Passthrough => cx.clone(),
             ExtractResult::Ignore => return cx.clone(),
@@ -650,6 +669,7 @@ pub mod tests {
                         mechanism: None,
                     },
                     tags: Some(tags),
+                    ot: None,
                 },
             );
 
@@ -678,6 +698,116 @@ pub mod tests {
                 injected_trace_state.get("foo").unwrap_or_default()
             )
         }
+    }
+
+    #[test]
+    fn extract_inject_w3c_passthrough_forwards_ot_without_span_registration() {
+        let builder = Config::builder();
+        let config = Arc::new(builder.build());
+        let registry = TraceRegistry::new(config.clone());
+        let propagator = DatadogPropagator::new(config, registry);
+
+        let mut extractor = HashMap::new();
+        extractor.insert(
+            TRACEPARENT_KEY.to_string(),
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+        );
+        extractor.insert(
+            TRACESTATE_KEY.to_string(),
+            "dd=s:2,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz".to_string(),
+        );
+
+        let extracted_context = propagator.extract(&extractor);
+
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            injected_trace_state.contains("ot=rv:ef284ace7a91e1;th:e6666666666666"),
+            "expected inbound `ot` to be forwarded unchanged, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
+    }
+
+    #[test]
+    fn extract_inject_w3c_does_not_restore_erased_ot() {
+        let config = Arc::new(Config::builder().build());
+        let registry = TraceRegistry::new(config.clone());
+        let propagator = DatadogPropagator::new(config, registry.clone());
+        let extractor = HashMap::from([
+            (
+                TRACEPARENT_KEY.to_string(),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                TRACESTATE_KEY.to_string(),
+                "dd=s:2,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz".to_string(),
+            ),
+        ]);
+        let extracted_context = propagator.extract(&extractor);
+        let span = extracted_context.span();
+        let span_context = span.span_context();
+
+        registry.register_span(
+            span_context.trace_id().to_bytes(),
+            span_context.span_id().to_bytes(),
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: None,
+                    mechanism: None,
+                },
+                origin: None,
+                tags: None,
+                ot: None,
+            },
+        );
+
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            !injected_trace_state.contains("ot="),
+            "expected the erased `ot` to remain absent, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
+    }
+
+    #[test]
+    fn extract_inject_w3c_passthrough_drops_malformed_ot_subkeys() {
+        let config = Arc::new(Config::builder().build());
+        let propagator = DatadogPropagator::new(config.clone(), TraceRegistry::new(config));
+        let extractor = HashMap::from([
+            (
+                TRACEPARENT_KEY.to_string(),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                TRACESTATE_KEY.to_string(),
+                "dd=s:2,ot=rv:not-hex;th:invalid;future:value,congo=xyz".to_string(),
+            ),
+        ]);
+
+        let extracted_context = propagator.extract(&extractor);
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            injected_trace_state.contains("ot=future:value"),
+            "expected malformed subkeys to be removed, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
     }
 
     #[test]
