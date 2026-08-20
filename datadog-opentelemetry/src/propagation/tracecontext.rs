@@ -72,7 +72,7 @@ pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
             _ => true,
         })
         .collect();
-    join_capped(&parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+    join_capped(parts, TRACESTATE_OT_KEY_MAX_LENGTH)
 }
 
 /// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
@@ -94,28 +94,32 @@ pub(crate) fn ot_set_rv_th(raw: Option<&str>, rv: Option<u64>, th: Option<u64>) 
     let rv_part = rv.map(|v| format!("rv:{v:014x}"));
     let th_part = th.map(|v| format!("th:{}", format_th(v)));
 
-    let parts: Vec<&str> = rv_part
+    let parts = rv_part
         .as_deref()
         .into_iter()
         .chain(th_part.as_deref())
-        .chain(others)
-        .collect();
-    join_capped(&parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+        .chain(others);
+    join_capped(parts, TRACESTATE_OT_KEY_MAX_LENGTH)
 }
 
 /// Joins leading `parts` with `;` capping length under `max_len`
-fn join_capped(parts: &[&str], max_len: usize) -> Option<String> {
+fn join_capped<'a>(parts: impl IntoIterator<Item = &'a str>, max_len: usize) -> Option<String> {
     let mut len = 0;
     let mut count = 0;
+    let mut result = String::new();
     for part in parts {
         let sep_len = if count == 0 { 0 } else { 1 };
         if len + sep_len + part.len() > max_len {
             break;
         }
         len += sep_len + part.len();
+        if count > 0 {
+            result.push(';');
+        }
+        result.push_str(part);
         count += 1;
     }
-    (count > 0).then(|| parts[..count].join(";"))
+    (count > 0).then_some(result)
 }
 
 #[derive(Clone, Debug, PartialEq)]
