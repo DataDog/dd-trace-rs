@@ -1,3 +1,5 @@
+[advisories]
+
 [bans]
 multiple-versions = "warn"
 

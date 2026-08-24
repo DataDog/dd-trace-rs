@@ -1,0 +1,114 @@
+name: cargo-deny/advisories
+# Non-blocking advisory check that posts a PR comment with the results.
+# Kept separate from lint.yaml (push-only) so adding PR commenting does not
+# duplicate every lint job for each PR update, and separate from the blocking
+# cargo-deny/bans gate which always blocks on banned crates.
+on:
+  pull_request:
+permissions:
+  contents: read
+  pull-requests: write
+# Cancel stale runs so an older run cannot overwrite a newer comment
+concurrency:
+  group: cargo-deny-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  # Set to true to make cargo deny errors fail the job
+  FAIL_IF_CARGO_DENY: false
+jobs:
+  cargo-deny-advisories:
+    runs-on: ubuntu-latest
+    name: "cargo-deny/advisories"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: ./.github/actions/cache
+        with:
+          rust_version: stable
+      - name: Install stable toolchain
+        run: rustup install stable && rustup default stable
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+        with:
+          tool: cargo-deny
+      - name: Run cargo deny
+        id: cargo-deny
+        run: |
+          set +e
+          ROOT_OUTPUT=$(cargo deny --color never --log-level error check advisories bans sources 2>&1)
+          INSTR_OUTPUT=$(cargo deny --color never --log-level error --manifest-path instrumentation/Cargo.toml check advisories bans sources 2>&1)
+
+          # Log output to the job log for visibility, not just the PR comment
+          echo "=== Root workspace ==="
+          echo "$ROOT_OUTPUT"
+          echo "=== Instrumentation workspace ==="
+          echo "$INSTR_OUTPUT"
+
+          ROOT_ERRORS=$(echo "$ROOT_OUTPUT" | grep -cE "^error" || true)
+          ROOT_WARNINGS=$(echo "$ROOT_OUTPUT" | grep -cE "^warning" || true)
+          INSTR_ERRORS=$(echo "$INSTR_OUTPUT" | grep -cE "^error" || true)
+          INSTR_WARNINGS=$(echo "$INSTR_OUTPUT" | grep -cE "^warning" || true)
+          TOTAL_ERRORS=$((ROOT_ERRORS + INSTR_ERRORS))
+          TOTAL_ISSUES=$((TOTAL_ERRORS + ROOT_WARNINGS + INSTR_WARNINGS))
+
+          {
+            echo "total_errors=$TOTAL_ERRORS"
+            echo "total_issues=$TOTAL_ISSUES"
+          } >> "$GITHUB_OUTPUT"
+
+          # Build the comment body
+          if [ "$TOTAL_ISSUES" -gt 0 ]; then
+            HEADER="## 🔒 Cargo Deny Results\n\n⚠️ **${TOTAL_ISSUES} issue(s) found** (advisories, bans, sources)\n"
+          else
+            HEADER="## 🔒 Cargo Deny Results\n\n✅ **No issues found!**\n"
+          fi
+
+          BODY="${HEADER}\n"
+
+          # Show output when there are errors or warnings, not just on non-zero exit
+          if [ "$((ROOT_ERRORS + ROOT_WARNINGS))" -gt 0 ]; then
+            BODY="${BODY}### 📦 Root workspace - ${ROOT_ERRORS} error(s), ${ROOT_WARNINGS} warning(s)\n\n<details>\n<summary>Show output</summary>\n\n\`\`\`\n${ROOT_OUTPUT}\n\`\`\`\n\n</details>\n\n"
+          else
+            BODY="${BODY}### 📦 Root workspace - ✅ No issues\n"
+          fi
+
+          if [ "$((INSTR_ERRORS + INSTR_WARNINGS))" -gt 0 ]; then
+            BODY="${BODY}### 📦 Instrumentation workspace - ${INSTR_ERRORS} error(s), ${INSTR_WARNINGS} warning(s)\n\n<details>\n<summary>Show output</summary>\n\n\`\`\`\n${INSTR_OUTPUT}\n\`\`\`\n\n</details>\n"
+          else
+            BODY="${BODY}### 📦 Instrumentation workspace - ✅ No issues\n"
+          fi
+
+          JOB_ID=$(curl -s -H "Authorization: Bearer ${{ github.token }}" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" | \
+            jq -r '.jobs[] | select(.name == "cargo-deny/advisories") | .id')
+          if [ -n "$JOB_ID" ]; then
+            JOB_URL="${{ github.server_url }}/${{ github.repository }}/runs/${JOB_ID}"
+          else
+            JOB_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
+
+          BODY="${BODY}\n---\n*Updated: $(date -u '+%Y-%m-%d %H:%M:%S UTC') | Commit: ${{ github.sha }} | [cargo deny job results](${JOB_URL})*"
+
+          echo -e "$BODY" > cargo-deny-results.md
+      - name: Find existing comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
+        id: find-comment
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '## 🔒 Cargo Deny Results'
+      - name: Create or update PR comment
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
+        if: ${{ !github.event.pull_request.head.repo.fork }}
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: cargo-deny-results.md
+          edit-mode: replace
+      - name: Fail if errors found and FAIL_IF_CARGO_DENY is true
+        if: env.FAIL_IF_CARGO_DENY == 'true' && steps.cargo-deny.outputs.total_errors > 0
+        run: |
+          echo "cargo deny found ${{ steps.cargo-deny.outputs.total_errors }} error(s) and FAIL_IF_CARGO_DENY is enabled"
+          exit 1
