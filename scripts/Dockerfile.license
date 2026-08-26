@@ -14,8 +14,5 @@ WORKDIR /build
 
 COPY . .
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    dd-rust-license-tool dump > /licenses.csv
-
-ENTRYPOINT ["cat", "/licenses.csv"]
+ENTRYPOINT ["dd-rust-license-tool"]
+CMD ["--manifest-path", "Cargo.toml", "dump"]
