@@ -27,7 +27,9 @@ jobs:
       with:
         tool: cargo-deny
     - name: Block PRs that introduce banned or compromised crates (root workspace)
-      run: cargo deny --log-level error check bans
+      run: |
+        cargo deny --version
+        cargo deny --log-level error check bans
     - name: Block PRs that introduce banned or compromised crates (instrumentation workspace)
       # instrumentation/ is a separate Cargo workspace with its own Cargo.lock;
       # check it too so a dependency-only change there cannot bypass the gate.

@@ -20,6 +20,7 @@ jobs:
   cargo-deny-advisories:
     runs-on: ubuntu-latest
     name: "cargo-deny/advisories"
+    if: ${{ !github.event.pull_request.head.repo.fork }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -35,9 +36,11 @@ jobs:
       - name: Run cargo deny
         id: cargo-deny
         run: |
-          set +e
-          ROOT_OUTPUT=$(cargo deny --color never --log-level error check advisories bans sources 2>&1)
-          INSTR_OUTPUT=$(cargo deny --color never --log-level error --manifest-path instrumentation/Cargo.toml check advisories bans sources 2>&1)
+          # Capture cargo deny output without failing the script on advisory/warning hits;
+          # the FAIL_IF_CARGO_DENY step below controls the final exit code.
+          cargo deny --version
+          ROOT_OUTPUT=$(cargo deny --color never --log-level warn check advisories bans sources 2>&1) || true
+          INSTR_OUTPUT=$(cargo deny --color never --log-level warn --manifest-path instrumentation/Cargo.toml check advisories bans sources 2>&1) || true
 
           # Log output to the job log for visibility, not just the PR comment
           echo "=== Root workspace ==="
@@ -94,14 +97,12 @@ jobs:
       - name: Find existing comment
         uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e # v3.1.0
         id: find-comment
-        if: ${{ !github.event.pull_request.head.repo.fork }}
         with:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: 'github-actions[bot]'
           body-includes: '## 🔒 Cargo Deny Results'
       - name: Create or update PR comment
         uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
-        if: ${{ !github.event.pull_request.head.repo.fork }}
         with:
           comment-id: ${{ steps.find-comment.outputs.comment-id }}
           issue-number: ${{ github.event.pull_request.number }}
