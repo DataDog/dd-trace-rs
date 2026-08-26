@@ -252,6 +252,7 @@ wasm-bindgen-macro,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crat
 wasm-bindgen-macro-support,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-shared,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared,MIT OR Apache-2.0,The wasm-bindgen Developers
 web-sys,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
+web-time,https://github.com/daxpedda/web-time,MIT OR Apache-2.0,The web-time Authors
 winapi-util,https://github.com/BurntSushi/winapi-util,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
 windows,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,Microsoft
 windows-core,https://github.com/microsoft/windows-rs,MIT OR Apache-2.0,The windows-core Authors
