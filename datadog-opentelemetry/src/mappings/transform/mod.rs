@@ -572,6 +572,11 @@ pub fn otel_span_to_dd_span<'a>(
     }
 
     for (key, value) in otel_resource.iter() {
+        if key.as_str() == DEPLOYMENT_ENVIRONMENT_NAME.key()
+            || key.as_str() == DEPLOYMENT_ENVIRONMENT.key()
+        {
+            continue;
+        }
         set_meta_otlp_with_semconv_mappings(key.as_str(), value, &mut dd_span);
     }
 

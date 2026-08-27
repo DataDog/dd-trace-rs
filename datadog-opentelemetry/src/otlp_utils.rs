@@ -8,6 +8,13 @@
     feature = "logs-http"
 ))]
 use opentelemetry_sdk::Resource;
+#[cfg(any(
+    feature = "metrics-grpc",
+    feature = "metrics-http",
+    feature = "logs-grpc",
+    feature = "logs-http"
+))]
+use std::borrow::Cow;
 
 #[cfg(any(
     feature = "metrics-grpc",
@@ -15,7 +22,10 @@ use opentelemetry_sdk::Resource;
     feature = "logs-grpc",
     feature = "logs-http"
 ))]
-use crate::{configuration::OtlpProtocol, core::configuration::Config};
+use crate::{
+    configuration::OtlpProtocol, core::configuration::Config, is_environment_attribute,
+    resource_environment, DEPLOYMENT_ENVIRONMENT_NAME,
+};
 
 #[cfg(any(
     feature = "metrics-grpc",
@@ -47,6 +57,16 @@ pub(crate) const DEFAULT_OTLP_HTTP_PORT: u16 = 4318;
 ))]
 pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -> Resource {
     let mut resource_attrs: Vec<opentelemetry::KeyValue> = Vec::new();
+    let environment = config
+        .explicit_env()
+        .map(Cow::Borrowed)
+        .or_else(|| resource.as_ref().and_then(resource_environment))
+        .or_else(|| {
+            config
+                .global_tags()
+                .find_map(|(key, value)| (key == "env").then(|| Cow::Owned(value.to_string())))
+        })
+        .or_else(|| config.otel_resource_environment().map(Cow::Borrowed));
 
     for (key, value) in config.otel_resource_attributes() {
         resource_attrs.push(opentelemetry::KeyValue::new(
@@ -58,7 +78,7 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
     for (key, value) in config.global_tags() {
         let otel_key = match key {
             "service" => "service.name",
-            "env" => "deployment.environment",
+            "env" => DEPLOYMENT_ENVIRONMENT_NAME,
             "version" => "service.version",
             _ => key,
         };
@@ -70,7 +90,7 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
         ));
     }
 
-    if let Some(resource) = resource {
+    if let Some(resource) = resource.as_ref() {
         for (k, v) in resource.iter() {
             resource_attrs.push(opentelemetry::KeyValue::new(k.clone(), v.clone()));
         }
@@ -92,11 +112,11 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
         ));
     }
 
-    if let Some(env) = config.env() {
-        resource_attrs.retain(|kv| kv.key.as_str() != "deployment.environment");
+    resource_attrs.retain(|kv| !is_environment_attribute(kv.key.as_str()));
+    if let Some(env) = environment {
         resource_attrs.push(opentelemetry::KeyValue::new(
-            "deployment.environment",
-            env.to_string(),
+            DEPLOYMENT_ENVIRONMENT_NAME,
+            env.into_owned(),
         ));
     }
 
@@ -218,4 +238,47 @@ pub(crate) fn get_otlp_logs_timeout(config: &Config) -> u32 {
         return timeout;
     }
     config.otlp_timeout()
+}
+
+#[cfg(all(
+    test,
+    any(
+        feature = "metrics-grpc",
+        feature = "metrics-http",
+        feature = "logs-grpc",
+        feature = "logs-http"
+    )
+))]
+mod tests {
+    use opentelemetry::{Key, KeyValue, Value};
+
+    use super::*;
+    use crate::LEGACY_DEPLOYMENT_ENVIRONMENT;
+
+    #[test]
+    fn configured_environment_replaces_resource_aliases() {
+        let config = Config::builder().set_env("datadog".to_string()).build();
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "stable"),
+                KeyValue::new(LEGACY_DEPLOYMENT_ENVIRONMENT, "legacy"),
+                KeyValue::new("unrelated", "value"),
+            ])
+            .build();
+
+        let resource = build_otel_resource(&config, Some(resource));
+
+        assert_eq!(
+            resource.get(&Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME)),
+            Some(Value::from("datadog"))
+        );
+        assert_eq!(
+            resource.get(&Key::from_static_str(LEGACY_DEPLOYMENT_ENVIRONMENT)),
+            None
+        );
+        assert_eq!(
+            resource.get(&Key::from_static_str("unrelated")),
+            Some(Value::from("value"))
+        );
+    }
 }

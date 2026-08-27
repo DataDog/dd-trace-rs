@@ -1079,6 +1079,7 @@ pub struct Config {
     // # Service tagging
     service: ConfigItemWithOverride<ServiceName>,
     env: ConfigItem<Option<String>>,
+    otel_resource_environment: Option<String>,
     version: ConfigItem<Option<String>>,
 
     // # Agent
@@ -1296,6 +1297,31 @@ impl Config {
         }
 
         let cisu = ConfigItemSourceUpdater { sources };
+        let env = cisu.update_string(default.env, Some);
+        let mut parsed_otel_resource_attributes = sources
+            .get_parse::<OtelResourceAttributes>(SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES);
+        let mut otel_resource_environment = None;
+
+        if let Some(config_key) = parsed_otel_resource_attributes.value.as_mut() {
+            let OtelResourceAttributes(attributes) = &mut config_key.value;
+            otel_resource_environment = attributes
+                .iter()
+                .find(|(key, value)| key == "deployment.environment.name" && !value.is_empty())
+                .or_else(|| {
+                    attributes
+                        .iter()
+                        .find(|(key, value)| key == "deployment.environment" && !value.is_empty())
+                })
+                .map(|(_, value)| value.clone());
+            attributes.retain(|(key, _)| {
+                key != "deployment.environment.name" && key != "deployment.environment"
+            });
+        }
+        let otel_resource_attributes = cisu.apply_result(
+            default.otel_resource_attributes,
+            parsed_otel_resource_attributes,
+            |OtelResourceAttributes(attributes)| attributes,
+        );
 
         Self {
             runtime_id: default.runtime_id,
@@ -1307,15 +1333,13 @@ impl Config {
                 SupportedConfigurations::OTEL_SERVICE_NAME,
                 ServiceName::Configured,
             ),
-            env: cisu.update_string(default.env, Some),
+            env,
+            otel_resource_environment,
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
-            otel_resource_attributes: cisu.update_parsed_with_transform(
-                default.otel_resource_attributes,
-                |OtelResourceAttributes(attrs)| attrs,
-            ),
+            otel_resource_attributes,
             otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
@@ -1522,7 +1546,15 @@ impl Config {
 
     /// Returns the configured environment name (e.g., "production", "staging").
     pub fn env(&self) -> Option<&str> {
+        self.explicit_env().or(self.otel_resource_environment())
+    }
+
+    pub(crate) fn explicit_env(&self) -> Option<&str> {
         self.env.value().as_deref()
+    }
+
+    pub(crate) fn otel_resource_environment(&self) -> Option<&str> {
+        self.otel_resource_environment.as_deref()
     }
 
     /// Returns the configured application version.
@@ -2012,6 +2044,7 @@ impl std::fmt::Debug for Config {
             .field("language_version", &self.language_version)
             .field("service", &self.service)
             .field("env", &self.env)
+            .field("otel_resource_environment", &self.otel_resource_environment)
             .field("version", &self.version)
             .field("global_tags", &self.global_tags)
             .field("trace_agent_url", &self.trace_agent_url)
@@ -2058,6 +2091,7 @@ fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
         env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
+        otel_resource_environment: None,
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_SERVICE,
@@ -2907,12 +2941,40 @@ impl ConfigBuilder {
 #[cfg(test)]
 mod tests {
     use libdd_telemetry::data::ConfigurationOrigin;
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::Resource;
     use std::collections::HashMap;
 
     use super::Config;
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
+    use crate::mappings::transform_tests::{test_cases, test_span_to_sdk_span};
+    use crate::mappings::{otel_span_to_dd_span, SpanStr};
     use crate::propagation::config::{get_extractors, get_injectors};
+
+    fn assert_resource_environment_on_span(config: Config, resource: Resource, expected_env: &str) {
+        let resource = crate::create_dd_resource(resource, &config);
+        let input_span = test_cases().remove(0).input_span;
+        let output = otel_span_to_dd_span(&test_span_to_sdk_span(&input_span), &resource);
+
+        assert_eq!(
+            output
+                .meta
+                .get(&SpanStr::from_str("env"))
+                .map(SpanStr::as_str),
+            Some(expected_env)
+        );
+        assert_eq!(
+            output
+                .meta
+                .get(&SpanStr::from_str("unrelated"))
+                .map(SpanStr::as_str),
+            Some("value")
+        );
+        for source_key in ["deployment.environment.name", "deployment.environment"] {
+            assert!(!output.meta.contains_key(&SpanStr::from_str(source_key)));
+        }
+    }
 
     #[test]
     fn test_config_from_source() {
@@ -3015,6 +3077,168 @@ mod tests {
         let config = Config::builder_with_sources(&sources).build();
         assert_eq!(&*config.service(), "unnamed-rust-service");
         assert!(config.service_is_default());
+    }
+
+    #[test]
+    fn test_otel_resource_deployment_environment_mapping() {
+        struct TestCase {
+            name: &'static str,
+            dd_env: Option<&'static str>,
+            resource_attributes: &'static str,
+            expected_env: &'static str,
+        }
+
+        for case in [
+            TestCase {
+                name: "stable only",
+                dd_env: None,
+                resource_attributes:
+                    "first=one,deployment.environment.name=stable,second=two",
+                expected_env: "stable",
+            },
+            TestCase {
+                name: "legacy only",
+                dd_env: None,
+                resource_attributes: "first=one,deployment.environment=legacy,second=two",
+                expected_env: "legacy",
+            },
+            TestCase {
+                name: "stable before legacy",
+                dd_env: None,
+                resource_attributes: "first=one,deployment.environment.name=stable,deployment.environment=legacy,second=two",
+                expected_env: "stable",
+            },
+            TestCase {
+                name: "legacy before stable",
+                dd_env: None,
+                resource_attributes: "first=one,deployment.environment=legacy,deployment.environment.name=stable,second=two",
+                expected_env: "stable",
+            },
+            TestCase {
+                name: "DD_ENV takes precedence",
+                dd_env: Some("datadog"),
+                resource_attributes: "first=one,deployment.environment=legacy,deployment.environment.name=stable,second=two",
+                expected_env: "datadog",
+            },
+        ] {
+            let mut values = vec![("OTEL_RESOURCE_ATTRIBUTES", case.resource_attributes)];
+            if let Some(dd_env) = case.dd_env {
+                values.push(("DD_ENV", dd_env));
+            }
+
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                values,
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+
+            assert_eq!(config.env(), Some(case.expected_env), "{} env", case.name);
+            assert_eq!(
+                config.otel_resource_attributes().collect::<Vec<_>>(),
+                vec![("first", "one"), ("second", "two")],
+                "{} resource attributes",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_dd_env_overrides_otel_resource_environment_on_span() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_ENV", "datadog")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("deployment.environment", "legacy"),
+                KeyValue::new("deployment.environment.name", "stable"),
+                KeyValue::new("unrelated", "value"),
+            ])
+            .build();
+        assert_resource_environment_on_span(config, resource, "datadog");
+    }
+
+    #[test]
+    fn test_resource_environment_overrides_otel_resource_attributes_on_span() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "deployment.environment.name=fallback",
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let resource = Resource::builder_empty()
+            .with_attributes([
+                KeyValue::new("deployment.environment", "provided"),
+                KeyValue::new("unrelated", "value"),
+            ])
+            .build();
+        assert_resource_environment_on_span(config, resource, "provided");
+    }
+
+    #[test]
+    fn test_datadog_tags_environment_overrides_otel_resource_attributes() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TAGS", "env:datadog"),
+                (
+                    "OTEL_RESOURCE_ATTRIBUTES",
+                    "deployment.environment.name=fallback",
+                ),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let resource = crate::otlp_utils::build_otel_resource(&config, None);
+
+        assert_eq!(
+            resource.get(&opentelemetry::Key::from_static_str(
+                "deployment.environment.name"
+            )),
+            Some(opentelemetry::Value::from("datadog"))
+        );
+        assert_eq!(
+            resource.get(&opentelemetry::Key::from_static_str(
+                "deployment.environment"
+            )),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resource_environment_overrides_otel_resource_attributes_for_otlp() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "OTEL_RESOURCE_ATTRIBUTES",
+                "deployment.environment.name=fallback",
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        let resource = Resource::builder_empty()
+            .with_attribute(KeyValue::new("deployment.environment", "provided"))
+            .build();
+        let resource = crate::otlp_utils::build_otel_resource(&config, Some(resource));
+
+        assert_eq!(
+            resource.get(&opentelemetry::Key::from_static_str(
+                "deployment.environment.name"
+            )),
+            Some(opentelemetry::Value::from("provided"))
+        );
+        assert_eq!(
+            resource.get(&opentelemetry::Key::from_static_str(
+                "deployment.environment"
+            )),
+            None
+        );
     }
 
     #[test]
