@@ -219,9 +219,10 @@ impl FromStr for Tracestate {
                         })
                         .collect(),
                 );
-            } else if key == "ot" {
-                ot = Some(value.to_string());
             } else {
+                if key == "ot" {
+                    ot = Some(value.to_string());
+                }
                 additional_values.push((key.to_string(), value.to_string()));
             }
         }
@@ -297,11 +298,20 @@ impl InjectTraceState {
         Self { header }
     }
 
-    pub(crate) fn additional_values(&self) -> impl Iterator<Item = &str> {
-        self.header.split(',').filter(|part| {
+    fn contains_ot(&self, ot: &str) -> bool {
+        self.header
+            .split(',')
+            .any(|part| part.split_once('=') == Some(("ot", ot)))
+    }
+
+    pub(crate) fn additional_values<'a>(
+        &'a self,
+        ot: Option<&'a str>,
+    ) -> impl Iterator<Item = &'a str> {
+        self.header.split(',').filter(move |part| {
             let (key, value) = part.split_once('=').unwrap_or((part, ""));
             key != "dd"
-                && key != "ot"
+                && (key != "ot" || ot == Some(value))
                 && !value.is_empty()
                 && Tracestate::valid_key(key)
                 && Tracestate::valid_value(value)
@@ -539,7 +549,14 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         dd_parts.truncate(index_before_tags);
     }
 
-    if let Some(ot) = context.ot_member {
+    let retained_ot = context.ot_member.filter(|ot| {
+        context
+            .tracestate
+            .as_ref()
+            .is_some_and(|tracestate| tracestate.contains_ot(ot))
+    });
+
+    if let Some(ot) = context.ot_member.filter(|_| retained_ot.is_none()) {
         member_count += 1;
         let mut ot_part = buf_appender(&mut tracestate);
         ot_part.push_str(super::const_concat!(TRACESTATE_VALUES_SEPARATOR, "ot=",));
@@ -549,7 +566,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
     // Add additional tracestate values if present
     if let Some(ts) = &context.tracestate {
         for part in ts
-            .additional_values()
+            .additional_values(retained_ot)
             .take(TRACESTATE_MAX_MEMBERS - member_count)
         {
             tracestate.push_str(TRACESTATE_VALUES_SEPARATOR);
@@ -1353,7 +1370,7 @@ mod test {
     }
 
     #[test]
-    fn parses_ot_member_and_removes_it_from_additional_values() {
+    fn parses_ot_member_and_preserves_it_in_additional_values() {
         let ts: Tracestate = "dd=s:2;t.dm:-3,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz"
             .parse()
             .unwrap();
@@ -1361,10 +1378,16 @@ mod test {
             ts.ot_member.as_deref(),
             Some("rv:ef284ace7a91e1;th:e6666666666666")
         );
-        // ot removed from remainder; congo preserved
-        let additional = ts.additional_values.unwrap();
-        assert!(additional.iter().all(|(k, _)| k != "ot"));
-        assert!(additional.iter().any(|(k, v)| k == "congo" && v == "xyz"));
+        assert_eq!(
+            ts.additional_values,
+            Some(vec![
+                (
+                    "ot".to_string(),
+                    "rv:ef284ace7a91e1;th:e6666666666666".to_string()
+                ),
+                ("congo".to_string(), "xyz".to_string())
+            ])
+        );
     }
 
     #[test]

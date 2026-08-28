@@ -701,7 +701,7 @@ pub mod tests {
     }
 
     #[test]
-    fn extract_inject_w3c_passthrough_forwards_ot_without_span_registration() {
+    fn extract_inject_w3c_passthrough_preserves_unchanged_ot_member_order() {
         let builder = Config::builder();
         let config = Arc::new(builder.build());
         let registry = TraceRegistry::new(config.clone());
@@ -714,7 +714,7 @@ pub mod tests {
         );
         extractor.insert(
             TRACESTATE_KEY.to_string(),
-            "dd=s:2,ot=rv:ef284ace7a91e1;th:e6666666666666,congo=xyz".to_string(),
+            "dd=s:1,foo=bar,ot=rv:6e6d1a75832a2f,something=else".to_string(),
         );
 
         let extracted_context = propagator.extract(&extractor);
@@ -722,14 +722,10 @@ pub mod tests {
         let mut injector = HashMap::new();
         propagator.inject_context(&extracted_context, &mut injector);
 
-        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
-        assert!(
-            injected_trace_state.contains("ot=rv:ef284ace7a91e1;th:e6666666666666"),
-            "expected inbound `ot` to be forwarded unchanged, got {injected_trace_state}"
-        );
-        assert!(
-            injected_trace_state.contains("congo=xyz"),
-            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        assert_eq!(
+            Extractor::get(&injector, TRACESTATE_KEY).unwrap_or(""),
+            "dd=s:1;p:00f067aa0ba902b7;t.tid:4bf92f3577b34da6,foo=bar,\
+             ot=rv:6e6d1a75832a2f,something=else"
         );
     }
 
