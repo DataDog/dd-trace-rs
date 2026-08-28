@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2 (Aug 28, 2026)
+
+- Preserve unchanged `ot` member order in W3C tracestate in https://github.com/DataDog/dd-trace-rs/pull/296
+- Emit and forward OTel consistent-probability ot tracestate member in https://github.com/DataDog/dd-trace-rs/pull/283
+- Shutdown with a deadline in https://github.com/DataDog/dd-trace-rs/pull/276
+- Run remote config on the trace exporter's shared runtime in https://github.com/DataDog/dd-trace-rs/pull/275
+- Drain pending spans in force_flush [APMSP-3915] in https://github.com/DataDog/dd-trace-rs/pull/287
+- Emit expected rate-limiter metric `_dd.limit_psr` in https://github.com/DataDog/dd-trace-rs/pull/288
+
 ## 0.5.1 (Aug 13, 2026)
 
 - Only error when no extractor recovers a real trace [SVLS-9550] in https://github.com/DataDog/dd-trace-rs/pull/284
