@@ -12,17 +12,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 
 usage() {
     cat <<EOF
-Usage: $0 WORKSPACE_PATH [WORKSPACE_PATH...]
+Usage: $0
 
-Generate third-party license CSV files.
-
-Each WORKSPACE_PATH must point to a Cargo workspace directory. The generated file is written next
-to that workspace's Cargo.toml as LICENSE-3rdparty.csv.
-
-Examples:
-  $0 .
-  $0 instrumentation
-  $0 . instrumentation
+Generate third-party license CSV files for the root and instrumentation Cargo workspaces.
 EOF
 }
 
@@ -33,56 +25,22 @@ case "${1:-}" in
         ;;
 esac
 
-if [ "$#" -eq 0 ]; then
-    echo "ERROR: at least one workspace path is required."
+if [ "$#" -ne 0 ]; then
+    echo "ERROR: this script does not accept arguments."
     echo ""
     usage
     exit 1
 fi
 
-WORKSPACE_PATHS=("$@")
-
-normalize_workspace_path() {
-    local workspace_path="$1"
-
-    workspace_path="${workspace_path#./}"
-    workspace_path="${workspace_path%/}"
-    if [ -z "${workspace_path}" ]; then
-        workspace_path="."
-    fi
-    echo "${workspace_path}"
-}
-
-run_tool() {
-    local workspace_path
-    local manifest
-    local output
-
-    workspace_path="$(normalize_workspace_path "$1")"
-    manifest="${workspace_path}/Cargo.toml"
-    output="${workspace_path}/LICENSE-3rdparty.csv"
-
-    if [ ! -f "${manifest}" ]; then
-        echo "ERROR: ${workspace_path} is not a Cargo workspace directory."
-        echo "Expected manifest at: ${manifest}"
-        exit 1
-    fi
-
-    echo "Generating ${output}..."
-    dd-rust-license-tool --manifest-path "${manifest}" dump > "${output}"
-}
-
 run_native() {
     cd "${ROOT_DIR}"
-    for workspace_path in "${WORKSPACE_PATHS[@]}"; do
-        run_tool "${workspace_path}"
-    done
+    echo "Generating LICENSE-3rdparty.csv..."
+    dd-rust-license-tool dump > "${GENERATED_DIR}/LICENSE-3rdparty.csv"
+    echo "Generating instrumentation/LICENSE-3rdparty.csv..."
+    dd-rust-license-tool --manifest-path instrumentation/Cargo.toml dump > "${GENERATED_DIR}/instrumentation/LICENSE-3rdparty.csv"
 }
 
 run_docker() {
-    local manifest
-    local output
-
     if ! command -v docker &> /dev/null || ! docker info &> /dev/null; then
         echo "ERROR: Docker is not running. Please start the Docker daemon and try again."
         exit 1
@@ -94,42 +52,45 @@ run_docker() {
         -t dd-trace-rs-dd-license-tool \
         -f "${ROOT_DIR}/scripts/Dockerfile.license" \
         "${ROOT_DIR}"
-    for workspace_path in "${WORKSPACE_PATHS[@]}"; do
-        workspace_path="$(normalize_workspace_path "${workspace_path}")"
-        manifest="${workspace_path}/Cargo.toml"
-        output="${workspace_path}/LICENSE-3rdparty.csv"
+    echo "Reading generated LICENSE-3rdparty.csv..."
+    docker run --rm dd-trace-rs-dd-license-tool /licenses/LICENSE-3rdparty.csv > "${GENERATED_DIR}/LICENSE-3rdparty.csv"
+    echo "Reading generated instrumentation/LICENSE-3rdparty.csv..."
+    docker run --rm dd-trace-rs-dd-license-tool /licenses/instrumentation/LICENSE-3rdparty.csv > "${GENERATED_DIR}/instrumentation/LICENSE-3rdparty.csv"
+}
 
-        if [ ! -f "${ROOT_DIR}/${manifest}" ]; then
-            echo "ERROR: ${workspace_path} is not a Cargo workspace directory."
-            echo "Expected manifest at: ${manifest}"
-            exit 1
+promote_if_changed() {
+    local changed=0
+    local file
+
+    for file in LICENSE-3rdparty.csv instrumentation/LICENSE-3rdparty.csv; do
+        if ! cmp -s "${file}" "${GENERATED_DIR}/${file}"; then
+            echo ""
+            echo "Differences for ${file}:"
+            diff -u "${file}" "${GENERATED_DIR}/${file}" || true
+            cp "${GENERATED_DIR}/${file}" "${file}"
+            changed=1
         fi
-
-        echo "Generating ${output}..."
-        docker run --rm dd-trace-rs-dd-license-tool --manifest-path "${manifest}" dump > "${ROOT_DIR}/${output}"
     done
-}
 
-has_matching_license_tool() {
-    cargo install --list 2>/dev/null | grep -qF "dd-rust-license-tool v${TOOL_VERSION}:" \
-        || { command -v dd-rust-license-tool > /dev/null && [ "$(dd-rust-license-tool --version | awk '{print $2}')" = "${TOOL_VERSION}" ]; }
-}
-
-installed_license_tool_version() {
-    local version
-
-    version="$(cargo install --list 2>/dev/null | grep "^dd-rust-license-tool v" | awk '{print $2}' | tr -d ':' || true)"
-    if [ -n "${version}" ]; then
-        echo "${version}"
-    elif command -v dd-rust-license-tool > /dev/null; then
-        dd-rust-license-tool --version | awk '{print $2}'
+    if [ "${changed}" -eq 0 ]; then
+        echo ""
+        echo "Generated license CSV files match committed copies."
+    else
+        echo ""
+        echo "Updated license CSV file(s)."
+        echo "Please review and commit the changes."
     fi
 }
 
-if has_matching_license_tool; then
+GENERATED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dd-trace-rs-license.XXXXXX")"
+trap 'rm -rf "${GENERATED_DIR}"' EXIT
+mkdir -p "${GENERATED_DIR}/instrumentation"
+cd "${ROOT_DIR}"
+
+if cargo install --list 2>/dev/null | grep -qF "dd-rust-license-tool v${TOOL_VERSION}"; then
     run_native
 else
-    INSTALLED_VERSION="$(installed_license_tool_version)"
+    INSTALLED_VERSION="$(cargo install --list 2>/dev/null | grep "^dd-rust-license-tool v" | awk '{print $2}' | tr -d ':' || true)"
 
     echo "dd-rust-license-tool v${TOOL_VERSION} is not installed."
     if [ -n "${INSTALLED_VERSION}" ]; then
@@ -173,6 +134,4 @@ else
     esac
 fi
 
-echo ""
-echo "Successfully generated license CSV file(s)."
-echo "Please review and commit the changes."
+promote_if_changed

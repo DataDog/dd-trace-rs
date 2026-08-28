@@ -100,7 +100,7 @@ find . -name '*.sh' -print0 | xargs -0 shellcheck
 rumdl check .
 
 # Update licence files if dependencies changed
-./scripts/update_license_3rdparty.sh . instrumentation
+./scripts/update_license_3rdparty.sh
 ```
 
 ## Code Style
@@ -194,8 +194,7 @@ dependencies are properly documented.
 
 To update the license files:
 
-1. Run `./scripts/update_license_3rdparty.sh . instrumentation` (requires Docker or local tool
-   install)
+1. Run `./scripts/update_license_3rdparty.sh` (requires Docker or local tool install)
 2. Review the changes to `LICENSE-3rdparty.csv` and `instrumentation/LICENSE-3rdparty.csv`
 3. Commit the updated file(s)
 
