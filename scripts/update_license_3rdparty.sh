@@ -10,10 +10,34 @@ TOOL_VERSION="1.0.6"
 INSTALL_CMD="cargo install dd-rust-license-tool --version \"${TOOL_VERSION}\" --locked"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd)"
 
+usage() {
+    cat <<EOF
+Usage: $0
+
+Generate third-party license CSV files for the root and instrumentation Cargo workspaces.
+EOF
+}
+
+case "${1:-}" in
+    -h|--help)
+        usage
+        exit 0
+        ;;
+esac
+
+if [ "$#" -ne 0 ]; then
+    echo "ERROR: this script does not accept arguments."
+    echo ""
+    usage
+    exit 1
+fi
+
 run_native() {
     cd "${ROOT_DIR}"
-    echo "Running dd-rust-license-tool dump..."
-    dd-rust-license-tool dump > LICENSE-3rdparty.csv
+    echo "Generating LICENSE-3rdparty.csv..."
+    dd-rust-license-tool dump > "${GENERATED_DIR}/LICENSE-3rdparty.csv"
+    echo "Generating instrumentation/LICENSE-3rdparty.csv..."
+    dd-rust-license-tool --manifest-path instrumentation/Cargo.toml dump > "${GENERATED_DIR}/instrumentation/LICENSE-3rdparty.csv"
 }
 
 run_docker() {
@@ -28,14 +52,45 @@ run_docker() {
         -t dd-trace-rs-dd-license-tool \
         -f "${ROOT_DIR}/scripts/Dockerfile.license" \
         "${ROOT_DIR}"
-    echo "Generating LICENSE-3rdparty.csv..."
-    docker run --rm dd-trace-rs-dd-license-tool > "${ROOT_DIR}/LICENSE-3rdparty.csv"
+    echo "Reading generated LICENSE-3rdparty.csv..."
+    docker run --rm dd-trace-rs-dd-license-tool /licenses/LICENSE-3rdparty.csv > "${GENERATED_DIR}/LICENSE-3rdparty.csv"
+    echo "Reading generated instrumentation/LICENSE-3rdparty.csv..."
+    docker run --rm dd-trace-rs-dd-license-tool /licenses/instrumentation/LICENSE-3rdparty.csv > "${GENERATED_DIR}/instrumentation/LICENSE-3rdparty.csv"
 }
+
+promote_if_changed() {
+    local changed=0
+    local file
+
+    for file in LICENSE-3rdparty.csv instrumentation/LICENSE-3rdparty.csv; do
+        if ! cmp -s "${file}" "${GENERATED_DIR}/${file}"; then
+            echo ""
+            echo "Differences for ${file}:"
+            diff -u "${file}" "${GENERATED_DIR}/${file}" || true
+            cp "${GENERATED_DIR}/${file}" "${file}"
+            changed=1
+        fi
+    done
+
+    if [ "${changed}" -eq 0 ]; then
+        echo ""
+        echo "Generated license CSV files match committed copies."
+    else
+        echo ""
+        echo "Updated license CSV file(s)."
+        echo "Please review and commit the changes."
+    fi
+}
+
+GENERATED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dd-trace-rs-license.XXXXXX")"
+trap 'rm -rf "${GENERATED_DIR}"' EXIT
+mkdir -p "${GENERATED_DIR}/instrumentation"
+cd "${ROOT_DIR}"
 
 if cargo install --list 2>/dev/null | grep -qF "dd-rust-license-tool v${TOOL_VERSION}"; then
     run_native
 else
-    INSTALLED_VERSION=$(cargo install --list 2>/dev/null | grep "^dd-rust-license-tool v" | awk '{print $2}' | tr -d ':' || true)
+    INSTALLED_VERSION="$(cargo install --list 2>/dev/null | grep "^dd-rust-license-tool v" | awk '{print $2}' | tr -d ':' || true)"
 
     echo "dd-rust-license-tool v${TOOL_VERSION} is not installed."
     if [ -n "${INSTALLED_VERSION}" ]; then
@@ -79,6 +134,4 @@ else
     esac
 fi
 
-echo ""
-echo "Successfully generated LICENSE-3rdparty.csv."
-echo "Please review and commit the changes."
+promote_if_changed

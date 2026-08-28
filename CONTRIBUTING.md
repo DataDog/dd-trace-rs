@@ -99,7 +99,7 @@ cargo test --workspace --doc --locked
 find . -name '*.sh' -print0 | xargs -0 shellcheck
 rumdl check .
 
-# Update licence file if dependencies changed
+# Update licence files if dependencies changed
 ./scripts/update_license_3rdparty.sh
 ```
 
@@ -188,19 +188,19 @@ If any code in the PR was contributed by an AI agent, apply the `ai generated` l
 
 ## Third-party Licenses
 
-When adding or updating dependencies, you must update the `LICENSE-3rdparty.csv` file to reflect
-these changes. This file is checked by our CI pipeline to ensure all dependencies are properly
-documented.
+When adding or updating dependencies, you must update the applicable `LICENSE-3rdparty.csv`
+file(s) to reflect these changes. These files are checked by our CI pipeline to ensure all
+dependencies are properly documented.
 
-To update the license file:
+To update the license files:
 
 1. Run `./scripts/update_license_3rdparty.sh` (requires Docker or local tool install)
-2. Review the changes to `LICENSE-3rdparty.csv`
-3. Commit the updated file
+2. Review the changes to `LICENSE-3rdparty.csv` and `instrumentation/LICENSE-3rdparty.csv`
+3. Commit the updated file(s)
 
-The script uses Docker to ensure the generated file matches our CI environment, avoiding
-platform-specific differences. Otherwise the GH action will generate a correct
-`LICENSE-3rdparty.csv` file artifact on failure, which you can download and add to your branch.
+The script uses the pinned local license tool when it is available, or can run through Docker when
+needed. Otherwise the GH action will generate correct license CSV file artifacts on failure, which
+you can download and add to your branch.
 
 ## Rust Code Review
 
