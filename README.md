@@ -229,6 +229,9 @@ datadog_opentelemetry::tracing()
 
 ## Support
 
+For the full support policy — supported Rust and OpenTelemetry versions, the version lifecycle,
+platform support tiers, and security — see [docs/SUPPORT_POLICY.md](docs/SUPPORT_POLICY.md).
+
 * MSRV: 1.87
 
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
