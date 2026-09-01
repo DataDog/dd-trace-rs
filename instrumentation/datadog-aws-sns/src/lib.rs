@@ -20,10 +20,18 @@
 //! For `Publish` and `PublishBatch`, the interceptor injects the active request span context as an
 //! SNS message attribute named `_datadog` with data type `Binary`. Existing `_datadog` attributes
 //! are replaced. Injection is skipped when the message already has the maximum number of SNS
-//! message attributes and no `_datadog` attribute is present. With the default W3C trace-context
-//! propagator, the binary JSON attribute value is typically less than 100 bytes before AWS request
-//! serialization overhead; baggage from the configured global OpenTelemetry text-map propagator can
-//! add arbitrary bytes. Other SNS operations create spans but do not carry propagation context.
+//! message attributes and no `_datadog` attribute is present. Other SNS operations create spans but
+//! do not carry propagation context.
+//!
+//! # Payload Size Headroom
+//!
+//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
+//! applications should leave a small amount of room under the SNS message size limit. With the
+//! default W3C trace-context propagator, the binary JSON attribute value is typically less than 100
+//! bytes before AWS request serialization overhead. Baggage from the configured global
+//! OpenTelemetry text-map propagator can add arbitrary bytes. SNS performs the authoritative size
+//! validation, and this crate only applies cheap stable guards such as the message attribute count
+//! limit.
 //!
 //! # Usage
 //!

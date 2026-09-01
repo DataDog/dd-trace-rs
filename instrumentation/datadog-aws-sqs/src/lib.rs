@@ -21,10 +21,7 @@
 //! For `SendMessage` and `SendMessageBatch`, the interceptor injects the active request span
 //! context as an SQS message attribute named `_datadog` with data type `String`. Existing
 //! `_datadog` attributes are replaced. Injection is skipped when the message already has the
-//! maximum number of SQS message attributes and no `_datadog` attribute is present. With the
-//! default W3C trace-context propagator, the JSON attribute value is typically less than 100 bytes
-//! before AWS request serialization overhead; baggage from the configured global OpenTelemetry
-//! text-map propagator can add arbitrary bytes.
+//! maximum number of SQS message attributes and no `_datadog` attribute is present.
 //!
 //! For `ReceiveMessage`, the interceptor requests the `_datadog` message attribute if the caller
 //! did not already request it. After messages are received, the request span records the received
@@ -32,6 +29,15 @@
 //! producer contexts found in SQS message attributes, SNS notification envelopes, EventBridge
 //! envelopes, or EventBridge envelopes nested inside SNS notifications. Use [`extract_context`] to
 //! extract the same parent context when starting consumer work for a specific message.
+//!
+//! # Payload Size Headroom
+//!
+//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
+//! applications should leave a small amount of room under the SQS message size limit. With the
+//! default W3C trace-context propagator, the JSON attribute value is typically less than 100 bytes
+//! before AWS request serialization overhead. Baggage from the configured global OpenTelemetry
+//! text-map propagator can add arbitrary bytes. SQS performs the authoritative size validation, and
+//! this crate only applies cheap stable guards such as the message attribute count limit.
 //!
 //! # Usage
 //!

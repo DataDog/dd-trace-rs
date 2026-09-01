@@ -20,11 +20,19 @@
 //! For `PutEvents`, the interceptor injects the active request span context into each entry's
 //! `detail` JSON object as a top-level `_datadog` field. Existing top-level `_datadog` fields are
 //! replaced. Entries with an `event_bus_name` also receive `x-datadog-resource-name`. Injection is
-//! skipped for entries with missing, invalid, non-object, or oversized `detail` payloads. With the
-//! default W3C trace-context propagator, the inserted JSON is typically less than 100 bytes before
-//! AWS request serialization overhead; `event_bus_name` adds the encoded bus name plus JSON field
-//! overhead, and baggage from the configured global OpenTelemetry text-map propagator can add
-//! arbitrary bytes. Other EventBridge operations create spans but do not carry propagation context.
+//! skipped for entries with missing, invalid, non-object, or oversized `detail` payloads. Other
+//! EventBridge operations create spans but do not carry propagation context.
+//!
+//! # Payload Size Headroom
+//!
+//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
+//! applications should leave a small amount of room under the EventBridge `PutEvents` size limit.
+//! With the default W3C trace-context propagator, the inserted JSON is typically less than 100
+//! bytes before AWS request serialization overhead. `event_bus_name` adds the encoded bus name plus
+//! JSON field overhead, and baggage from the configured global OpenTelemetry text-map propagator
+//! can add arbitrary bytes. EventBridge performs the authoritative size validation, and this crate
+//! only applies cheap stable guards such as skipping invalid or clearly oversized `detail`
+//! payloads.
 //!
 //! # Usage
 //!
