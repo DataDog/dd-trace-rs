@@ -319,7 +319,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         // Always include the default value
         configurations.push(Configuration {
             name: self.name.as_str().to_string(),
-            value: self.default_value.get_configuration_value(),
+            value: Some(self.default_value.get_configuration_value()),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
             seq_id: Some(ConfigSourceOrigin::Default as u64),
@@ -327,7 +327,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(calculated_value) = calculated_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: calculated_value,
+                value: Some(calculated_value),
                 origin: ConfigSourceOrigin::Calculated.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Calculated as u64),
@@ -336,7 +336,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref env_value) = self.env_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: env_value.get_configuration_value(),
+                value: Some(env_value.get_configuration_value()),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
@@ -345,7 +345,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref code_value) = self.code_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: code_value.get_configuration_value(),
+                value: Some(code_value.get_configuration_value()),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Code as u64),
@@ -520,7 +520,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
             configurations.push(Configuration {
                 name: self.config_item.name.as_str().to_string(),
-                value: self.value().get_configuration_value(),
+                value: Some(self.value().get_configuration_value()),
                 origin: self.source().into(),
                 config_id,
                 seq_id: Some(self.source() as u64),
@@ -1138,6 +1138,10 @@ pub struct Config {
     trace_writer_synchronous_timeout: Duration,
     /// The max amount of time a span stays in the writer buffer before we trigger a flush
     trace_writer_max_flush_interval: Duration,
+    /// How long `force_flush` waits for pending spans to be exported before returning. Unlike
+    /// `trace_writer_synchronous_timeout` this applies to explicit flushes regardless of whether
+    /// synchronous writes are enabled.
+    trace_writer_force_flush_timeout: Duration,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -1385,6 +1389,7 @@ impl Config {
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
+            trace_writer_force_flush_timeout: default.trace_writer_force_flush_timeout,
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
@@ -1631,6 +1636,10 @@ impl Config {
 
     pub(crate) fn trace_writer_max_flush_interval(&self) -> Duration {
         self.trace_writer_max_flush_interval
+    }
+
+    pub(crate) fn trace_writer_force_flush_timeout(&self) -> Duration {
+        self.trace_writer_force_flush_timeout
     }
 
     #[cfg(feature = "test-utils")]
@@ -2112,6 +2121,7 @@ fn default_config() -> Config {
         trace_writer_synchronous_write: false,
         trace_writer_synchronous_timeout: Duration::from_secs(2),
         trace_writer_max_flush_interval: Duration::from_secs(1),
+        trace_writer_force_flush_timeout: Duration::from_secs(5),
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
@@ -2867,6 +2877,20 @@ impl ConfigBuilder {
         trace_writer_max_flush_interval: Duration,
     ) -> &mut Self {
         self.config.trace_writer_max_flush_interval = trace_writer_max_flush_interval;
+        self
+    }
+
+    /// Set the maximum time `force_flush` waits for pending spans to be exported before
+    /// returning. Unlike [`ConfigBuilder::set_trace_writer_synchronous_timeout`] this applies
+    /// to explicit flushes regardless of whether synchronous writes are enabled. If the timeout
+    /// is reached, the flush continues in the background.
+    ///
+    /// **Default**: `5s`
+    pub fn set_trace_writer_force_flush_timeout(
+        &mut self,
+        trace_writer_force_flush_timeout: Duration,
+    ) -> &mut Self {
+        self.config.trace_writer_force_flush_timeout = trace_writer_force_flush_timeout;
         self
     }
 
@@ -4123,7 +4147,7 @@ mod tests {
         // Converting configuration value to json helps with comparison as serialized properties may
         // differ from their original order
         assert_eq!(
-            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected.clone()
         );
 
@@ -4146,7 +4170,8 @@ mod tests {
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(&active_configuration_after_rc.value).unwrap(),
+            ParsedSamplingRules::from_str(active_configuration_after_rc.value.as_deref().unwrap())
+                .unwrap(),
             expected_rc
         );
 
@@ -4157,7 +4182,7 @@ mod tests {
         let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
         assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
-            ParsedSamplingRules::from_str(&active_configuration.value).unwrap(),
+            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected
         );
     }
@@ -4338,7 +4363,9 @@ mod tests {
             SENTINEL_OTLP_LOGS,
         ] {
             assert!(
-                !configurations.iter().any(|c| c.value.contains(sentinel)),
+                !configurations
+                    .iter()
+                    .any(|c| c.value.as_deref().is_some_and(|v| v.contains(sentinel))),
                 "sentinel value {sentinel:?} must not appear in telemetry configuration"
             );
         }
@@ -4362,7 +4389,7 @@ mod tests {
                 .iter()
                 .filter(|c| c.name == name)
                 .max_by_key(|c| c.seq_id)
-                .map(|c| c.value.clone())
+                .and_then(|c| c.value.clone())
         };
         assert_eq!(
             value_for("OTEL_EXPORTER_OTLP_ENDPOINT").as_deref(),
