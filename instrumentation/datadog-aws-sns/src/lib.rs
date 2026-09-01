@@ -7,6 +7,24 @@
 
 //! Datadog tracing for AWS SDK for Rust SNS operations.
 //!
+//! # What it instruments
+//!
+//! Installing [`ConfigExt::datadog_tracing`] adds an AWS SDK interceptor that creates one
+//! `sns.request` client span for each SNS SDK operation as a child of the current OpenTelemetry
+//! context. Spans are tagged with common AWS SDK metadata, HTTP method, URL, user agent, response
+//! status, AWS request ID, and SDK errors.
+//!
+//! SNS-specific span tags include `topicname`, `targetname`, and
+//! `messaging.batch.message_count` for `PublishBatch`.
+//!
+//! For `Publish` and `PublishBatch`, the interceptor injects the active request span context as an
+//! SNS message attribute named `_datadog` with data type `Binary`. Existing `_datadog` attributes
+//! are replaced. Injection is skipped when the message already has the maximum number of SNS
+//! message attributes and no `_datadog` attribute is present. With the default W3C trace-context
+//! propagator, the binary JSON attribute value is typically less than 100 bytes before AWS request
+//! serialization overhead; baggage from the configured global OpenTelemetry text-map propagator can
+//! add arbitrary bytes. Other SNS operations create spans but do not carry propagation context.
+//!
 //! # Usage
 //!
 //! ```rust,ignore

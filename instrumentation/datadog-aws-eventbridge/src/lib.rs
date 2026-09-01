@@ -7,6 +7,25 @@
 
 //! Datadog tracing for AWS SDK for Rust EventBridge operations.
 //!
+//! # What it instruments
+//!
+//! Installing [`ConfigExt::datadog_tracing`] adds an AWS SDK interceptor that creates one
+//! `eventbridge.request` client span for each EventBridge SDK operation as a child of the current
+//! OpenTelemetry context. Spans are tagged with common AWS SDK metadata, HTTP method, URL, user
+//! agent, response status, AWS request ID, and SDK errors.
+//!
+//! EventBridge-specific span tags include `rulename` for rule-oriented operations and
+//! `messaging.batch.message_count` for `PutEvents`.
+//!
+//! For `PutEvents`, the interceptor injects the active request span context into each entry's
+//! `detail` JSON object as a top-level `_datadog` field. Existing top-level `_datadog` fields are
+//! replaced. Entries with an `event_bus_name` also receive `x-datadog-resource-name`. Injection is
+//! skipped for entries with missing, invalid, non-object, or oversized `detail` payloads. With the
+//! default W3C trace-context propagator, the inserted JSON is typically less than 100 bytes before
+//! AWS request serialization overhead; `event_bus_name` adds the encoded bus name plus JSON field
+//! overhead, and baggage from the configured global OpenTelemetry text-map propagator can add
+//! arbitrary bytes. Other EventBridge operations create spans but do not carry propagation context.
+//!
 //! # Usage
 //!
 //! ```rust,ignore

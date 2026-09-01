@@ -7,6 +7,32 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
+//! Datadog tracing for AWS Lambda handlers using `lambda_runtime`.
+//!
+//! # What it instruments
+//!
+//! [`TracedService`] wraps a Lambda Tower service and creates one `aws.lambda` server span for each
+//! Lambda invocation. The invocation span is a child of the current OpenTelemetry context and is
+//! made active while the user handler future runs, so spans created by the handler and supported
+//! AWS SDK client calls are parented to the invocation.
+//!
+//! The invocation span records Lambda metadata such as function name, function ARN, version,
+//! request ID, cold-start status, `language = rust`, `_dd.origin = lambda`, and `span.type =
+//! serverless`. If the handler returns an error or the event payload cannot be deserialized, the
+//! span is marked as errored before the original Lambda result is returned.
+//!
+//! The wrapper owns the Datadog OpenTelemetry tracer provider lifecycle and forces Lambda-safe
+//! defaults: client-side trace stats computation is disabled and trace writes are synchronous to
+//! reduce span loss when the runtime freezes after a handler returns.
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! lambda_runtime::run(TracedService::new(
+//!     lambda_runtime::service_fn(my_handler),
+//! ))
+//! .await
+//! ```
 mod attribute_keys;
 mod invocation;
 

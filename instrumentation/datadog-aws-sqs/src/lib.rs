@@ -7,6 +7,32 @@
 
 //! Datadog tracing for AWS SDK for Rust SQS operations.
 //!
+//! # What it instruments
+//!
+//! Installing [`ConfigExt::datadog_tracing`] adds an AWS SDK interceptor that creates one
+//! `sqs.request` client span for each SQS SDK operation as a child of the current OpenTelemetry
+//! context. Spans are tagged with common AWS SDK metadata, HTTP method, URL, user agent, response
+//! status, AWS request ID, and SDK errors.
+//!
+//! SQS-specific span tags include `messaging.system = amazonsqs`, `queuename`,
+//! `cloud.resource_id`, `messaging.batch.message_count`, and the sent `messaging.message.id` when
+//! available.
+//!
+//! For `SendMessage` and `SendMessageBatch`, the interceptor injects the active request span
+//! context as an SQS message attribute named `_datadog` with data type `String`. Existing
+//! `_datadog` attributes are replaced. Injection is skipped when the message already has the
+//! maximum number of SQS message attributes and no `_datadog` attribute is present. With the
+//! default W3C trace-context propagator, the JSON attribute value is typically less than 100 bytes
+//! before AWS request serialization overhead; baggage from the configured global OpenTelemetry
+//! text-map propagator can add arbitrary bytes.
+//!
+//! For `ReceiveMessage`, the interceptor requests the `_datadog` message attribute if the caller
+//! did not already request it. After messages are received, the request span records the received
+//! message count, adds an `sqs.receive.messages` event, and links the request span to extracted
+//! producer contexts found in SQS message attributes, SNS notification envelopes, EventBridge
+//! envelopes, or EventBridge envelopes nested inside SNS notifications. Use [`extract_context`] to
+//! extract the same parent context when starting consumer work for a specific message.
+//!
 //! # Usage
 //!
 //! ```rust,ignore
