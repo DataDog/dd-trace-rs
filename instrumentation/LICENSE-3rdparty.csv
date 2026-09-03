@@ -41,7 +41,7 @@ bumpalo,https://github.com/fitzgen/bumpalo,MIT OR Apache-2.0,Nick Fitzgerald <fi
 bytes,https://github.com/tokio-rs/bytes,MIT,"Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>"
 bytes-utils,https://github.com/vorner/bytes-utils,Apache-2.0 OR MIT,Michal 'vorner' Vaner <vorner@vorner.cz>
 cadence,https://github.com/56quarters/cadence,Apache-2.0 OR MIT,Nick Pillitteri
-cc,https://github.com/rust-lang/cc-rs,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
+cc,https://github.com/rust-lang/cc-rs,MIT OR Apache-2.0,The cc Authors
 cfg-if,https://github.com/rust-lang/cfg-if,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 chrono,https://github.com/chronotope/chrono,MIT OR Apache-2.0,The chrono Authors
 cmov,https://github.com/RustCrypto/utils,Apache-2.0 OR MIT,RustCrypto Developers
@@ -97,7 +97,7 @@ h2,https://github.com/hyperium/h2,MIT,"Carl Lerche <me@carllerche.com>, Sean McA
 hashbrown,https://github.com/rust-lang/hashbrown,MIT OR Apache-2.0,Amanieu d'Antras <amanieu@gmail.com>
 hashbrown,https://github.com/rust-lang/hashbrown,MIT OR Apache-2.0,The hashbrown Authors
 heck,https://github.com/withoutboats/heck,MIT OR Apache-2.0,The heck Authors
-hermit-abi,https://github.com/hermit-os/hermit-rs,MIT OR Apache-2.0,Stefan Lankes
+hermit-abi,https://github.com/hermit-os/hermit-rs,MIT OR Apache-2.0,The hermit-abi Authors
 hex,https://github.com/KokaKiwi/rust-hex,MIT OR Apache-2.0,KokaKiwi <kokakiwi@kokakiwi.net>
 hmac,https://github.com/RustCrypto/MACs,MIT OR Apache-2.0,RustCrypto Developers
 http,https://github.com/hyperium/http,MIT OR Apache-2.0,"Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>"
@@ -134,7 +134,7 @@ konst_macro_rules,https://github.com/rodrimati1992/konst,Zlib,rodrimati1992 <rod
 lambda_runtime,https://github.com/awslabs/aws-lambda-rust-runtime,Apache-2.0,"David Calavera <dcalaver@amazon.com>, Harold Sun <sunhua@amazon.com>"
 lambda_runtime_api_client,https://github.com/awslabs/aws-lambda-rust-runtime,Apache-2.0,"David Calavera <dcalaver@amazon.com>, Harold Sun <sunhua@amazon.com>"
 lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
-libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The Rust Project Developers
+libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The libc Authors
 libdd-capabilities,https://github.com/DataDog/libdatadog/tree/main/libdd-capabilities,Apache-2.0,The libdd-capabilities Authors
 libdd-capabilities-impl,https://github.com/DataDog/libdatadog/tree/main/libdd-capabilities-impl,Apache-2.0,The libdd-capabilities-impl Authors
 libdd-common,https://github.com/DataDog/libdatadog/tree/main/datadog-common,Apache-2.0,The libdd-common Authors
@@ -315,8 +315,8 @@ writeable,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Dev
 xmlparser,https://github.com/RazrFalcon/xmlparser,MIT OR Apache-2.0,Yevhenii Reizner <razrfalcon@gmail.com>
 yoke,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
 yoke-derive,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
-zerocopy,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,"Joshua Liebow-Feeser <joshlf@google.com>, Jack Wrenn <jswrenn@amazon.com>"
-zerocopy-derive,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,"Joshua Liebow-Feeser <joshlf@google.com>, Jack Wrenn <jswrenn@amazon.com>"
+zerocopy,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,The zerocopy Authors
+zerocopy-derive,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,The zerocopy-derive Authors
 zerofrom,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 zerofrom-derive,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
 zeroize,https://github.com/RustCrypto/utils,Apache-2.0 OR MIT,The RustCrypto Project Developers
