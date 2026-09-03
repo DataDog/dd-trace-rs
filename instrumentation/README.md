@@ -65,6 +65,8 @@ Prefer focused tests for:
 
 Functional changes and bug fixes require regression coverage.
 
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the canonical test commands.
+
 ## Third-party Licenses
 
 When adding or updating dependencies in this workspace, update
@@ -84,11 +86,11 @@ and add it to the branch.
 ## Local Development
 
 Follow the repository-level setup, formatting, linting, testing, and pull
-request guidance in `../CONTRIBUTING.md`. Run workspace-scoped Cargo commands
+request guidance in [CONTRIBUTING.md](../CONTRIBUTING.md). Run workspace-scoped Cargo commands
 from this directory when working only on instrumentation code.
 
-This workspace declares Rust 1.91.1 as its MSRV in `Cargo.toml`, which is
-newer than the repository root MSRV. Install it in addition to the
+This workspace declares **Rust 1.91.1** as its **MSRV** in `Cargo.toml`, which is
+**newer** than the repository root MSRV. Install it in addition to the
 repository-level toolchains:
 
 ```bash
@@ -96,9 +98,9 @@ rustup install 1.91.1
 rustup component add clippy --toolchain 1.91.1
 ```
 
-Validate instrumentation changes with the same MSRV used by CI:
+To make Cargo use the instrumentation MSRV by default in this directory, set a
+local rustup override:
 
 ```bash
-rustup run 1.91.1 cargo check --workspace --locked
-rustup run 1.91.1 cargo clippy --workspace --all-targets -- -D warnings
+rustup override set 1.91.1
 ```
