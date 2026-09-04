@@ -86,17 +86,7 @@ const MAX_MESSAGE_ATTRIBUTES: usize = 10;
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SNS config builder.
 #[derive(Debug)]
-struct SnsInterceptor {
-    tracer: global::BoxedTracer,
-}
-
-impl SnsInterceptor {
-    fn new() -> Self {
-        Self {
-            tracer: global::tracer(TRACER_NAME),
-        }
-    }
-}
+struct SnsInterceptor;
 
 /// Extension methods for installing Datadog tracing on an Amazon SNS config builder.
 pub trait ConfigExt {
@@ -106,7 +96,7 @@ pub trait ConfigExt {
 
 impl ConfigExt for aws_sdk_sns::config::Builder {
     fn datadog_tracing(self) -> Self {
-        self.interceptor(SnsInterceptor::new())
+        self.interceptor(SnsInterceptor)
     }
 }
 
@@ -177,12 +167,15 @@ impl Intercept for SnsInterceptor {
         ]
         .into_iter()
         .flatten();
+        // Resolve at operation start so clients built before TracedService installs
+        // the Datadog provider do not keep a no-op tracer.
+        let tracer = global::tracer(TRACER_NAME);
         let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
             service_tags,
-            &self.tracer,
+            &tracer,
             cfg,
         );
         inject(&span_context, context.input_mut());

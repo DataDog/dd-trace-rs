@@ -90,17 +90,7 @@ const MAX_EVENT_DETAIL_BYTES: usize = 1024 * 1024;
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an EventBridge config builder.
 #[derive(Debug)]
-struct EventBridgeInterceptor {
-    tracer: global::BoxedTracer,
-}
-
-impl EventBridgeInterceptor {
-    fn new() -> Self {
-        Self {
-            tracer: global::tracer(TRACER_NAME),
-        }
-    }
-}
+struct EventBridgeInterceptor;
 
 /// Extension methods for installing Datadog tracing on an Amazon EventBridge config builder.
 pub trait ConfigExt {
@@ -110,7 +100,7 @@ pub trait ConfigExt {
 
 impl ConfigExt for aws_sdk_eventbridge::config::Builder {
     fn datadog_tracing(self) -> Self {
-        self.interceptor(EventBridgeInterceptor::new())
+        self.interceptor(EventBridgeInterceptor)
     }
 }
 
@@ -156,12 +146,15 @@ impl Intercept for EventBridgeInterceptor {
         ]
         .into_iter()
         .flatten();
+        // Resolve at operation start so clients built before TracedService installs
+        // the Datadog provider do not keep a no-op tracer.
+        let tracer = global::tracer(TRACER_NAME);
         let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
             service_tags,
-            &self.tracer,
+            &tracer,
             cfg,
         );
         inject(&span_context, context.input_mut());

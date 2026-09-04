@@ -106,17 +106,7 @@ const SQS_RECEIVE_MESSAGES_EVENT: &str = "sqs.receive.messages";
 ///
 /// Use [`ConfigExt::datadog_tracing`] to install it on an SQS config builder.
 #[derive(Debug)]
-struct SqsInterceptor {
-    tracer: global::BoxedTracer,
-}
-
-impl SqsInterceptor {
-    fn new() -> Self {
-        Self {
-            tracer: global::tracer(TRACER_NAME),
-        }
-    }
-}
+struct SqsInterceptor;
 
 /// Extension methods for installing Datadog tracing on an Amazon SQS config builder.
 pub trait ConfigExt {
@@ -126,7 +116,7 @@ pub trait ConfigExt {
 
 impl ConfigExt for aws_sdk_sqs::config::Builder {
     fn datadog_tracing(self) -> Self {
-        self.interceptor(SqsInterceptor::new())
+        self.interceptor(SqsInterceptor)
     }
 }
 
@@ -447,12 +437,15 @@ impl Intercept for SqsInterceptor {
         .into_iter()
         .flatten();
 
+        // Resolve at operation start so clients built before TracedService installs
+        // the Datadog provider do not keep a no-op tracer.
+        let tracer = global::tracer(TRACER_NAME);
         let span_context = start_request_span(
             SPAN_NAME,
             SPAN_OPERATION_NAME,
             metadata,
             service_tags,
-            &self.tracer,
+            &tracer,
             cfg,
         );
         inject(&span_context, context.input_mut());
