@@ -30,14 +30,26 @@ use crate::attribute_keys::{
     HTTP_STATUS_CODE, HTTP_URL, OPERATION_NAME, RESOURCE_NAME, SPAN_KIND,
 };
 
+/// AWS SDK metadata used to tag request spans.
+///
+/// The metadata is derived from the Smithy [`ConfigBag`] for the request being
+/// intercepted and is shared with service-specific instrumentation before the
+/// span is started.
 pub struct AwsRequestMetadata {
+    /// AWS SDK operation name, such as `SendMessage` or `Publish`.
     pub operation: String,
+    /// AWS region configured for the request, or an empty string when none is available.
     pub region: String,
+    /// AWS partition derived from the region, such as `aws`, `aws-cn`, or `aws-us-gov`.
     pub partition: &'static str,
+    /// AWS SDK service identifier, such as `SQS`, `SNS`, or `EventBridge`.
     pub service: String,
 }
 
 impl AwsRequestMetadata {
+    /// Builds request metadata from the AWS SDK [`ConfigBag`].
+    ///
+    /// Returns `None` when the SDK request metadata is not present.
     pub fn from_config_bag(cfg: &ConfigBag) -> Option<AwsRequestMetadata> {
         let metadata = cfg.load::<Metadata>()?;
         let region = cfg

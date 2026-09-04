@@ -20,6 +20,7 @@
 //! - add final HTTP request attributes once the SDK request has been serialized;
 //! - record response status, AWS request ID, SDK errors, and end the span after execution.
 
+/// Shared attribute-key constants used by the AWS instrumentation crates.
 pub mod attribute_keys;
 mod request_span;
 
