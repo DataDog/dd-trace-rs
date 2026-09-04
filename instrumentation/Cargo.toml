@@ -18,7 +18,9 @@ rust-version = "1.91.1"
 license = "Apache-2.0"
 repository = "https://github.com/DataDog/dd-trace-rs"
 authors = ["Datadog Inc. <info@datadoghq.com>"]
-publish = true
+# Mark the instrumentation workspace as unpublished until the tag
+# publication path is wired up for these crates.
+publish = false
 
 [workspace.dependencies]
 datadog-aws-core = { version = "0.1.0", path = "datadog-aws-core" }
