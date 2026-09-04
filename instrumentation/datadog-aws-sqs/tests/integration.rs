@@ -30,6 +30,15 @@ const HTTP_200: &str = "200";
 const HTTP_400: &str = "400";
 const MESSAGING_MESSAGE_ID: &str = "messaging.message.id";
 
+fn assert_queue_name_span(harness: &TestHarness, operation: &str) {
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], operation);
+    assert_eq!(attrs["queuename"], "MyQueue");
+    assert!(!attrs.contains_key("cloud.resource_id"));
+}
+
 fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> String {
     serde_json::json!({
         "Type": "Notification",
@@ -521,6 +530,26 @@ async fn sqs_delete_message_batch_creates_span_with_queue_tags() {
     assert_eq!(attrs["aws.operation"], "DeleteMessageBatch");
     assert_eq!(attrs["queuename"], "MyQueue");
     assert_eq!(attrs[MESSAGING_BATCH_MESSAGE_COUNT], "2");
+}
+
+#[tokio::test]
+async fn sqs_create_queue_creates_span_with_queuename() {
+    let harness = TestHarness::ok().await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let _ = client.create_queue().queue_name("MyQueue").send().await;
+
+    assert_queue_name_span(&harness, "CreateQueue");
+}
+
+#[tokio::test]
+async fn sqs_get_queue_url_creates_span_with_queuename() {
+    let harness = TestHarness::ok().await;
+    let client = sqs_client(&harness.sdk_config());
+
+    let _ = client.get_queue_url().queue_name("MyQueue").send().await;
+
+    assert_queue_name_span(&harness, "GetQueueUrl");
 }
 
 #[tokio::test]

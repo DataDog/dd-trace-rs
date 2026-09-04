@@ -56,10 +56,12 @@ use std::collections::HashMap;
 use aws_sdk_sqs::operation::add_permission::AddPermissionInput;
 use aws_sdk_sqs::operation::change_message_visibility::ChangeMessageVisibilityInput;
 use aws_sdk_sqs::operation::change_message_visibility_batch::ChangeMessageVisibilityBatchInput;
+use aws_sdk_sqs::operation::create_queue::CreateQueueInput;
 use aws_sdk_sqs::operation::delete_message::DeleteMessageInput;
 use aws_sdk_sqs::operation::delete_message_batch::DeleteMessageBatchInput;
 use aws_sdk_sqs::operation::delete_queue::DeleteQueueInput;
 use aws_sdk_sqs::operation::get_queue_attributes::GetQueueAttributesInput;
+use aws_sdk_sqs::operation::get_queue_url::GetQueueUrlInput;
 use aws_sdk_sqs::operation::list_dead_letter_source_queues::ListDeadLetterSourceQueuesInput;
 use aws_sdk_sqs::operation::list_queue_tags::ListQueueTagsInput;
 use aws_sdk_sqs::operation::purge_queue::PurgeQueueInput;
@@ -415,13 +417,15 @@ impl Intercept for SqsInterceptor {
         let input = context.input();
         let queue_url = queue_url_from_input(input);
         let batch_message_count = batch_message_count_from_input(input);
-        let mut queue_name = None;
+        let mut queue_name = queue_name_from_input(input);
         let mut cloud_resource_id = None;
         if let Some(url) = queue_url {
             let url = url.trim_end_matches('/');
             let mut parts = url.rsplit('/');
             if let (Some(name), Some(account_id)) = (parts.next(), parts.next()) {
-                queue_name = Some(name);
+                if queue_name.is_none() {
+                    queue_name = Some(name);
+                }
                 let region = &metadata.region;
                 let partition = metadata.partition;
                 cloud_resource_id =
@@ -521,6 +525,16 @@ impl Intercept for SqsInterceptor {
     ) -> Result<(), BoxError> {
         finish_request_span(context, cfg);
         Ok(())
+    }
+}
+
+fn queue_name_from_input(input: &Input) -> Option<&str> {
+    if let Some(input) = input.downcast_ref::<CreateQueueInput>() {
+        input.queue_name.as_deref()
+    } else if let Some(input) = input.downcast_ref::<GetQueueUrlInput>() {
+        input.queue_name.as_deref()
+    } else {
+        None
     }
 }
 
@@ -731,6 +745,26 @@ mod tests {
 
     fn assert_queue_url_extracted(input: Input) {
         assert_eq!(queue_url_from_input(&input), Some(TEST_QUEUE_URL));
+    }
+
+    fn assert_queue_name_extracted(input: Input) {
+        assert_eq!(queue_name_from_input(&input), Some("MyQueue"));
+    }
+
+    #[test]
+    fn extracts_queue_name_from_name_scoped_inputs() {
+        assert_queue_name_extracted(Input::erase(
+            CreateQueueInput::builder()
+                .queue_name("MyQueue")
+                .build()
+                .unwrap(),
+        ));
+        assert_queue_name_extracted(Input::erase(
+            GetQueueUrlInput::builder()
+                .queue_name("MyQueue")
+                .build()
+                .unwrap(),
+        ));
     }
 
     #[test]
