@@ -53,6 +53,7 @@ use aws_sdk_eventbridge::operation::delete_rule::DeleteRuleInput;
 use aws_sdk_eventbridge::operation::describe_rule::DescribeRuleInput;
 use aws_sdk_eventbridge::operation::disable_rule::DisableRuleInput;
 use aws_sdk_eventbridge::operation::enable_rule::EnableRuleInput;
+use aws_sdk_eventbridge::operation::list_targets_by_rule::ListTargetsByRuleInput;
 use aws_sdk_eventbridge::operation::put_events::PutEventsInput;
 use aws_sdk_eventbridge::operation::put_rule::PutRuleInput;
 use aws_sdk_eventbridge::operation::put_targets::PutTargetsInput;
@@ -135,6 +136,8 @@ impl Intercept for EventBridgeInterceptor {
         } else if let Some(input) = input.downcast_ref::<PutTargetsInput>() {
             rule_name = input.rule.as_deref();
         } else if let Some(input) = input.downcast_ref::<RemoveTargetsInput>() {
+            rule_name = input.rule.as_deref();
+        } else if let Some(input) = input.downcast_ref::<ListTargetsByRuleInput>() {
             rule_name = input.rule.as_deref();
         } else if let Some(input) = input.downcast_ref::<PutEventsInput>() {
             batch_message_count = Some(input.entries.as_ref().map_or(0, Vec::len) as i64);

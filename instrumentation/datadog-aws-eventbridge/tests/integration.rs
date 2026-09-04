@@ -19,6 +19,14 @@ fn eventbridge_client(cfg: &SdkConfig) -> aws_sdk_eventbridge::Client {
     aws_sdk_eventbridge::Client::from_conf(config)
 }
 
+fn assert_rule_name_span(harness: &TestHarness, operation: &str) {
+    let spans = harness.finished_spans();
+    assert_eq!(spans.len(), 1);
+    let attrs = span_attrs(&spans[0]);
+    assert_eq!(attrs["aws.operation"], operation);
+    assert_eq!(attrs["rulename"], "my-rule");
+}
+
 #[tokio::test]
 async fn eventbridge_put_events_creates_span_and_injects_detail() {
     let harness = TestHarness::ok().await;
@@ -122,11 +130,47 @@ async fn eventbridge_put_rule_creates_span_with_rulename() {
 
     let _ = client.put_rule().name("my-rule").send().await;
 
-    let spans = harness.finished_spans();
-    assert_eq!(spans.len(), 1);
-    let attrs = span_attrs(&spans[0]);
-    assert_eq!(attrs["aws.operation"], "PutRule");
-    assert_eq!(attrs["rulename"], "my-rule");
+    assert_rule_name_span(&harness, "PutRule");
+}
+
+#[tokio::test]
+async fn eventbridge_describe_rule_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client.describe_rule().name("my-rule").send().await;
+
+    assert_rule_name_span(&harness, "DescribeRule");
+}
+
+#[tokio::test]
+async fn eventbridge_delete_rule_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client.delete_rule().name("my-rule").send().await;
+
+    assert_rule_name_span(&harness, "DeleteRule");
+}
+
+#[tokio::test]
+async fn eventbridge_enable_rule_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client.enable_rule().name("my-rule").send().await;
+
+    assert_rule_name_span(&harness, "EnableRule");
+}
+
+#[tokio::test]
+async fn eventbridge_disable_rule_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client.disable_rule().name("my-rule").send().await;
+
+    assert_rule_name_span(&harness, "DisableRule");
 }
 
 #[tokio::test]
@@ -136,9 +180,30 @@ async fn eventbridge_put_targets_creates_span_with_rulename() {
 
     let _ = client.put_targets().rule("my-rule").send().await;
 
-    let spans = harness.finished_spans();
-    assert_eq!(spans.len(), 1);
-    let attrs = span_attrs(&spans[0]);
-    assert_eq!(attrs["aws.operation"], "PutTargets");
-    assert_eq!(attrs["rulename"], "my-rule");
+    assert_rule_name_span(&harness, "PutTargets");
+}
+
+#[tokio::test]
+async fn eventbridge_remove_targets_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client
+        .remove_targets()
+        .rule("my-rule")
+        .ids("target-1")
+        .send()
+        .await;
+
+    assert_rule_name_span(&harness, "RemoveTargets");
+}
+
+#[tokio::test]
+async fn eventbridge_list_targets_by_rule_creates_span_with_rulename() {
+    let harness = TestHarness::ok().await;
+    let client = eventbridge_client(&harness.sdk_config());
+
+    let _ = client.list_targets_by_rule().rule("my-rule").send().await;
+
+    assert_rule_name_span(&harness, "ListTargetsByRule");
 }
