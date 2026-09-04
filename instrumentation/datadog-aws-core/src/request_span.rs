@@ -193,7 +193,33 @@ fn partition_from_region(region: &str) -> &'static str {
         "aws-iso"
     } else if region.starts_with("eu-isoe-") {
         "aws-iso-e"
+    } else if region.starts_with("eusc-") {
+        "aws-eusc"
     } else {
         "aws"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn partition_from_region_matches_aws_partition_prefixes() {
+        let cases = [
+            ("us-east-1", "aws"),
+            ("cn-north-1", "aws-cn"),
+            ("us-gov-west-1", "aws-us-gov"),
+            ("us-iso-east-1", "aws-iso"),
+            ("us-isob-east-1", "aws-iso-b"),
+            ("eu-isoe-west-1", "aws-iso-e"),
+            ("us-isof-south-1", "aws-iso-f"),
+            ("eusc-de-east-1", "aws-eusc"),
+            ("unknown-region-1", "aws"),
+        ];
+
+        for (region, partition) in cases {
+            assert_eq!(partition_from_region(region), partition);
+        }
     }
 }
