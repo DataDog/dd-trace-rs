@@ -248,13 +248,6 @@ fn init_logs() -> SdkLoggerProvider {
     // The tracer emits its own diagnostics through `tracing`, under the `datadog_opentelemetry`
     // target, so this subscriber decides where they end up. How verbose they are is a separate
     // question, answered by `DD_LOG_LEVEL` / `set_log_level_filter` — see `init_tracer`.
-    //
-    // This bridge turns events into OpenTelemetry log records, which then have to be exported. The
-    // crates the exporters themselves are built on are excluded for that reason: bridging their
-    // events would make every export produce more records to export.
-    // `libdd` covers every `libdd_*` crate, since directives match targets by prefix. Those crates
-    // are the trace transport, and they log from async tasks where the SDK's context-based
-    // suppression cannot reach them.
     let otel_filter = EnvFilter::new("info")
         .add_directive(
             "datadog_opentelemetry=debug"

@@ -568,13 +568,8 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
 
     use crate::{dd_debug, dd_error};
 
-    // Suppress OpenTelemetry log records for the duration of this call. These diagnostics reach the
-    // application's `tracing` subscriber, which may bridge them into an OpenTelemetry log pipeline;
-    // if that pipeline exports through this same trace
-    // exporter, a failed export would log, produce a record, and fail again. The OpenTelemetry
-    // SDK enters this scope around its own exporters, but Datadog span export runs on
-    // libdatadog's worker instead, so we enter it ourselves. The guard is `!Send`, hence it is
-    // taken here rather than around the `async` export itself.
+    // Suppress OpenTelemetry log records for the duration of this call to avoid infinite recursion
+    // when the error is logged generating a new log record and attempt to export it again.
     let _suppress_guard = Context::enter_telemetry_suppressed_scope();
 
     match e {
