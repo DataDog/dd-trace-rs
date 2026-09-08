@@ -1,0 +1,27 @@
+[package]
+name = "datadog-trace-propagation"
+repository = "https://github.com/DataDog/dd-trace-rs/tree/main/datadog-trace-propagation"
+description = "Datadog distributed trace context propagation (Datadog, W3C Trace Context, W3C Baggage, B3 formats)"
+rust-version.workspace = true
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+readme.workspace = true
+authors.workspace = true
+
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+# External dependencies
+opentelemetry = { version = "0.32.0", features = ["trace"], default-features = false }
+percent-encoding = "2.3.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { version = "1.0", default-features = false }
+tracing = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+assert_unordered = "0.3"
+pretty_assertions = "1.4.1"

@@ -5,14 +5,16 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     catch_panic,
-    core::{configuration::Config, sampling::priority},
-    propagation::{
-        baggage::extract_baggage,
-        config::{get_extractors, get_injectors},
-        context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
-        tracecontext::ot_sanitize,
-        DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
-    },
+    core::configuration::Config,
+    sampling::conversion::{mechanism_into_propagation, priority_into_propagation},
+};
+use datadog_trace_propagation::{
+    baggage::extract_baggage,
+    config::{get_extractors, get_injectors},
+    context::{InjectSpanContext, InjectTraceState, Sampling, SpanContext, SpanLink},
+    sampling::priority,
+    tracecontext::ot_sanitize,
+    DatadogCompositePropagator, ExtractResult, TracePropagationStyle,
 };
 use opentelemetry::{
     baggage::BaggageExt as _,
@@ -122,8 +124,11 @@ impl DatadogPropagator {
         // flags
         let sampling = if let Some(priority) = propagation_data.sampling_decision.priority {
             Sampling {
-                priority: Some(priority),
-                mechanism: propagation_data.sampling_decision.mechanism,
+                priority: Some(priority_into_propagation(priority)),
+                mechanism: propagation_data
+                    .sampling_decision
+                    .mechanism
+                    .map(mechanism_into_propagation),
             }
         } else {
             Sampling {
@@ -309,7 +314,7 @@ pub mod tests {
         Context, KeyValue, SpanId, TraceFlags, TraceId,
     };
 
-    use crate::propagation::{
+    use datadog_trace_propagation::{
         context::Tracestate,
         tracecontext::{TRACEPARENT_KEY, TRACESTATE_KEY},
     };
@@ -846,7 +851,7 @@ pub mod tests {
         }
     }
 
-    use crate::propagation::baggage::BAGGAGE_KEY;
+    use datadog_trace_propagation::baggage::BAGGAGE_KEY;
 
     fn get_propagator_with_separate_styles(
         extract: Vec<TracePropagationStyle>,

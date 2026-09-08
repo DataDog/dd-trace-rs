@@ -6,15 +6,16 @@
 //! This module exposes the header key so the composite propagator can include it in its `fields()`
 //! list. It contains only extraction code.
 //!
-//! Injection is performed by [`opentelemetry_sdk::propagation::BaggagePropagator`]
-//! at the [`DatadogPropagator`](crate::text_map_propagator::DatadogPropagator) layer, which has
+//! Injection is performed by `opentelemetry_sdk::propagation::BaggagePropagator`
+//! at the `DatadogPropagator` layer (in `datadog-opentelemetry`), which has
 //! access to the OTel [`Context`](opentelemetry::Context) that carries baggage.
 use std::sync::LazyLock;
 
 use opentelemetry::baggage::{Baggage, KeyValueMetadata};
 use percent_encoding::percent_decode_str;
 
-use crate::{dd_warn, propagation::carrier::Extractor};
+use crate::carrier::Extractor;
+use tracing::warn;
 
 /// The W3C `baggage` header name.
 pub const BAGGAGE_KEY: &str = "baggage";
@@ -36,30 +37,30 @@ pub fn keys() -> &'static [String] {
 fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
     let mut member = baggage_member.split(';');
     let Some(name_and_value) = member.next() else {
-        dd_warn!("Propagator (baggage): invalid format");
+        warn!("Propagator (baggage): invalid format");
         return None;
     };
     let mut iter = name_and_value.split('=');
     let (Some(name), Some(value)) = (iter.next(), iter.next()) else {
-        dd_warn!("Propagator (baggage): invalid key-value format");
+        warn!("Propagator (baggage): invalid key-value format");
         return None;
     };
     let decode_name = percent_decode_str(name).decode_utf8();
     let decode_value = percent_decode_str(value).decode_utf8();
 
     let (Ok(name), Ok(value)) = (decode_name, decode_value) else {
-        dd_warn!("Propagator (baggage): invalid percent encoded UTF8 string in key values");
+        warn!("Propagator (baggage): invalid percent encoded UTF8 string in key values");
         return None;
     };
 
     let name = name.trim();
     let value = value.trim();
     if name.is_empty() {
-        dd_warn!("Propagator (baggage): empty key");
+        warn!("Propagator (baggage): empty key");
         return None;
     }
     if value.is_empty() {
-        dd_warn!("Propagator (baggage): empty value");
+        warn!("Propagator (baggage): empty value");
         return None;
     }
 
@@ -82,7 +83,11 @@ fn parse_baggage_member(baggage_member: &str) -> Option<KeyValueMetadata> {
     ))
 }
 
-pub(crate) fn extract_baggage(extractor: &dyn Extractor) -> Option<Baggage> {
+/// Extracts W3C Baggage from a carrier into an OpenTelemetry `Baggage`.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub fn extract_baggage(extractor: &dyn Extractor) -> Option<Baggage> {
     let header_value = extractor.get(BAGGAGE_KEY)?;
     let mut members = 0;
     let mut allocated_size = 0;
@@ -91,7 +96,7 @@ pub(crate) fn extract_baggage(extractor: &dyn Extractor) -> Option<Baggage> {
             allocated_size += member.len();
             let drop_entry = allocated_size > MAX_BAGGAGE_LENGTH;
             if drop_entry {
-                dd_warn!("Propagator (baggage): ignored baggage key-values, only first {} bytes propagated", MAX_BAGGAGE_LENGTH)
+                warn!("Propagator (baggage): ignored baggage key-values, only first {} bytes propagated", MAX_BAGGAGE_LENGTH)
             }
             !drop_entry
         })
@@ -102,7 +107,7 @@ pub(crate) fn extract_baggage(extractor: &dyn Extractor) -> Option<Baggage> {
             members +=1;
             let drop_entry = members > MAX_BAGGAGE_MEMBERS;
             if drop_entry {
-                dd_warn!("Propagator (baggage): ignored baggage key-values, only first {} propagated", MAX_BAGGAGE_MEMBERS)
+                warn!("Propagator (baggage): ignored baggage key-values, only first {} propagated", MAX_BAGGAGE_MEMBERS)
             }
             !drop_entry
         });

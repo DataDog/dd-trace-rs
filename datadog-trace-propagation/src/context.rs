@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 pub use super::tracecontext::{InjectTraceState, Tracestate};
-use crate::core::{
+use crate::{
     configuration::TracePropagationStyle,
     sampling::{SamplingMechanism, SamplingPriority},
 };
@@ -196,9 +196,9 @@ pub(crate) fn combine_trace_id(trace_id: u64, higher_bits_hex: Option<&String>) 
 mod test {
     use std::str::FromStr;
 
-    use crate::core::sampling::priority;
+    use crate::sampling::priority;
 
-    use crate::propagation::context::{combine_trace_id, split_trace_id, SamplingPriority};
+    use crate::context::{combine_trace_id, split_trace_id, SamplingPriority};
 
     use super::Tracestate;
 

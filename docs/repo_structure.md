@@ -1,17 +1,29 @@
 # Repository Structure
 
-This is a Cargo workspace. The production crate is `datadog-opentelemetry`; the examples under
-`datadog-opentelemetry/examples/` are separate workspace members with `publish = false`.
+This is a Cargo workspace. The production crates are `datadog-trace-propagation` and
+`datadog-opentelemetry` (which depends on and re-exports the former as its `propagation` module);
+the examples under `datadog-opentelemetry/examples/` are separate workspace members with
+`publish = false`.
 
 ```text
 dd-trace-rs/
+├── datadog-trace-propagation/   # Trace context propagation (Datadog, W3C, B3 formats)
+│   └── src/
+│       ├── lib.rs               # DatadogCompositePropagator and re-exports
+│       ├── b3.rs / b3multi.rs   # B3 propagation formats
+│       ├── baggage.rs           # W3C Baggage propagation
+│       ├── context.rs           # SpanContext, Tracestate, span-link handling
+│       ├── datadog.rs           # Datadog x-datadog-* propagation
+│       ├── tracecontext.rs      # W3C Trace Context propagation
+│       ├── carrier.rs           # Injector/Extractor carrier traits
+│       ├── sampling.rs          # Sampling priority/mechanism primitives
+│       └── configuration.rs     # TracePropagationStyle/BehaviorExtract enums
 ├── datadog-opentelemetry/       # Main crate — Datadog OpenTelemetry SDK
 │   ├── src/
 │   │   ├── lib.rs               # Public API entry point (tracing(), metrics(), logs() builders)
 │   │   ├── core/                # Internal: config, sampling decisions, telemetry, error types
 │   │   ├── mappings/            # OTel → Datadog span transformation
-│   │   ├── sampling/            # Sampler implementations (rules, rate, agent-based)
-│   │   └── propagation/         # Trace context propagation (Datadog & W3C formats)
+│   │   └── sampling/            # Sampler implementations (rules, rate, agent-based)
 │   ├── tests/
 │   │   ├── integration_tests/   # Integration tests (require Docker test agent)
 │   │   └── snapshots/           # JSON snapshot fixtures for integration tests
@@ -20,11 +32,18 @@ dd-trace-rs/
 │       ├── propagator/          # HTTP server example
 │       └── simple_tracing/      # Minimal tracing example
 ├── scripts/                     # Release, license, and build automation
-│   └── pack-system-tests-artifact.sh  # Stable entry point for system-test builds
+│   ├── pack-system-tests-artifact.sh  # Stable entry point for system-test builds
+│   └── check-trace-propagation-isolation.sh  # CI guardrail for the propagation crate
 ├── docs/                        # Architecture documentation
 ├── .config/                     # Tool config (commitlint, nextest profiles)
 └── .github/                     # CI workflows and issue templates
 ```
+
+**Propagation crate independence**: `datadog-trace-propagation` must not depend on any `libdd-*`
+crate (normal, build, or dev edges). `datadog-opentelemetry` re-exports it as
+`datadog_opentelemetry::propagation` and converts between its sampling primitives and the libdd
+sampling types used by the sampler and span processor. CI enforces this with
+`scripts/check-trace-propagation-isolation.sh` (see the `lint.yaml` workflow).
 
 **Key visibility rule**: `core` is `pub(crate)` by default; it is re-exported as `pub` only when the
 `test-utils` feature is enabled (used by integration tests). Only `configuration` and `log` modules
@@ -36,6 +55,8 @@ are always public.
 - `logs-grpc` / `logs-http` — OTLP transport for logs (default: grpc)
 - `test-utils` — exposes internal helpers and pulls in test dependencies; never enable in production
   builds
+- `_unstable_propagation`: deprecated, has no effect. Propagation is now always available via the
+  `datadog-trace-propagation` re-export; enabling the feature emits a build-time warning
 
 ## System-test build entry point
 

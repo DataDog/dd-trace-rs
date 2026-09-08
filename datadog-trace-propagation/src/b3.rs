@@ -19,12 +19,13 @@
 
 use std::sync::LazyLock;
 
-use crate::core::sampling::{priority, SamplingPriority};
-use crate::dd_warn;
-use crate::propagation::{
+use crate::sampling::{priority, SamplingPriority};
+use crate::{
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, Sampling, SpanContext},
 };
+
+use tracing::warn;
 
 /// B3 single-header name.
 pub const B3_SINGLE_KEY: &str = "b3";
@@ -123,13 +124,13 @@ fn parse_trace_id(hex: &str) -> Option<u128> {
     // so leading-zero-padded oversized inputs (which `u128::from_str_radix`
     // would otherwise accept) are treated as malformed.
     if hex.len() > 32 {
-        dd_warn!("Propagator (b3): trace_id {hex:?} exceeds 32 hex chars");
+        warn!("Propagator (b3): trace_id {hex:?} exceeds 32 hex chars");
         return None;
     }
     let id = match u128::from_str_radix(hex, 16) {
         Ok(id) => id,
         Err(e) => {
-            dd_warn!("Propagator (b3): malformed trace_id {hex:?}: {e}");
+            warn!("Propagator (b3): malformed trace_id {hex:?}: {e}");
             return None;
         }
     };
@@ -144,13 +145,13 @@ fn parse_trace_id(hex: &str) -> Option<u128> {
 /// the whole context" from "zero / no parent → accept with span_id 0".
 fn parse_span_id(hex: &str) -> Option<u64> {
     if hex.len() > 16 {
-        dd_warn!("Propagator (b3): span_id {hex:?} exceeds 16 hex chars");
+        warn!("Propagator (b3): span_id {hex:?} exceeds 16 hex chars");
         return None;
     }
     match u64::from_str_radix(hex, 16) {
         Ok(id) => Some(id),
         Err(e) => {
-            dd_warn!("Propagator (b3): malformed span_id {hex:?}: {e}");
+            warn!("Propagator (b3): malformed span_id {hex:?}: {e}");
             None
         }
     }
@@ -178,9 +179,10 @@ fn format_b3_trace_id(trace_id: u128) -> String {
 mod test {
     use std::collections::HashMap;
 
-    use crate::core::configuration::{Config, TracePropagationStyle};
-    use crate::core::sampling::priority;
-    use crate::propagation::{context::span_context_to_inject, Propagator};
+    use crate::configuration::TracePropagationStyle;
+    use crate::sampling::priority;
+    use crate::test_util::TestPropagationConfig;
+    use crate::{context::span_context_to_inject, Propagator};
 
     use super::*;
 
@@ -396,7 +398,7 @@ mod test {
         let carrier = carrier_with("80f198ee56343ba8-00f067aa0ba902b7-1");
         let propagator = TracePropagationStyle::B3SingleHeader;
         let ctx = propagator
-            .try_extract(&carrier, &Config::builder().build())
+            .try_extract(&carrier, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("b3 single-header dispatch should produce context");
         assert_eq!(ctx.trace_id, 0x80f1_98ee_5634_3ba8);
@@ -405,7 +407,8 @@ mod test {
     #[test]
     fn propagator_dispatch_exposes_keys() {
         let propagator = TracePropagationStyle::B3SingleHeader;
-        let k: &[String] = <TracePropagationStyle as Propagator<Config>>::keys(&propagator);
+        let k: &[String] =
+            <TracePropagationStyle as Propagator<TestPropagationConfig>>::keys(&propagator);
         assert_eq!(k, &["b3".to_string()]);
     }
 }

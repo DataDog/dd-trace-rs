@@ -14,12 +14,15 @@ use crate::{
         configuration::Config, constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
     },
-    propagation::tracecontext::{ot_extract_rv, ot_sanitize, ot_set_rv_th},
-    sampling::{DatadogSampler, OtelSamplingData, SamplingRule, SamplingRulesCallback},
+    sampling::{
+        conversion::{mechanism_from_propagation, priority_from_propagation},
+        DatadogSampler, OtelSamplingData, SamplingRule, SamplingRulesCallback,
+    },
     span_processor::{RegisterTracePropagationResult, TracePropagationData},
     text_map_propagator::{self, DatadogExtractData},
     TraceRegistry,
 };
+use datadog_trace_propagation::tracecontext::{ot_extract_rv, ot_sanitize, ot_set_rv_th};
 
 enum OtDecision {
     Probability(OtelConsistentSampling),
@@ -186,8 +189,8 @@ impl ShouldSample for Sampler {
             }) = remote_ctx.get()
             {
                 let sampling_decision = SamplingDecision {
-                    priority: sampling.priority,
-                    mechanism: sampling.mechanism,
+                    priority: sampling.priority.map(priority_from_propagation),
+                    mechanism: sampling.mechanism.map(mechanism_from_propagation),
                 };
                 Some(TracePropagationData {
                     origin: origin.clone(),

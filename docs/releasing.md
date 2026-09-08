@@ -1,5 +1,12 @@
 # Releasing
 
+Releases publish two crates that share the workspace version: `datadog-trace-propagation`
+(published first; `datadog-opentelemetry` depends on it and re-exports it as its `propagation`
+module) and `datadog-opentelemetry`. Publishing is triggered per git tag
+(`{crate-name}-v{version}`) via `.github/workflows/publish.yaml` and
+`scripts/publish-crate.sh`, so a release requires two tags. Push the propagation tag first, wait
+for its publish workflow to complete successfully, and only then push the OpenTelemetry tag.
+
 ## Datadog-opentelemetry
 
 > [!CAUTION]
@@ -88,11 +95,13 @@ Run it from the tip of the branch you are releasing (usually `main`, up to date 
 It will:
 
 - verify your checkout is in sync with the release branch,
-- bump the workspace crate version,
+- bump the workspace crate version (shared by `datadog-trace-propagation` and
+  `datadog-opentelemetry`),
 - update the version references in `README.md`, `src/lib.rs`, the bug-report issue template, and the
   `datadog-aws-lambda` dependency pin (plus its lockfile),
 - prepend a `CHANGELOG.md` section listing the commits since the previous release tag,
-- verify that the rustdocs build and that the crate publishes cleanly (a `cargo publish` dry-run).
+- verify that the rustdocs build and that both crates publish cleanly (a multi-package
+  `cargo publish` dry-run uses Cargo's temporary registry to resolve the workspace dependency).
 
 Then review the working tree — especially the generated changelog, pruning it to user-facing
 changes — and commit.
@@ -129,23 +138,31 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p datadog-opentelemetry --no-dep
 
 7. Tag the release commit with the version. Set `BUMP_COMMIT_HASH` to the commit being released —
    the version-bump merge commit on `main` for a normal release, or the hotfix merge commit on the
-   `hotfix/<major>.<minor>.x` branch for a hotfix (do **not** tag `main` for a hotfix). The tag must
-   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github.
+   `hotfix/<major>.<minor>.x` branch for a hotfix (do **not** tag `main` for a hotfix). Both crates
+   must be tagged, and `datadog-trace-propagation` must be pushed first so it is on crates.io when
+   `datadog-opentelemetry` publishes. The tags must follow the format `{crate}-v0.0.0`, then push
+   them to github.
 
 ```text
 VERSION="0.0.0" # Placeholder, please replace!
 BUMP_COMMIT_HASH="PUT THE HASH HERE" # Placeholder, please replace!
-TAG="datadog-opentelemetry-v$VERSION"
-git tag $TAG $BUMP_COMMIT_HASH -m "Release v$VERSION of datadog-opentelemetry"
-echo "Tagged release $TAG"
+TAG="datadog-trace-propagation-v$VERSION"
+TAG_OTEL="datadog-opentelemetry-v$VERSION"
+git tag $TAG $BUMP_COMMIT_HASH -m "Release v$VERSION of datadog-trace-propagation"
+git tag $TAG_OTEL $BUMP_COMMIT_HASH -m "Release v$VERSION of datadog-opentelemetry"
+echo "Tagged releases $TAG and $TAG_OTEL"
 ```
 
 > [!CAUTION]
-> Pushing the tag to github will trigger the release automation. Run `git log`, and check that the
-> tag name and tagged commit are correct before running the following command
+> Pushing a tag to github triggers the release automation. Run `git log`, and check that the tag
+> names and tagged commit are correct. Push the propagation tag first. Wait for its **Publish**
+> workflow to complete successfully and for the version to appear on crates.io before pushing the
+> OpenTelemetry tag.
 
 ```text
 git push origin $TAG
+# Wait for the Publish workflow for $TAG to complete successfully.
+git push origin $TAG_OTEL
 ```
 
 8. Once the tag has been pushed, the publish job will need to be approved by another member of the

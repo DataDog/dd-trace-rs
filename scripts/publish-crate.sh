@@ -14,6 +14,7 @@ NC='\033[0m'
 
 # Allowed crate names for publication (in dependency order)
 ALLOWED_CRATES=(
+    "datadog-trace-propagation"
     "datadog-opentelemetry"
 )
 

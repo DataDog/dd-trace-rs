@@ -4,18 +4,16 @@
 use std::{borrow::Cow, collections::HashMap, fmt::Write, str::FromStr, sync::LazyLock};
 
 use crate::{
-    core::{
-        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::{mechanism, priority, SamplingMechanism, SamplingPriority},
-    },
-    dd_debug, dd_error, dd_warn,
-    propagation::{
-        carrier::{Extractor, Injector},
-        context::{InjectSpanContext, Sampling, SpanContext, DATADOG_PROPAGATION_TAG_PREFIX},
-        datadog::DATADOG_LAST_PARENT_ID_KEY,
-        error::Error,
+    carrier::{Extractor, Injector},
+    context::{InjectSpanContext, Sampling, SpanContext, DATADOG_PROPAGATION_TAG_PREFIX},
+    datadog::DATADOG_LAST_PARENT_ID_KEY,
+    error::Error,
+    sampling::{
+        mechanism, priority, SamplingMechanism, SamplingPriority, SAMPLING_DECISION_MAKER_TAG_KEY,
     },
 };
+
+use tracing::{debug, error, warn};
 
 // Traceparent Keys
 /// W3C traceparent header key.
@@ -55,7 +53,11 @@ fn ot_parse_hex_56(s: &str, exact_len: Option<usize>) -> Option<u64> {
 }
 
 /// Extract `rv` from a raw `ot` member value, ignoring everything else.
-pub(crate) fn ot_extract_rv(raw: &str) -> Option<u64> {
+/// Extracts the `rv` (reason value) subkey from an `ot` tracestate member.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub fn ot_extract_rv(raw: &str) -> Option<u64> {
     raw.split(';').find_map(|item| match item.split_once(':') {
         Some(("rv", v)) => ot_parse_hex_56(v, Some(14)),
         _ => None,
@@ -63,7 +65,11 @@ pub(crate) fn ot_extract_rv(raw: &str) -> Option<u64> {
 }
 
 /// Removes malformed `rv`/`th` subkeys, preserving valid and unknown subkeys.
-pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
+/// Sanitizes an `ot` tracestate member, dropping malformed or over-long subkeys.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub fn ot_sanitize(raw: &str) -> Option<String> {
     let parts: Vec<_> = raw
         .split(';')
         .filter(|item| match item.split_once(':') {
@@ -78,7 +84,11 @@ pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
 /// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
 /// appending everything else, in order, after the new pair. `None` when
 /// nothing is left to emit.
-pub(crate) fn ot_set_rv_th(raw: Option<&str>, rv: Option<u64>, th: Option<u64>) -> Option<String> {
+/// Sets the `rv` and `th` subkeys on an `ot` tracestate member.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub fn ot_set_rv_th(raw: Option<&str>, rv: Option<u64>, th: Option<u64>) -> Option<String> {
     let format_th = |v: u64| {
         if v == 0 {
             "0".to_string()
@@ -135,12 +145,18 @@ pub(crate) struct Traceparent {
 /// alongside the standard traceparent header.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct Tracestate {
-    pub(crate) sampling: Option<Sampling>,
-    pub(crate) origin: Option<String>,
-    pub(crate) lower_order_trace_id: Option<String>,
-    pub(crate) propagation_tags: Option<HashMap<String, String>>,
-    pub(crate) additional_values: Option<Vec<(String, String)>>,
-    pub(crate) ot_member: Option<String>,
+    /// Datadog sampling data from the `dd` tracestate member.
+    pub sampling: Option<Sampling>,
+    /// Trace origin (e.g. `rum`, `synthetics`) from the `o` tracestate member.
+    pub origin: Option<String>,
+    /// Higher-order 64 bits of the trace ID from the `t.tid` tracestate member.
+    pub lower_order_trace_id: Option<String>,
+    /// Datadog propagation tags (`t.*` members) such as `_dd.p.dm`.
+    pub propagation_tags: Option<HashMap<String, String>>,
+    /// Non-Datadog vendor tracestate members, as key-value pairs.
+    pub additional_values: Option<Vec<(String, String)>>,
+    /// Raw `ot` tracestate member, when present.
+    pub ot_member: Option<String>,
 }
 
 /// Code inspired, and copied, by OpenTelemetry Rust project.
@@ -197,7 +213,7 @@ impl FromStr for Tracestate {
             let (key, value) = v.split_once('=').unwrap_or(("", ""));
 
             if !Tracestate::valid_key(key) || value.is_empty() || !Tracestate::valid_value(value) {
-                dd_debug!("Tracestate: invalid key or header value: {v}");
+                debug!("Tracestate: invalid key or header value: {v}");
                 return Err(String::from("Invalid tracestate"));
             }
 
@@ -274,7 +290,7 @@ impl FromStr for Tracestate {
 
             Some(tags)
         } else {
-            dd_debug!("No `dd` value found in tracestate");
+            debug!("No `dd` value found in tracestate");
             None
         };
 
@@ -294,7 +310,11 @@ pub struct InjectTraceState {
 }
 
 impl InjectTraceState {
-    pub(crate) fn from_header(header: String) -> Self {
+    /// Creates an [`InjectTraceState`] from a raw tracestate header value.
+    ///
+    /// This API is not covered by semver guarantees and may change in minor releases.
+    #[doc(hidden)]
+    pub fn from_header(header: String) -> Self {
         Self { header }
     }
 
@@ -380,7 +400,7 @@ pub fn inject(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         inject_traceparent(context, carrier);
         inject_tracestate(context, carrier);
     } else {
-        dd_debug!("Propagator (tracecontext): skipping inject");
+        debug!("Propagator (tracecontext): skipping inject");
     }
 }
 
@@ -400,7 +420,7 @@ fn inject_traceparent(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         context.trace_id, context.span_id
     );
 
-    dd_debug!("Propagator (tracecontext): injecting traceparent: {traceparent}");
+    debug!("Propagator (tracecontext): injecting traceparent: {traceparent}");
 
     carrier.set(TRACEPARENT_KEY, traceparent);
 }
@@ -574,7 +594,7 @@ fn inject_tracestate(context: &InjectSpanContext, carrier: &mut dyn Injector) {
         }
     }
 
-    dd_debug!(
+    debug!(
         "Propagator (tracecontext): injecting tracestate: {}",
         tracestate
     );
@@ -591,7 +611,7 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     match try_extract(carrier)? {
         Ok(context) => Some(context),
         Err(e) => {
-            dd_error!("Propagator (tracecontext): Failed to extract traceparent: {e}");
+            error!("Propagator (tracecontext): Failed to extract traceparent: {e}");
             None
         }
     }
@@ -604,7 +624,7 @@ pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext,
 
     match extract_traceparent(tp) {
         Ok(traceparent) => {
-            dd_debug!("Propagator (tracecontext): traceparent extracted successfully");
+            debug!("Propagator (tracecontext): traceparent extracted successfully");
 
             let mut tags = HashMap::new();
             tags.insert(TRACEPARENT_KEY.to_string(), tp.to_string());
@@ -612,51 +632,50 @@ pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext,
             let mut origin = None;
             let mut sampling_priority = traceparent.sampling_priority;
             let mut mechanism = None;
-            let tracestate: Option<Tracestate> = if let Some(raw_tracestate) =
-                carrier.get(TRACESTATE_KEY)
-            {
-                if let Ok(tracestate) = Tracestate::from_str(raw_tracestate) {
-                    dd_debug!("Propagator (tracecontext): tracestate header parsed successfully");
+            let tracestate: Option<Tracestate> =
+                if let Some(raw_tracestate) = carrier.get(TRACESTATE_KEY) {
+                    if let Ok(tracestate) = Tracestate::from_str(raw_tracestate) {
+                        debug!("Propagator (tracecontext): tracestate header parsed successfully");
 
-                    tags.insert(TRACESTATE_KEY.to_string(), raw_tracestate.to_string());
+                        tags.insert(TRACESTATE_KEY.to_string(), raw_tracestate.to_string());
 
-                    // Convert from `t.` to `_dd.p.`
-                    if let Some(propagation_tags) = &tracestate.propagation_tags {
-                        for (k, v) in propagation_tags {
-                            if let Some(stripped) =
-                                k.strip_prefix(TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX)
-                            {
-                                let nk = format!("{DATADOG_PROPAGATION_TAG_PREFIX}{stripped}");
-                                tags.insert(nk, v.to_string());
+                        // Convert from `t.` to `_dd.p.`
+                        if let Some(propagation_tags) = &tracestate.propagation_tags {
+                            for (k, v) in propagation_tags {
+                                if let Some(stripped) =
+                                    k.strip_prefix(TRACESTATE_DATADOG_PROPAGATION_TAG_PREFIX)
+                                {
+                                    let nk = format!("{DATADOG_PROPAGATION_TAG_PREFIX}{stripped}");
+                                    tags.insert(nk, v.to_string());
+                                }
                             }
                         }
+
+                        if let Some(ref lpid) = tracestate.lower_order_trace_id {
+                            tags.insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), lpid.clone());
+                        }
+
+                        origin.clone_from(&tracestate.origin);
+
+                        sampling_priority = define_sampling_priority(
+                            traceparent.sampling_priority,
+                            tracestate.sampling.unwrap_or_default().priority,
+                            &mut tags,
+                        );
+
+                        mechanism = tags
+                            .get(SAMPLING_DECISION_MAKER_TAG_KEY)
+                            .and_then(|sm| SamplingMechanism::from_str(sm).ok());
+
+                        Some(tracestate)
+                    } else {
+                        debug!("Propagator (tracecontext): unable to parse tracestate header");
+                        None
                     }
-
-                    if let Some(ref lpid) = tracestate.lower_order_trace_id {
-                        tags.insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), lpid.clone());
-                    }
-
-                    origin.clone_from(&tracestate.origin);
-
-                    sampling_priority = define_sampling_priority(
-                        traceparent.sampling_priority,
-                        tracestate.sampling.unwrap_or_default().priority,
-                        &mut tags,
-                    );
-
-                    mechanism = tags
-                        .get(SAMPLING_DECISION_MAKER_TAG_KEY)
-                        .and_then(|sm| SamplingMechanism::from_str(sm).ok());
-
-                    Some(tracestate)
                 } else {
-                    dd_debug!("Propagator (tracecontext): unable to parse tracestate header");
+                    debug!("Propagator (tracecontext): no tracestate header found");
                     None
-                }
-            } else {
-                dd_debug!("Propagator (tracecontext): no tracestate header found");
-                None
-            };
+                };
 
             Some(Ok(SpanContext {
                 trace_id: traceparent.trace_id,
@@ -790,7 +809,7 @@ fn extract_version(version: &str, tail: &str, trace_flags: u8) -> Result<(), Err
             }
         }
         _ => {
-            dd_warn!("Propagator (tracecontext): Unsupported traceparent version {version}, still atempenting to parse");
+            warn!("Propagator (tracecontext): Unsupported traceparent version {version}, still atempenting to parse");
         }
     }
 
@@ -838,12 +857,10 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::core::{
-        configuration::{Config, TracePropagationStyle},
-        sampling::priority,
-    };
-
-    use crate::propagation::{
+    use crate::configuration::TracePropagationStyle;
+    use crate::sampling::priority;
+    use crate::test_util::TestPropagationConfig;
+    use crate::{
         context::{span_context_to_inject, InjectTraceState},
         Propagator,
     };
@@ -866,7 +883,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -907,7 +924,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -930,7 +947,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -953,7 +970,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -976,7 +993,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -992,7 +1009,7 @@ mod test {
 
         let propagator = TracePropagationStyle::TraceContext;
 
-        let context = propagator.try_extract(&headers, &Config::builder().build());
+        let context = propagator.try_extract(&headers, &TestPropagationConfig::builder().build());
 
         assert!(matches!(context, Some(Err(_))));
     }
@@ -1013,7 +1030,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -1037,7 +1054,7 @@ mod test {
         let propagator = TracePropagationStyle::TraceContext;
 
         let tracestate = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context")
             .tracestate
@@ -1083,7 +1100,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut context,
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(
@@ -1118,7 +1135,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut context,
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
         carrier.get(TRACESTATE_KEY).cloned().unwrap_or_default()
     }
@@ -1191,7 +1208,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut context,
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
         let ts = &carrier[TRACESTATE_KEY];
         assert!(
@@ -1226,7 +1243,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut context,
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(
@@ -1266,7 +1283,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut context,
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(
@@ -1301,7 +1318,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
         assert_eq!(
             carrier[TRACESTATE_KEY],
@@ -1331,7 +1348,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
         assert_eq!(
             carrier[TRACESTATE_KEY],
@@ -1361,7 +1378,7 @@ mod test {
         TracePropagationStyle::TraceContext.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
         assert_eq!(
             carrier[TRACESTATE_KEY],

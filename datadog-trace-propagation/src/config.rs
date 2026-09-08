@@ -3,9 +3,11 @@
 
 use crate::configuration::TracePropagationStyle;
 
-use crate::propagation::PropagationConfig;
+use crate::PropagationConfig;
 
-pub(crate) fn get_extractors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
+/// Returns the configured extraction styles, falling back to the default styles.
+#[doc(hidden)]
+pub fn get_extractors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
     if let Some(extractors) = config.trace_propagation_style_extract() {
         extractors
     } else {
@@ -13,7 +15,9 @@ pub(crate) fn get_extractors(config: &impl PropagationConfig) -> &[TracePropagat
     }
 }
 
-pub(crate) fn get_injectors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
+/// Returns the configured injection styles, falling back to the default styles.
+#[doc(hidden)]
+pub fn get_injectors(config: &impl PropagationConfig) -> &[TracePropagationStyle] {
     if let Some(injectors) = config.trace_propagation_style_inject() {
         injectors
     } else {

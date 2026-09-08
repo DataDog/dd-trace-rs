@@ -3,7 +3,7 @@
 
 use std::{collections::HashMap, str::FromStr, sync::LazyLock};
 
-use crate::propagation::{
+use crate::{
     carrier::{Extractor, Injector},
     context::{
         combine_trace_id, split_trace_id, InjectSpanContext, Sampling, SpanContext,
@@ -13,13 +13,11 @@ use crate::propagation::{
 };
 
 use crate::{
-    core::{
-        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::{SamplingMechanism, SamplingPriority},
-    },
-    dd_debug, dd_error, dd_warn,
-    propagation::PropagationConfig,
+    sampling::{SamplingMechanism, SamplingPriority, SAMPLING_DECISION_MAKER_TAG_KEY},
+    PropagationConfig,
 };
+
+use tracing::{debug, error, warn};
 
 /// Datadog trace ID header.
 pub const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
@@ -57,7 +55,7 @@ pub fn inject(
 
     inject_trace_id(context.trace_id, carrier, tags);
 
-    dd_debug!(
+    debug!(
         "Propagator (datadog): injecting {DATADOG_PARENT_ID_KEY}: {}",
         context.span_id
     );
@@ -74,7 +72,7 @@ pub fn inject(
 fn inject_trace_id(trace_id: u128, carrier: &mut dyn Injector, tags: &mut HashMap<String, String>) {
     let (higher, lower) = split_trace_id(trace_id);
 
-    dd_debug!("Propagator (datadog): injecting {DATADOG_TRACE_ID_KEY}: {lower}");
+    debug!("Propagator (datadog): injecting {DATADOG_TRACE_ID_KEY}: {lower}");
 
     carrier.set(DATADOG_TRACE_ID_KEY, lower.to_string());
 
@@ -94,7 +92,7 @@ fn inject_sampling(
     tags: &mut HashMap<String, String>,
 ) {
     if let Some(priority) = sampling.priority {
-        dd_debug!("Propagator (datadog): injecting {DATADOG_SAMPLING_PRIORITY_KEY}: {priority}");
+        debug!("Propagator (datadog): injecting {DATADOG_SAMPLING_PRIORITY_KEY}: {priority}");
 
         carrier.set(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string())
     }
@@ -119,7 +117,7 @@ fn inject_tags(tags: &mut HashMap<String, String>, carrier: &mut dyn Injector, m
     match get_propagation_tags(tags, max_length) {
         Ok(propagation_tags) => {
             if !propagation_tags.is_empty() {
-                dd_debug!("Propagator (datadog): injecting {DATADOG_TAGS_KEY}: {propagation_tags}");
+                debug!("Propagator (datadog): injecting {DATADOG_TAGS_KEY}: {propagation_tags}");
                 carrier.set(DATADOG_TAGS_KEY, propagation_tags);
             }
         }
@@ -128,7 +126,7 @@ fn inject_tags(tags: &mut HashMap<String, String>, carrier: &mut dyn Injector, m
                 DATADOG_PROPAGATION_ERROR_KEY.to_string(),
                 err.message.to_string(),
             );
-            dd_error!("Propagator (datadog): Error getting propagation tags {err}");
+            error!("Propagator (datadog): Error getting propagation tags {err}");
         }
     }
 }
@@ -202,7 +200,7 @@ pub fn extract(
     match try_extract(carrier, config)? {
         Ok(context) => Some(context),
         Err(e) => {
-            dd_error!("Propagator (datadog): Error extracting trace_id {e}");
+            error!("Propagator (datadog): Error extracting trace_id {e}");
             None
         }
     }
@@ -223,7 +221,7 @@ pub(crate) fn try_extract(
     let parent_id = match extract_parent_id(carrier) {
         Ok(parent_id) => parent_id.unwrap_or_default(),
         Err(e) => {
-            dd_warn!("Propagator (datadog): Error extracting parent_id {e}");
+            warn!("Propagator (datadog): Error extracting parent_id {e}");
             0
         }
     };
@@ -243,7 +241,7 @@ pub(crate) fn try_extract(
             },
         },
         Err(e) => {
-            dd_warn!("Propagator (datadog): Error extracting sampling priority {e}");
+            warn!("Propagator (datadog): Error extracting sampling priority {e}");
             Sampling {
                 priority: None,
                 mechanism: None,
@@ -341,7 +339,7 @@ fn extract_tags(carrier: &dyn Extractor, max_length: usize) -> HashMap<String, S
     // Handle 128bit trace ID
     if let Some(trace_id_higher_order_bits) = tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY) {
         if !higher_order_bits_valid(trace_id_higher_order_bits) {
-            dd_warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
+            warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
             tags.insert(
                 DATADOG_PROPAGATION_ERROR_KEY.to_string(),
                 format!("malformed_tid {trace_id_higher_order_bits}"),
@@ -365,7 +363,7 @@ fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
                     .map(|m| m > 0)
                     .unwrap_or(true);
                 if is_invalid {
-                    dd_warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
+                    warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
                 }
                 is_invalid
             });
@@ -400,12 +398,10 @@ pub fn keys() -> &'static [String] {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::core::{
-        configuration::{Config, TracePropagationStyle},
-        sampling::{mechanism, priority},
-    };
-
-    use crate::propagation::{
+    use crate::configuration::TracePropagationStyle;
+    use crate::sampling::{mechanism, priority};
+    use crate::test_util::TestPropagationConfig;
+    use crate::{
         context::{span_context_to_inject, split_trace_id},
         Propagator,
     };
@@ -428,7 +424,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -462,7 +458,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -491,7 +487,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -523,7 +519,9 @@ mod test {
         let context = propagator
             .try_extract(
                 &headers,
-                &Config::builder().set_datadog_tags_max_length(5).build(),
+                &TestPropagationConfig::builder()
+                    .set_datadog_tags_max_length(5)
+                    .build(),
             )
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
@@ -553,7 +551,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -573,7 +571,7 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .try_extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &TestPropagationConfig::builder().build())
             .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
@@ -608,7 +606,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], "1234");
@@ -651,7 +649,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier[DATADOG_TRACE_ID_KEY], lower.to_string());
@@ -676,7 +674,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.dm=-4");
@@ -695,7 +693,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
@@ -715,7 +713,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
@@ -733,7 +731,9 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().set_datadog_tags_max_length(0).build(),
+            &TestPropagationConfig::builder()
+                .set_datadog_tags_max_length(0)
+                .build(),
         );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
@@ -751,7 +751,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier.get(DATADOG_TAGS_KEY), None);
@@ -770,7 +770,7 @@ mod test {
         propagator.inject(
             &mut span_context_to_inject(&mut context),
             &mut carrier,
-            &Config::builder().build(),
+            &TestPropagationConfig::builder().build(),
         );
 
         assert_eq!(carrier[DATADOG_TAGS_KEY], "_dd.p.other=test");

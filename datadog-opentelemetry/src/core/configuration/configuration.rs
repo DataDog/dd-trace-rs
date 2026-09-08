@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
 
+use datadog_trace_propagation::{TracePropagationBehaviorExtract, TracePropagationStyle};
+
 #[cfg(target_os = "linux")]
 use libdd_library_config::tracer_metadata::TracerMetadata;
 
@@ -803,113 +805,25 @@ impl ExtraServicesTracker {
     }
 }
 
-/// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum TracePropagationBehaviorExtract {
-    /// `continue` (default) - incoming trace context is used as the local trace context. Baggage
-    /// is propagated.
-    #[default]
-    Continue,
-    /// `restart` - starts a new trace with a fresh trace ID and sampling decision. Incoming
-    /// context is referenced via a span link with reason=propagation_behavior_extract. Baggage is
-    /// propagated.
-    Restart,
-    /// `ignore` - discards the entire incoming trace context. Creates new trace with no parent.
-    /// Baggage is discarded.
-    Ignore,
-}
-
-impl FromStr for TracePropagationBehaviorExtract {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_lowercase().as_str() {
-            "" => Ok(TracePropagationBehaviorExtract::default()),
-            "continue" => Ok(TracePropagationBehaviorExtract::Continue),
-            "restart" => Ok(TracePropagationBehaviorExtract::Restart),
-            "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
-            _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
-        }
-    }
-}
-
-impl Display for TracePropagationBehaviorExtract {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let behavior = match self {
-            TracePropagationBehaviorExtract::Continue => "continue",
-            TracePropagationBehaviorExtract::Restart => "restart",
-            TracePropagationBehaviorExtract::Ignore => "ignore",
-        };
-        write!(f, "{behavior}")
-    }
-}
-
-/// Trace context propagation style.
-///
-/// Defines how trace context is propagated across service boundaries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TracePropagationStyle {
-    /// Datadog proprietary propagation format using `x-datadog-*` headers.
-    Datadog,
-    /// W3C Trace Context propagation format using `traceparent` and `tracestate` headers.
-    TraceContext,
-    /// W3C Baggage propagation format using the `baggage` header.
-    Baggage,
-    /// B3 multi-header propagation format using `x-b3-*` headers.
-    B3Multi,
-    /// B3 single-header propagation format using the `b3` header.
-    B3SingleHeader,
-    /// No propagation - trace context is not propagated.
-    None,
-}
-
-impl TracePropagationStyle {
-    fn from_tags(tags: Option<Vec<String>>) -> Option<Vec<TracePropagationStyle>> {
-        match tags {
-            Some(tags) if !tags.is_empty() => Some(
-                tags.iter()
-                    .filter_map(|value| match TracePropagationStyle::from_str(value) {
-                        Ok(style) => Some(style),
-                        Err(err) => {
-                            dd_warn!("Error parsing: {err}");
-                            None
-                        }
-                    })
-                    .collect::<Vec<TracePropagationStyle>>(),
-            ),
-            Some(_) => None,
-            None => None,
-        }
-    }
-}
-
-impl FromStr for TracePropagationStyle {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_lowercase().as_str() {
-            "datadog" => Ok(TracePropagationStyle::Datadog),
-            "tracecontext" => Ok(TracePropagationStyle::TraceContext),
-            "baggage" => Ok(TracePropagationStyle::Baggage),
-            "b3multi" => Ok(TracePropagationStyle::B3Multi),
-            "b3" => Ok(TracePropagationStyle::B3SingleHeader),
-            "none" => Ok(TracePropagationStyle::None),
-            _ => Err(format!("Unknown trace propagation style: '{s}'")),
-        }
-    }
-}
-
-impl Display for TracePropagationStyle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let style = match self {
-            TracePropagationStyle::Datadog => "datadog",
-            TracePropagationStyle::TraceContext => "tracecontext",
-            TracePropagationStyle::Baggage => "baggage",
-            TracePropagationStyle::B3Multi => "b3multi",
-            TracePropagationStyle::B3SingleHeader => "b3",
-            TracePropagationStyle::None => "none",
-        };
-        write!(f, "{style}")
+/// Parses a list of tags into trace propagation styles, logging and skipping any
+/// unrecognized values.
+fn trace_propagation_style_from_tags(
+    tags: Option<Vec<String>>,
+) -> Option<Vec<TracePropagationStyle>> {
+    match tags {
+        Some(tags) if !tags.is_empty() => Some(
+            tags.iter()
+                .filter_map(|value| match TracePropagationStyle::from_str(value) {
+                    Ok(style) => Some(style),
+                    Err(err) => {
+                        dd_warn!("Error parsing: {err}");
+                        None
+                    }
+                })
+                .collect::<Vec<TracePropagationStyle>>(),
+        ),
+        Some(_) => None,
+        None => None,
     }
 }
 
@@ -1367,7 +1281,7 @@ impl Config {
                 cisu.update_non_empty_string_with_fallback(
                     default.trace_propagation_style,
                     SupportedConfigurations::OTEL_PROPAGATORS,
-                    move |styles| match TracePropagationStyle::from_tags(Some(
+                    move |styles| match trace_propagation_style_from_tags(Some(
                         DdTags::from_str(&styles).unwrap().0,
                     )) {
                         Some(styles) if styles.is_empty() => default_style,
@@ -1377,11 +1291,11 @@ impl Config {
             },
             trace_propagation_style_extract: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_extract,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |DdTags(tags)| trace_propagation_style_from_tags(Some(tags)),
             ),
             trace_propagation_style_inject: cisu.update_parsed_with_transform(
                 default.trace_propagation_style_inject,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |DdTags(tags)| trace_propagation_style_from_tags(Some(tags)),
             ),
             trace_propagation_extract_first: cisu
                 .update_parsed(default.trace_propagation_extract_first),
@@ -2001,6 +1915,32 @@ impl Config {
             // TODO: add the process tags. For now, we can't easily get them.
             ..Default::default()
         }
+    }
+}
+
+impl datadog_trace_propagation::PropagationConfig for Config {
+    fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+        Config::trace_propagation_style(self)
+    }
+
+    fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+        Config::trace_propagation_style_extract(self)
+    }
+
+    fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+        Config::trace_propagation_style_inject(self)
+    }
+
+    fn trace_propagation_extract_first(&self) -> bool {
+        Config::trace_propagation_extract_first(self)
+    }
+
+    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+        Config::trace_propagation_behavior_extract(self)
+    }
+
+    fn datadog_tags_max_length(&self) -> usize {
+        self.datadog_tags_max_length()
     }
 }
 
@@ -2912,7 +2852,7 @@ mod tests {
     use super::Config;
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
-    use crate::propagation::config::{get_extractors, get_injectors};
+    use datadog_trace_propagation::config::{get_extractors, get_injectors};
 
     #[test]
     fn test_config_from_source() {

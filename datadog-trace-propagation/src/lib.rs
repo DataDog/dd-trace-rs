@@ -1,20 +1,25 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Distributed trace propagation logic
+//! Distributed trace context propagation logic.
+//!
+//! This crate implements extraction and injection of distributed trace context using the
+//! Datadog, W3C Trace Context, W3C Baggage, and B3 propagation formats. The
+//! [`DatadogCompositePropagator`] selects formats based on the configured
+//! [`TracePropagationStyle`]s.
+
+#![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::sync::Arc;
 
-use crate::{
-    configuration::TracePropagationBehaviorExtract,
-    dd_debug, dd_error,
-    propagation::context::{InjectSpanContext, SpanContext, SpanLink},
-};
+use crate::context::{InjectSpanContext, SpanContext, SpanLink};
 use carrier::{Extractor, Injector};
 use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
 use error::Error;
 use tracecontext::TRACESTATE_KEY;
+use tracing::{debug, error};
 
 /// B3 single-header propagation (`b3` header).
 pub mod b3;
@@ -23,22 +28,37 @@ pub mod b3multi;
 /// W3C Baggage propagation (`baggage` header).
 pub mod baggage;
 pub mod carrier;
-pub(crate) mod config;
+/// Helper functions resolving configured extractors and injectors.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub mod config;
+/// Propagation configuration types: `TracePropagationStyle`,
+/// `TracePropagationBehaviorExtract`.
+pub mod configuration;
 pub mod context;
 /// Datadog header format propagation (`x-datadog-*` headers).
 pub mod datadog;
 mod error;
-pub(crate) mod trace_propagation_style;
+/// Sampling primitives ([`SamplingPriority`](sampling::SamplingPriority),
+/// [`SamplingMechanism`](sampling::SamplingMechanism)) used by trace context propagation.
+pub mod sampling;
+/// Serde deserialization helper for `TracePropagationStyle` lists.
+///
+/// This API is not covered by semver guarantees and may change in minor releases.
+#[doc(hidden)]
+pub mod trace_propagation_style;
 /// W3C Trace Context propagation (`traceparent`/`tracestate` headers).
 pub mod tracecontext;
 
-pub use crate::core::configuration::TracePropagationStyle;
+pub use configuration::{TracePropagationBehaviorExtract, TracePropagationStyle};
 
 /// Configuration required for trace context propagation.
 ///
 /// This trait abstracts the configuration needed by propagators, allowing
 /// consumers to provide their own configuration implementation without
-/// depending on the full [`Config`](crate::configuration::Config) struct.
+/// depending on a concrete configuration struct. The `datadog-opentelemetry`
+/// crate's `Config` implements this trait, or you can provide your own implementation.
 pub trait PropagationConfig: Send + Sync {
     /// Returns the default trace propagation styles (used as fallback for both
     /// extract and inject if specific styles are not configured).
@@ -81,7 +101,7 @@ pub(crate) trait Propagator<C: PropagationConfig + ?Sized> {
 /// (e.g., Datadog, W3C Trace Context) based on the provided configuration.
 ///
 /// The type parameter `C` is the configuration type, which must implement
-/// [`PropagationConfig`]. Use [`crate::configuration::Config`] for the default
+/// `PropagationConfig`. Use the `datadog-opentelemetry` crate's `Config` for the default
 /// Datadog configuration, or provide your own implementation.
 #[derive(Debug)]
 pub struct DatadogCompositePropagator<C: PropagationConfig> {
@@ -197,11 +217,11 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         for propagator in self.extractors.iter() {
             match propagator.try_extract(carrier, self.config.as_ref()) {
                 Some(Ok(context)) => {
-                    dd_debug!("Propagator ({propagator}): extracted {context:#?}");
+                    debug!("Propagator ({propagator}): extracted {context:#?}");
                     contexts.push((context, *propagator));
                 }
                 Some(Err(e)) => {
-                    dd_debug!("Propagator ({propagator}): failed to extract: {e}");
+                    debug!("Propagator ({propagator}): failed to extract: {e}");
                     failures.push(*propagator);
                 }
                 None => {}
@@ -214,7 +234,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ");
-            dd_error!(
+            error!(
                 "DatadogCompositePropagator: propagation headers present but no configured extractor could recover a real trace context (tried: {tried})"
             );
         }
@@ -237,7 +257,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         contexts: Vec<(SpanContext, TracePropagationStyle)>,
         _carrier: &dyn Extractor,
     ) -> SpanContext {
-        dd_debug!(
+        debug!(
             "DatadogCompositePropagator: resolving contexts: received {}",
             contexts.len()
         );
@@ -254,7 +274,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                 && context.trace_id != primary_context.trace_id
             {
                 links.push(SpanLink::terminated_context(context, style));
-                dd_debug!(
+                debug!(
                     "DatadogCompositePropagator: terminated context (trace_id: {:#?}, span_id: {:#?})",
                     context.trace_id,
                     context.span_id
@@ -265,7 +285,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                         .tags
                         .insert(TRACESTATE_KEY.to_string(), tracestate.clone());
                     primary_context.tracestate = context.tracestate.clone();
-                    dd_debug!(
+                    debug!(
                         "DatadogCompositePropagator: setting tracestate from tracecontext context in the datadog context"
                     );
                 }
@@ -289,7 +309,7 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                         );
                     }
 
-                    dd_debug!(
+                    debug!(
                         "DatadogCompositePropagator: spanId differences between extrated contexts. (resolved spanId: {}, {DATADOG_LAST_PARENT_ID_KEY}: {} ",
                             context.span_id,
                             primary_context.tags.get(DATADOG_LAST_PARENT_ID_KEY).unwrap_or(&"".to_string())
@@ -303,32 +323,6 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         primary_context.links = links;
 
         primary_context
-    }
-}
-
-impl PropagationConfig for crate::core::configuration::Config {
-    fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
-        self.trace_propagation_style()
-    }
-
-    fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
-        self.trace_propagation_style_extract()
-    }
-
-    fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
-        self.trace_propagation_style_inject()
-    }
-
-    fn trace_propagation_extract_first(&self) -> bool {
-        self.trace_propagation_extract_first()
-    }
-
-    fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
-        self.trace_propagation_behavior_extract()
-    }
-
-    fn datadog_tags_max_length(&self) -> usize {
-        self.datadog_tags_max_length()
     }
 }
 
@@ -368,11 +362,11 @@ pub(crate) mod tests {
 
     use assert_unordered::assert_eq_unordered;
 
-    use crate::core::configuration::Config;
-    use crate::core::sampling::{mechanism, priority};
+    use crate::sampling::{mechanism, priority};
+    use crate::test_util::TestPropagationConfig;
     use pretty_assertions::assert_eq;
 
-    use crate::propagation::context::{Sampling, Tracestate};
+    use crate::context::{Sampling, Tracestate};
 
     use super::*;
 
@@ -560,11 +554,11 @@ pub(crate) mod tests {
                 fn $name() {
                     let (styles, carrier, expected) = $value;
                     let config = if let Some(styles) = styles {
-                        let mut builder = Config::builder();
+                        let mut builder = TestPropagationConfig::builder();
                         builder.set_trace_propagation_style_extract(styles.to_vec());
                         builder.build()
                     } else {
-                        Config::builder().build()
+                        TestPropagationConfig::builder().build()
                     };
 
                     let propagator = DatadogCompositePropagator::new(Arc::new(config));
@@ -1224,8 +1218,8 @@ pub(crate) mod tests {
     fn get_config(
         extract: Option<Vec<TracePropagationStyle>>,
         inject: Option<Vec<TracePropagationStyle>>,
-    ) -> Arc<Config> {
-        let mut builder = Config::builder();
+    ) -> Arc<TestPropagationConfig> {
+        let mut builder = TestPropagationConfig::builder();
         builder.set_trace_propagation_style_extract(extract.unwrap_or_default());
         builder.set_trace_propagation_style_inject(inject.unwrap_or_default());
         Arc::new(builder.build())
@@ -1379,26 +1373,24 @@ pub(crate) mod tests {
 
         // ...but shouldn't count as recovery — Datadog's failure here is real.
         let failures = vec![TracePropagationStyle::Datadog];
-        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
-            &contexts, &failures
-        ));
+        assert!(
+            DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(
+                &contexts, &failures
+            )
+        );
     }
 
     #[test]
     fn test_lost_real_trace_false_when_nothing_attempted() {
-        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
-            &[],
-            &[]
-        ));
+        assert!(!DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(&[], &[]));
     }
 
     #[test]
     fn test_lost_real_trace_true_when_every_attempted_extractor_fails() {
         let failures = vec![TracePropagationStyle::Datadog];
-        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
-            &[],
-            &failures
-        ));
+        assert!(
+            DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(&[], &failures)
+        );
     }
 
     #[test]
@@ -1412,9 +1404,11 @@ pub(crate) mod tests {
         )];
         let failures = vec![TracePropagationStyle::TraceContext];
 
-        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
-            &contexts, &failures
-        ));
+        assert!(
+            !DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(
+                &contexts, &failures
+            )
+        );
     }
 
     #[test]
@@ -1425,9 +1419,11 @@ pub(crate) mod tests {
         )];
         let failures = vec![TracePropagationStyle::Datadog];
 
-        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
-            &contexts, &failures
-        ));
+        assert!(
+            DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(
+                &contexts, &failures
+            )
+        );
     }
 
     #[test]
@@ -1437,10 +1433,9 @@ pub(crate) mod tests {
             TracePropagationStyle::B3SingleHeader,
         )];
 
-        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
-            &contexts,
-            &[]
-        ));
+        assert!(
+            !DatadogCompositePropagator::<TestPropagationConfig>::lost_real_trace(&contexts, &[])
+        );
     }
 
     #[test]
@@ -1450,7 +1445,7 @@ pub(crate) mod tests {
             TracePropagationStyle::TraceContext,
         ];
 
-        let mut builder = Config::builder();
+        let mut builder = TestPropagationConfig::builder();
         builder.set_trace_propagation_style_extract(extract);
         builder.set_trace_propagation_extract_first(true);
         let config = Arc::new(builder.build());
@@ -1512,16 +1507,16 @@ pub(crate) mod tests {
             $(
                 #[test]
                 fn $name() {
-                    use crate::propagation::context::span_context_to_inject;
+                    use crate::context::span_context_to_inject;
 
                     let (styles, mut context, expected) = $value;
 
                     let builder = if let Some(styles) = styles {
-                        let mut b = Config::builder();
+                        let mut b = TestPropagationConfig::builder();
                         b.set_trace_propagation_style_inject(styles.to_vec());
                         b
                     } else {
-                        Config::builder()
+                        TestPropagationConfig::builder()
                     };
 
                     let config = Arc::new(builder.build());
@@ -1868,5 +1863,126 @@ pub(crate) mod tests {
         let propagator = DatadogCompositePropagator::new(config);
 
         assert_eq!(vec!["b3"], propagator.fields())
+    }
+}
+
+/// Test-only configuration implementing [`PropagationConfig`].
+///
+/// Mirrors the propagation-related subset of `datadog-opentelemetry`'s `Config` so the
+/// tests in this crate can run without a full configuration implementation.
+#[cfg(test)]
+pub(crate) mod test_util {
+    use crate::configuration::{TracePropagationBehaviorExtract, TracePropagationStyle};
+
+    /// Default value of [`TestPropagationConfig::datadog_tags_max_length`].
+    pub(crate) const DATADOG_TAGS_MAX_LENGTH: usize = 512;
+
+    /// A propagation-only configuration for tests.
+    #[derive(Clone, Debug)]
+    pub(crate) struct TestPropagationConfig {
+        style: Option<Vec<TracePropagationStyle>>,
+        style_extract: Option<Vec<TracePropagationStyle>>,
+        style_inject: Option<Vec<TracePropagationStyle>>,
+        extract_first: bool,
+        behavior_extract: TracePropagationBehaviorExtract,
+        datadog_tags_max_length: usize,
+    }
+
+    impl Default for TestPropagationConfig {
+        fn default() -> Self {
+            Self {
+                style: Some(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                    TracePropagationStyle::Baggage,
+                ]),
+                style_extract: None,
+                style_inject: None,
+                extract_first: false,
+                behavior_extract: TracePropagationBehaviorExtract::Continue,
+                datadog_tags_max_length: DATADOG_TAGS_MAX_LENGTH,
+            }
+        }
+    }
+
+    impl TestPropagationConfig {
+        /// Returns a builder for [`TestPropagationConfig`].
+        pub(crate) fn builder() -> TestPropagationConfigBuilder {
+            TestPropagationConfigBuilder {
+                config: Self::default(),
+            }
+        }
+    }
+
+    impl super::PropagationConfig for TestPropagationConfig {
+        fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
+            self.style.as_deref()
+        }
+
+        fn trace_propagation_style_extract(&self) -> Option<&[TracePropagationStyle]> {
+            self.style_extract.as_deref()
+        }
+
+        fn trace_propagation_style_inject(&self) -> Option<&[TracePropagationStyle]> {
+            self.style_inject.as_deref()
+        }
+
+        fn trace_propagation_extract_first(&self) -> bool {
+            self.extract_first
+        }
+
+        fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
+            self.behavior_extract
+        }
+
+        fn datadog_tags_max_length(&self) -> usize {
+            self.datadog_tags_max_length
+        }
+    }
+
+    /// Builder for [`TestPropagationConfig`].
+    #[derive(Debug)]
+    pub(crate) struct TestPropagationConfigBuilder {
+        config: TestPropagationConfig,
+    }
+
+    impl TestPropagationConfigBuilder {
+        /// Sets the trace propagation styles used for extraction.
+        pub(crate) fn set_trace_propagation_style_extract(
+            &mut self,
+            styles: Vec<TracePropagationStyle>,
+        ) -> &mut Self {
+            self.config.style_extract = Some(styles);
+            self
+        }
+
+        /// Sets the trace propagation styles used for injection.
+        pub(crate) fn set_trace_propagation_style_inject(
+            &mut self,
+            styles: Vec<TracePropagationStyle>,
+        ) -> &mut Self {
+            self.config.style_inject = Some(styles);
+            self
+        }
+
+        /// Sets whether to stop extraction after the first successful propagator.
+        pub(crate) fn set_trace_propagation_extract_first(
+            &mut self,
+            extract_first: bool,
+        ) -> &mut Self {
+            self.config.extract_first = extract_first;
+            self
+        }
+
+        /// Sets the maximum length of the `x-datadog-tags` header value.
+        pub(crate) fn set_datadog_tags_max_length(&mut self, max_length: usize) -> &mut Self {
+            self.config.datadog_tags_max_length = max_length;
+            self
+        }
+
+        /// Builds the [`TestPropagationConfig`].
+        pub(crate) fn build(&self) -> TestPropagationConfig {
+            self.config.clone()
+        }
     }
 }

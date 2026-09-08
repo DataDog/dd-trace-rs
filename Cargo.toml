@@ -4,6 +4,7 @@
 [workspace]
 members = [
     "datadog-opentelemetry",
+    "datadog-trace-propagation",
     "datadog-opentelemetry/examples/propagator",
     "datadog-opentelemetry/examples/simple_tracing",
     "tools",
@@ -23,6 +24,9 @@ description = "Reserved future DataDog package, contact info@datadoghq.com if yo
 authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
+# Datadog crates
+datadog-trace-propagation = { version = "0.5.2", path = "datadog-trace-propagation" }
+
 # Libdatadog dependencies
 libdd-data-pipeline = { version = "8.0.0", features = [
     "stats-obfuscation",

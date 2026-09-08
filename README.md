@@ -13,13 +13,11 @@
 [apache-badge]: https://img.shields.io/badge/license-Apache-blue.svg
 [apache-url]: LICENSE
 
-
 # dd-trace-rs
 
 This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/), metrics and logging.
 It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and
 optimizations.
-
 
 ## Usage
 
@@ -32,6 +30,17 @@ Add to you Cargo.toml
 
 ```toml
 datadog-opentelemetry = { version = "0.5.2" }
+```
+
+### Trace context propagation
+
+Trace context propagation (the `DatadogCompositePropagator` and the Datadog, W3C Trace Context,
+W3C Baggage, and B3 formats) lives in the standalone
+[`datadog-trace-propagation`](https://docs.rs/datadog-trace-propagation) crate, which can be used
+on its own. It is also re-exported by this crate as the `propagation` module:
+
+```toml
+datadog-trace-propagation = { version = "0.5.2" }
 ```
 
 ### Creating traces, metrics and logs
@@ -230,7 +239,6 @@ datadog_opentelemetry::tracing()
 ## Support
 
 * MSRV: 1.87
-
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
 * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
   version: 0.33

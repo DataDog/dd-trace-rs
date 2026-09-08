@@ -7,7 +7,7 @@ use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 
-use datadog_opentelemetry::propagation::{carrier::Extractor, DatadogCompositePropagator};
+use datadog_trace_propagation::{carrier::Extractor, DatadogCompositePropagator};
 use std::{collections::HashMap, sync::Arc};
 
 #[global_allocator]

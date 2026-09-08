@@ -282,10 +282,17 @@ pub mod core_pub_hack {
     pub use crate::core::*;
 }
 
+/// Trace context propagation, re-exported from the
+/// [`datadog-trace-propagation`](https://docs.rs/datadog-trace-propagation) crate.
+///
+/// All propagation types and propagators (`DatadogCompositePropagator`, the
+/// individual format modules, and the sampling primitives used by propagation)
+/// live in the standalone `datadog-trace-propagation` crate and are re-exported
+/// here for compatibility.
+pub use datadog_trace_propagation as propagation;
+
 #[cfg(feature = "test-utils")]
 pub mod mappings;
-#[cfg(feature = "test-utils")]
-pub mod propagation;
 #[cfg(feature = "test-utils")]
 pub mod sampler;
 #[cfg(feature = "test-utils")]
@@ -293,15 +300,8 @@ pub mod sampling;
 #[cfg(feature = "test-utils")]
 pub mod span_processor;
 
-#[cfg(all(feature = "_unstable_propagation", not(feature = "test-utils")))]
-#[doc(hidden)]
-#[allow(missing_docs)]
-pub mod propagation;
-
 #[cfg(not(feature = "test-utils"))]
 pub(crate) mod mappings;
-#[cfg(not(any(feature = "test-utils", feature = "_unstable_propagation")))]
-pub(crate) mod propagation;
 #[cfg(not(feature = "test-utils"))]
 mod sampler;
 #[cfg(not(feature = "test-utils"))]

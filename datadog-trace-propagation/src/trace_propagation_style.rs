@@ -1,10 +1,10 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::configuration::TracePropagationStyle;
+use crate::configuration::TracePropagationStyle;
 use serde::{Deserialize, Deserializer};
 
-use crate::propagation::{
+use crate::{
     b3, b3multi, baggage,
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, SpanContext},
@@ -25,7 +25,7 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
             Self::Datadog => datadog::try_extract(carrier, config),
             Self::TraceContext => tracecontext::try_extract(carrier),
             // b3/b3multi don't distinguish malformed from absent — both already log via
-            // `dd_warn!` and return `None`.
+            // `warn!` and return `None`.
             Self::B3Multi => b3multi::extract(carrier).map(Ok),
             Self::B3SingleHeader => b3::extract(carrier).map(Ok),
             // Baggage extraction operates on OTel Context and is handled by DatadogPropagator.
@@ -56,6 +56,7 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
     }
 }
 
+/// Deserializes a comma-separated `TracePropagationStyle` list from a string.
 #[allow(clippy::module_name_repetitions)]
 #[allow(unused)]
 pub fn deserialize_trace_propagation_style<'de, D>(

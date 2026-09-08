@@ -264,8 +264,9 @@ check() {
         echo -e "${GREEN}  ✓ $description${NC}"
     fi
 }
-check "README install snippet"  "README.md"                          "datadog-opentelemetry = { version = \"$NEW_VERSION\" }"
-check "README docs.rs link"     "README.md"                          "docs.rs/datadog-opentelemetry/$NEW_VERSION/"
+check "README install snippet"             "README.md" "datadog-opentelemetry = { version = \"$NEW_VERSION\" }"
+check "README propagation install snippet" "README.md" "datadog-trace-propagation = { version = \"$NEW_VERSION\" }"
+check "README docs.rs link"                "README.md" "docs.rs/datadog-opentelemetry/$NEW_VERSION/"
 check "lib.rs install snippet"  "$PACKAGE/src/lib.rs"                "datadog-opentelemetry = { version = \"$NEW_VERSION\" }"
 check "bug report template"     ".github/ISSUE_TEMPLATE/bug_report.yml" "placeholder: \"$NEW_VERSION\""
 check "aws-lambda dep pin"      "$lambda_manifest"                   "datadog-opentelemetry = { version = \"$version_req\""
@@ -275,10 +276,18 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-# 3c. Verify the crate still packages/publishes cleanly against the updated lockfile.
+# 3c. Verify both crates still package/publish cleanly against the updated lockfile. Passing both
+# packages in one Cargo invocation creates a temporary registry for their workspace dependency,
+# allowing datadog-opentelemetry to be verified before datadog-trace-propagation is on crates.io.
 if [ "$RUN_PUBLISH_DRY_RUN" = true ]; then
     echo -e "${BLUE}--- cargo publish --dry-run ---${NC}"
-    cargo publish --package "$PACKAGE" --all-features --locked --dry-run --allow-dirty
+    cargo publish \
+        --package datadog-trace-propagation \
+        --package "$PACKAGE" \
+        --all-features \
+        --locked \
+        --dry-run \
+        --allow-dirty
 fi
 
 echo -e "${GREEN}✓ Release proposal prepared: $PREV_VERSION -> $NEW_VERSION${NC}"

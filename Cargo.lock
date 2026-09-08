@@ -682,6 +682,7 @@ dependencies = [
  "criterion",
  "ctor",
  "datadog-opentelemetry",
+ "datadog-trace-propagation",
  "foldhash 0.1.5",
  "hashbrown 0.15.5",
  "hyper",
@@ -704,7 +705,6 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
- "percent-encoding",
  "pretty_assertions",
  "proptest",
  "rand 0.8.7",
@@ -712,12 +712,25 @@ dependencies = [
  "serde",
  "serde_json",
  "test-case",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "datadog-trace-propagation"
+version = "0.5.2"
+dependencies = [
+ "assert_unordered",
+ "opentelemetry",
+ "percent-encoding",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
