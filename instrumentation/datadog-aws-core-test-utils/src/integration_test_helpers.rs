@@ -42,6 +42,7 @@ impl Respond for CaptureBodyResponder {
 
 /// Handle to the shared mock AWS endpoint used by integration tests.
 pub struct MockAwsServer {
+    /// Base URL for the mock AWS endpoint, exposed so tests can configure AWS SDK clients.
     pub url: String,
     request_id: String,
     bodies: Arc<Mutex<Vec<String>>>,
@@ -72,6 +73,7 @@ impl MockAwsServer {
 /// tests can run concurrently.
 pub struct TestHarness {
     exporter: InMemorySpanExporter,
+    /// Mock AWS endpoint used by clients configured through this harness.
     pub server: MockAwsServer,
 }
 

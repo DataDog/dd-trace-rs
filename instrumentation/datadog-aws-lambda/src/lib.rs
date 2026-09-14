@@ -91,7 +91,7 @@ impl From<serde_json::Error> for TracedServiceError {
 
 /// A Lambda service wrapped with Datadog tracing.
 ///
-/// Owns the [`SdkTracerProvider`] lifecycle,
+/// Owns the [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider) lifecycle,
 /// applies Lambda-appropriate defaults, and implements [`Service`] so it composes
 /// naturally with tower middleware.
 ///

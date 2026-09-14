@@ -9,7 +9,7 @@
 
 //! Shared AWS SDK request-span support for the Datadog AWS service instrumentation crates.
 //!
-//! This crate does not install instrumentation directly. Service-specific crates use it to:
+//! Service-specific crates use it to:
 //!
 //! - create an OpenTelemetry client span for each AWS SDK operation as a child of the current
 //!   OpenTelemetry context;
