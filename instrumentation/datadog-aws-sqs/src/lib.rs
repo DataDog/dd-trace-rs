@@ -124,39 +124,36 @@ impl ConfigExt for aws_sdk_sqs::config::Builder {
 
 /// Extracts an OpenTelemetry context from an SQS message.
 ///
-/// Context is read from the SQS `_datadog` message attribute when present, from the
-/// `_datadog` attribute inside an SNS notification envelope in the message body,
-/// from the `_datadog` field inside the `detail` object of an EventBridge envelope,
-/// or from an EventBridge event inside an SNS notification's `Message` field.
+/// Context is read from the first valid carrier found in priority order: the SQS `_datadog`
+/// message attribute, the `_datadog` attribute inside an SNS notification envelope in the message
+/// body, the `_datadog` field inside the `detail` object of an EventBridge envelope, or an
+/// EventBridge event inside an SNS notification's `Message` field.
 ///
 /// Returns `None` when the message does not contain a valid Datadog propagation attribute.
 pub fn extract_context(message: &Message) -> Option<Context> {
-    let trace_headers = datadog_trace_headers(message)?;
-    global::get_text_map_propagator(|propagator| {
-        extract_context_from_trace_headers(&trace_headers, propagator)
-    })
+    global::get_text_map_propagator(|propagator| extract_context_from_message(message, propagator))
 }
 
-#[cfg(test)]
-fn extract_context_with_propagator(
+fn extract_context_from_message(
     message: &Message,
     propagator: &dyn TextMapPropagator,
 ) -> Option<Context> {
-    let trace_headers = datadog_trace_headers(message)?;
-    extract_context_from_trace_headers(&trace_headers, propagator)
+    extract_context_from_sqs_message_attribute(message, propagator)
+        .or_else(|| extract_context_from_sns_envelope(message, propagator))
+        .or_else(|| extract_context_from_eventbridge_envelope(message, propagator))
 }
 
-fn datadog_trace_headers(message: &Message) -> Option<HashMap<String, String>> {
-    if let Some(datadog_attr) = message
+fn extract_context_from_sqs_message_attribute(
+    message: &Message,
+    propagator: &dyn TextMapPropagator,
+) -> Option<Context> {
+    let datadog_attr = message
         .message_attributes
         .as_ref()
-        .and_then(|attrs| attrs.get(DATADOG_ATTRIBUTE_KEY))
-    {
-        return trace_headers_from_sqs_message_attribute(datadog_attr);
-    }
+        .and_then(|attrs| attrs.get(DATADOG_ATTRIBUTE_KEY))?;
+    let trace_headers = trace_headers_from_sqs_message_attribute(datadog_attr)?;
 
-    trace_headers_from_sns_envelope(message)
-        .or_else(|| trace_headers_from_eventbridge_envelope(message))
+    extract_context_from_trace_headers(&trace_headers, propagator)
 }
 
 fn trace_headers_from_sqs_message_attribute(
@@ -178,7 +175,10 @@ fn trace_headers_from_sqs_message_attribute(
     }
 }
 
-fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, String>> {
+fn extract_context_from_sns_envelope(
+    message: &Message,
+    propagator: &dyn TextMapPropagator,
+) -> Option<Context> {
     let body = message.body()?;
     if !body.contains(DATADOG_ATTRIBUTE_KEY)
         || (!body.contains("\"MessageAttributes\"") && !body.contains("\"Message\""))
@@ -198,20 +198,24 @@ fn trace_headers_from_sns_envelope(message: &Message) -> Option<HashMap<String, 
         }
     };
 
+    let eventbridge_context = || {
+        envelope
+            .message
+            .as_deref()
+            .and_then(|body| extract_context_from_eventbridge_body(body, propagator))
+    };
+
     let datadog_attr = match envelope
         .message_attributes
         .and_then(|attributes| attributes.datadog)
     {
         Some(datadog_attr) => datadog_attr,
-        None => {
-            return envelope
-                .message
-                .as_deref()
-                .and_then(trace_headers_from_eventbridge_body);
-        }
+        None => return eventbridge_context(),
     };
 
     trace_headers_from_sns_datadog_attribute(datadog_attr)
+        .and_then(|trace_headers| extract_context_from_trace_headers(&trace_headers, propagator))
+        .or_else(eventbridge_context)
 }
 
 fn trace_headers_from_sns_datadog_attribute(
@@ -265,6 +269,14 @@ fn trace_headers_from_eventbridge_body(body: &str) -> Option<HashMap<String, Str
     }
 }
 
+fn extract_context_from_eventbridge_body(
+    body: &str,
+    propagator: &dyn TextMapPropagator,
+) -> Option<Context> {
+    let trace_headers = trace_headers_from_eventbridge_body(body)?;
+    extract_context_from_trace_headers(&trace_headers, propagator)
+}
+
 #[derive(Deserialize)]
 struct SnsEnvelope<'a> {
     #[serde(rename = "MessageAttributes", borrow)]
@@ -298,6 +310,14 @@ fn trace_headers_from_eventbridge_envelope(message: &Message) -> Option<HashMap<
     }
 
     trace_headers_from_eventbridge_body(body)
+}
+
+fn extract_context_from_eventbridge_envelope(
+    message: &Message,
+    propagator: &dyn TextMapPropagator,
+) -> Option<Context> {
+    let trace_headers = trace_headers_from_eventbridge_envelope(message)?;
+    extract_context_from_trace_headers(&trace_headers, propagator)
 }
 
 #[derive(Deserialize)]
@@ -714,6 +734,17 @@ mod tests {
         TraceContextPropagator::new()
     }
 
+    fn trace_headers_json(traceparent: &str) -> String {
+        serde_json::json!({ "traceparent": traceparent }).to_string()
+    }
+
+    fn assert_extracted_context(extracted: &Context, trace_id: &str, span_id: &str) {
+        let span_context = extracted.span().span_context().clone();
+        assert!(span_context.is_valid());
+        assert_eq!(span_context.trace_id().to_string(), trace_id);
+        assert_eq!(span_context.span_id().to_string(), span_id);
+    }
+
     fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> String {
         serde_json::json!({
             "Type": "Notification",
@@ -1087,7 +1118,7 @@ mod tests {
             .message_attributes(DATADOG_ATTRIBUTE_KEY, datadog_attr)
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1108,7 +1139,7 @@ mod tests {
             .message_attributes(DATADOG_ATTRIBUTE_KEY, datadog_attr)
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1123,7 +1154,7 @@ mod tests {
             .body(sns_envelope_body("String", datadog_attr))
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1140,7 +1171,7 @@ mod tests {
             .body(sns_envelope_body("Binary", datadog_attr))
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1162,7 +1193,7 @@ mod tests {
         .to_string();
         let message = Message::builder().body(sns_body).build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1178,7 +1209,7 @@ mod tests {
             })))
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
     }
@@ -1198,9 +1229,61 @@ mod tests {
             })))
             .build();
         let propagator = trace_context_propagator();
-        let extracted = extract_context_with_propagator(&message, &propagator).unwrap();
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
 
         assert!(extracted.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn extract_context_falls_back_to_sns_envelope_when_datadog_message_attribute_is_malformed() {
+        let stale_attr = MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value("stale")
+            .build()
+            .unwrap();
+        let message = Message::builder()
+            .message_attributes(DATADOG_ATTRIBUTE_KEY, stale_attr)
+            .body(sns_envelope_body(
+                "String",
+                trace_headers_json("00-33333333333333333333333333333333-4444444444444444-01"),
+            ))
+            .build();
+        let propagator = trace_context_propagator();
+
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
+
+        assert_extracted_context(
+            &extracted,
+            "33333333333333333333333333333333",
+            "4444444444444444",
+        );
+    }
+
+    #[test]
+    fn extract_context_falls_back_to_eventbridge_when_datadog_message_attribute_is_invalid() {
+        let stale_attr = MessageAttributeValue::builder()
+            .data_type("String")
+            .string_value(trace_headers_json("invalid"))
+            .build()
+            .unwrap();
+        let message = Message::builder()
+            .message_attributes(DATADOG_ATTRIBUTE_KEY, stale_attr)
+            .body(eventbridge_envelope_body(serde_json::json!({
+                "message": "hello",
+                "_datadog": {
+                    "traceparent": "00-55555555555555555555555555555555-6666666666666666-01"
+                }
+            })))
+            .build();
+        let propagator = trace_context_propagator();
+
+        let extracted = extract_context_from_message(&message, &propagator).unwrap();
+
+        assert_extracted_context(
+            &extracted,
+            "55555555555555555555555555555555",
+            "6666666666666666",
+        );
     }
 
     #[test]
@@ -1212,7 +1295,7 @@ mod tests {
             .build();
         let propagator = trace_context_propagator();
 
-        assert!(extract_context_with_propagator(&message, &propagator).is_none());
+        assert!(extract_context_from_message(&message, &propagator).is_none());
     }
 
     #[test]
@@ -1226,7 +1309,7 @@ mod tests {
             .build();
         let propagator = trace_context_propagator();
 
-        assert!(extract_context_with_propagator(&message, &propagator).is_none());
+        assert!(extract_context_from_message(&message, &propagator).is_none());
     }
 
     #[test]
@@ -1241,7 +1324,7 @@ mod tests {
             .build();
 
         let propagator = trace_context_propagator();
-        assert!(extract_context_with_propagator(&message, &propagator).is_none());
+        assert!(extract_context_from_message(&message, &propagator).is_none());
     }
 
     #[test]
@@ -1249,7 +1332,7 @@ mod tests {
         let message = Message::builder().build();
 
         let propagator = trace_context_propagator();
-        assert!(extract_context_with_propagator(&message, &propagator).is_none());
+        assert!(extract_context_from_message(&message, &propagator).is_none());
     }
 
     #[test]
