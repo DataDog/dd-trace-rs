@@ -580,12 +580,14 @@ fn queue_url_from_input(input: &Input) -> Option<&str> {
 
 fn batch_message_count_from_input(input: &Input) -> Option<i64> {
     if let Some(input) = input.downcast_ref::<SendMessageBatchInput>() {
-        return Some(input.entries.as_ref().map_or(0, Vec::len) as i64);
+        input.entries.as_deref().map(|items| items.len() as i64)
+    } else if let Some(input) = input.downcast_ref::<ChangeMessageVisibilityBatchInput>() {
+        input.entries.as_deref().map(|items| items.len() as i64)
+    } else if let Some(input) = input.downcast_ref::<DeleteMessageBatchInput>() {
+        input.entries.as_deref().map(|items| items.len() as i64)
+    } else {
+        None
     }
-
-    input
-        .downcast_ref::<DeleteMessageBatchInput>()
-        .map(|input| input.entries.as_ref().map_or(0, Vec::len) as i64)
 }
 
 /// Dispatches trace context injection based on the concrete operation input type.
@@ -751,6 +753,37 @@ mod tests {
         assert_eq!(queue_name_from_input(&input), Some("MyQueue"));
     }
 
+    fn send_message_batch_entry(id: &str, message_body: &str) -> SendMessageBatchRequestEntry {
+        SendMessageBatchRequestEntry::builder()
+            .id(id)
+            .message_body(message_body)
+            .build()
+            .unwrap()
+    }
+
+    fn change_message_visibility_batch_entry(
+        id: &str,
+        receipt_handle: &str,
+    ) -> ChangeMessageVisibilityBatchRequestEntry {
+        ChangeMessageVisibilityBatchRequestEntry::builder()
+            .id(id)
+            .receipt_handle(receipt_handle)
+            .visibility_timeout(30)
+            .build()
+            .unwrap()
+    }
+
+    fn delete_message_batch_entry(
+        id: &str,
+        receipt_handle: &str,
+    ) -> DeleteMessageBatchRequestEntry {
+        DeleteMessageBatchRequestEntry::builder()
+            .id(id)
+            .receipt_handle(receipt_handle)
+            .build()
+            .unwrap()
+    }
+
     #[test]
     fn extracts_queue_name_from_name_scoped_inputs() {
         assert_queue_name_extracted(Input::erase(
@@ -789,14 +822,7 @@ mod tests {
         assert_queue_url_extracted(Input::erase(
             ChangeMessageVisibilityBatchInput::builder()
                 .queue_url(TEST_QUEUE_URL)
-                .entries(
-                    ChangeMessageVisibilityBatchRequestEntry::builder()
-                        .id("1")
-                        .receipt_handle("handle")
-                        .visibility_timeout(30)
-                        .build()
-                        .unwrap(),
-                )
+                .entries(change_message_visibility_batch_entry("1", "handle"))
                 .build()
                 .unwrap(),
         ));
@@ -810,13 +836,7 @@ mod tests {
         assert_queue_url_extracted(Input::erase(
             DeleteMessageBatchInput::builder()
                 .queue_url(TEST_QUEUE_URL)
-                .entries(
-                    DeleteMessageBatchRequestEntry::builder()
-                        .id("1")
-                        .receipt_handle("handle")
-                        .build()
-                        .unwrap(),
-                )
+                .entries(delete_message_batch_entry("1", "handle"))
                 .build()
                 .unwrap(),
         ));
@@ -874,13 +894,7 @@ mod tests {
         assert_queue_url_extracted(Input::erase(
             SendMessageBatchInput::builder()
                 .queue_url(TEST_QUEUE_URL)
-                .entries(
-                    SendMessageBatchRequestEntry::builder()
-                        .id("1")
-                        .message_body("hello")
-                        .build()
-                        .unwrap(),
-                )
+                .entries(send_message_batch_entry("1", "hello"))
                 .build()
                 .unwrap(),
         ));
@@ -905,6 +919,42 @@ mod tests {
                 .build()
                 .unwrap(),
         ));
+    }
+
+    #[test]
+    fn extracts_batch_message_count_from_all_batch_inputs() {
+        let send_input = Input::erase(
+            SendMessageBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(send_message_batch_entry("1", "hello"))
+                .entries(send_message_batch_entry("2", "hello2"))
+                .entries(send_message_batch_entry("3", "hello3"))
+                .entries(send_message_batch_entry("4", "hello4"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(batch_message_count_from_input(&send_input), Some(4));
+
+        let change_input = Input::erase(
+            ChangeMessageVisibilityBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(change_message_visibility_batch_entry("1", "handle1"))
+                .entries(change_message_visibility_batch_entry("2", "handle2"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(batch_message_count_from_input(&change_input), Some(2));
+
+        let delete_input = Input::erase(
+            DeleteMessageBatchInput::builder()
+                .queue_url(TEST_QUEUE_URL)
+                .entries(delete_message_batch_entry("1", "handle1"))
+                .entries(delete_message_batch_entry("2", "handle2"))
+                .entries(delete_message_batch_entry("3", "handle3"))
+                .build()
+                .unwrap(),
+        );
+        assert_eq!(batch_message_count_from_input(&delete_input), Some(3));
     }
 
     #[test]
