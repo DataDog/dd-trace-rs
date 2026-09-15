@@ -72,7 +72,7 @@ pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
             _ => true,
         })
         .collect();
-    join_capped(parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+    (!parts.is_empty()).then(|| parts.join(";"))
 }
 
 /// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
@@ -176,10 +176,6 @@ impl Tracestate {
     }
 
     fn valid_value(value: &str) -> bool {
-        if value.len() > 256 {
-            return false;
-        }
-
         !(value.contains(',') || value.contains('='))
     }
 }
@@ -1433,6 +1429,15 @@ mod test {
             ot_sanitize("rv:1234567890abcd;th:e6666666666666;future:value"),
             Some("rv:1234567890abcd;th:e6666666666666;future:value".to_string())
         );
+    }
+
+    #[test]
+    fn preserves_long_ot_values() {
+        let ot_value = "future:".to_string() + &"x".repeat(TRACESTATE_OT_KEY_MAX_LENGTH);
+        let tracestate: Tracestate = format!("dd=s:1,ot={ot_value}").parse().unwrap();
+
+        assert_eq!(tracestate.ot_member.as_deref(), Some(ot_value.as_str()));
+        assert_eq!(ot_sanitize(&ot_value), Some(ot_value));
     }
 
     #[test]
