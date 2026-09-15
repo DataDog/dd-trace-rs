@@ -72,7 +72,7 @@ pub(crate) fn ot_sanitize(raw: &str) -> Option<String> {
             _ => true,
         })
         .collect();
-    join_capped(parts, TRACESTATE_OT_KEY_MAX_LENGTH)
+    (!parts.is_empty()).then(|| parts.join(";"))
 }
 
 /// Replaces `rv`/`th` in a raw `ot` member value, dropping the old ones and
@@ -176,10 +176,6 @@ impl Tracestate {
     }
 
     fn valid_value(value: &str) -> bool {
-        if value.len() > 256 {
-            return false;
-        }
-
         !(value.contains(',') || value.contains('='))
     }
 }
@@ -1391,6 +1387,20 @@ mod test {
     }
 
     #[test]
+    fn parses_ot_member_longer_than_256_characters() {
+        let ot_value = "x".repeat(TRACESTATE_OT_KEY_MAX_LENGTH + 1);
+        let tracestate = format!("dd=s:1,ot={ot_value}");
+
+        let parsed: Tracestate = tracestate.parse().unwrap();
+
+        assert_eq!(parsed.ot_member.as_deref(), Some(ot_value.as_str()));
+        assert_eq!(
+            parsed.additional_values,
+            Some(vec![("ot".to_string(), ot_value)])
+        );
+    }
+
+    #[test]
     fn ot_is_kept_raw_at_extraction_even_if_malformed() {
         let ts: Tracestate = "dd=s:1,ot=rv:not-hex-garbage;th:not-hex-either,congo=xyz123"
             .parse()
@@ -1433,6 +1443,13 @@ mod test {
             ot_sanitize("rv:1234567890abcd;th:e6666666666666;future:value"),
             Some("rv:1234567890abcd;th:e6666666666666;future:value".to_string())
         );
+    }
+
+    #[test]
+    fn ot_sanitize_preserves_values_longer_than_256_characters() {
+        let ot_value = "future:".to_string() + &"x".repeat(TRACESTATE_OT_KEY_MAX_LENGTH);
+
+        assert_eq!(ot_sanitize(&ot_value), Some(ot_value));
     }
 
     #[test]
