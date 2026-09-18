@@ -4,7 +4,7 @@
 [package]
 name = "datadog-aws-lambda"
 description = "Datadog distributed tracing for AWS Lambda. Provides inferred spans and trace context extraction for SQS, SNS, EventBridge, API Gateway (REST and HTTP APIs), and Lambda Function URLs."
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version = "1.85.0"
 license.workspace = true
@@ -13,9 +13,9 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-datadog-opentelemetry = { version = "0.5" }
+datadog-opentelemetry = { workspace = true }
 libdd-trace-inferrer = { workspace = true }
-lambda_runtime = "0.13"
+lambda_runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 opentelemetry = { workspace = true }
