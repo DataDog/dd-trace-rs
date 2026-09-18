@@ -8,25 +8,19 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     str::FromStr,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use crate::{
     core::{
-        configuration::{
-            remote_config::{
-                RemoteConfigClientError, RemoteConfigClientHandle, RemoteConfigClientWorker,
-            },
-            BaggageTagKeyFilter, Config,
-        },
+        configuration::{remote_config::RemoteConfigClientWorker, BaggageTagKeyFilter, Config},
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
-        telemetry::init_telemetry,
-        utils::WorkerError,
+        telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
     create_dd_resource, dd_debug, dd_error,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
-    spans_metrics::{TelemetryMetricsCollector, TelemetryMetricsCollectorHandle},
+    spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
 };
 use opentelemetry::{
@@ -54,6 +48,7 @@ pub(crate) struct TracePropagationData {
     pub sampling_decision: SamplingDecision,
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
+    pub ot: Option<String>,
 }
 
 const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
@@ -63,7 +58,14 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
         mechanism: None,
     },
     tags: None,
+    ot: None,
 };
+
+impl Default for TracePropagationData {
+    fn default() -> Self {
+        EMPTY_PROPAGATION_DATA
+    }
+}
 
 #[derive(Debug)]
 struct InnerTraceRegistry {
@@ -239,11 +241,10 @@ impl InnerTraceRegistry {
         }
     }
 
-    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> &TracePropagationData {
-        match self.registry.get(&trace_id) {
-            Some(trace) => &trace.propagation_data,
-            None => &EMPTY_PROPAGATION_DATA,
-        }
+    fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> Option<&TracePropagationData> {
+        self.registry
+            .get(&trace_id)
+            .map(|trace| &trace.propagation_data)
     }
 
     fn get_metrics(&mut self) -> TraceRegistryMetrics {
@@ -356,15 +357,15 @@ impl TraceRegistry {
 
     /// Retrieves the trace propagation data for a given trace ID.
     ///
-    /// Returns the sampling decision, origin, and internal tags associated with the trace.
+    /// Returns the sampling decision, origin, and internal tags when the trace is registered.
     #[allow(private_interfaces)]
-    pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> TracePropagationData {
+    pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> Option<TracePropagationData> {
         let inner = self
             .get_shard(trace_id)
             .read()
             .expect("Failed to acquire lock on trace registry");
 
-        inner.get_trace_propagation_data(trace_id).clone()
+        inner.get_trace_propagation_data(trace_id).cloned()
     }
 
     /// Aggregates and returns metrics from all registry shards.
@@ -409,8 +410,7 @@ pub(crate) struct DatadogSpanProcessor {
     span_exporter: DatadogExporter,
     resource: Arc<RwLock<Resource>>,
     config: Arc<Config>,
-    rc_client_handle: Option<RemoteConfigClientHandle>,
-    telemetry_metrics_handle: Option<TelemetryMetricsCollectorHandle>,
+    telemetry_user: Mutex<Option<TelemetryUser<'static>>>,
 }
 
 impl std::fmt::Debug for DatadogSpanProcessor {
@@ -427,30 +427,42 @@ impl DatadogSpanProcessor {
         resource: Arc<RwLock<Resource>>,
         agent_response_handler: Option<Box<dyn for<'a> Fn(&'a str) + Send + Sync>>,
     ) -> Result<Self, DatadogExporterInitError> {
-        let rc_client_handle = if config.remote_config_enabled() && config.enabled() {
-            RemoteConfigClientWorker::start(config.clone())
-                .inspect_err(|e| {
-                    dd_error!(
-                        "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
-                        e
-                    );
-                })
-                .ok()
-        } else {
-            None
-        };
+        // The exporter owns the shared runtime and builds it on its own dedicated
+        // thread (never on this caller's thread), so a failed init can't drop a
+        // tokio runtime inline here — which would panic when `new` runs inside an
+        // existing runtime
         let span_exporter = DatadogExporter::new(config.clone(), agent_response_handler)?;
-        let telemetry_metrics_handle = config.telemetry_enabled().then(|| {
-            TelemetryMetricsCollector::start(registry.clone(), span_exporter.queue_metrics())
-        });
+
+        if config.remote_config_enabled() && config.enabled() {
+            if let Err(e) =
+                RemoteConfigClientWorker::start(config.clone(), span_exporter.shared_runtime())
+            {
+                dd_error!(
+                    "RemoteConfigClientWorker.start: Failed to start remote config client: {}",
+                    e
+                );
+            }
+        }
+        if config.telemetry_enabled() {
+            if let Err(e) = TelemetryMetricsCollector::start(
+                registry.clone(),
+                span_exporter.queue_metrics(),
+                span_exporter.shared_runtime(),
+            ) {
+                dd_error!(
+                    "TelemetryMetricsCollector.start: Failed to start telemetry metrics collector: {}",
+                    e
+                );
+            }
+        }
+        let telemetry_user = Mutex::new(TelemetryUser::register(&config));
 
         Ok(Self {
             registry,
             span_exporter,
             resource,
             config,
-            rc_client_handle,
-            telemetry_metrics_handle,
+            telemetry_user,
         })
     }
 
@@ -643,8 +655,13 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn force_flush(&self) -> opentelemetry_sdk::error::OTelSdkResult {
+        // Previously this called `DatadogExporter::force_flush`, which only notified the
+        // background worker and could return while a chunk was still queued. Drain pending
+        // spans (bounded by the force-flush timeout) so the export completes before returning.
+        // See APMSP-3915.
+        let timeout = self.config.trace_writer_force_flush_timeout();
         self.span_exporter
-            .force_flush()
+            .flush_and_drain(timeout)
             .map_err(|e| exporter_error_to_otel(&e, "force_flush"))
     }
 
@@ -661,17 +678,20 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         let drain_left = deadline.saturating_duration_since(std::time::Instant::now());
         let _ = self.span_exporter.flush_and_drain(drain_left);
 
-        // Trigger all tasks shutdown
+        // Trigger the runtime teardown. The Remote Config and telemetry-metrics
+        // workers are torn down as part of the exporter's runtime shutdown
+        // (`shutdown_async` stops every worker on the shared runtime), so they
+        // need no separate trigger/wait.
         self.span_exporter.trigger_shutdown();
-        if let Some(rc_client_handle) = &self.rc_client_handle {
-            rc_client_handle.trigger_shutdown();
-        };
-        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
-            telemetry_metrics_handle.trigger_shutdown();
-        }
+        let telemetry_last_user = self
+            .telemetry_user
+            .lock()
+            .ok()
+            .and_then(|mut user| user.take())
+            .is_some_and(TelemetryUser::trigger_stop);
 
-        // Wait fot all tasks to finish, keeping in mind how much time is left
-        // since the beginning of the call
+        // Wait for the runtime shutdown to finish, keeping in mind how much time
+        // is left since the beginning of the call.
         let left = deadline.saturating_duration_since(std::time::Instant::now());
         self.span_exporter.wait_for_shutdown(left).map_err(|e| {
             let e = match e {
@@ -681,40 +701,15 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
             exporter_error_to_otel(&e, "wait_for_shutdown")
         })?;
 
-        if let Some(rc_client_handle) = &self.rc_client_handle {
+        if telemetry_last_user {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
-            rc_client_handle
-                .wait_for_shutdown(left)
-                .map_err(|e| match e {
-                    RemoteConfigClientError::HandleMutexPoisoned
-                    | RemoteConfigClientError::WorkerPanicked(_)
-                    | RemoteConfigClientError::InvalidAgentUri => {
-                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
-                            "RemoteConfigClient.shutdown_with_timeout: {}",
-                            e
-                        ))
-                    }
-                    RemoteConfigClientError::ShutdownTimedOut => {
-                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                    }
-                })?;
-        }
-
-        if let Some(telemetry_metrics_handle) = &self.telemetry_metrics_handle {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            telemetry_metrics_handle
-                .wait_for_shutdown(left)
-                .map_err(|e| match e {
-                    WorkerError::ShutdownTimedOut => {
-                        opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
-                    }
-                    WorkerError::HandleMutexPoisoned | WorkerError::WorkerPanicked(_) => {
-                        opentelemetry_sdk::error::OTelSdkError::InternalFailure(format!(
-                            "TelemetryMetricsCollector.shutdown_with_timeout: {}",
-                            e
-                        ))
-                    }
-                })?;
+            if left.is_zero() {
+                return Err(opentelemetry_sdk::error::OTelSdkError::Timeout(timeout));
+            }
+            wait_telemetry_stopped(left).map_err(|e| {
+                dd_debug!("DatadogSpanProcessor.shutdown_with_timeout: telemetry did not stop in time: {e}");
+                opentelemetry_sdk::error::OTelSdkError::Timeout(timeout)
+            })?;
         }
         Ok(())
     }
@@ -743,7 +738,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
 
 fn exporter_error_to_otel(e: &DatadogExporterError, operation: &str) -> OTelSdkError {
     match e {
-        DatadogExporterError::AlreadyShutdown => OTelSdkError::AlreadyShutdown,
+        DatadogExporterError::AlreadyClosed => OTelSdkError::AlreadyShutdown,
         DatadogExporterError::TimedOut(duration) => OTelSdkError::Timeout(*duration),
         DatadogExporterError::MutexPoisoned => OTelSdkError::InternalFailure(format!(
             "DatadogExporter.{operation}: the sender mutex was poisonned"
@@ -971,6 +966,7 @@ mod tests {
                                                     "dd.p.tid".to_string(),
                                                     "foobar".to_string(),
                                                 )])),
+                                                ot: None,
                                             },
                                         );
                                     }

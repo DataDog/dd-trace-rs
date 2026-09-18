@@ -1,1 +1,3 @@
 *   @DataDog/apm-rust
+
+instrumentation/datadog-aws-lambda/   @DataDog/apm-serverless @DataDog/serverless-aws

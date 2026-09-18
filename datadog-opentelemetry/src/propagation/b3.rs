@@ -396,7 +396,8 @@ mod test {
         let carrier = carrier_with("80f198ee56343ba8-00f067aa0ba902b7-1");
         let propagator = TracePropagationStyle::B3SingleHeader;
         let ctx = propagator
-            .extract(&carrier, &Config::builder().build())
+            .try_extract(&carrier, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("b3 single-header dispatch should produce context");
         assert_eq!(ctx.trace_id, 0x80f1_98ee_5634_3ba8);
     }

@@ -8,18 +8,26 @@ use crate::propagation::{
     b3, b3multi, baggage,
     carrier::{Extractor, Injector},
     context::{InjectSpanContext, SpanContext},
-    datadog, tracecontext, PropagationConfig, Propagator,
+    datadog,
+    error::Error,
+    tracecontext, PropagationConfig, Propagator,
 };
 
 const NONE_KEYS: [String; 0] = [];
 
 impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
-    fn extract(&self, carrier: &dyn Extractor, config: &C) -> Option<SpanContext> {
+    fn try_extract(
+        &self,
+        carrier: &dyn Extractor,
+        config: &C,
+    ) -> Option<Result<SpanContext, Error>> {
         match self {
-            Self::Datadog => datadog::extract(carrier, config),
-            Self::TraceContext => tracecontext::extract(carrier),
-            Self::B3Multi => b3multi::extract(carrier),
-            Self::B3SingleHeader => b3::extract(carrier),
+            Self::Datadog => datadog::try_extract(carrier, config),
+            Self::TraceContext => tracecontext::try_extract(carrier),
+            // b3/b3multi don't distinguish malformed from absent — both already log via
+            // `dd_warn!` and return `None`.
+            Self::B3Multi => b3multi::extract(carrier).map(Ok),
+            Self::B3SingleHeader => b3::extract(carrier).map(Ok),
             // Baggage extraction operates on OTel Context and is handled by DatadogPropagator.
             Self::Baggage | Self::None => None,
         }

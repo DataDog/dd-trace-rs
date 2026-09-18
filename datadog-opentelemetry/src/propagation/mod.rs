@@ -7,12 +7,13 @@ use std::sync::Arc;
 
 use crate::{
     configuration::TracePropagationBehaviorExtract,
-    dd_debug,
+    dd_debug, dd_error,
     propagation::context::{InjectSpanContext, SpanContext, SpanLink},
 };
 use carrier::{Extractor, Injector};
 use config::{get_extractors, get_injectors};
 use datadog::DATADOG_LAST_PARENT_ID_KEY;
+use error::Error;
 use tracecontext::TRACESTATE_KEY;
 
 /// B3 single-header propagation (`b3` header).
@@ -62,7 +63,14 @@ pub trait PropagationConfig: Send + Sync {
 }
 
 pub(crate) trait Propagator<C: PropagationConfig + ?Sized> {
-    fn extract(&self, carrier: &dyn Extractor, config: &C) -> Option<SpanContext>;
+    /// Extracts a trace context without logging on failure — see
+    /// [`DatadogCompositePropagator::extract_available_contexts`], which decides whether
+    /// a failure matters once all extractors have run.
+    fn try_extract(
+        &self,
+        carrier: &dyn Extractor,
+        config: &C,
+    ) -> Option<Result<SpanContext, Error>>;
     fn inject(&self, context: &mut InjectSpanContext, carrier: &mut dyn Injector, config: &C);
     fn keys(&self) -> &[String];
 }
@@ -184,15 +192,45 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
         carrier: &dyn Extractor,
     ) -> Vec<(SpanContext, TracePropagationStyle)> {
         let mut contexts = vec![];
+        let mut failures = vec![];
 
         for propagator in self.extractors.iter() {
-            if let Some(context) = propagator.extract(carrier, self.config.as_ref()) {
-                dd_debug!("Propagator ({propagator}): extracted {context:#?}");
-                contexts.push((context, *propagator));
+            match propagator.try_extract(carrier, self.config.as_ref()) {
+                Some(Ok(context)) => {
+                    dd_debug!("Propagator ({propagator}): extracted {context:#?}");
+                    contexts.push((context, *propagator));
+                }
+                Some(Err(e)) => {
+                    dd_debug!("Propagator ({propagator}): failed to extract: {e}");
+                    failures.push(*propagator);
+                }
+                None => {}
             }
         }
 
+        if Self::lost_real_trace(&contexts, &failures) {
+            let tried = failures
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            dd_error!(
+                "DatadogCompositePropagator: propagation headers present but no configured extractor could recover a real trace context (tried: {tried})"
+            );
+        }
+
         contexts
+    }
+
+    /// True if some extractor failed and nothing else recovered a real trace.
+    ///
+    /// A zero-trace context (B3's sampling-only `b3: 1`) doesn't count as recovery — it's
+    /// valid on its own, but shouldn't hide a real failure from another format.
+    fn lost_real_trace(
+        contexts: &[(SpanContext, TracePropagationStyle)],
+        failures: &[TracePropagationStyle],
+    ) -> bool {
+        !failures.is_empty() && !contexts.iter().any(|(context, _)| context.trace_id != 0)
     }
 
     fn resolve_contexts(
@@ -1143,7 +1181,8 @@ pub(crate) mod tests {
                     origin: Some("rum".to_string()),
                     lower_order_trace_id: None,
                     propagation_tags: Some(HashMap::from([("t.usr.id".to_string(), "baz64".to_string()), ("t.dm".to_string(), "-4".to_string())])),
-                    additional_values: Some(vec![("congo".to_string(), "t61rcWkgMz".to_string())])
+                    additional_values: Some(vec![("congo".to_string(), "t61rcWkgMz".to_string())]),
+                    ot_member: None
                 }),
             }
         ),
@@ -1281,6 +1320,127 @@ pub(crate) mod tests {
         let contexts = propagator.extract_available_contexts(&carrier);
 
         assert_eq!(contexts.len(), 0);
+    }
+
+    #[test]
+    fn test_malformed_traceparent_recovers_via_datadog() {
+        // SLES-2958 / SVLS-9550
+        let extract = Some(vec![
+            TracePropagationStyle::Datadog,
+            TracePropagationStyle::TraceContext,
+        ]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(config);
+
+        let carrier = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "not-a-valid-traceparent".to_string(),
+            ),
+            (
+                "x-datadog-trace-id".to_string(),
+                "7277407061855694839".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "67667974448284343".to_string(),
+            ),
+        ]);
+
+        let ExtractResult::Continue(context) = propagator.extract(&carrier) else {
+            panic!("expected the Datadog headers to recover the trace");
+        };
+
+        assert_eq!(context.trace_id, 7_277_407_061_855_694_839);
+        assert_eq!(context.span_id, 67_667_974_448_284_343);
+    }
+
+    #[test]
+    fn test_b3_single_sampling_only_does_not_mask_datadog_failure() {
+        // PR #284 review comment.
+        let extract = Some(vec![
+            TracePropagationStyle::B3SingleHeader,
+            TracePropagationStyle::Datadog,
+        ]);
+        let config = get_config(extract, None);
+        let propagator = DatadogCompositePropagator::new(config);
+
+        let carrier = HashMap::from([
+            ("b3".to_string(), "1".to_string()),
+            ("x-datadog-trace-id".to_string(), "not-a-number".to_string()),
+        ]);
+
+        let contexts = propagator.extract_available_contexts(&carrier);
+
+        // b3 stub still comes through...
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(contexts[0].0.trace_id, 0);
+        assert_eq!(contexts[0].1, TracePropagationStyle::B3SingleHeader);
+
+        // ...but shouldn't count as recovery — Datadog's failure here is real.
+        let failures = vec![TracePropagationStyle::Datadog];
+        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
+            &contexts, &failures
+        ));
+    }
+
+    #[test]
+    fn test_lost_real_trace_false_when_nothing_attempted() {
+        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
+            &[],
+            &[]
+        ));
+    }
+
+    #[test]
+    fn test_lost_real_trace_true_when_every_attempted_extractor_fails() {
+        let failures = vec![TracePropagationStyle::Datadog];
+        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
+            &[],
+            &failures
+        ));
+    }
+
+    #[test]
+    fn test_lost_real_trace_false_when_a_real_trace_recovers_despite_a_failure() {
+        let contexts = vec![(
+            SpanContext {
+                trace_id: 13_088_165_645_273_925_489,
+                ..SpanContext::default()
+            },
+            TracePropagationStyle::Datadog,
+        )];
+        let failures = vec![TracePropagationStyle::TraceContext];
+
+        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
+            &contexts, &failures
+        ));
+    }
+
+    #[test]
+    fn test_lost_real_trace_true_when_only_a_zero_trace_stub_recovers() {
+        let contexts = vec![(
+            SpanContext::default(),
+            TracePropagationStyle::B3SingleHeader,
+        )];
+        let failures = vec![TracePropagationStyle::Datadog];
+
+        assert!(DatadogCompositePropagator::<Config>::lost_real_trace(
+            &contexts, &failures
+        ));
+    }
+
+    #[test]
+    fn test_lost_real_trace_false_when_zero_trace_stub_is_the_only_input() {
+        let contexts = vec![(
+            SpanContext::default(),
+            TracePropagationStyle::B3SingleHeader,
+        )];
+
+        assert!(!DatadogCompositePropagator::<Config>::lost_real_trace(
+            &contexts,
+            &[]
+        ));
     }
 
     #[test]

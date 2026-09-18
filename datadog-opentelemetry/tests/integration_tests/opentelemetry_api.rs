@@ -168,19 +168,26 @@ async fn test_sampling_extraction() {
                     propagator.inject(&mut injected);
                 }
             }
+            let tracestate = injected.get("tracestate").unwrap();
+            let dd_member = tracestate
+                .split(',')
+                .find_map(|member| member.strip_prefix("dd="))
+                .unwrap();
             assert_subset(
-                injected
-                    .get("tracestate")
-                    .unwrap()
-                    .strip_prefix("dd=")
-                    .unwrap()
-                    .split(';')
-                    .map(String::from),
+                dd_member.split(';').map(String::from),
                 [
                     "s:2".to_string(),
                     "t.dm:-3".to_string(),
                     format!("p:{span_id:016x}"),
                 ],
+            );
+            // A probability sampling rule with rate 1.0 emits an OTel `ot`
+            // member with `rv` from the trace ID and `th:0`.
+            assert!(
+                tracestate
+                    .split(',')
+                    .any(|m| m.starts_with("ot=rv:") && m.ends_with(";th:0")),
+                "expected an ot=rv:…;th:0 member, got {tracestate}"
             );
 
             assert_subset(
@@ -342,6 +349,44 @@ async fn test_trace_writer_synchronous_mode() {
             });
     }
     test_agent.assert_snapshot(SESSION_NAME).await;
+}
+
+#[tokio::test]
+/// Regression test for APMSP-3915: `force_flush` must block until pending spans are
+/// exported to the agent, not merely notify the background worker.
+async fn test_force_flush_drains_pending_spans() {
+    const SESSION_NAME: &str = "opentelemetry_api/test_force_flush_drains_pending_spans";
+    let test_agent = make_test_agent(SESSION_NAME).await;
+
+    let mut cfg = Config::builder();
+    cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string())
+        // Disable the periodic flush so only `force_flush` can deliver the queued trace.
+        .set_trace_writer_max_flush_interval(Duration::from_secs(1000000000))
+        .set_log_level_filter(LevelFilter::Debug);
+    let config = Arc::new(cfg.build());
+
+    let (tracer_provider, _propagator) = make_test_tracer(config.clone());
+
+    drop(
+        SpanBuilder::from_name("force-flush-span")
+            .with_kind(opentelemetry::trace::SpanKind::Server)
+            .start_with_context(&tracer_provider.tracer("test"), &Context::new()),
+    );
+
+    assert!(
+        test_agent.get_sent_traces().await.is_empty(),
+        "trace should still be queued"
+    );
+
+    tracer_provider.force_flush().expect("force_flush failed");
+
+    let traces = test_agent.get_sent_traces().await;
+    assert!(
+        !traces.is_empty(),
+        "force_flush should have delivered the trace before returning, got: {traces:?}"
+    );
+
+    tracer_provider.shutdown().expect("failed to shutdown");
 }
 
 #[tokio::test]
