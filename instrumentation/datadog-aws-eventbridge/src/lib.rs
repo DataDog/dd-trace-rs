@@ -23,17 +23,6 @@
 //! skipped for entries with missing, invalid, non-object, or oversized `detail` payloads. Other
 //! EventBridge operations create spans but do not carry propagation context.
 //!
-//! # Payload Size Headroom
-//!
-//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
-//! applications should leave a small amount of room under the EventBridge `PutEvents` size limit.
-//! With the default W3C trace-context propagator, the inserted JSON is typically less than 100
-//! bytes before AWS request serialization overhead. `event_bus_name` adds the encoded bus name plus
-//! JSON field overhead, and baggage from the configured global OpenTelemetry text-map propagator
-//! can add arbitrary bytes. EventBridge performs the authoritative size validation, and this crate
-//! only applies cheap stable guards such as skipping invalid or clearly oversized `detail`
-//! payloads.
-//!
 //! # Usage
 //!
 //! ```rust,no_run
@@ -46,6 +35,11 @@
 //! let client = aws_sdk_eventbridge::Client::from_conf(config);
 //! # }
 //! ```
+//!
+//! # Limitations
+//!
+//! Trace-context propagation increases event size. Leave room below the EventBridge `PutEvents`
+//! size limit, especially when propagating baggage. See [`ConfigExt::datadog_tracing`] for details.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -98,6 +92,17 @@ struct EventBridgeInterceptor;
 /// Extension methods for installing Datadog tracing on an Amazon EventBridge config builder.
 pub trait ConfigExt {
     /// Installs Datadog tracing on this EventBridge config builder.
+    ///
+    /// # Payload size headroom
+    ///
+    /// Datadog trace context is injected into AWS payload fields before the SDK sends the request,
+    /// so applications should leave a small amount of room under the EventBridge `PutEvents` size
+    /// limit. With the default W3C trace-context propagator, the inserted JSON is typically less
+    /// than 100 bytes before AWS request serialization overhead. `event_bus_name` adds the encoded
+    /// bus name plus JSON field overhead, and baggage from the configured global OpenTelemetry
+    /// text-map propagator can add arbitrary bytes. EventBridge performs the authoritative size
+    /// validation, and this crate only applies cheap stable guards such as skipping invalid or
+    /// clearly oversized `detail` payloads.
     fn datadog_tracing(self) -> Self;
 }
 

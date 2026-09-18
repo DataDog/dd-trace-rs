@@ -30,15 +30,6 @@
 //! envelopes, or EventBridge envelopes nested inside SNS notifications. Use [`extract_context`] to
 //! extract the same parent context when starting consumer work for a specific message.
 //!
-//! # Payload Size Headroom
-//!
-//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
-//! applications should leave a small amount of room under the SQS message size limit. With the
-//! default W3C trace-context propagator, the JSON attribute value is typically less than 100 bytes
-//! before AWS request serialization overhead. Baggage from the configured global OpenTelemetry
-//! text-map propagator can add arbitrary bytes. SQS performs the authoritative size validation, and
-//! this crate only applies cheap stable guards such as the message attribute count limit.
-//!
 //! # Usage
 //!
 //! ```rust,no_run
@@ -51,6 +42,11 @@
 //! let client = aws_sdk_sqs::Client::from_conf(config);
 //! # }
 //! ```
+//!
+//! # Limitations
+//!
+//! Trace-context propagation increases message size. Leave room below the SQS message size limit,
+//! especially when propagating baggage. See [`ConfigExt::datadog_tracing`] for details.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -115,6 +111,16 @@ struct SqsInterceptor;
 /// Extension methods for installing Datadog tracing on an Amazon SQS config builder.
 pub trait ConfigExt {
     /// Installs Datadog tracing on this SQS config builder.
+    ///
+    /// # Payload size headroom
+    ///
+    /// Datadog trace context is injected into AWS payload fields before the SDK sends the request,
+    /// so applications should leave a small amount of room under the SQS message size limit. With
+    /// the default W3C trace-context propagator, the JSON attribute value is typically less than
+    /// 100 bytes before AWS request serialization overhead. Baggage from the configured global
+    /// OpenTelemetry text-map propagator can add arbitrary bytes. SQS performs the authoritative
+    /// size validation, and this crate only applies cheap stable guards such as the message
+    /// attribute count limit.
     fn datadog_tracing(self) -> Self;
 }
 

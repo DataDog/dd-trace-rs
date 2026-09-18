@@ -23,16 +23,6 @@
 //! message attributes and no `_datadog` attribute is present. Other SNS operations create spans but
 //! do not carry propagation context.
 //!
-//! # Payload Size Headroom
-//!
-//! Datadog trace context is injected into AWS payload fields before the SDK sends the request, so
-//! applications should leave a small amount of room under the SNS message size limit. With the
-//! default W3C trace-context propagator, the binary JSON attribute value is typically less than 100
-//! bytes before AWS request serialization overhead. Baggage from the configured global
-//! OpenTelemetry text-map propagator can add arbitrary bytes. SNS performs the authoritative size
-//! validation, and this crate only applies cheap stable guards such as the message attribute count
-//! limit.
-//!
 //! # Usage
 //!
 //! ```rust,no_run
@@ -45,6 +35,11 @@
 //! let client = aws_sdk_sns::Client::from_conf(config);
 //! # }
 //! ```
+//!
+//! # Limitations
+//!
+//! Trace-context propagation increases message size. Leave room below the SNS message size limit,
+//! especially when propagating baggage. See [`ConfigExt::datadog_tracing`] for details.
 
 use std::collections::HashMap;
 
@@ -93,6 +88,16 @@ struct SnsInterceptor;
 /// Extension methods for installing Datadog tracing on an Amazon SNS config builder.
 pub trait ConfigExt {
     /// Installs Datadog tracing on this SNS config builder.
+    ///
+    /// # Payload size headroom
+    ///
+    /// Datadog trace context is injected into AWS payload fields before the SDK sends the request,
+    /// so applications should leave a small amount of room under the SNS message size limit. With
+    /// the default W3C trace-context propagator, the binary JSON attribute value is typically less
+    /// than 100 bytes before AWS request serialization overhead. Baggage from the configured global
+    /// OpenTelemetry text-map propagator can add arbitrary bytes. SNS performs the authoritative
+    /// size validation, and this crate only applies cheap stable guards such as the message
+    /// attribute count limit.
     fn datadog_tracing(self) -> Self;
 }
 
