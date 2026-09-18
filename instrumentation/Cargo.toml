@@ -24,6 +24,9 @@ publish = false
 
 [workspace.dependencies]
 datadog-aws-core = { version = "0.1.0", path = "datadog-aws-core" }
+datadog-opentelemetry = "0.5"
+base64 = "0.22.1"
+lambda_runtime = "0.13"
 serde = "1.0.194"
 serde_json = "1.0.140"
 opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"], default-features = false }
@@ -31,6 +34,11 @@ opentelemetry_sdk = { version = "0.32.1", default-features = false }
 opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
 tracing = { version = "0.1", default-features = false }
 tokio = { version = "1.44.1" }
+wiremock = "0.6"
+aws-credential-types = "1"
+aws-sdk-eventbridge = "1.104.0"
+aws-sdk-sns = "1.98.0"
+aws-sdk-sqs = "1.97.0"
 aws-smithy-runtime-api = { version = "1.11", features = ["client"] }
 aws-smithy-types = "1.4"
 aws-types = "1.3"

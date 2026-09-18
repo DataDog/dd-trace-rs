@@ -14,10 +14,10 @@ publish.workspace = true
 
 [dependencies]
 datadog-aws-core = { workspace = true }
-aws-sdk-sqs = "1.97.0"
+aws-sdk-sqs = { workspace = true }
 aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
-base64 = "0.22.1"
+base64 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 opentelemetry = { workspace = true }

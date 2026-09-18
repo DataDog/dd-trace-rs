@@ -13,9 +13,9 @@ authors.workspace = true
 publish = false
 
 [dependencies]
-aws-credential-types = { version = "1", features = ["test-util"] }
+aws-credential-types = { workspace = true, features = ["test-util"] }
 aws-smithy-runtime-api = { workspace = true }
 aws-types = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
-wiremock = "0.6"
+wiremock = { workspace = true }
