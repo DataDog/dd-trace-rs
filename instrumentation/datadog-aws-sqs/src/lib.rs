@@ -23,12 +23,13 @@
 //! `_datadog` attributes are replaced. Injection is skipped when the message already has the
 //! maximum number of SQS message attributes and no `_datadog` attribute is present.
 //!
-//! For `ReceiveMessage`, the interceptor requests the `_datadog` message attribute if the caller
-//! did not already request it. After messages are received, the request span records the received
-//! message count, adds an `sqs.receive.messages` event, and links the request span to extracted
-//! producer contexts found in SQS message attributes, SNS notification envelopes, EventBridge
-//! envelopes, or EventBridge envelopes nested inside SNS notifications. Use [`extract_context`] to
-//! extract the same parent context when starting consumer work for a specific message.
+//! For `ReceiveMessage`, the interceptor adds `_datadog` to the request's `message_attribute_names`
+//! unless the list already contains `_datadog`, `All`, or `.*`. After messages are received, the
+//! request span records the received message count, adds an `sqs.receive.messages` event, and links
+//! the request span to extracted producer contexts found in SQS message attributes, SNS
+//! notification envelopes, EventBridge envelopes, or EventBridge envelopes nested inside SNS
+//! notifications. Use [`extract_context`] to extract the same parent context when starting consumer
+//! work for a specific message.
 //!
 //! # Usage
 //!
