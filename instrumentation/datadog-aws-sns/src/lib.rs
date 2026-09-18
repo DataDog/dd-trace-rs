@@ -35,13 +35,15 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use datadog_aws_sns::ConfigExt as _;
 //!
+//! # fn example(sdk_config: aws_types::SdkConfig) {
 //! let config = aws_sdk_sns::config::Builder::from(&sdk_config)
 //!     .datadog_tracing()
 //!     .build();
 //! let client = aws_sdk_sns::Client::from_conf(config);
+//! # }
 //! ```
 
 use std::collections::HashMap;

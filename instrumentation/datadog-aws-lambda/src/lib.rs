@@ -27,11 +27,15 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
-//! lambda_runtime::run(TracedService::new(
-//!     lambda_runtime::service_fn(my_handler),
-//! ))
-//! .await
+//! ```rust,no_run
+//! use datadog_aws_lambda::TracedService;
+//!
+//! # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
+//! #     Ok(())
+//! # }
+//! # async fn example() -> Result<(), lambda_runtime::Error> {
+//! lambda_runtime::run(TracedService::new(lambda_runtime::service_fn(my_handler))).await
+//! # }
 //! ```
 mod attribute_keys;
 mod invocation;
@@ -97,11 +101,20 @@ impl From<serde_json::Error> for TracedServiceError {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust,no_run
+/// use datadog_aws_lambda::TracedService;
+/// use datadog_opentelemetry::configuration::Config;
+/// use lambda_runtime::tower;
+///
+/// # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
+/// #     Ok(())
+/// # }
+/// # async fn example() -> Result<(), lambda_runtime::Error> {
+/// # let some_middleware = tower::layer::layer_fn(|service| service);
 /// // Zero-config
 /// lambda_runtime::run(TracedService::new(
 ///     lambda_runtime::service_fn(my_handler),
-/// )).await
+/// )).await?;
 ///
 /// // Set service/env/version
 /// let mut config = Config::builder();
@@ -112,7 +125,7 @@ impl From<serde_json::Error> for TracedServiceError {
 /// lambda_runtime::run(TracedService::with_config(
 ///     lambda_runtime::service_fn(my_handler),
 ///     config,
-/// )).await
+/// )).await?;
 ///
 /// // With tower middleware
 /// lambda_runtime::run(
@@ -122,6 +135,7 @@ impl From<serde_json::Error> for TracedServiceError {
 ///             .service(lambda_runtime::service_fn(my_handler)),
 ///     )
 /// ).await
+/// # }
 /// ```
 pub struct TracedService<S, E, R> {
     inner: S,

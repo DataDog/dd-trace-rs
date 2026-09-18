@@ -41,13 +41,15 @@
 //!
 //! # Usage
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! use datadog_aws_sqs::ConfigExt as _;
 //!
+//! # fn example(sdk_config: aws_types::SdkConfig) {
 //! let config = aws_sdk_sqs::config::Builder::from(&sdk_config)
 //!     .datadog_tracing()
 //!     .build();
 //! let client = aws_sdk_sqs::Client::from_conf(config);
+//! # }
 //! ```
 
 use std::borrow::Cow;
