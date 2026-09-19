@@ -769,6 +769,72 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_otel_span_to_dd_span_consumes_environment_resource_attributes() {
+        for (name, resource_attributes, expected_env) in [
+            (
+                "stable only",
+                vec![("deployment.environment.name", "stable")],
+                "stable",
+            ),
+            (
+                "legacy only",
+                vec![("deployment.environment", "legacy")],
+                "legacy",
+            ),
+            (
+                "stable before legacy",
+                vec![
+                    ("deployment.environment.name", "stable"),
+                    ("deployment.environment", "legacy"),
+                ],
+                "stable",
+            ),
+            (
+                "legacy before stable",
+                vec![
+                    ("deployment.environment", "legacy"),
+                    ("deployment.environment.name", "stable"),
+                ],
+                "stable",
+            ),
+        ] {
+            let resource = Resource::builder_empty()
+                .with_attributes(
+                    resource_attributes
+                        .into_iter()
+                        .chain([("unrelated", "value")])
+                        .map(|(key, value)| KeyValue::new(key, value)),
+                )
+                .build();
+            let input_span = test_cases().remove(0).input_span;
+            let output = otel_span_to_dd_span(&test_span_to_sdk_span(&input_span), &resource);
+
+            assert_eq!(
+                output
+                    .meta
+                    .get(&CowStr::from_str("env"))
+                    .map(CowStr::as_str),
+                Some(expected_env),
+                "{name} environment"
+            );
+            assert_eq!(
+                output
+                    .meta
+                    .get(&CowStr::from_str("unrelated"))
+                    .map(CowStr::as_str),
+                Some("value"),
+                "{name} unrelated resource attribute"
+            );
+            for source_key in ["deployment.environment.name", "deployment.environment"] {
+                assert!(
+                    !output.meta.contains_key(&CowStr::from_str(source_key)),
+                    "{name} retained {source_key}"
+                );
+            }
+        }
+    }
+
     #[track_caller]
     fn hashmap_diff<'a, V: PartialEq + Debug>(
         output: &VecMap<CowStr<'a>, V>,
