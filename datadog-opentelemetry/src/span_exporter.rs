@@ -3,7 +3,7 @@
 
 use std::{
     pin::Pin,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -102,21 +102,6 @@ impl BufferSize for BufferedSpan {
     }
 }
 
-/// Pending-span accounting for `flush_and_drain`.
-///
-/// `pending` counts spans accepted by `send_chunk` but not yet exported. `total_exported` is a
-/// monotonically increasing count of spans that have been exported, used to build a flush
-/// barrier: `flush_and_drain` snapshots `total_exported + pending` and waits until
-/// `total_exported` reaches it, so spans accepted concurrently after the flush notification do
-/// not delay the wait.
-#[derive(Debug, Default)]
-struct PendingState {
-    pending: usize,
-    total_exported: u64,
-}
-
-type PendingSpans = Arc<(Mutex<PendingState>, Condvar)>;
-
 pub struct DatadogExporter {
     // Wrapped in `Option` so `Drop` can move them onto a dedicated std thread —
     // their drop transitively drops a `tokio::runtime::Runtime`, which panics when
@@ -125,7 +110,6 @@ pub struct DatadogExporter {
     shared_runtime: Option<Arc<BasicRuntime>>,
     otel_resource: Arc<ArcSwap<Resource>>,
     shutdown_rx: Mutex<Option<mpsc::Receiver<Result<(), SharedRuntimeError>>>>,
-    pending_spans: PendingSpans,
 }
 
 impl Drop for DatadogExporter {
@@ -215,39 +199,14 @@ impl DatadogExporter {
         if span_data.is_empty() {
             return Ok(());
         }
-        let n = span_data.len();
         let buffered = wrap_span_vec(span_data);
-        // Increment before handing the chunk to libdatadog so the export-side decrement
-        // (in `SpanDataExport::export_trace_chunks`) cannot race ahead and underflow.
-        increment_pending(&self.pending_spans, n);
-        match self.trace_buffer().send_chunk(buffered) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // `BatchFull` and `AlreadyClosed` are outright rejections, so the export side
-                // will never decrement. Late errors from `wait_flush_done` (sync
-                // mode) mean the chunk is still queued.
-                if matches!(
-                    e,
-                    TraceBufferError::BatchFull(_) | TraceBufferError::AlreadyClosed
-                ) {
-                    cancel_pending(&self.pending_spans, n);
-                }
-                Err(e)
-            }
-        }
+        self.trace_buffer().send_chunk(buffered)
     }
 
-    /// Triggers a flush and blocks until every span accepted by `send_chunk` *before this call*
-    /// has been exported (or the timeout elapses). Spans accepted concurrently after the flush
-    /// notification do not delay the wait. Use this before [`trigger_shutdown`] so the runtime
-    /// cancellation doesn't drop a queued batch.
-    pub fn flush_and_drain(&self, timeout: Duration) -> Result<(), TraceBufferError> {
-        self.trace_buffer().force_flush()?;
-        self.wait_for_drain(timeout)
-    }
-
-    fn wait_for_drain(&self, timeout: Duration) -> Result<(), TraceBufferError> {
-        wait_for_barrier(&self.pending_spans, timeout)
+    /// Triggers a flush and blocks until every span accepted by `send_chunk` before this call
+    /// has been exported (or the timeout elapses).
+    pub fn flush_and_wait(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+        self.trace_buffer().flush_and_wait(Some(timeout))
     }
 
     pub fn trigger_shutdown(&self) {
@@ -358,15 +317,12 @@ fn build_on_dedicated_thread(
         .max_flush_interval(config.trace_writer_max_flush_interval());
 
     let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
-    let pending_spans: PendingSpans =
-        Arc::new((Mutex::new(PendingState::default()), Condvar::new()));
 
     let export = SpanDataExport {
         trace_exporter,
         otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
-        pending_spans: Arc::clone(&pending_spans),
     };
 
     let (trace_buffer, worker) =
@@ -383,58 +339,7 @@ fn build_on_dedicated_thread(
         shared_runtime: Some(shared_runtime),
         otel_resource,
         shutdown_rx: Mutex::new(None),
-        pending_spans,
     })
-}
-
-fn increment_pending(pending: &PendingSpans, n: usize) {
-    let (lock, _) = &**pending;
-    if let Ok(mut state) = lock.lock() {
-        state.pending = state.pending.saturating_add(n);
-    }
-}
-
-fn decrement_pending(pending: &PendingSpans, n: usize) {
-    let (lock, cvar) = &**pending;
-    if let Ok(mut state) = lock.lock() {
-        state.pending = state.pending.saturating_sub(n);
-        state.total_exported = state.total_exported.saturating_add(n as u64);
-        // Notify on every decrement so barrier waiters waiting on `total_exported` (not just
-        // `pending == 0`) wake up. Flushes are rare, so the extra wakeups are negligible.
-        cvar.notify_all();
-    }
-}
-
-/// Like `decrement_pending` but does NOT count the spans as exported. Used when chunks are
-/// rejected outright (BatchFull / AlreadyClosed) — the spans were never handed to the
-/// background worker, so they should not advance the flush barrier.
-fn cancel_pending(pending: &PendingSpans, n: usize) {
-    let (lock, _) = &**pending;
-    if let Ok(mut state) = lock.lock() {
-        state.pending = state.pending.saturating_sub(n);
-    }
-}
-
-/// Blocks until every span pending at call time has been exported, i.e. until the cumulative
-/// exported count reaches `total_exported + pending` captured here. Spans accepted concurrently
-/// after this snapshot raise `pending` but not the barrier, so they cannot stall the wait.
-fn wait_for_barrier(pending: &PendingSpans, timeout: Duration) -> Result<(), TraceBufferError> {
-    let (lock, cvar) = &**pending;
-    let guard = lock.lock().map_err(|_| TraceBufferError::MutexPoisoned)?;
-    let barrier = guard.total_exported.saturating_add(guard.pending as u64);
-    if guard.total_exported >= barrier {
-        return Ok(());
-    }
-    if timeout.is_zero() {
-        return Err(TraceBufferError::TimedOut(Duration::ZERO));
-    }
-    let (_guard, res) = cvar
-        .wait_timeout_while(guard, timeout, |state| state.total_exported < barrier)
-        .map_err(|_| TraceBufferError::MutexPoisoned)?;
-    if res.timed_out() {
-        return Err(TraceBufferError::TimedOut(timeout));
-    }
-    Ok(())
 }
 
 fn build_trace_exporter(
@@ -498,7 +403,6 @@ struct SpanDataExport {
     otel_resource: Arc<ArcSwap<Resource>>,
     cached_config: CachedConfig,
     config: Arc<Config>,
-    pending_spans: PendingSpans,
 }
 
 impl Export<BufferedSpan> for SpanDataExport {
@@ -510,9 +414,6 @@ impl Export<BufferedSpan> for SpanDataExport {
             dyn std::future::Future<Output = Result<AgentResponse, TraceExporterError>> + Send + '_,
         >,
     > {
-        // Account for every span we drained from the buffer, regardless of whether the export
-        // ultimately succeeds — `send_chunk` already counted them on entry.
-        let total_spans: usize = trace_chunks.iter().map(|c| c.len()).sum();
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
             let dd_trace_chunks = trace_chunks
@@ -537,7 +438,6 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .trace_exporter
                 .send_trace_chunks_async(dd_trace_chunks)
                 .await;
-            decrement_pending(&self.pending_spans, total_spans);
             result
         })
     }
@@ -617,59 +517,4 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             );
         }
     };
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-
-    fn make_pending() -> PendingSpans {
-        Arc::new((Mutex::new(PendingState::default()), Condvar::new()))
-    }
-
-    #[test]
-    fn barrier_wait_returns_when_pre_flush_spans_exported() {
-        let pending = make_pending();
-        increment_pending(&pending, 5);
-        // Snapshot the barrier on a waiter thread before exporting.
-        let pending2 = Arc::clone(&pending);
-        let waiter =
-            std::thread::spawn(move || wait_for_barrier(&pending2, Duration::from_secs(5)));
-
-        // Give the waiter a moment to snapshot the barrier (total_exported=0, pending=5 -> 5).
-        std::thread::sleep(Duration::from_millis(50));
-
-        // Accept spans concurrently *after* the barrier snapshot: these must not stall the wait.
-        increment_pending(&pending, 100);
-        // Export the 5 pre-flush spans: total_exported reaches the barrier.
-        decrement_pending(&pending, 5);
-
-        let res = waiter.join().unwrap();
-        assert!(
-            res.is_ok(),
-            "barrier wait should return once pre-flush spans are exported: {res:?}"
-        );
-        // The 100 concurrently-accepted spans are still pending, yet the wait returned.
-        let (lock, _) = &*pending;
-        let state = lock.lock().unwrap();
-        assert_eq!(state.pending, 100);
-        assert_eq!(state.total_exported, 5);
-    }
-
-    #[test]
-    fn barrier_wait_times_out_when_spans_never_exported() {
-        let pending = make_pending();
-        increment_pending(&pending, 3);
-        let res = wait_for_barrier(&pending, Duration::from_millis(100));
-        assert!(matches!(res, Err(TraceBufferError::TimedOut(_))), "{res:?}");
-    }
-
-    #[test]
-    fn barrier_wait_no_op_when_nothing_pending() {
-        let pending = make_pending();
-        let res = wait_for_barrier(&pending, Duration::from_secs(5));
-        assert!(res.is_ok());
-    }
 }
