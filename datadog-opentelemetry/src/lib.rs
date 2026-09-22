@@ -324,11 +324,34 @@ mod telemetry_metrics_exporter;
 mod text_map_propagator;
 mod trace_id;
 
-use std::sync::{Arc, RwLock};
+use std::{
+    borrow::Cow,
+    sync::{Arc, RwLock},
+};
 
 use opentelemetry::{Key, KeyValue, Value};
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
-use opentelemetry_semantic_conventions::resource::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_NAME};
+use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+
+pub(crate) const DEPLOYMENT_ENVIRONMENT_NAME: &str =
+    opentelemetry_semantic_conventions::resource::DEPLOYMENT_ENVIRONMENT_NAME;
+pub(crate) const LEGACY_DEPLOYMENT_ENVIRONMENT: &str = "deployment.environment";
+
+pub(crate) fn is_environment_attribute(key: &str) -> bool {
+    key == DEPLOYMENT_ENVIRONMENT_NAME || key == LEGACY_DEPLOYMENT_ENVIRONMENT
+}
+
+pub(crate) fn resource_environment(resource: &Resource) -> Option<Cow<'_, str>> {
+    [DEPLOYMENT_ENVIRONMENT_NAME, LEGACY_DEPLOYMENT_ENVIRONMENT]
+        .into_iter()
+        .find_map(|key| {
+            resource
+                .iter()
+                .find(|(resource_key, _)| resource_key.as_str() == key)
+                .map(|(_, value)| value.as_str())
+                .filter(|value| !value.is_empty())
+        })
+}
 
 use crate::{
     core::configuration::{Config, RemoteConfigUpdate},
@@ -629,7 +652,21 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
     builder.build()
 }
 
-fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
+fn without_environment_attributes(resource: &Resource) -> Resource {
+    let attributes = resource
+        .iter()
+        .filter(|(key, _)| !is_environment_attribute(key.as_str()))
+        .map(|(key, value)| KeyValue::new(key.clone(), value.clone()));
+    let mut builder = Resource::builder_empty();
+    if let Some(schema_url) = resource.schema_url() {
+        builder = builder.with_schema_url(attributes, schema_url.to_string());
+    } else {
+        builder = builder.with_attributes(attributes);
+    }
+    builder.build()
+}
+
+fn create_dd_resource(mut resource: Resource, cfg: &Config) -> Resource {
     let otel_service_name: Option<Value> = resource.get(&Key::from_static_str(SERVICE_NAME));
 
     // Collect attributes to add
@@ -662,11 +699,14 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
         ));
     }
 
-    // Handle environment - add it if configured and not already present
-    if let Some(env) = cfg.env() {
-        let otel_env: Option<Value> =
-            resource.get(&Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME));
-        if otel_env.is_none() {
+    if let Some(env) = cfg.explicit_env() {
+        resource = without_environment_attributes(&resource);
+        attributes.push((
+            Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME),
+            Value::from(env.to_string()),
+        ));
+    } else if resource_environment(&resource).is_none() {
+        if let Some(env) = cfg.otel_resource_environment() {
             attributes.push((
                 Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME),
                 Value::from(env.to_string()),
