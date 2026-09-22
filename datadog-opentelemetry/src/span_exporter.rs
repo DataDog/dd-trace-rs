@@ -414,8 +414,6 @@ impl Export<BufferedSpan> for SpanDataExport {
             dyn std::future::Future<Output = Result<AgentResponse, TraceExporterError>> + Send + '_,
         >,
     > {
-        // Account for every span we drained from the buffer, regardless of whether the export
-        // ultimately succeeds — `send_chunk` already counted them on entry.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
             let dd_trace_chunks = trace_chunks
