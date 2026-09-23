@@ -37,6 +37,57 @@ pub(crate) struct ConfigKey<T> {
     pub(crate) origin: ConfigSourceOrigin,
 }
 
+pub trait ConfigParser {
+    type Parsed;
+    type ParseError: Display;
+    fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError>;
+}
+
+impl ConfigParser for String {
+    type Parsed = String;
+
+    type ParseError = std::convert::Infallible;
+
+    fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
+        Ok(cfg.to_owned())
+    }
+}
+
+pub struct BooleanFlag;
+
+impl ConfigParser for BooleanFlag {
+    type Parsed = bool;
+
+    type ParseError = String;
+
+    fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
+        match cfg {
+            "true" | "1" => Ok(true),
+            "false" | "0" => Ok(false),
+            v => Err(format!("failed to parse configuration value {v} as a boolean flag. Allowed values are true/false/1/0")),
+        }
+    }
+}
+
+macro_rules! impl_config_parser_from_str {
+    ($type:ty) => {
+        impl ConfigParser for $type {
+            type Parsed = $type;
+
+            type ParseError = <Self as FromStr>::Err;
+
+            fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
+                FromStr::from_str(cfg)
+            }
+        }
+    };
+}
+
+impl_config_parser_from_str!(usize);
+impl_config_parser_from_str!(f64);
+impl_config_parser_from_str!(u32);
+impl_config_parser_from_str!(i32);
+
 /// Compose multiple sources of configuration together.
 ///
 /// The higher precedence sources are the first ones in the list.
@@ -82,7 +133,7 @@ pub(crate) struct CompositeConfigSourceResult<T> {
 
 impl CompositeSource {
     pub fn get(&self, key: SupportedConfigurations) -> CompositeConfigSourceResult<String> {
-        self.get_parse(key)
+        self.get_parse::<String>(key)
     }
 
     /// Get a value from the configuration sources
@@ -92,20 +143,19 @@ impl CompositeSource {
     ///
     /// It will return all parsing errors encountered before finding a valid value, and associate
     /// them with the source they came from.
-    pub fn get_parse<T: FromStr<Err = impl Display>>(
+    pub fn get_parse<T: ConfigParser>(
         &self,
         name: SupportedConfigurations,
-    ) -> CompositeConfigSourceResult<T> {
+    ) -> CompositeConfigSourceResult<T::Parsed> {
+        let desired_type = std::any::type_name::<T::Parsed>();
         let mut errors = Vec::new();
         for s in &self.sources {
             match s.get(name.as_str()).and_then(|value| {
-                value
-                    .parse::<T>()
-                    .map_err(|e| ConfigSourceError::FailedParsing {
-                        desired_type: std::any::type_name::<T>(),
-                        error: Cow::Owned(e.to_string()),
-                        value,
-                    })
+                T::parse(&value).map_err(|e| ConfigSourceError::FailedParsing {
+                    desired_type,
+                    error: Cow::Owned(e.to_string()),
+                    value,
+                })
             }) {
                 Ok(v) => {
                     if name.is_deprecated() {
@@ -121,13 +171,11 @@ impl CompositeSource {
                     };
                 }
                 Err(ConfigSourceError::Missing) => match s.get_alias_value(name).and_then(|value| {
-                    value
-                        .parse::<T>()
-                        .map_err(|e| ConfigSourceError::FailedParsing {
-                            desired_type: std::any::type_name::<T>(),
-                            error: Cow::Owned(e.to_string()),
-                            value,
-                        })
+                    T::parse(&value).map_err(|e| ConfigSourceError::FailedParsing {
+                        desired_type,
+                        error: Cow::Owned(e.to_string()),
+                        value,
+                    })
                 }) {
                     Ok(v) => {
                         return CompositeConfigSourceResult {
@@ -267,6 +315,7 @@ mod tests {
         CompositeConfigSourceResult, CompositeParseError, CompositeSource, ConfigSourceOrigin,
         HashMapSource,
     };
+    use crate::configuration::sources::{BooleanFlag, ConfigParser};
     use crate::core::configuration::sources::ConfigKey;
     use crate::core::configuration::supported_configurations::SupportedConfigurations;
 
@@ -405,7 +454,7 @@ mod tests {
         ));
 
         let result: CompositeConfigSourceResult<bool> =
-            source.get_parse(SupportedConfigurations::DD_TRACE_ENABLED);
+            source.get_parse::<BooleanFlag>(SupportedConfigurations::DD_TRACE_ENABLED);
         assert_eq!(
             result,
             CompositeConfigSourceResult {
@@ -416,7 +465,7 @@ mod tests {
                 }),
                 errors: vec![CompositeParseError {
                     desired_type: "bool",
-                    error: "provided string was not `true` or `false`".into(),
+                    error: "failed to parse configuration value foo as a boolean flag. Allowed values are true/false/1/0".into(),
                     value: "foo".to_string(),
                     origin: ConfigSourceOrigin::Code,
                 },],
@@ -445,15 +494,16 @@ mod tests {
             ConfigSourceOrigin::Code,
         ));
 
-        impl std::str::FromStr for ComplexConfig {
-            type Err = String;
+        impl ConfigParser for ComplexConfig {
+            type Parsed = Self;
+            type ParseError = String;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
+            fn parse(s: &str) -> Result<Self, Self::ParseError> {
                 serde_json::from_str(s).map_err(|e| e.to_string())
             }
         }
 
-        let result = source.get_parse(SupportedConfigurations::DD_COMPLEX_STRUCT);
+        let result = source.get_parse::<ComplexConfig>(SupportedConfigurations::DD_COMPLEX_STRUCT);
         assert_eq!(
             result,
             CompositeConfigSourceResult {

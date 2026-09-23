@@ -6,7 +6,6 @@
 use std::{
     fmt::{self, Display},
     mem,
-    str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -38,10 +37,11 @@ pub enum LevelFilter {
     Debug,
 }
 
-impl FromStr for LevelFilter {
-    type Err = &'static str;
+impl super::configuration::ConfigParser for LevelFilter {
+    type Parsed = Self;
+    type ParseError = &'static str;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         if s.eq_ignore_ascii_case("debug") {
             Ok(LevelFilter::Debug)
         } else if s.eq_ignore_ascii_case("info") {

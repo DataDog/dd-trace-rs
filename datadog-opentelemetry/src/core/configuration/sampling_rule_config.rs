@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Deref;
-use std::str::FromStr;
+
+use crate::configuration::sources::ConfigParser;
 
 /// Configuration for a single sampling rule.
 //
@@ -62,10 +63,11 @@ impl From<ParsedSamplingRules> for Vec<SamplingRuleConfig> {
     }
 }
 
-impl FromStr for ParsedSamplingRules {
-    type Err = serde_json::Error;
+impl ConfigParser for ParsedSamplingRules {
+    type Parsed = Self;
+    type ParseError = serde_json::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
         if s.trim().is_empty() {
             return Ok(ParsedSamplingRules::default());
         }
