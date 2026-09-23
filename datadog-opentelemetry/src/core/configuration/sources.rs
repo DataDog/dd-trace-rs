@@ -43,16 +43,6 @@ pub trait ConfigParser {
     fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError>;
 }
 
-impl ConfigParser for String {
-    type Parsed = String;
-
-    type ParseError = std::convert::Infallible;
-
-    fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
-        Ok(cfg.to_owned())
-    }
-}
-
 pub struct BooleanFlag;
 
 impl ConfigParser for BooleanFlag {
@@ -83,6 +73,7 @@ macro_rules! impl_config_parser_from_str {
     };
 }
 
+impl_config_parser_from_str!(String);
 impl_config_parser_from_str!(usize);
 impl_config_parser_from_str!(f64);
 impl_config_parser_from_str!(u32);

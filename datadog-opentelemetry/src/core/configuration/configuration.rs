@@ -856,6 +856,14 @@ impl ConfigParser for TracePropagationBehaviorExtract {
     }
 }
 
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
 impl Display for TracePropagationBehaviorExtract {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let behavior = match self {
@@ -1004,6 +1012,15 @@ impl ConfigParser for BaggageTagKeyFilter {
         }
     }
 }
+
+impl FromStr for BaggageTagKeyFilter {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s).map_err(|e| match e {})
+    }
+}
+
 
 impl ConfigurationValueProvider for BaggageTagKeyFilter {
     fn get_configuration_value(&self) -> String {

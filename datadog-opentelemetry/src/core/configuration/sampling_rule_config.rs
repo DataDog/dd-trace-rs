@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Deref;
+use std::str::FromStr;
 
 use crate::configuration::sources::ConfigParser;
 
@@ -74,6 +75,14 @@ impl ConfigParser for ParsedSamplingRules {
         // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
         let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
         Ok(ParsedSamplingRules { rules: rules_vec })
+    }
+}
+
+impl FromStr for ParsedSamplingRules {
+    type Err = <ParsedSamplingRules as ConfigParser>::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
