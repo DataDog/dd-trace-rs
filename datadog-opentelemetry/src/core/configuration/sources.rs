@@ -465,6 +465,26 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::bool_assert_comparison)]
+    fn test_parse_boolean_flag() {
+        let mut source = CompositeSource::new();
+        source.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_ENABLED", "0")],
+            ConfigSourceOrigin::Code,
+        ));
+        source.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STATS_COMPUTATION_ENABLED", "1")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let trace_enabled: CompositeConfigSourceResult<bool> =
+            source.get_parse::<BooleanFlag>(SupportedConfigurations::DD_TRACE_ENABLED);
+        assert_eq!(trace_enabled.value.expect("value found").value, false);
+        let trace_stats_enabled: CompositeConfigSourceResult<bool> = source
+            .get_parse::<BooleanFlag>(SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED);
+        assert_eq!(trace_stats_enabled.value.expect("value found").value, true);
+    }
+
+    #[test]
     fn test_parse_complex_config() {
         #[derive(Debug, serde::Deserialize, PartialEq)]
         struct ComplexStruct {

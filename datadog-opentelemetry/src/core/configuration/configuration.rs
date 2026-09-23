@@ -1021,7 +1021,6 @@ impl FromStr for BaggageTagKeyFilter {
     }
 }
 
-
 impl ConfigurationValueProvider for BaggageTagKeyFilter {
     fn get_configuration_value(&self) -> String {
         match self {
