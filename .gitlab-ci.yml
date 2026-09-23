@@ -2,6 +2,7 @@ include:
   - local: ".gitlab/configuration-central-validation.yml"
   - project: 'DataDog/apm-reliability/apm-sdks-benchmarks'
     file: '.gitlab/ci-rust-axum-realworld-parallel.yml'
+    ref: "12a3157e4e36ad5530c283c0e751f1fe71560192"
 
 stages:
   - config-validation
@@ -20,7 +21,7 @@ validate_supported_configurations_v2_local_file:
   stage: config-validation
   image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
   rules:
-    - when: on_success
+    - when: never
   extends: .validate_supported_configurations_v2_local_file
   variables:
     LOCAL_JSON_PATH: "supported-configurations.json"
@@ -31,8 +32,7 @@ update_central_configurations_version_range_v2:
   stage: config-validation
   image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^datadog-opentelemetry-v[0-9]+\.[0-9]+\.[0-9]+$/'
-      when: on_success
+    - when: never
   extends: .update_central_configurations_version_range_v2
   variables:
     LOCAL_REPO_NAME: "dd-trace-rs"
