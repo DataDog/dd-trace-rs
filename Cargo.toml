@@ -24,19 +24,19 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies
-libdd-data-pipeline = { version = "8.0.0", features = [
+libdd-data-pipeline = { version = "10.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "10.1.0", default-features = false }
-libdd-capabilities-impl = { version = "4.0.0", default-features = false }
-libdd-telemetry = { version = "7.0.0", default-features = false }
-libdd-common = { version = "5.2.0", default-features = false }
-libdd-tinybytes = { version = "1.1.2", default-features = false }
-libdd-library-config = { version = "3.0.0", default-features = false }
+libdd-trace-utils = { version = "12.0.0", default-features = false }
+libdd-capabilities-impl = { version = "5.0.0", default-features = false }
+libdd-telemetry = { version = "8.0.0", default-features = false }
+libdd-common = { version = "6.0.0", default-features = false }
+libdd-tinybytes = { version = "1.1.3", default-features = false }
+libdd-library-config = { version = "4.0.0", default-features = false }
 libdd-sampling = { version = "6.0.0", default-features = false }
-libdd-shared-runtime = { version = "3.0.0", default-features = false }
-libdd-remote-config = { version = "2.0.0", default-features = false, features = [
+libdd-shared-runtime = { version = "4.0.0", default-features = false }
+libdd-remote-config = { version = "5.0.0", default-features = false, features = [
     "client",
 ] }
 libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.0.0", default-features = false }
@@ -80,3 +80,25 @@ shared-version = true
 publish = false
 tag = false
 push = false
+
+# Patch libdatadog crates to the local checkout so dd-trace-rs picks up the new
+# `Export::export_trace_chunks` force_flush flag.
+[patch.crates-io]
+libdd-data-pipeline = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-data-pipeline" }
+libdd-data-pipeline-core = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-data-pipeline-core" }
+libdd-trace-stats = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-trace-stats" }
+libdd-trace-utils = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-trace-utils" }
+libdd-capabilities = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-capabilities" }
+libdd-capabilities-impl = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-capabilities-impl" }
+libdd-common = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-common" }
+libdd-shared-runtime = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-shared-runtime" }
+libdd-telemetry = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-telemetry" }
+libdd-trace-protobuf = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-trace-protobuf" }
+libdd-ddsketch = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-ddsketch" }
+libdd-trace-normalization = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-trace-normalization" }
+libdd-trace-obfuscation = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-trace-obfuscation" }
+libdd-dogstatsd-client = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-dogstatsd-client" }
+libdd-tinybytes = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-tinybytes" }
+libdd-library-config = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-library-config" }
+libdd-sampling = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-sampling" }
+libdd-remote-config = { path = "/Users/paul.legranddescloizeaux/go/src/github.com/DataDog/libdatadog/libdd-remote-config" }
