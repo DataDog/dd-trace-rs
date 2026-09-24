@@ -6,8 +6,11 @@
 use std::{
     fmt::{self, Display},
     mem,
+    str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+use crate::configuration::ConfigParser;
 
 static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Error as usize);
 
@@ -55,6 +58,14 @@ impl super::configuration::ConfigParser for LevelFilter {
         } else {
             Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
         }
+    }
+}
+
+impl FromStr for LevelFilter {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        <Self as ConfigParser>::parse(s)
     }
 }
 

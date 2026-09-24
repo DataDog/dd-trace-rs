@@ -1014,10 +1014,10 @@ impl ConfigParser for BaggageTagKeyFilter {
 }
 
 impl FromStr for BaggageTagKeyFilter {
-    type Err = &'static str;
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s).map_err(|e| match e {})
+        Self::parse(s)
     }
 }
 
