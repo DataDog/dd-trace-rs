@@ -7,6 +7,8 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use crate::configuration::sources::ConfigParser;
+
 /// Configuration for a single sampling rule.
 //
 // This is the public-facing type. The `provenance` field from
@@ -62,16 +64,25 @@ impl From<ParsedSamplingRules> for Vec<SamplingRuleConfig> {
     }
 }
 
-impl FromStr for ParsedSamplingRules {
-    type Err = serde_json::Error;
+impl ConfigParser for ParsedSamplingRules {
+    type Parsed = Self;
+    type ParseError = serde_json::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
         if s.trim().is_empty() {
             return Ok(ParsedSamplingRules::default());
         }
         // DD_TRACE_SAMPLING_RULES is expected to be a JSON array of SamplingRuleConfig objects.
         let rules_vec: Vec<SamplingRuleConfig> = serde_json::from_str(s)?;
         Ok(ParsedSamplingRules { rules: rules_vec })
+    }
+}
+
+impl FromStr for ParsedSamplingRules {
+    type Err = <ParsedSamplingRules as ConfigParser>::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
