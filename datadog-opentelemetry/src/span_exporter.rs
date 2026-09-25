@@ -444,7 +444,7 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .await;
 
             if force_flush {
-                let _ = self.trace_exporter.flush_client_side_stats_async().await;
+                self.trace_exporter.flush_client_side_stats_async().await;
             }
             result
         })
