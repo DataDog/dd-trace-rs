@@ -246,3 +246,5 @@ datadog_opentelemetry::tracing()
 * `logs` enabled the log provider
 * `logs-grpc` enabled the log provider, with GRPC OTLP export
 * `logs-http` enabled the log provider, with HTTP OTLP export
+* `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
+  subscriber is available

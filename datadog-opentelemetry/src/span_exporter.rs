@@ -19,6 +19,7 @@ use libdd_data_pipeline::trace_exporter::{
     TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
+use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
@@ -467,6 +468,10 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
 
     use crate::{dd_debug, dd_error};
 
+    // Suppress OpenTelemetry log records for the duration of this call to avoid infinite recursion
+    // when the error is logged generating a new log record and attempt to export it again.
+    let _suppress_guard = Context::enter_telemetry_suppressed_scope();
+
     match e {
         // Exceptional errors
         TraceExporterError::Builder(e) => {
@@ -517,4 +522,26 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             );
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use libdd_data_pipeline::trace_exporter::error::{InternalErrorKind, TraceExporterError};
+    use crate::{core::log::test_capture::capture_at, log::LevelFilter, span_exporter::log_trace_exporter_error};
+
+
+    #[test]
+    fn export_errors_reach_non_otel_tracing_layers_while_suppressed() {
+        let error = TraceExporterError::Internal(InternalErrorKind::InvalidWorkerState(
+            "stopped".to_owned(),
+        ));
+
+        let events = capture_at(LevelFilter::Debug, || log_trace_exporter_error(&error));
+
+        // The event is dispatched so non-OpenTelemetry layers can capture it. The active
+        // suppression flag makes an OpenTelemetry log bridge reject the event independently.
+        assert_eq!(events.len(), 1);
+        assert!(events[0].suppressed);
+        assert!(events[0].message.contains("Invalid worker state: stopped"));
+    }
 }
