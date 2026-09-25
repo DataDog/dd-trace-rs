@@ -24,22 +24,22 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies
-libdd-data-pipeline = { version = "8.0.0", features = [
+libdd-data-pipeline = { version = "11.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "10.1.0", default-features = false }
-libdd-capabilities-impl = { version = "4.0.0", default-features = false }
-libdd-telemetry = { version = "7.0.0", default-features = false }
-libdd-common = { version = "5.2.0", default-features = false }
-libdd-tinybytes = { version = "1.1.2", default-features = false }
-libdd-library-config = { version = "3.0.0", default-features = false }
-libdd-sampling = { version = "6.0.0", default-features = false }
-libdd-shared-runtime = { version = "3.0.0", default-features = false }
-libdd-remote-config = { version = "2.0.0", default-features = false, features = [
+libdd-trace-utils = { version = "13.0.0", default-features = false }
+libdd-capabilities-impl = { version = "6.0.0", default-features = false }
+libdd-telemetry = { version = "9.0.0", default-features = false }
+libdd-common = { version = "7.0.0", default-features = false }
+libdd-tinybytes = { version = "1.1.4", default-features = false }
+libdd-library-config = { version = "4.1.0", default-features = false }
+libdd-sampling = { version = "7.0.0", default-features = false }
+libdd-shared-runtime = { version = "5.0.0", default-features = false }
+libdd-remote-config = { version = "6.0.0", default-features = false, features = [
     "client",
 ] }
-libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.0.0", default-features = false }
+libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.1.0", default-features = false }
 opentelemetry_sdk = { version = "0.32.1", features = [
     "trace",
     "metrics",
