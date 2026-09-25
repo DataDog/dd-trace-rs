@@ -438,10 +438,13 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
             self.config.add_extra_services(services);
 
-            let result = self
-                .trace_exporter
-                .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
-                .await;
+            let result = if !dd_trace_chunks.is_empty() {
+                self.trace_exporter
+                    .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
+                    .await
+            } else {
+                Ok(AgentResponse::Unchanged)
+            };
 
             if force_flush {
                 self.trace_exporter.flush_client_side_stats_async().await;
