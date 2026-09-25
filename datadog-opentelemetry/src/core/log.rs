@@ -23,6 +23,8 @@ use std::{
 };
 use tracing::subscriber::NoSubscriber;
 
+use crate::configuration::ConfigParser;
+
 static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::Error as usize);
 
 pub(crate) fn set_max_level(lvl: LevelFilter) {
@@ -51,10 +53,11 @@ pub enum LevelFilter {
     Debug,
 }
 
-impl FromStr for LevelFilter {
-    type Err = &'static str;
+impl super::configuration::ConfigParser for LevelFilter {
+    type Parsed = Self;
+    type ParseError = &'static str;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         if s.eq_ignore_ascii_case("debug") {
             Ok(LevelFilter::Debug)
         } else if s.eq_ignore_ascii_case("info") {
@@ -68,6 +71,14 @@ impl FromStr for LevelFilter {
         } else {
             Err("log level filter should be one of DEBUG, INFO, WARN, ERROR, OFF")
         }
+    }
+}
+
+impl FromStr for LevelFilter {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        <Self as ConfigParser>::parse(s)
     }
 }
 
