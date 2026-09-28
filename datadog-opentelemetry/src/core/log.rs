@@ -14,6 +14,10 @@
 //!   (`RUST_LOG=datadog_opentelemetry=debug`). If tracing cannot carry the event, the optional
 //!   `log-compat` feature routes it through the `log` facade instead; without that feature it falls
 //!   back to stdout/stderr, so a bare application still sees it.
+//!
+//! `max_level` and the subscriber's filter are combined, not ordered: a diagnostic has to pass both,
+//! so the more restrictive of the two decides what is seen and raising one alone leaves the other in
+//! force.
 
 use std::{
     fmt::{self, Display},
