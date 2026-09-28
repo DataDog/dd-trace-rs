@@ -62,6 +62,7 @@ libdd-shared-runtime = { workspace = true }
 libdd-remote-config = { workspace = true }
 libdd-heap-allocator = { workspace = true, optional = true }
 percent-encoding = "2.3.1"
+hostname = "0.4.2"
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true, features = ["otel-thread-ctx"] }

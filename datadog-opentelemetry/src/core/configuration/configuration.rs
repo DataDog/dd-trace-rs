@@ -1091,7 +1091,7 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1182,6 +1182,15 @@ pub struct Config {
     /// `trace_writer_synchronous_timeout` this applies to explicit flushes regardless of whether
     /// synchronous writes are enabled.
     trace_writer_force_flush_timeout: Duration,
+
+    /// When true, the data sent to datadog will report the hostname of the machine the
+    /// program runs on.
+    /// The reported hostname defaults to the system hostname and can be set explicitly through
+    /// the `DD_HOSTNAME` configuration or [`ConfigBuilder::set_hostname`].
+    trace_report_hostname: ConfigItem<bool>,
+
+    /// Hostname reported by the library
+    hostname: ConfigItem<String>,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -1428,6 +1437,8 @@ impl Config {
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             trace_writer_force_flush_timeout: default.trace_writer_force_flush_timeout,
+            trace_report_hostname: cisu.update_bool(default.trace_report_hostname),
+            hostname: cisu.update_non_empty_string(default.hostname, |s| s),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
@@ -1492,6 +1503,7 @@ impl Config {
             &self.enabled,
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
+            &self.trace_report_hostname,
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_heartbeat_interval,
@@ -1662,6 +1674,16 @@ impl Config {
     /// Returns whether client-side trace stats computation is enabled.
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
+    }
+
+    /// Returns whether the library reports the hostname to datadog
+    pub fn trace_report_hostname(&self) -> bool {
+        *self.trace_report_hostname.value()
+    }
+
+    /// The hostname reported to datadog if [`Config::trace_report_hostname`] is true
+    pub fn hostname(&self) -> &str {
+        self.hostname.value()
     }
 
     pub(crate) fn trace_writer_synchronous_write(&self) -> bool {
@@ -2160,6 +2182,13 @@ fn default_config() -> Config {
         trace_writer_synchronous_timeout: Duration::from_secs(2),
         trace_writer_max_flush_interval: Duration::from_secs(1),
         trace_writer_force_flush_timeout: Duration::from_secs(5),
+
+        trace_report_hostname: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_REPORT_HOSTNAME,
+            false,
+        ),
+        hostname: ConfigItem::new(SupportedConfigurations::DD_HOSTNAME, String::new()),
+
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
@@ -2347,6 +2376,13 @@ impl ConfigBuilder {
                 Cow::Owned(format!("http://{host}:{port}"))
             };
             config.dogstatsd_agent_url.set_calculated(url);
+        }
+
+        if config.hostname.value().is_empty() && *config.trace_report_hostname.value() {
+            let system_hostname = hostname::get()
+                .map(|h| String::from_utf8_lossy(h.as_encoded_bytes()).to_string())
+                .unwrap_or_default();
+            config.hostname.default_value = system_hostname;
         }
 
         config
@@ -2901,6 +2937,31 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets whether the library reports the hostname to datadog.
+    ///
+    /// **Default**: `false`
+    pub fn set_trace_report_hostname(&mut self, report_hostname: bool) -> &mut Self {
+        self.config.trace_report_hostname.set_code(report_hostname);
+        self
+    }
+
+    /// Sets hostname reported to datadog if [`Config::trace_report_hostname`] is true.
+    ///
+    /// **Default**: if [`Config::trace_report_hostname`] is true, defaults to the system hostname,
+    /// otherwise `""`
+    ///
+    /// This is fetched using:
+    /// *`gethostname` on Linux
+    /// * `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` on Windows
+    pub fn set_hostname(&mut self, hostname: String) -> &mut Self {
+        // An empty hostname is treated as unset, mirroring an empty `DD_HOSTNAME` environment
+        // variable, so that `build()`'s system-hostname fallback still applies.
+        if !hostname.is_empty() {
+            self.config.hostname.set_code(hostname);
+        }
+        self
+    }
+
     #[cfg(feature = "test-utils")]
     #[allow(missing_docs)]
     pub fn set_datadog_tags_max_length_with_no_limit(&mut self, length: usize) -> &mut Self {
@@ -3116,6 +3177,69 @@ mod tests {
 
         assert!(config.enabled());
         assert_eq!(*config.log_level_filter(), super::LevelFilter::Warn);
+    }
+
+    fn system_hostname() -> String {
+        hostname::get()
+            .map(|h| String::from_utf8_lossy(h.as_encoded_bytes()).to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn test_trace_report_hostname_env_enabled_uses_system_hostname() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_REPORT_HOSTNAME", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
+    }
+
+    #[test]
+    fn test_hostname_env_takes_precedence_over_system_hostname() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_REPORT_HOSTNAME", "true"),
+                ("DD_HOSTNAME", "custom-host"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), "custom-host");
+    }
+
+    #[test]
+    fn test_hostname_empty_env_falls_back_to_system_hostname() {
+        // An empty DD_HOSTNAME="" is treated as unset, so the system hostname fallback applies.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_REPORT_HOSTNAME", "true"), ("DD_HOSTNAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
+    }
+
+    #[test]
+    fn test_hostname_empty_code_value_falls_back_to_system_hostname() {
+        // An explicitly empty hostname set through set_hostname is treated as unset, like an
+        // empty DD_HOSTNAME environment variable, so the system-hostname fallback applies.
+        let sources = CompositeSource::new();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_report_hostname(true)
+            .set_hostname(String::new())
+            .build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
     }
 
     #[test]

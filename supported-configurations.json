@@ -42,6 +42,14 @@
         "propertyKeys": ["env"]
       }
     ],
+    "DD_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["hostname"]
+      }
+    ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
       {
         "version": "A",
@@ -217,6 +225,14 @@
         "type": "int",
         "default": "100",
         "propertyKeys": ["trace_rate_limit"]
+      }
+    ],
+    "DD_TRACE_REPORT_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["trace_report_hostname"]
       }
     ],
     "DD_TRACE_SAMPLE_RATE": [
