@@ -2940,6 +2940,8 @@ impl ConfigBuilder {
     /// Sets whether the library reports the hostname to datadog.
     ///
     /// **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_REPORT_HOSTNAME`
     pub fn set_trace_report_hostname(&mut self, report_hostname: bool) -> &mut Self {
         self.config.trace_report_hostname.set_code(report_hostname);
         self
@@ -2953,6 +2955,8 @@ impl ConfigBuilder {
     /// This is fetched using:
     /// *`gethostname` on Linux
     /// * `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` on Windows
+    ///
+    /// Env variable: `DD_HOSTNAME`
     pub fn set_hostname(&mut self, hostname: String) -> &mut Self {
         // An empty hostname is treated as unset, mirroring an empty `DD_HOSTNAME` environment
         // variable, so that `build()`'s system-hostname fallback still applies.
