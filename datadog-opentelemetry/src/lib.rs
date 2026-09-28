@@ -373,7 +373,7 @@ impl DatadogTracingBuilder {
 
         // For now, otel process context spec is linux-specific.
         #[cfg(target_os = "linux")]
-        if let Err(e) = libdd_library_config::otel_process_ctx::linux::publish(
+        if let Err(e) = libdd_library_config::otel_process_ctx::publish(
             &config.to_tracer_metadata().to_otel_process_ctx(),
         ) {
             dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
