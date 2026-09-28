@@ -526,9 +526,11 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        core::log::test_capture::capture_at, log::LevelFilter,
+        span_exporter::log_trace_exporter_error,
+    };
     use libdd_data_pipeline::trace_exporter::error::{InternalErrorKind, TraceExporterError};
-    use crate::{core::log::test_capture::capture_at, log::LevelFilter, span_exporter::log_trace_exporter_error};
-
 
     #[test]
     fn export_errors_reach_non_otel_tracing_layers_while_suppressed() {
