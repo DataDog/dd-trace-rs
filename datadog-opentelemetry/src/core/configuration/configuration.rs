@@ -2953,7 +2953,7 @@ impl ConfigBuilder {
     /// otherwise `""`
     ///
     /// This is fetched using:
-    /// *`gethostname` on Linux
+    /// * `gethostname` on unix like OS-es
     /// * `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` on Windows
     ///
     /// Env variable: `DD_HOSTNAME`
