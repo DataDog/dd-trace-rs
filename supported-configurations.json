@@ -47,7 +47,8 @@
         "version": "A",
         "type": "string",
         "default": null,
-        "propertyKeys": ["hostname"]
+        "propertyKeys": ["hostname"],
+        "sensitive": true
       }
     ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [

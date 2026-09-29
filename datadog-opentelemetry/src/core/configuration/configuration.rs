@@ -1534,6 +1534,7 @@ impl Config {
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
             &self.trace_report_hostname,
+            &self.hostname,
             &self.trace_stats_cardinality_limit,
             &self.trace_stats_resource_cardinality_limit,
             &self.trace_stats_http_endpoint_cardinality_limit,

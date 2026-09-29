@@ -184,7 +184,8 @@ impl SupportedConfigurations {
     pub fn is_sensitive(&self) -> bool {
         matches!(
             self,
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
+            SupportedConfigurations::DD_HOSTNAME
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
         )
