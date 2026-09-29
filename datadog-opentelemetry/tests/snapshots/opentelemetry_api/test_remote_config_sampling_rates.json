@@ -10,6 +10,7 @@
     "meta": {
       "_dd.p.dm": "-11",
       "_dd.p.ksr": "1",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "69b9879800000000e3b9155ba22b8a52",
