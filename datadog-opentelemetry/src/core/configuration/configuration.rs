@@ -3,6 +3,7 @@
 
 use libdd_telemetry::data::Configuration;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::Infallible;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::Path;
@@ -18,12 +19,14 @@ use rustc_version_runtime::version;
 
 use super::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
-    CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
+    BooleanFlag, CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
+
+pub(crate) use crate::core::configuration::sources::ConfigParser;
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -239,10 +242,12 @@ trait ConfigurationValueProvider {
 /// (environment variables, programmatic code, remote configuration, etc.). This source
 /// tracking is essential for implementing proper configuration precedence rules and
 /// for telemetry reporting.
-trait ValueSourceUpdater<T> {
+trait ValueSourceUpdater {
+    type Value;
+
     fn name(&self) -> SupportedConfigurations;
     /// Updates the configuration value while recording its source origin.
-    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin);
+    fn set_value_source(&mut self, value: Self::Value, source: ConfigSourceOrigin);
 }
 
 /// Configuration item that tracks the value of a setting and where it came from
@@ -368,7 +373,9 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
     }
 }
 
-impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
+impl<T: ConfigurationValueProvider> ValueSourceUpdater for ConfigItem<T> {
+    type Value = T;
+
     fn name(&self) -> SupportedConfigurations {
         self.name
     }
@@ -530,9 +537,10 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     }
 }
 
-impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater<T>
+impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater
     for ConfigItemWithOverride<T>
 {
+    type Value = T;
     fn name(&self) -> SupportedConfigurations {
         self.config_item.name()
     }
@@ -552,16 +560,15 @@ struct ConfigItemSourceUpdater<'a> {
 }
 
 impl ConfigItemSourceUpdater<'_> {
-    fn apply_result<ParsedConfig, RawConfig, ConfigItemType, F>(
+    fn apply_result<RawConfig, ConfigItemType>(
         &self,
         mut item: ConfigItemType,
         result: CompositeConfigSourceResult<RawConfig>,
-        transform: F,
+        transform: impl FnOnce(RawConfig) -> ConfigItemType::Value,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(RawConfig) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value: ConfigurationValueProvider,
     {
         if !result.errors.is_empty() {
             dd_error!(
@@ -578,13 +585,23 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value (no transformation)
-    fn update_parsed<ParsedConfig, ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
+    fn update_parsed<ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
     where
-        ParsedConfig: Clone + FromStr + ConfigurationValueProvider,
-        ParsedConfig::Err: std::fmt::Display,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value:
+            ConfigParser<Parsed = ConfigItemType::Value> + ConfigurationValueProvider,
     {
-        let result = self.sources.get_parse::<ParsedConfig>(default.name());
+        self.update_parse_custom::<ConfigItemType::Value, ConfigItemType>(default)
+    }
+
+    /// Updates a ConfigItem from sources with parsed value (no transformation)
+    fn update_parse_custom<Parser, ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
+    where
+        Parser: ConfigParser,
+        ConfigItemType: ValueSourceUpdater<Value = Parser::Parsed>,
+        ConfigItemType::Value: ConfigurationValueProvider,
+    {
+        let result = self.sources.get_parse::<Parser>(default.name());
         self.apply_result(default, result, |value| value)
     }
 
@@ -595,24 +612,32 @@ impl ConfigItemSourceUpdater<'_> {
         transform: F,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        ParsedConfig: ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
         F: FnOnce(String) -> ParsedConfig,
     {
         let result = self.sources.get(default.name());
         self.apply_result(default, result, transform)
     }
 
-    /// Updates a ConfigItem from non empty sources string with transformation
-    pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
+    /// Updates a ConfigItem from a boolean flag
+    pub fn update_bool<ConfigItemType: ValueSourceUpdater<Value = bool>>(
         &self,
         default: ConfigItemType,
-        transform: F,
+    ) -> ConfigItemType {
+        let result = self.sources.get_parse::<BooleanFlag>(default.name());
+        self.apply_result(default, result, |b| b)
+    }
+
+    /// Updates a ConfigItem from non empty sources string with transformation
+    pub fn update_non_empty_string<ParsedConfig, ConfigItemType>(
+        &self,
+        default: ConfigItemType,
+        transform: impl FnOnce(String) -> ParsedConfig,
     ) -> ConfigItemType
     where
         ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(String) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
     {
         let result = self.sources.get(default.name());
         match result.value {
@@ -626,16 +651,15 @@ impl ConfigItemSourceUpdater<'_> {
     /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
     /// value on either key is treated the same as the key being absent. If neither key has a
     /// non-empty value, the default is returned.
-    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
+    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType>(
         &self,
         default: ConfigItemType,
         fallback: SupportedConfigurations,
-        transform: F,
+        transform: impl FnOnce(String) -> ParsedConfig,
     ) -> ConfigItemType
     where
         ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(String) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
     {
         // Use the primary key if it has a non-empty value; otherwise fall back to `fallback`.
         let result = self.sources.get(default.name());
@@ -652,19 +676,17 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
-    pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
+    pub fn update_parsed_with_transform<Parser, ConfigItemType>(
         &self,
         default: ConfigItemType,
-        transform: F,
+        transform: impl FnOnce(Parser::Parsed) -> ConfigItemType::Value,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        RawConfig: FromStr,
-        RawConfig::Err: std::fmt::Display,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(RawConfig) -> ParsedConfig,
+        Parser: ConfigParser,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value: ConfigurationValueProvider,
     {
-        let result = self.sources.get_parse::<RawConfig>(default.name());
+        let result = self.sources.get_parse::<Parser>(default.name());
         self.apply_result(default, result, transform)
     }
 }
@@ -819,10 +841,11 @@ pub enum TracePropagationBehaviorExtract {
     Ignore,
 }
 
-impl FromStr for TracePropagationBehaviorExtract {
-    type Err = String;
+impl ConfigParser for TracePropagationBehaviorExtract {
+    type Parsed = Self;
+    type ParseError = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         match s.trim().to_lowercase().as_str() {
             "" => Ok(TracePropagationBehaviorExtract::default()),
             "continue" => Ok(TracePropagationBehaviorExtract::Continue),
@@ -830,6 +853,14 @@ impl FromStr for TracePropagationBehaviorExtract {
             "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
             _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
         }
+    }
+}
+
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -957,10 +988,11 @@ pub enum BaggageTagKeyFilter {
     Keys(Vec<String>),
 }
 
-impl std::str::FromStr for BaggageTagKeyFilter {
-    type Err = std::convert::Infallible;
+impl ConfigParser for BaggageTagKeyFilter {
+    type Parsed = Self;
+    type ParseError = std::convert::Infallible;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         let trimmed = s.trim();
         if trimmed.is_empty() {
             Ok(BaggageTagKeyFilter::Disabled)
@@ -978,6 +1010,14 @@ impl std::str::FromStr for BaggageTagKeyFilter {
                 Ok(BaggageTagKeyFilter::Keys(keys))
             }
         }
+    }
+}
+
+impl FromStr for BaggageTagKeyFilter {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -1234,51 +1274,49 @@ impl Config {
         let default = default_config();
 
         /// Wrapper to parse "," separated string to vector
-        struct DdTags(Vec<String>);
+        struct DdTags;
 
-        impl FromStr for DdTags {
-            type Err = &'static str;
+        impl ConfigParser for DdTags {
+            type Parsed = Vec<String>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(DdTags(
-                    s.split(',').map(|s| s.to_string()).collect::<Vec<String>>(),
-                ))
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(s.split(',').map(|s| s.to_string()).collect::<Vec<String>>())
             }
         }
 
         /// Wrapper to parse "," separated key:value tags to vector<(key, value)>
         /// discarding tags without ":" delimiter
-        struct DdKeyValueTags(Vec<(String, String)>);
+        struct DdKeyValueTags;
 
-        impl FromStr for DdKeyValueTags {
-            type Err = &'static str;
+        impl ConfigParser for DdKeyValueTags {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(DdKeyValueTags(
-                    s.split(',')
-                        .filter_map(|s| {
-                            s.split_once(':')
-                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                        })
-                        .collect(),
-                ))
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(s.split(',')
+                    .filter_map(|s| {
+                        s.split_once(':')
+                            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    })
+                    .collect())
             }
         }
 
-        struct OtelResourceAttributes(Vec<(String, String)>);
+        struct OtelResourceAttributes;
 
-        impl FromStr for OtelResourceAttributes {
-            type Err = &'static str;
+        impl ConfigParser for OtelResourceAttributes {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(OtelResourceAttributes(
-                    s.split(',')
-                        .filter_map(|s| {
-                            s.split_once('=')
-                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                        })
-                        .collect(),
-                ))
+            fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(cfg
+                    .split(',')
+                    .filter_map(|s| {
+                        s.split_once('=')
+                            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    })
+                    .collect())
             }
         }
 
@@ -1310,12 +1348,9 @@ impl Config {
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
-            global_tags: cisu
-                .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
-            otel_resource_attributes: cisu.update_parsed_with_transform(
-                default.otel_resource_attributes,
-                |OtelResourceAttributes(attrs)| attrs,
-            ),
+            global_tags: cisu.update_parse_custom::<DdKeyValueTags, _>(default.global_tags),
+            otel_resource_attributes: cisu
+                .update_parse_custom::<OtelResourceAttributes, _>(default.otel_resource_attributes),
             otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
@@ -1329,29 +1364,29 @@ impl Config {
             dogstatsd_agent_url: cisu
                 .update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
 
-            trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
+            trace_partial_flush_enabled: cisu.update_bool(default.trace_partial_flush_enabled),
             trace_partial_flush_min_spans: cisu
                 .update_parsed(default.trace_partial_flush_min_spans),
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_sample_rate: cisu.update_parsed_with_transform(
+            trace_sample_rate: cisu.update_parsed_with_transform::<f64, _>(
                 default.trace_sample_rate,
                 validate_trace_sample_rate,
             ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
-            enabled: cisu.update_parsed(default.enabled),
+            enabled: cisu.update_bool(default.enabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
-                .update_parsed(default.trace_stats_computation_enabled),
-            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_parsed(
+                .update_bool(default.trace_stats_computation_enabled),
+            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_bool(
                 default.trace_stats_computation_experimental_client_obfuscation_enabled,
             ),
-            telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
+            telemetry_enabled: cisu.update_bool(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
-                .update_parsed(default.telemetry_log_collection_enabled),
-            telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
+                .update_bool(default.telemetry_log_collection_enabled),
+            telemetry_heartbeat_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
@@ -1367,24 +1402,27 @@ impl Config {
                 cisu.update_non_empty_string_with_fallback(
                     default.trace_propagation_style,
                     SupportedConfigurations::OTEL_PROPAGATORS,
-                    move |styles| match TracePropagationStyle::from_tags(Some(
-                        DdTags::from_str(&styles).unwrap().0,
-                    )) {
+                    move |styles| match TracePropagationStyle::from_tags(Some(match DdTags::parse(
+                        &styles,
+                    ) {
+                        Ok(tags) => tags,
+                        Err(e) => match e {},
+                    })) {
                         Some(styles) if styles.is_empty() => default_style,
                         other => other,
                     },
                 )
             },
-            trace_propagation_style_extract: cisu.update_parsed_with_transform(
+            trace_propagation_style_extract: cisu.update_parsed_with_transform::<DdTags, _>(
                 default.trace_propagation_style_extract,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |tags| TracePropagationStyle::from_tags(Some(tags)),
             ),
-            trace_propagation_style_inject: cisu.update_parsed_with_transform(
+            trace_propagation_style_inject: cisu.update_parsed_with_transform::<DdTags, _>(
                 default.trace_propagation_style_inject,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |tags| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_extract_first: cisu
-                .update_parsed(default.trace_propagation_extract_first),
+                .update_bool(default.trace_propagation_extract_first),
             trace_baggage_tag_keys: cisu.update_parsed(default.trace_baggage_tag_keys),
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
@@ -1393,17 +1431,17 @@ impl Config {
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
-            remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
-            remote_config_poll_interval: cisu.update_parsed_with_transform(
+            remote_config_enabled: cisu.update_bool(default.remote_config_enabled),
+            remote_config_poll_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.remote_config_poll_interval,
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-            datadog_tags_max_length: cisu
-                .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
-                    max.min(DATADOG_TAGS_MAX_LENGTH)
-                }),
-            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
+            datadog_tags_max_length: cisu.update_parsed_with_transform::<usize, _>(
+                default.datadog_tags_max_length,
+                |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
+            ),
+            metrics_otel_enabled: cisu.update_bool(default.metrics_otel_enabled),
             otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
             otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
             otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
@@ -1415,7 +1453,7 @@ impl Config {
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
             metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
-            logs_otel_enabled: cisu.update_parsed(default.logs_otel_enabled),
+            logs_otel_enabled: cisu.update_bool(default.logs_otel_enabled),
             otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
             otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
             otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
@@ -3649,7 +3687,7 @@ mod tests {
         // The public SamplingRuleConfig should silently ignore a "provenance" field in JSON,
         // since serde skips unknown fields by default.
         let json = r#"[{"sample_rate":0.5,"service":"svc","provenance":"dynamic"}]"#;
-        let parsed: ParsedSamplingRules = json.parse().unwrap();
+        let parsed: ParsedSamplingRules = ParsedSamplingRules::parse(json).unwrap();
         assert_eq!(parsed.rules.len(), 1);
         assert_eq!(parsed.rules[0].sample_rate, 0.5);
         assert_eq!(parsed.rules[0].service, Some("svc".to_string()));
@@ -4090,34 +4128,37 @@ mod tests {
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled = cisu.update_parsed(default.enabled);
+        let enabled = cisu.update_bool(default.enabled);
         assert!(enabled.default_value);
         assert_eq!(enabled.env_value, None);
         assert_eq!(enabled.code_value, None);
 
-        struct Tags(Vec<(String, String)>);
+        struct Tags;
 
-        impl FromStr for Tags {
-            type Err = &'static str;
+        impl ConfigParser for Tags {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(Tags(
-                    s.split(',')
-                        .enumerate()
-                        .map(|(index, s)| (index.to_string(), s.to_string()))
-                        .collect(),
-                ))
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(s.split(',')
+                    .enumerate()
+                    .map(|(index, s)| (index.to_string(), s.to_string()))
+                    .collect())
             }
         }
 
-        let tags = cisu.update_parsed_with_transform(default.global_tags, |Tags(tags)| tags);
+        let tags = cisu.update_parsed_with_transform::<Tags, _>(default.global_tags, |mut tags| {
+            tags.resize(3, ("hello".into(), "world".into()));
+            tags
+        });
         assert_eq!(tags.default_value, vec![]);
         assert_eq!(tags.env_value, None);
         assert_eq!(
             tags.code_value,
             Some(vec![
                 ("0".to_string(), "v1".to_string()),
-                ("1".to_string(), "v2".to_string())
+                ("1".to_string(), "v2".to_string()),
+                ("hello".to_string(), "world".to_string()),
             ])
         );
     }
@@ -4134,7 +4175,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        let expected = ParsedSamplingRules::from_str(
+        let expected = ParsedSamplingRules::parse(
             r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
         )
         .unwrap();
@@ -4147,12 +4188,12 @@ mod tests {
         // Converting configuration value to json helps with comparison as serialized properties may
         // differ from their original order
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
+            ParsedSamplingRules::parse(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected.clone()
         );
 
         // Update ConfigItemRc via RC
-        let expected_rc = ParsedSamplingRules::from_str(
+        let expected_rc = ParsedSamplingRules::parse(
             r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
         )
         .unwrap();
@@ -4170,7 +4211,7 @@ mod tests {
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration_after_rc.value.as_deref().unwrap())
+            ParsedSamplingRules::parse(active_configuration_after_rc.value.as_deref().unwrap())
                 .unwrap(),
             expected_rc
         );
@@ -4182,7 +4223,7 @@ mod tests {
         let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
         assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
+            ParsedSamplingRules::parse(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected
         );
     }

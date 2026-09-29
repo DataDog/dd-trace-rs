@@ -1515,14 +1515,12 @@ mod tests {
     }
 
     mod baggage_tag_key_filter_parse_tests {
-        use std::str::FromStr;
-
-        use crate::core::configuration::BaggageTagKeyFilter;
+        use crate::{configuration::ConfigParser, core::configuration::BaggageTagKeyFilter};
 
         #[test]
         fn empty_string_is_disabled() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str("").unwrap(),
+                BaggageTagKeyFilter::parse("").unwrap(),
                 BaggageTagKeyFilter::Disabled
             );
         }
@@ -1530,7 +1528,7 @@ mod tests {
         #[test]
         fn whitespace_only_is_disabled() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str("   ").unwrap(),
+                BaggageTagKeyFilter::parse("   ").unwrap(),
                 BaggageTagKeyFilter::Disabled
             );
         }
@@ -1538,7 +1536,7 @@ mod tests {
         #[test]
         fn star_is_all() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str("*").unwrap(),
+                BaggageTagKeyFilter::parse("*").unwrap(),
                 BaggageTagKeyFilter::All
             );
         }
@@ -1546,7 +1544,7 @@ mod tests {
         #[test]
         fn comma_separated_list_parsed() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str("user.id,session.id,account.id").unwrap(),
+                BaggageTagKeyFilter::parse("user.id,session.id,account.id").unwrap(),
                 BaggageTagKeyFilter::Keys(vec![
                     "user.id".to_string(),
                     "session.id".to_string(),
@@ -1558,7 +1556,7 @@ mod tests {
         #[test]
         fn whitespace_around_keys_trimmed() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str(" user.id , session.id ").unwrap(),
+                BaggageTagKeyFilter::parse(" user.id , session.id ").unwrap(),
                 BaggageTagKeyFilter::Keys(vec!["user.id".to_string(), "session.id".to_string(),])
             );
         }
@@ -1566,7 +1564,7 @@ mod tests {
         #[test]
         fn comma_only_is_disabled() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str(",").unwrap(),
+                BaggageTagKeyFilter::parse(",").unwrap(),
                 BaggageTagKeyFilter::Disabled
             );
         }
@@ -1574,7 +1572,7 @@ mod tests {
         #[test]
         fn all_commas_and_spaces_is_disabled() {
             assert_eq!(
-                BaggageTagKeyFilter::from_str(", ,").unwrap(),
+                BaggageTagKeyFilter::parse(", ,").unwrap(),
                 BaggageTagKeyFilter::Disabled
             );
         }

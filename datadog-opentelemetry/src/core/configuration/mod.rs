@@ -29,7 +29,7 @@ pub use configuration::{
     BaggageTagKeyFilter, Config, ConfigBuilder, OtlpProtocol, TracePropagationBehaviorExtract,
     TracePropagationStyle,
 };
-pub(crate) use configuration::{ConfigurationProvider, RemoteConfigUpdate};
+pub(crate) use configuration::{ConfigParser, ConfigurationProvider, RemoteConfigUpdate};
 
 mod sampling_rule_config;
 pub use sampling_rule_config::{ParsedSamplingRules, SamplingRuleConfig};

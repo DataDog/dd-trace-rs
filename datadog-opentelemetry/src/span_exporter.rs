@@ -19,6 +19,7 @@ use libdd_data_pipeline::trace_exporter::{
     TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
+use libdd_trace_utils::span::span_pool::PooledChunks;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
@@ -409,11 +410,14 @@ impl Export<BufferedSpan> for SpanDataExport {
     fn export_trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<BufferedSpan>>,
+        force_flush: bool,
     ) -> Pin<
         Box<
             dyn std::future::Future<Output = Result<AgentResponse, TraceExporterError>> + Send + '_,
         >,
     > {
+        // The trace buffer passes `force_flush = true` for an explicit flush (e.g. via
+        // `flush_and_wait`); in that case we also drain buffered client-computed stats.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
             let dd_trace_chunks = trace_chunks
@@ -434,10 +438,17 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
             self.config.add_extra_services(services);
 
-            let result = self
-                .trace_exporter
-                .send_trace_chunks_async(dd_trace_chunks)
-                .await;
+            let result = if !dd_trace_chunks.is_empty() {
+                self.trace_exporter
+                    .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
+                    .await
+            } else {
+                Ok(AgentResponse::Unchanged)
+            };
+
+            if force_flush {
+                self.trace_exporter.flush_client_side_stats_async().await;
+            }
             result
         })
     }
