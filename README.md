@@ -227,6 +227,34 @@ datadog_opentelemetry::tracing()
     .init();
 ```
 
+### Tracer diagnostics
+
+The tracer reports on itself - configuration problems, transport failures, dropped spans. Where
+those diagnostics go depends on the application: if it has installed a `tracing` subscriber, they
+are emitted to it under the target `datadog_opentelemetry`; if it has not, they are printed to
+stdout and stderr, so a bare binary still sees them.
+
+With a subscriber installed, two independent settings apply, and a diagnostic has to pass **both**:
+
+| Setting | Decides | Default |
+| --- | --- | --- |
+| `DD_LOG_LEVEL`, or `ConfigBuilder::set_log_level_filter` | how verbose the tracer is: which diagnostics it produces at all | `ERROR` |
+| the subscriber's own filter, typically `RUST_LOG` | which of those it keeps, and where they go | `ERROR`, for `EnvFilter` with `RUST_LOG` unset |
+
+Neither overrides the other: the more restrictive of the two wins, so raising one alone leaves the
+other in force. Both have to be raised to see anything below `ERROR`.
+
+```bash
+# Errors only: the tracer produces nothing below ERROR for the filter to admit.
+RUST_LOG=datadog_opentelemetry=debug cargo run
+
+# Errors only: the tracer produces DEBUG diagnostics, and the subscriber discards them.
+DD_LOG_LEVEL=debug RUST_LOG=error cargo run
+
+# DEBUG diagnostics reach the subscriber, which decides where they end up.
+DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
+```
+
 ## Support
 
 * MSRV: 1.87
@@ -246,3 +274,5 @@ datadog_opentelemetry::tracing()
 * `logs` enabled the log provider
 * `logs-grpc` enabled the log provider, with GRPC OTLP export
 * `logs-http` enabled the log provider, with HTTP OTLP export
+* `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
+  subscriber is available

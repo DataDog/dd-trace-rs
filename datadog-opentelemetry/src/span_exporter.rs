@@ -15,11 +15,12 @@ use libdd_data_pipeline::trace_buffer::{
     TraceChunk,
 };
 use libdd_data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
-    TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse, error::TraceExporterError, stats::CardinalityLimitConfig,
+    TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
 use libdd_trace_utils::span::span_pool::PooledChunks;
+use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
@@ -366,6 +367,13 @@ fn build_trace_exporter(
     if config.trace_stats_computation_enabled() {
         builder.enable_stats(Duration::from_secs(10));
     }
+    builder.set_stats_cardinality_limit(CardinalityLimitConfig {
+        whole_key_limit: config.trace_stats_cardinality_limit(),
+        resource_limit: config.trace_stats_resource_cardinality_limit(),
+        http_endpoint_limit: config.trace_stats_http_endpoint_cardinality_limit(),
+        peer_tags_limit: config.trace_stats_peer_tags_cardinality_limit(),
+        additional_tags_limit: config.trace_stats_additional_tags_cardinality_limit(),
+    });
     if config.trace_stats_computation_experimental_client_obfuscation_enabled() {
         builder.enable_client_side_stats_obfuscation();
     }
@@ -481,6 +489,10 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
 
     use crate::{dd_debug, dd_error};
 
+    // Suppress OpenTelemetry log records for the duration of this call to avoid infinite recursion
+    // when the error is logged generating a new log record and attempt to export it again.
+    let _suppress_guard = Context::enter_telemetry_suppressed_scope();
+
     match e {
         // Exceptional errors
         TraceExporterError::Builder(e) => {
@@ -531,4 +543,28 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             );
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        core::log::test_capture::capture_at, log::LevelFilter,
+        span_exporter::log_trace_exporter_error,
+    };
+    use libdd_data_pipeline::trace_exporter::error::{InternalErrorKind, TraceExporterError};
+
+    #[test]
+    fn export_errors_reach_non_otel_tracing_layers_while_suppressed() {
+        let error = TraceExporterError::Internal(InternalErrorKind::InvalidWorkerState(
+            "stopped".to_owned(),
+        ));
+
+        let events = capture_at(LevelFilter::Debug, || log_trace_exporter_error(&error));
+
+        // The event is dispatched so non-OpenTelemetry layers can capture it. The active
+        // suppression flag makes an OpenTelemetry log bridge reject the event independently.
+        assert_eq!(events.len(), 1);
+        assert!(events[0].suppressed);
+        assert!(events[0].message.contains("Invalid worker state: stopped"));
+    }
 }

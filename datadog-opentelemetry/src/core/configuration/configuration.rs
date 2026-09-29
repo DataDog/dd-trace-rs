@@ -1168,6 +1168,26 @@ pub struct Config {
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
 
+    /// Maximum number of distinct client-side stats aggregation keys per flush period.
+    /// Aggregates beyond this limit are collapsed into an overflow bucket.
+    trace_stats_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the `resource` field in client-side stats per flush period.
+    /// Resources beyond this limit are collapsed into a blocked value.
+    trace_stats_resource_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the `http.url` (normalized endpoint) field in client-side stats
+    /// per flush period. Endpoints beyond this limit are collapsed into a blocked value.
+    trace_stats_http_endpoint_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the peer tags in client-side stats per flush period.
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value.
+    trace_stats_peer_tags_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the additional metric tags in client-side stats per flush period.
+    /// Additional tags beyond this limit are collapsed into a blocked value.
+    trace_stats_additional_tags_cardinality_limit: ConfigItem<usize>,
+
     /// Whether to enable stats obfuscation for the tracer (for internal testing)
     trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem<bool>,
 
@@ -1389,6 +1409,16 @@ impl Config {
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
                 .update_bool(default.trace_stats_computation_enabled),
+            trace_stats_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_cardinality_limit),
+            trace_stats_resource_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_resource_cardinality_limit),
+            trace_stats_http_endpoint_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_http_endpoint_cardinality_limit),
+            trace_stats_peer_tags_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_peer_tags_cardinality_limit),
+            trace_stats_additional_tags_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_additional_tags_cardinality_limit),
             trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_bool(
                 default.trace_stats_computation_experimental_client_obfuscation_enabled,
             ),
@@ -1504,6 +1534,11 @@ impl Config {
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
             &self.trace_report_hostname,
+            &self.trace_stats_cardinality_limit,
+            &self.trace_stats_resource_cardinality_limit,
+            &self.trace_stats_http_endpoint_cardinality_limit,
+            &self.trace_stats_peer_tags_cardinality_limit,
+            &self.trace_stats_additional_tags_cardinality_limit,
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_heartbeat_interval,
@@ -1684,6 +1719,41 @@ impl Config {
     /// The hostname reported to datadog if [`Config::trace_report_hostname`] is true
     pub fn hostname(&self) -> &str {
         self.hostname.value()
+    }
+
+    /// Returns the cardinality limit for client-side stats.
+    ///
+    /// Aggregates beyond this limit are collapsed into an overflow bucket per flush period.
+    pub fn trace_stats_cardinality_limit(&self) -> usize {
+        *self.trace_stats_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the `resource` field of client-side stats.
+    ///
+    /// Resource values beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_resource_cardinality_limit(&self) -> usize {
+        *self.trace_stats_resource_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the `http_endpoint` field of client-side stats.
+    ///
+    /// Endpoint values beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_http_endpoint_cardinality_limit(&self) -> usize {
+        *self.trace_stats_http_endpoint_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the peer tags of client-side stats.
+    ///
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_peer_tags_cardinality_limit(&self) -> usize {
+        *self.trace_stats_peer_tags_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the additional metric tags of client-side stats.
+    ///
+    /// Additional tags beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_additional_tags_cardinality_limit(&self) -> usize {
+        *self.trace_stats_additional_tags_cardinality_limit.value()
     }
 
     pub(crate) fn trace_writer_synchronous_write(&self) -> bool {
@@ -2173,6 +2243,26 @@ fn default_config() -> Config {
         trace_stats_computation_enabled: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
+        ),
+        trace_stats_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_CARDINALITY_LIMIT,
+            7000,
+        ),
+        trace_stats_resource_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT,
+            1024,
+        ),
+        trace_stats_http_endpoint_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT,
+            512,
+        ),
+        trace_stats_peer_tags_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT,
+            512,
+        ),
+        trace_stats_additional_tags_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT,
+            100,
         ),
         trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem::new(
             SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
@@ -2867,6 +2957,74 @@ impl ConfigBuilder {
         self.config
             .trace_stats_computation_enabled
             .set_code(trace_stats_computation_enabled);
+        self
+    }
+
+    /// Sets the cardinality limit for client-side stats computation.
+    ///
+    /// Aggregates beyond this limit are collapsed into an overflow bucket per flush period.
+    ///
+    /// **Default**: `7000`
+    ///
+    /// Env variable: `DD_TRACE_STATS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config.trace_stats_cardinality_limit.set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the `resource` field of client-side stats.
+    ///
+    /// Resource values beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `1024`
+    ///
+    /// Env variable: `DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_resource_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_resource_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the `http_endpoint` field of client-side stats.
+    ///
+    /// Endpoint values beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `512`
+    ///
+    /// Env variable: `DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_http_endpoint_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_http_endpoint_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the peer tags of client-side stats.
+    ///
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `512`
+    ///
+    /// Env variable: `DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_peer_tags_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_peer_tags_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the additional metric tags of client-side stats.
+    ///
+    /// Additional tags beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `100`
+    ///
+    /// Env variable: `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_additional_tags_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_additional_tags_cardinality_limit
+            .set_code(limit);
         self
     }
 

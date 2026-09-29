@@ -1,0 +1,50 @@
+[
+  {
+    "Start": 0,
+    "Duration": 10000000000,
+    "Stats": [
+      {
+        "Name": "client.request",
+        "Resource": "stats-op-1",
+        "Service": "unnamed-rust-service",
+        "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 6000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "client.request",
+        "Resource": "stats-op-2",
+        "Service": "unnamed-rust-service",
+        "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 1000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "tracer_blocked_value",
+        "Resource": "tracer_blocked_value",
+        "Service": "tracer_blocked_value",
+        "Type": "tracer_blocked_value",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 2,
+        "TopLevelHits": 2,
+        "Duration": 2000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      }
+    ]
+  }
+]
