@@ -15,8 +15,8 @@ use libdd_data_pipeline::trace_buffer::{
     TraceChunk,
 };
 use libdd_data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
-    TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse, error::TraceExporterError, stats::CardinalityLimitConfig,
+    TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
 use libdd_trace_utils::span::span_pool::PooledChunks;
@@ -367,6 +367,13 @@ fn build_trace_exporter(
     if config.trace_stats_computation_enabled() {
         builder.enable_stats(Duration::from_secs(10));
     }
+    builder.set_stats_cardinality_limit(CardinalityLimitConfig {
+        whole_key_limit: config.trace_stats_cardinality_limit(),
+        resource_limit: config.trace_stats_resource_cardinality_limit(),
+        http_endpoint_limit: config.trace_stats_http_endpoint_cardinality_limit(),
+        peer_tags_limit: config.trace_stats_peer_tags_cardinality_limit(),
+        additional_tags_limit: config.trace_stats_additional_tags_cardinality_limit(),
+    });
     if config.trace_stats_computation_experimental_client_obfuscation_enabled() {
         builder.enable_client_side_stats_obfuscation();
     }
