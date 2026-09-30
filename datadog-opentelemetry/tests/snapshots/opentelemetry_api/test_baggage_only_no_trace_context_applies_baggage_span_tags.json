@@ -15,8 +15,7 @@
       "otel.trace_id": "6a3a5a6c00000000525a2c317a438eb3",
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
-      "telemetry.sdk.name": "datadog",
-      "telemetry.sdk.version": "0.5.0"
+      "telemetry.sdk.name": "datadog"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,

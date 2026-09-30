@@ -3,7 +3,7 @@
 
 use std::{
     pin::Pin,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
 };
@@ -15,10 +15,12 @@ use libdd_data_pipeline::trace_buffer::{
     TraceChunk,
 };
 use libdd_data_pipeline::trace_exporter::{
-    agent_response::AgentResponse, error::TraceExporterError, TelemetryConfig, TraceExporter,
-    TraceExporterBuilder, TraceExporterOutputFormat,
+    agent_response::AgentResponse, error::TraceExporterError, stats::CardinalityLimitConfig,
+    TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
+use libdd_trace_utils::span::span_pool::PooledChunks;
+use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
@@ -102,9 +104,6 @@ impl BufferSize for BufferedSpan {
     }
 }
 
-/// Counter + cvar tracking spans accepted by `send_chunk` but not yet exported.
-type PendingSpans = Arc<(Mutex<usize>, Condvar)>;
-
 pub struct DatadogExporter {
     // Wrapped in `Option` so `Drop` can move them onto a dedicated std thread —
     // their drop transitively drops a `tokio::runtime::Runtime`, which panics when
@@ -113,7 +112,6 @@ pub struct DatadogExporter {
     shared_runtime: Option<Arc<BasicRuntime>>,
     otel_resource: Arc<ArcSwap<Resource>>,
     shutdown_rx: Mutex<Option<mpsc::Receiver<Result<(), SharedRuntimeError>>>>,
-    pending_spans: PendingSpans,
 }
 
 impl Drop for DatadogExporter {
@@ -166,6 +164,11 @@ impl DatadogExporter {
         // `TraceExporterBuilder::build` drives async setup via `tokio::runtime::Runtime::block_on`,
         // which panics when called from inside an existing tokio runtime (e.g. a `#[tokio::test]`).
         // Run construction on a dedicated std thread so the builder is outside any caller context.
+        //
+        // The shared runtime is also built *inside* this thread (not on the caller's), so it never
+        // exists on the caller's thread: neither a build failure (dropped here) nor a spawn failure
+        // (no runtime created) can drop a tokio runtime inline on the caller — which would panic
+        // when `new` runs inside an existing runtime.
         let (tx, rx) = mpsc::sync_channel(1);
         thread::Builder::new()
             .name("datadog-trace-init".into())
@@ -184,7 +187,7 @@ impl DatadogExporter {
             .expect("trace_buffer accessed after DatadogExporter::drop")
     }
 
-    fn shared_runtime(&self) -> &Arc<BasicRuntime> {
+    pub(crate) fn shared_runtime(&self) -> &Arc<BasicRuntime> {
         self.shared_runtime
             .as_ref()
             .expect("shared_runtime accessed after DatadogExporter::drop")
@@ -198,56 +201,14 @@ impl DatadogExporter {
         if span_data.is_empty() {
             return Ok(());
         }
-        let n = span_data.len();
         let buffered = wrap_span_vec(span_data);
-        // Increment before handing the chunk to libdatadog so the export-side decrement
-        // (in `SpanDataExport::export_trace_chunks`) cannot race ahead and underflow.
-        increment_pending(&self.pending_spans, n);
-        match self.trace_buffer().send_chunk(buffered) {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // `BatchFull` and `AlreadyShutdown` are outright rejections, so the export side
-                // will never decrement. Late errors from `wait_flush_done` (sync
-                // mode) mean the chunk is still queued.
-                if matches!(
-                    e,
-                    TraceBufferError::BatchFull(_) | TraceBufferError::AlreadyShutdown
-                ) {
-                    decrement_pending(&self.pending_spans, n);
-                }
-                Err(e)
-            }
-        }
+        self.trace_buffer().send_chunk(buffered)
     }
 
-    pub fn force_flush(&self) -> Result<(), TraceBufferError> {
-        self.trace_buffer().force_flush()
-    }
-
-    /// Triggers a flush and blocks until every span accepted by `send_chunk` has been exported
-    /// (or the timeout elapses). Use this before [`trigger_shutdown`] so the runtime cancellation
-    /// doesn't drop a queued batch.
-    pub fn flush_and_drain(&self, timeout: Duration) -> Result<(), TraceBufferError> {
-        self.trace_buffer().force_flush()?;
-        self.wait_for_drain(timeout)
-    }
-
-    fn wait_for_drain(&self, timeout: Duration) -> Result<(), TraceBufferError> {
-        let (lock, cvar) = &*self.pending_spans;
-        let guard = lock.lock().map_err(|_| TraceBufferError::MutexPoisoned)?;
-        if *guard == 0 {
-            return Ok(());
-        }
-        if timeout.is_zero() {
-            return Err(TraceBufferError::TimedOut(Duration::ZERO));
-        }
-        let (_guard, res) = cvar
-            .wait_timeout_while(guard, timeout, |count| *count > 0)
-            .map_err(|_| TraceBufferError::MutexPoisoned)?;
-        if res.timed_out() {
-            return Err(TraceBufferError::TimedOut(timeout));
-        }
-        Ok(())
+    /// Triggers a flush and blocks until every span accepted by `send_chunk` before this call
+    /// has been exported (or the timeout elapses).
+    pub fn flush_and_wait(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+        self.trace_buffer().flush_and_wait(Some(timeout))
     }
 
     pub fn trigger_shutdown(&self) {
@@ -281,7 +242,7 @@ impl DatadogExporter {
             .lock()
             .map_err(|_| TraceBufferError::MutexPoisoned)?
             .take()
-            .ok_or(TraceBufferError::AlreadyShutdown)?;
+            .ok_or(TraceBufferError::AlreadyClosed)?;
         let runtime_result = match rx.recv_timeout(timeout) {
             Ok(res) => res,
             Err(mpsc::RecvTimeoutError::Timeout) => return Err(TraceBufferError::TimedOut(timeout)),
@@ -298,7 +259,7 @@ impl DatadogExporter {
             Ok(()) => Ok(()),
             Err(SharedRuntimeError::ShutdownTimedOut(d)) => Err(TraceBufferError::TimedOut(d)),
             Err(SharedRuntimeError::LockFailed(_)) => Err(TraceBufferError::MutexPoisoned),
-            Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyShutdown),
+            Err(SharedRuntimeError::RuntimeUnavailable) => Err(TraceBufferError::AlreadyClosed),
             Err(e) => Err(TraceBufferError::TraceExporter(TraceExporterError::Internal(
                 libdd_data_pipeline::trace_exporter::error::InternalErrorKind::InvalidWorkerState(
                     e.to_string(),
@@ -331,6 +292,15 @@ fn build_response_handler(agent_response_handler: Option<AgentResponseHandler>) 
     })
 }
 
+fn build_shared_runtime() -> Result<Arc<BasicRuntime>, DatadogExporterInitError> {
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
+    Ok(Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime))))
+}
+
 /// Drives trace-exporter construction on a dedicated std thread. `TraceExporterBuilder::build`
 /// runs async setup through `Runtime::block_on`, which panics when called from inside an existing
 /// tokio runtime — this function must therefore run on a fresh std thread.
@@ -338,12 +308,7 @@ fn build_on_dedicated_thread(
     config: Arc<Config>,
     response_handler: ResponseHandler,
 ) -> Result<DatadogExporter, DatadogExporterInitError> {
-    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .map_err(|e| DatadogExporterInitError::Runtime(SharedRuntimeError::RuntimeCreation(e)))?;
-    let shared_runtime = Arc::new(BasicRuntime::from_handle(Arc::new(tokio_runtime)));
+    let shared_runtime = build_shared_runtime()?;
 
     let trace_exporter = build_trace_exporter(&config, &shared_runtime)
         .map_err(DatadogExporterInitError::TraceExporter)?;
@@ -354,14 +319,12 @@ fn build_on_dedicated_thread(
         .max_flush_interval(config.trace_writer_max_flush_interval());
 
     let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
-    let pending_spans: PendingSpans = Arc::new((Mutex::new(0_usize), Condvar::new()));
 
     let export = SpanDataExport {
         trace_exporter,
         otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
-        pending_spans: Arc::clone(&pending_spans),
     };
 
     let (trace_buffer, worker) =
@@ -378,25 +341,7 @@ fn build_on_dedicated_thread(
         shared_runtime: Some(shared_runtime),
         otel_resource,
         shutdown_rx: Mutex::new(None),
-        pending_spans,
     })
-}
-
-fn increment_pending(pending: &PendingSpans, n: usize) {
-    let (lock, _) = &**pending;
-    if let Ok(mut count) = lock.lock() {
-        *count = count.saturating_add(n);
-    }
-}
-
-fn decrement_pending(pending: &PendingSpans, n: usize) {
-    let (lock, cvar) = &**pending;
-    if let Ok(mut count) = lock.lock() {
-        *count = count.saturating_sub(n);
-        if *count == 0 {
-            cvar.notify_all();
-        }
-    }
 }
 
 fn build_trace_exporter(
@@ -422,6 +367,13 @@ fn build_trace_exporter(
     if config.trace_stats_computation_enabled() {
         builder.enable_stats(Duration::from_secs(10));
     }
+    builder.set_stats_cardinality_limit(CardinalityLimitConfig {
+        whole_key_limit: config.trace_stats_cardinality_limit(),
+        resource_limit: config.trace_stats_resource_cardinality_limit(),
+        http_endpoint_limit: config.trace_stats_http_endpoint_cardinality_limit(),
+        peer_tags_limit: config.trace_stats_peer_tags_cardinality_limit(),
+        additional_tags_limit: config.trace_stats_additional_tags_cardinality_limit(),
+    });
     if config.trace_stats_computation_experimental_client_obfuscation_enabled() {
         builder.enable_client_side_stats_obfuscation();
     }
@@ -460,21 +412,20 @@ struct SpanDataExport {
     otel_resource: Arc<ArcSwap<Resource>>,
     cached_config: CachedConfig,
     config: Arc<Config>,
-    pending_spans: PendingSpans,
 }
 
 impl Export<BufferedSpan> for SpanDataExport {
     fn export_trace_chunks(
         &mut self,
         trace_chunks: Vec<TraceChunk<BufferedSpan>>,
+        force_flush: bool,
     ) -> Pin<
         Box<
             dyn std::future::Future<Output = Result<AgentResponse, TraceExporterError>> + Send + '_,
         >,
     > {
-        // Account for every span we drained from the buffer, regardless of whether the export
-        // ultimately succeeds — `send_chunk` already counted them on entry.
-        let total_spans: usize = trace_chunks.iter().map(|c| c.len()).sum();
+        // The trace buffer passes `force_flush = true` for an explicit flush (e.g. via
+        // `flush_and_wait`); in that case we also drain buffered client-computed stats.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
             let dd_trace_chunks = trace_chunks
@@ -495,11 +446,17 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
             self.config.add_extra_services(services);
 
-            let result = self
-                .trace_exporter
-                .send_trace_chunks_async(dd_trace_chunks)
-                .await;
-            decrement_pending(&self.pending_spans, total_spans);
+            let result = if !dd_trace_chunks.is_empty() {
+                self.trace_exporter
+                    .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
+                    .await
+            } else {
+                Ok(AgentResponse::Unchanged)
+            };
+
+            if force_flush {
+                self.trace_exporter.flush_client_side_stats_async().await;
+            }
             result
         })
     }
@@ -528,6 +485,10 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
     };
 
     use crate::{dd_debug, dd_error};
+
+    // Suppress OpenTelemetry log records for the duration of this call to avoid infinite recursion
+    // when the error is logged generating a new log record and attempt to export it again.
+    let _suppress_guard = Context::enter_telemetry_suppressed_scope();
 
     match e {
         // Exceptional errors
@@ -579,4 +540,28 @@ fn log_trace_exporter_error(e: &TraceExporterError) {
             );
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        core::log::test_capture::capture_at, log::LevelFilter,
+        span_exporter::log_trace_exporter_error,
+    };
+    use libdd_data_pipeline::trace_exporter::error::{InternalErrorKind, TraceExporterError};
+
+    #[test]
+    fn export_errors_reach_non_otel_tracing_layers_while_suppressed() {
+        let error = TraceExporterError::Internal(InternalErrorKind::InvalidWorkerState(
+            "stopped".to_owned(),
+        ));
+
+        let events = capture_at(LevelFilter::Debug, || log_trace_exporter_error(&error));
+
+        // The event is dispatched so non-OpenTelemetry layers can capture it. The active
+        // suppression flag makes an OpenTelemetry log bridge reject the event independently.
+        assert_eq!(events.len(), 1);
+        assert!(events[0].suppressed);
+        assert!(events[0].message.contains("Invalid worker state: stopped"));
+    }
 }

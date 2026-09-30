@@ -1,0 +1,39 @@
+# git-cliff configuration for datadog-opentelemetry.
+#
+# Used by scripts/prepare-release.sh to render the list of changelog entries for a release: a plain
+# (ungrouped) list of the meaningful commits since the previous tag, each linking its PR. The
+# "## <version> (<date>)" heading and placement in CHANGELOG.md are handled by the script, so this
+# config emits only the bullet list.
+
+[changelog]
+header = ""
+# One bullet per commit, no grouping. `commit.message` is the conventional-commit description
+# (type/scope prefix stripped by the parser below).
+body = """
+{%- for commit in commits %}
+- {{ commit.message | upper_first }}
+{%- endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+# Keep commits that don't follow the convention (rare) rather than silently dropping them.
+filter_unconventional = false
+# Only emit commits that a parser keeps (drops the skipped types below).
+filter_commits = true
+# Turn the trailing "(#123)" that squash-merges add into a Markdown link to the PR.
+commit_preprocessors = [
+    { pattern = '\(#([0-9]+)\)', replace = "in https://github.com/DataDog/dd-trace-rs/pull/${1}" },
+]
+# Omit chore/ci/docs/test; keep everything else in a single (unused) group.
+commit_parsers = [
+    { message = "^chore", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^docs", skip = true },
+    { message = "^test", skip = true },
+    { message = ".*", group = "changes" },
+]
+tag_pattern = "datadog-opentelemetry-v[0-9]*"
+sort_commits = "newest"

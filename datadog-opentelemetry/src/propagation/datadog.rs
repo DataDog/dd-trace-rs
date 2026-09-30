@@ -191,22 +191,39 @@ fn validate_tag_value(value: &str) -> bool {
 }
 
 /// Extract trace context from a carrier using Datadog headers.
+///
+/// `DatadogCompositePropagator` calls `try_extract` instead; this is for direct
+/// callers of the public propagation API (`_unstable_propagation`/`test-utils`).
+#[allow(dead_code)]
 pub fn extract(
     carrier: &dyn Extractor,
     config: &(impl PropagationConfig + ?Sized),
 ) -> Option<SpanContext> {
-    let lower_trace_id = match extract_trace_id(carrier) {
-        Ok(trace_id) => trace_id?,
+    match try_extract(carrier, config)? {
+        Ok(context) => Some(context),
         Err(e) => {
             dd_error!("Propagator (datadog): Error extracting trace_id {e}");
-            return None;
+            None
         }
+    }
+}
+
+/// Same as [`extract`], but returns the trace-id error instead of logging it. The
+/// composite propagator uses this so it can log once, after checking if another
+/// format recovered.
+pub(crate) fn try_extract(
+    carrier: &dyn Extractor,
+    config: &(impl PropagationConfig + ?Sized),
+) -> Option<Result<SpanContext, Error>> {
+    let lower_trace_id = match extract_trace_id(carrier) {
+        Ok(trace_id) => trace_id?,
+        Err(e) => return Some(Err(e)),
     };
 
     let parent_id = match extract_parent_id(carrier) {
         Ok(parent_id) => parent_id.unwrap_or_default(),
         Err(e) => {
-            dd_error!("Propagator (datadog): Error extracting parent_id {e}");
+            dd_warn!("Propagator (datadog): Error extracting parent_id {e}");
             0
         }
     };
@@ -239,7 +256,7 @@ pub fn extract(
         tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY),
     );
 
-    Some(SpanContext {
+    Some(Ok(SpanContext {
         trace_id,
         span_id: parent_id,
         sampling,
@@ -248,7 +265,7 @@ pub fn extract(
         links: Vec::new(),
         is_remote: true,
         tracestate: None,
-    })
+    }))
 }
 
 fn extract_trace_id(carrier: &dyn Extractor) -> Result<Option<u64>, Error> {
@@ -411,7 +428,8 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 317_007_296_906_698_644_522_194);
@@ -444,7 +462,8 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -472,7 +491,8 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -501,10 +521,11 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(
+            .try_extract(
                 &headers,
                 &Config::builder().set_datadog_tags_max_length(5).build(),
             )
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -532,7 +553,8 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
@@ -551,7 +573,8 @@ mod test {
         let propagator = TracePropagationStyle::Datadog;
 
         let context = propagator
-            .extract(&headers, &Config::builder().build())
+            .try_extract(&headers, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);

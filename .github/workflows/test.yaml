@@ -14,6 +14,9 @@ jobs:
   test:
     name: "cargo test --workspace #${{ matrix.platform }} ${{ matrix.rust_version }}"
     runs-on: ${{ matrix.platform }}
+    permissions:
+      id-token: write
+      contents: read
     strategy:
       matrix:
         platform: [windows-latest, ubuntu-latest, macos-14]
@@ -47,7 +50,7 @@ jobs:
         # On Windows run happens in a PowerShell, so start bash explicitly
         run: bash -c 'echo "version=$(rustc --version)" >> $GITHUB_OUTPUT'
       - name: Install cargo nextest
-        uses: taiki-e/install-action@955a6ff1416eae278c9f833008a9beb4b7f9afe3 # v2.49.15,
+        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
         with:
           tool: nextest@0.9.81
       - name: "Remove nextest CI report"
@@ -79,8 +82,16 @@ jobs:
           report_paths: "target/nextest/ci/junit.xml"
           check_name: "[${{ matrix.platform }}:${{ matrix.rust_version }}] test report"
           include_passed: true
+      - name: Get Datadog credentials via dd-sts
+        id: dd-sts
+        if: success() || failure()
+        continue-on-error: true
+        uses: DataDog/dd-sts-action@639d841c72f15e4e77747bd726ef8105ce971da2
+        with:
+          policy: public-datadog-dd-trace-rs
       - name: Upload test results to Datadog
         if: success() || failure()
+        continue-on-error: true
         shell: bash
         run: |
           # Download datadog-ci binary
@@ -123,7 +134,7 @@ jobs:
             --tags rustc:${{ matrix.rust_version }},arch:${{ runner.arch }},os:${{ runner.os }},platform:${{ matrix.platform }} \
             target/nextest/ci/junit.xml
         env:
-          DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+          DD_API_KEY: ${{ steps.dd-sts.outputs.api_key }}
 
   cross-centos7:
     name: build and test using cross - on centos7
@@ -171,7 +182,7 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@271863c89eb498754525cc8a7f59f46868a729e4  # main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@53687a2f4eab136c61d2a97474a37846d9ca6959  # main
     permissions:
       contents: read
       id-token: write
@@ -180,5 +191,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: 271863c89eb498754525cc8a7f59f46868a729e4 # main
+      ref: 53687a2f4eab136c61d2a97474a37846d9ca6959 # main
       push_to_test_optimization: true

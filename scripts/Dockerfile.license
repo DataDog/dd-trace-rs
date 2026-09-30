@@ -16,6 +16,8 @@ COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    dd-rust-license-tool dump > /licenses.csv
+    mkdir -p /licenses/instrumentation && \
+    dd-rust-license-tool dump > /licenses/LICENSE-3rdparty.csv && \
+    dd-rust-license-tool --manifest-path instrumentation/Cargo.toml dump > /licenses/instrumentation/LICENSE-3rdparty.csv
 
-ENTRYPOINT ["cat", "/licenses.csv"]
+ENTRYPOINT ["/bin/sh", "-ec", "test \"$#\" -eq 1; exec cat \"$1\"", "--"]

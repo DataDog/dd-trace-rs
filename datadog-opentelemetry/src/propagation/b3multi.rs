@@ -375,7 +375,8 @@ mod test {
         ]);
         let propagator = TracePropagationStyle::B3Multi;
         let ctx = propagator
-            .extract(&carrier, &Config::builder().build())
+            .try_extract(&carrier, &Config::builder().build())
+            .map(Result::unwrap)
             .expect("b3multi dispatch should produce context");
         assert_eq!(ctx.trace_id, 0x80f1_98ee_5634_3ba8);
     }

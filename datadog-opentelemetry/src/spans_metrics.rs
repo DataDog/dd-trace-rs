@@ -3,40 +3,35 @@
 
 use std::{sync::Arc, time::Duration};
 
-use crate::{
-    core::{
-        telemetry,
-        utils::{ShutdownSignaler, WorkerError, WorkerHandle},
-    },
-    span_exporter::QueueMetricsFetcher,
-    TraceRegistry,
-};
+use async_trait::async_trait;
+use libdd_shared_runtime::{BasicRuntime, SharedRuntime, SharedRuntimeError, Worker};
 
+use crate::{core::telemetry, span_exporter::QueueMetricsFetcher, TraceRegistry};
+
+const EMIT_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Periodically emits span/queue telemetry metrics.
+///
+/// Runs as a [`Worker`] on the runtime shared with the trace exporter (see
+/// [`crate::span_processor`]). It has no independent shutdown: it is registered
+/// via [`SharedRuntime::spawn_worker`] and torn down when the runtime's
+/// `shutdown_async` runs during the exporter's shutdown — the same lifecycle as
+/// the trace-export and Remote Config workers.
 pub struct TelemetryMetricsCollector {
     registry: TraceRegistry,
     exporter_queue_metrics: QueueMetricsFetcher,
-    shutdown_rx: std::sync::mpsc::Receiver<()>,
-    shutdown_finished: Arc<ShutdownSignaler>,
+    /// Built lazily on the first [`Worker::trigger`] because `tokio::time`
+    /// timers must be constructed inside a runtime context, and `start` runs on
+    /// the caller's (non-runtime) thread. The first tick is one full interval
+    /// out, so the first emission happens after `EMIT_INTERVAL` — matching the
+    /// previous `recv_timeout` loop.
+    interval: Option<tokio::time::Interval>,
 }
 
-pub struct TelemetryMetricsCollectorHandle {
-    shutdown_tx: std::sync::mpsc::SyncSender<()>,
-    worker_handle: WorkerHandle,
-}
-
-impl TelemetryMetricsCollectorHandle {
-    pub fn trigger_shutdown(&self) {
-        let _ = self.shutdown_tx.try_send(());
-    }
-
-    pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), WorkerError> {
-        self.worker_handle.wait_for_shutdown(timeout)
-    }
-}
-
-impl Drop for TelemetryMetricsCollector {
-    fn drop(&mut self) {
-        self.shutdown_finished.signal_shutdown();
+impl std::fmt::Debug for TelemetryMetricsCollector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TelemetryMetricsCollector")
+            .finish_non_exhaustive()
     }
 }
 
@@ -44,30 +39,14 @@ impl TelemetryMetricsCollector {
     pub fn start(
         registry: TraceRegistry,
         exporter_queue_metrics: QueueMetricsFetcher,
-    ) -> TelemetryMetricsCollectorHandle {
-        let (shutdown_tx, shutdown_rx) = std::sync::mpsc::sync_channel(1);
-        let shutdown_finished = ShutdownSignaler::new();
+        shared_runtime: &Arc<BasicRuntime>,
+    ) -> Result<(), SharedRuntimeError> {
         let worker = Self {
             registry,
-            shutdown_rx,
-            shutdown_finished: shutdown_finished.clone(),
             exporter_queue_metrics,
+            interval: None,
         };
-        let handle = std::thread::spawn(|| worker.run());
-        TelemetryMetricsCollectorHandle {
-            shutdown_tx,
-            worker_handle: WorkerHandle::new(shutdown_finished, handle),
-        }
-    }
-
-    fn run(mut self) {
-        loop {
-            match self.shutdown_rx.recv_timeout(Duration::from_secs(10)) {
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) | Ok(()) => return,
-            };
-            self.emit_metrics();
-        }
+        shared_runtime.spawn_worker(worker, false).map(|_handle| ())
     }
 
     fn emit_metrics(&mut self) {
@@ -99,5 +78,26 @@ impl TelemetryMetricsCollector {
                 SpansDroppedBufferFull,
             ),
         ]);
+    }
+}
+
+#[async_trait]
+impl Worker for TelemetryMetricsCollector {
+    async fn run(&mut self) {
+        self.emit_metrics();
+    }
+
+    async fn trigger(&mut self) {
+        let interval = self.interval.get_or_insert_with(|| {
+            // First tick one interval out so the first emission is delayed by
+            // `EMIT_INTERVAL`, matching the previous `recv_timeout` loop.
+            let mut interval = tokio::time::interval_at(
+                tokio::time::Instant::now() + EMIT_INTERVAL,
+                EMIT_INTERVAL,
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval
+        });
+        interval.tick().await;
     }
 }
