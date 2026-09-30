@@ -1627,7 +1627,7 @@ dependencies = [
 [[package]]
 name = "libdd-otel-telemetry"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#f0b41deceb30796d7bdcdd075586f6188f1790f9"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#01809b7833922e6fe085be025310024d844b36b7"
 dependencies = [
  "libdd-shared-runtime",
  "opentelemetry",
