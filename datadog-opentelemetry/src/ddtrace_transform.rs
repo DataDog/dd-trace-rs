@@ -52,9 +52,10 @@ where
 {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
-    let mut dd_spans: Vec<DdSpan<'a>> = span_data
+    span_data
         .into_iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let trace_flags = s.span_context.trace_flags();
             let sdk_span = SdkSpan::from_sdk_span_data(s);
             let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource);
@@ -62,20 +63,23 @@ where
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);
 
+            // Traces are only exported natively today. When OTLP trace export is added, pass
+            // the export mode in and skip this tag for OTLP.
+            if i == 0 {
+                add_native_export_marker(&mut dd_span);
+            }
+
             dd_span
         })
-        .collect();
+        .collect()
+}
 
-    // Traces are only exported natively today. When OTLP trace export is added, pass the
-    // export mode in and skip this tag for OTLP.
-    if let Some(first_span) = dd_spans.first_mut() {
-        first_span.meta.insert(
-            SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
-            SpanStr::from_static_str("false"),
-        );
-    }
-
-    dd_spans
+/// Mark the span as exported natively to the Datadog agent. Set on the first span of each chunk.
+fn add_native_export_marker(dd_span: &mut DdSpan) {
+    dd_span.meta.insert(
+        SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
+        SpanStr::from_static_str("false"),
+    );
 }
 
 fn add_config_metadata<'a>(
