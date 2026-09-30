@@ -16,8 +16,6 @@ use crate::otlp_utils::{
 };
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use libdd_otel_telemetry::{build_datadog_metric_exporter, OtlpExporterConfig, Temporality};
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-use libdd_shared_runtime::{BasicRuntime, SharedRuntime};
 
 use crate::dd_warn;
 
@@ -103,18 +101,7 @@ pub fn create_meter_provider(
     let exporter_config =
         OtlpExporterConfig::new(endpoint, to_libdd_protocol(protocol)).with_timeout(timeout);
 
-    let runtime = match BasicRuntime::new() {
-        Ok(runtime) => Arc::new(runtime),
-        Err(err) => {
-            dd_warn!(
-                "Failed to create metrics runtime: {}. Metrics will not be exported.",
-                err
-            );
-            return SdkMeterProvider::builder().build();
-        }
-    };
-
-    let exporter = match build_exporter(exporter_config, temporality, runtime) {
+    let exporter = match build_exporter(exporter_config, temporality) {
         Ok(exporter) => exporter,
         Err(err) => {
             dd_warn!(
@@ -147,15 +134,14 @@ pub fn create_meter_provider(
 
 /// Builds the libdatadog OTLP metrics exporter.
 ///
-/// The shared runtime initializes the transport and drives exports from the SDK reader thread.
+/// Libdatadog's shared runtime initializes the transport and drives exports from the SDK reader
+/// thread.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 fn build_exporter(
     config: OtlpExporterConfig,
     temporality: Temporality,
-    runtime: Arc<BasicRuntime>,
 ) -> Result<libdd_otel_telemetry::DatadogMetricExporter, String> {
-    build_datadog_metric_exporter(&config, temporality, runtime)
-        .map_err(|warning| warning.to_string())
+    build_datadog_metric_exporter(&config, temporality).map_err(|warning| warning.to_string())
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
