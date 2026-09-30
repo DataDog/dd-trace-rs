@@ -216,6 +216,8 @@ jobs:
         TRACING_CONFIG_NONDEFAULT_2,
         TRACING_CONFIG_NONDEFAULT_3,
         PARAMETRIC
+      # Splits the end-to-end scenarios across parallel runners
+      desired_execution_time: "600"
       parametric_job_count: 2
       ref: 53687a2f4eab136c61d2a97474a37846d9ca6959 # main
       push_to_test_optimization: true
