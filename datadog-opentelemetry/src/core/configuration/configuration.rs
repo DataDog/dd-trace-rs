@@ -8,7 +8,7 @@ use std::fmt::Display;
 use std::ops::Deref;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
 
@@ -1091,6 +1091,12 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
+static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
+    hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default()
+});
+
 impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
 impl_config_value_provider!(option: String, f64);
 
@@ -2100,31 +2106,12 @@ impl Config {
     #[cfg(target_os = "linux")]
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
         fn hostname() -> String {
-            let mut buf = vec![0; 256];
-
-            unsafe {
-                // Safety: buf is valid for writes for at most buf.len().
-                if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
-                    // Amusingly (so to speak), if the host name doesn't fit in `buf.len()`,
-                    // gethostname will put a truncated version in the buffer, which isn't
-                    // null-terminated. So the resulting buffer might or might not be a valid C
-                    // string...
-                    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-                    buf.truncate(len);
-                    // Note: use from_utf8_lossy_owned once it's stabilized
-                    String::from_utf8(buf)
-                        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
-                } else {
-                    String::new()
-                }
-            }
-        }
 
         TracerMetadata {
             runtime_id: Some(self.runtime_id.to_owned()),
             tracer_language: "rust".to_owned(),
             tracer_version: self.tracer_version.to_owned(),
-            hostname: hostname(),
+            hostname: self.hostname().to_owned(),
             service_name: Some(self.service().to_owned()),
             service_env: self.env().map(str::to_owned),
             service_version: self.version().map(str::to_owned),
@@ -2469,11 +2456,15 @@ impl ConfigBuilder {
             config.dogstatsd_agent_url.set_calculated(url);
         }
 
+        #[cfg(not(target_os = "linux"))]
         if config.hostname.value().is_empty() && *config.trace_report_hostname.value() {
-            let system_hostname = hostname::get()
-                .map(|h| String::from_utf8_lossy(h.as_encoded_bytes()).to_string())
-                .unwrap_or_default();
-            config.hostname.default_value = system_hostname;
+            config.hostname.default_value = HOSTNAME.clone();
+        }
+
+        #[cfg(target_os = "linux")]
+        if config.hostname.value().is_empty() {
+            // on linux, this is needed for the tracer metadata
+            config.hostname.default_value = HOSTNAME.clone();
         }
 
         config
