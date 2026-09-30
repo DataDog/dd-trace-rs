@@ -8,17 +8,14 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-use libdd_otel_telemetry::{build_datadog_metric_exporter, OtlpExporterConfig, Temporality};
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-use libdd_shared_runtime::{BasicRuntime, BlockingRuntime};
-
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use crate::configuration::OtlpProtocol;
 use crate::core::configuration::Config;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use crate::otlp_utils::{
     build_otel_resource, get_otlp_metrics_endpoint, get_otlp_metrics_timeout, get_otlp_protocol,
 };
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+use libdd_otel_telemetry::{build_datadog_metric_exporter, OtlpExporterConfig, Temporality};
 
 use crate::dd_warn;
 
@@ -137,29 +134,14 @@ pub fn create_meter_provider(
 
 /// Builds the libdatadog OTLP metrics exporter.
 ///
-/// `build_datadog_metric_exporter` is `async` because the underlying `opentelemetry-otlp`
-/// exporter initializes its transport within a tokio context. It's driven on a dedicated std
-/// thread's single-worker runtime (mirroring `span_exporter`) so it works whether or not the
-/// caller is already inside a tokio runtime — `BasicRuntime::block_on` would otherwise panic if
-/// called from within an existing runtime.
+/// The underlying `opentelemetry-otlp` exporter initializes its transport against the current
+/// tokio runtime and retains that runtime for later exports.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 fn build_exporter(
     config: OtlpExporterConfig,
     temporality: Temporality,
 ) -> Result<libdd_otel_telemetry::DatadogMetricExporter, String> {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(move || {
-                let runtime = BasicRuntime::with_worker_threads(1)
-                    .map_err(|e| format!("failed to create metrics exporter runtime: {e}"))?;
-                runtime
-                    .block_on(build_datadog_metric_exporter(&config, temporality))
-                    .map_err(|e| format!("metrics exporter runtime unavailable: {e}"))?
-                    .map_err(|warning| warning.to_string())
-            })
-            .join()
-            .unwrap_or_else(|_| Err("metrics exporter build thread panicked".to_string()))
-    })
+    build_datadog_metric_exporter(&config, temporality).map_err(|warning| warning.to_string())
 }
 
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]

@@ -1370,15 +1370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1398,36 +1389,6 @@ dependencies = [
  "thiserror 1.0.69",
  "walkdir",
  "windows-sys 0.45.0",
-]
-
-[[package]]
-name = "jni"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5efd9a482cf3a427f00d6b35f14332adc7902ce91efb778580e180ff90fa3498"
-dependencies = [
- "cfg-if",
- "combine",
- "jni-macros",
- "jni-sys 0.4.1",
- "log",
- "simd_cesu8",
- "thiserror 2.0.21",
- "walkdir",
- "windows-link",
-]
-
-[[package]]
-name = "jni-macros"
-version = "0.22.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a00109accc170f0bdb141fed3e393c565b6f5e072365c3bd58f5b062591560a3"
-dependencies = [
- "proc-macro2",
- "quote",
- "rustc_version",
- "simd_cesu8",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -1509,7 +1470,8 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 [[package]]
 name = "libdd-capabilities"
 version = "4.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#522070ee2db0e668b807e532a576bfe6dfa31b63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f9cb2c9db9807ae5c3f2eca9ba14561f51c3a85d31837bd60a7baaeba7f5420"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1522,7 +1484,8 @@ dependencies = [
 [[package]]
 name = "libdd-capabilities-impl"
 version = "6.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#522070ee2db0e668b807e532a576bfe6dfa31b63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64bd2696705ee3451cc56464926287620165a596356224ceba2cb085b82e5f20"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1536,10 +1499,10 @@ dependencies = [
 [[package]]
 name = "libdd-common"
 version = "7.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#522070ee2db0e668b807e532a576bfe6dfa31b63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07f750b5392281ae57764e1ad924d868d880f3b6c4f9529373adfb4823becff0"
 dependencies = [
  "anyhow",
- "arc-swap",
  "bytes",
  "cc",
  "const_format",
@@ -1557,7 +1520,7 @@ dependencies = [
  "pin-project",
  "regex",
  "rustls",
- "rustls-platform-verifier 0.6.2",
+ "rustls-platform-verifier",
  "serde",
  "static_assertions",
  "thiserror 2.0.21",
@@ -1673,14 +1636,13 @@ dependencies = [
 [[package]]
 name = "libdd-otel-telemetry"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#522070ee2db0e668b807e532a576bfe6dfa31b63"
+source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#9f0c735af231714a893153da8d19e42c89d63885"
 dependencies = [
  "libdd-shared-runtime",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "rustls",
- "tracing",
 ]
 
 [[package]]
@@ -1750,7 +1712,8 @@ dependencies = [
 [[package]]
 name = "libdd-shared-runtime"
 version = "5.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=munir%2Fotel-telemetry-libdatadog#522070ee2db0e668b807e532a576bfe6dfa31b63"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "748e2a65ee90cf24bc6c4476fb83a67baa58ab439da70667ad43f48551201c3c"
 dependencies = [
  "async-trait",
  "futures",
@@ -2422,7 +2385,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -2720,7 +2683,7 @@ dependencies = [
  "quinn",
  "rustls",
  "rustls-pki-types",
- "rustls-platform-verifier 0.7.1",
+ "rustls-platform-verifier",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -2859,33 +2822,12 @@ checksum = "1d99feebc72bae7ab76ba994bb5e121b8d83d910ca40b36e0921f53becc41784"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
- "jni 0.21.1",
+ "jni",
  "log",
  "once_cell",
  "rustls",
  "rustls-native-certs",
- "rustls-platform-verifier-android 0.1.1",
- "rustls-webpki",
- "security-framework",
- "security-framework-sys",
- "webpki-root-certs",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rustls-platform-verifier"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1167586491e2b18b8bfbb293e8180ec17c201c4f076d7cb3070ca964e7598f98"
-dependencies = [
- "core-foundation 0.10.1",
- "core-foundation-sys",
- "jni 0.22.4",
- "log",
- "once_cell",
- "rustls",
- "rustls-native-certs",
- "rustls-platform-verifier-android 0.2.0",
+ "rustls-platform-verifier-android",
  "rustls-webpki",
  "security-framework",
  "security-framework-sys",
@@ -2898,12 +2840,6 @@ name = "rustls-platform-verifier-android"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
-
-[[package]]
-name = "rustls-platform-verifier-android"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
@@ -3123,22 +3059,6 @@ dependencies = [
  "errno",
  "libc",
 ]
-
-[[package]]
-name = "simd_cesu8"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11031e251abf8611c80f460e19dbdeb54a66db918e49c65a7065b46ac7aec520"
-dependencies = [
- "rustc_version",
- "simdutf8",
-]
-
-[[package]]
-name = "simdutf8"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "similar"
