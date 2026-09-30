@@ -52,7 +52,7 @@ where
 {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
-    span_data
+    let mut dd_spans: Vec<DdSpan<'a>> = span_data
         .into_iter()
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
@@ -64,18 +64,18 @@ where
 
             dd_span
         })
-        .collect()
-}
+        .collect();
 
-/// Mark a trace chunk as exported natively to the Datadog agent, by setting the
-/// `_dd.sdk.otlp_export` tag to "false" on its first span.
-pub fn mark_native_export(dd_chunk: &mut [DdSpan<'_>]) {
-    if let Some(first_span) = dd_chunk.first_mut() {
+    // Traces are only exported natively today. When OTLP trace export is added, pass the
+    // export mode in and skip this tag for OTLP.
+    if let Some(first_span) = dd_spans.first_mut() {
         first_span.meta.insert(
             SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
             SpanStr::from_static_str("false"),
         );
     }
+
+    dd_spans
 }
 
 fn add_config_metadata<'a>(
@@ -149,17 +149,12 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_native_export_only_on_first_span_of_chunk() {
+    fn test_sdk_otlp_export_tag_only_on_first_span_of_chunk() {
         let cached_config = CachedConfig::new(&Config::builder().build());
         let resource = Resource::builder_empty().build();
         let spans = [span_data(1, 0), span_data(2, 1), span_data(3, 1)];
 
-        let mut dd_spans = otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource);
-        assert!(dd_spans.iter().all(|s| !s
-            .meta
-            .contains_key(&SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY))));
-
-        mark_native_export(&mut dd_spans);
+        let dd_spans = otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource);
 
         assert_eq!(dd_spans.len(), 3);
         assert_eq!(
@@ -177,10 +172,11 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_native_export_empty_chunk() {
-        let mut dd_spans: Vec<DdSpan<'_>> = Vec::new();
+    fn test_sdk_otlp_export_tag_empty_chunk() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+        let resource = Resource::builder_empty().build();
 
-        mark_native_export(&mut dd_spans);
+        let dd_spans = otel_trace_chunk_to_dd_trace_chunk(&cached_config, &[], &resource);
 
         assert!(dd_spans.is_empty());
     }
