@@ -431,11 +431,13 @@ impl Export<BufferedSpan> for SpanDataExport {
             let dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
-                    ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
+                    let mut dd_chunk = ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),
                         &resource,
-                    )
+                    );
+                    ddtrace_transform::mark_native_export(&mut dd_chunk);
+                    dd_chunk
                 })
                 .collect::<Vec<_>>();
 
