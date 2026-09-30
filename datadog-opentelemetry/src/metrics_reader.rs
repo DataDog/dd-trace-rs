@@ -15,6 +15,8 @@ use crate::otlp_utils::{
     build_otel_resource, get_otlp_metrics_endpoint, get_otlp_metrics_timeout, get_otlp_protocol,
 };
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use libdd_otel_telemetry::{build_datadog_metric_exporter, OtlpExporterConfig, Temporality};
 
 use crate::dd_warn;
@@ -37,9 +39,8 @@ pub(crate) type MetricView = Arc<
 /// attempts/successes/failures. dd-trace-rs keeps ownership of the `SdkMeterProvider`,
 /// `PeriodicReader`, resource, and views.
 ///
-/// TODO: wire `DatadogMetricExporter::counters()` into `crate::core::telemetry` (the old
-/// `TelemetryTrackingExporter`'s job). Export counts are now available via that snapshot; feeding
-/// them into DD telemetry is a follow-up.
+/// A thin host wrapper reports export outcomes into dd-trace-rs telemetry while libdatadog owns
+/// transport and export behavior.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub fn create_meter_provider(
     config: Arc<Config>,
@@ -115,7 +116,8 @@ pub fn create_meter_provider(
     let interval = export_interval
         .unwrap_or_else(|| Duration::from_millis(config.metric_export_interval() as u64));
 
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
+    let telemetry_exporter = TelemetryTrackingExporter::new(exporter, protocol);
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(telemetry_exporter)
         .with_interval(interval)
         .build();
 
