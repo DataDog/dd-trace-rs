@@ -8,7 +8,7 @@ GitLab CI configuration for the benchmarks that run on the
 - `rust-axum-realworld-parallel` stages: included in the root `.gitlab-ci.yml` from
   [apm-sdks-benchmarks](https://github.com/DataDog/apm-sdks-benchmarks/tree/main/.gitlab)
   (`ci-rust-axum-realworld-parallel.yml`).
-    - `FLAKY_BENCHMARKS_REGEX` for this suite lives there. Change it there.
+  - `FLAKY_BENCHMARKS_REGEX` for this suite lives there. Change it there.
 
 ## Marking a benchmark as flaky
 
