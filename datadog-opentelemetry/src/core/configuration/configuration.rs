@@ -2105,8 +2105,6 @@ impl Config {
     /// Generate tracer metadata from this config.
     #[cfg(target_os = "linux")]
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
-        fn hostname() -> String {
-
         TracerMetadata {
             runtime_id: Some(self.runtime_id.to_owned()),
             tracer_language: "rust".to_owned(),
