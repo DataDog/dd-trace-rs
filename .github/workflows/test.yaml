@@ -163,7 +163,7 @@ jobs:
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
       - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "integration_tests::"
 
-  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch of run-parametric.yml
+  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch_map of system-tests.yml
   build-artifacts:
     runs-on: ubuntu-latest
     steps:
@@ -179,17 +179,46 @@ jobs:
           name: system_tests_binaries
           path: ./binaries/**/*
 
-  parametric:
+  system-tests:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@53687a2f4eab136c61d2a97474a37846d9ca6959  # main
+    concurrency:
+      group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
+      cancel-in-progress: true
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@53687a2f4eab136c61d2a97474a37846d9ca6959  # main
     permissions:
       contents: read
       id-token: write
     with:
       library: rust
       binaries_artifact: system_tests_binaries
-      job_count: 2
-      job_matrix: '[1,2]'
+      scenarios: >-
+        APM_TRACING_E2E_OTEL,
+        APPSEC_API_SECURITY_RC,
+        DEFAULT,
+        INTEGRATIONS,
+        LIBRARY_CONF_CUSTOM_HEADER_TAGS_INVALID,
+        OTLP_RUNTIME_METRICS,
+        REMOTE_CONFIG_MOCKED_BACKEND_ASM_FEATURES,
+        SAMPLING,
+        TELEMETRY_DEPENDENCY_LOADED_TEST_FOR_DEPENDENCY_COLLECTION_DISABLED,
+        TELEMETRY_EXTENDED_HEARTBEAT,
+        TELEMETRY_LOG_GENERATION_DISABLED,
+        TRACE_PROPAGATION_STYLE_W3C,
+        TRACE_STATS_COMPUTATION,
+        TRACE_STATS_COMPUTATION_CLIENT_DROP_P0S_FALSE,
+        TRACE_STATS_COMPUTATION_ERROR_SAMPLER,
+        TRACE_STATS_COMPUTATION_FUTURE_OBFUSCATION_VERSION,
+        TRACE_STATS_COMPUTATION_MISSING_OBFUSCATION_VERSION,
+        TRACE_STATS_COMPUTATION_OBFUSCATION_VERSION_ZERO,
+        TRACING_CONFIG_EMPTY,
+        TRACING_CONFIG_NONDEFAULT,
+        TRACING_CONFIG_NONDEFAULT_2,
+        TRACING_CONFIG_NONDEFAULT_3,
+        PARAMETRIC
+      # Splits the end-to-end scenarios across parallel runners
+      desired_execution_time: "600"
+      parametric_job_count: 2
       ref: 53687a2f4eab136c61d2a97474a37846d9ca6959 # main
       push_to_test_optimization: true
+      skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}
