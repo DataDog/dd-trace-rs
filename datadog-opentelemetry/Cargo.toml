@@ -61,6 +61,7 @@ libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
 libdd-sampling = { workspace = true }
 libdd-shared-runtime = { workspace = true }
+libdd-otel-telemetry = { workspace = true, optional = true }
 libdd-remote-config = { workspace = true }
 libdd-heap-allocator = { workspace = true, optional = true }
 percent-encoding = "2.3.1"
@@ -97,12 +98,8 @@ criterion = "0.5.1"
 [features]
 default = []
 metrics = ["metrics-grpc"]
-metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
-metrics-http = [
-    "opentelemetry-otlp",
-    "opentelemetry-otlp/http-proto",
-    "opentelemetry-otlp/reqwest-blocking-client",
-]
+metrics-grpc = ["dep:libdd-otel-telemetry", "libdd-otel-telemetry/grpc"]
+metrics-http = ["dep:libdd-otel-telemetry", "libdd-otel-telemetry/http"]
 logs = ["logs-grpc"]
 logs-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
 logs-http = [

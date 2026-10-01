@@ -35,9 +35,7 @@ fn assert_meter_can_create_instruments(meter: &opentelemetry::metrics::Meter) {
         .build();
 }
 
-fn create_meter_provider_with_config(
-    config: Config,
-) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+fn create_meter_provider_with_config(config: Config) -> impl opentelemetry::metrics::MeterProvider {
     metrics()
         .with_config(config)
         .with_export_interval(TEST_EXPORT_INTERVAL)
@@ -46,7 +44,7 @@ fn create_meter_provider_with_config(
 
 fn create_meter_provider_with_config_no_interval(
     config: Config,
-) -> opentelemetry_sdk::metrics::SdkMeterProvider {
+) -> impl opentelemetry::metrics::MeterProvider {
     metrics().with_config(config).init()
 }
 
@@ -181,6 +179,30 @@ async fn test_metrics_export_grpc() {
     let _meter_provider = create_meter_provider_with_config(config);
     let meter = global::meter(TEST_METER_NAME);
     assert_meter_can_create_instruments(&meter);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_metrics_force_flush_keeps_export_runtime_alive() {
+    let config = Config::builder()
+        .set_metrics_otel_enabled(true)
+        .set_otlp_metrics_protocol("grpc".to_string())
+        .set_otlp_metrics_endpoint("http://127.0.0.1:1".to_string())
+        .set_otlp_metrics_timeout(50)
+        .build();
+
+    let meter_provider = metrics()
+        .with_config(config)
+        .with_export_interval(TEST_EXPORT_INTERVAL)
+        .init();
+    let counter = meter_provider
+        .meter(TEST_METER_NAME)
+        .u64_counter("runtime.counter")
+        .build();
+    counter.add(1, &[]);
+
+    // The endpoint is intentionally unavailable; this checks that export returns an error
+    // instead of panicking because its tokio runtime was dropped after initialization.
+    let _ = meter_provider.force_flush();
 }
 
 #[tokio::test]

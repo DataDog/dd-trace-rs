@@ -36,6 +36,7 @@ libdd-tinybytes = { version = "1.1.4", default-features = false }
 libdd-library-config = { version = "4.1.0", default-features = false }
 libdd-sampling = { version = "7.0.0", default-features = false }
 libdd-shared-runtime = { version = "5.0.0", default-features = false }
+libdd-otel-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "munir/otel-telemetry-libdatadog", default-features = false }
 libdd-remote-config = { version = "6.0.0", default-features = false, features = [
     "client",
 ] }
@@ -65,6 +66,12 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
+
+[patch."https://github.com/DataDog/libdatadog"]
+libdd-shared-runtime = { version = "5.0.0" }
+libdd-common = { version = "7.0.0" }
+libdd-capabilities = { version = "4.0.0" }
+libdd-capabilities-impl = { version = "6.0.0" }
 
 [profile.dev]
 debug = 2 # full debug info

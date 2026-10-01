@@ -28,7 +28,7 @@ camino,https://github.com/camino-rs/camino,MIT OR Apache-2.0,"Without Boats <sao
 cargo-platform,https://github.com/rust-lang/cargo,MIT OR Apache-2.0,The cargo-platform Authors
 cargo_metadata,https://github.com/oli-obk/cargo_metadata,MIT,Oliver Schneider <git-spam-no-reply9815368754983@oli-obk.de>
 cast,https://github.com/japaric/cast.rs,MIT OR Apache-2.0,Jorge Aparicio <jorge@japaric.io>
-cc,https://github.com/rust-lang/cc-rs,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
+cc,https://github.com/rust-lang/cc-rs,MIT OR Apache-2.0,The cc Authors
 cesu8,https://github.com/emk/cesu8-rs,Apache-2.0 OR MIT,Eric Kidd <git@randomhacks.net>
 cexpr,https://github.com/jethrogb/rust-cexpr,Apache-2.0 OR MIT,Jethro Beekman <jethro@jbeekman.nl>
 cfg-if,https://github.com/rust-lang/cfg-if,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
@@ -44,7 +44,6 @@ clap_derive,https://github.com/clap-rs/clap,MIT OR Apache-2.0,The clap_derive Au
 clap_lex,https://github.com/clap-rs/clap,MIT OR Apache-2.0,The clap_lex Authors
 colorchoice,https://github.com/rust-cli/anstyle,MIT OR Apache-2.0,The colorchoice Authors
 combine,https://github.com/Marwes/combine,MIT,Markus Westerlind <marwes91@gmail.com>
-concurrent-queue,https://github.com/smol-rs/concurrent-queue,Apache-2.0 OR MIT,"Stjepan Glavina <stjepang@gmail.com>, Taiki Endo <te316e89@gmail.com>, John Nunley <dev@notgull.net>"
 const_format,https://github.com/rodrimati1992/const_format_crates,Zlib,rodrimati1992 <rodrimatt1985@gmail.com>
 const_format_proc_macros,https://github.com/rodrimati1992/const_format_crates,Zlib,rodrimati1992 <rodrimatt1985@gmail.com>
 core-foundation,https://github.com/servo/core-foundation-rs,MIT OR Apache-2.0,The Servo Project Developers
@@ -93,7 +92,7 @@ hashbrown,https://github.com/rust-lang/hashbrown,MIT OR Apache-2.0,The hashbrown
 headers,https://github.com/hyperium/headers,MIT,Sean McArthur <sean@seanmonstar.com>
 headers-core,https://github.com/hyperium/headers,MIT,Sean McArthur <sean@seanmonstar.com>
 heck,https://github.com/withoutboats/heck,MIT OR Apache-2.0,The heck Authors
-hermit-abi,https://github.com/hermit-os/hermit-rs,MIT OR Apache-2.0,Stefan Lankes
+hermit-abi,https://github.com/hermit-os/hermit-rs,MIT OR Apache-2.0,The hermit-abi Authors
 hex,https://github.com/KokaKiwi/rust-hex,MIT OR Apache-2.0,KokaKiwi <kokakiwi@kokakiwi.net>
 http,https://github.com/hyperium/http,MIT OR Apache-2.0,"Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>"
 http-body,https://github.com/hyperium/http-body,MIT,"Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14@gmail.com>, Sean McArthur <sean@seanmonstar.com>"
@@ -121,8 +120,6 @@ is_terminal_polyfill,https://github.com/polyfill-rs/is_terminal_polyfill,MIT OR 
 itertools,https://github.com/rust-itertools/itertools,MIT OR Apache-2.0,bluss
 itoa,https://github.com/dtolnay/itoa,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 jni,https://github.com/jni-rs/jni-rs,MIT OR Apache-2.0,Josh Chase <josh@prevoty.com>
-jni,https://github.com/jni-rs/jni-rs,MIT OR Apache-2.0,jni team
-jni-macros,https://github.com/jni-rs/jni-rs,MIT OR Apache-2.0,The jni-macros Authors
 jni-sys,https://github.com/jni-rs/jni-sys,MIT OR Apache-2.0,Steven Fackler <sfackler@gmail.com>
 jni-sys,https://github.com/jni-rs/jni-sys,MIT OR Apache-2.0,"Steven Fackler <sfackler@gmail.com>, Robert Bragg <robert@sixbynine.org>"
 jni-sys-macros,https://github.com/jni-rs/jni-sys,MIT OR Apache-2.0,Robert Bragg <robert@sixbynine.org>
@@ -140,6 +137,7 @@ libdd-data-pipeline-core,https://github.com/DataDog/libdatadog/tree/main/libdd-d
 libdd-ddsketch,https://github.com/DataDog/libdatadog/tree/main/libdd-ddsketch,Apache-2.0,The libdd-ddsketch Authors
 libdd-dogstatsd-client,https://github.com/DataDog/libdatadog/tree/main/libdd-dogstatsd-client,Apache-2.0,The libdd-dogstatsd-client Authors
 libdd-library-config,https://github.com/DataDog/libdatadog/tree/main/libdd-library-config,Apache-2.0,The libdd-library-config Authors
+libdd-otel-telemetry,https://github.com/DataDog/libdatadog/tree/main/libdd-otel-telemetry,Apache-2.0,The libdd-otel-telemetry Authors
 libdd-profiling-heap-allocator,https://github.com/DataDog/libdatadog/tree/main/libdd-profiling-heap-allocator,Apache-2.0,The libdd-profiling-heap-allocator Authors
 libdd-profiling-heap-sampler,https://github.com/DataDog/libdatadog/tree/main/libdd-profiling-heap-sampler,Apache-2.0,The libdd-profiling-heap-sampler Authors
 libdd-remote-config,https://github.com/DataDog/libdatadog/tree/main/libdd-remote-config,Apache-2.0,Datadog Inc. <info@datadoghq.com>
@@ -174,7 +172,7 @@ num-traits,https://github.com/rust-num/num-traits,MIT OR Apache-2.0,The Rust Pro
 once_cell,https://github.com/matklad/once_cell,MIT OR Apache-2.0,Aleksey Kladov <aleksey.kladov@gmail.com>
 once_cell_polyfill,https://github.com/polyfill-rs/once_cell_polyfill,MIT OR Apache-2.0,The once_cell_polyfill Authors
 oorandom,https://hg.sr.ht/~icefox/oorandom,MIT,Simon Heath <icefox@dreamquest.io>
-openssl-probe,https://github.com/alexcrichton/openssl-probe,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
+openssl-probe,https://github.com/rustls/openssl-probe,MIT OR Apache-2.0,Alex Crichton <alex@alexcrichton.com>
 opentelemetry,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry,Apache-2.0,The opentelemetry Authors
 opentelemetry-appender-tracing,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-appender-tracing,Apache-2.0,The opentelemetry-appender-tracing Authors
 opentelemetry-http,https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-http,Apache-2.0,The opentelemetry-http Authors
@@ -259,8 +257,6 @@ sha2,https://github.com/RustCrypto/hashes,MIT OR Apache-2.0,RustCrypto Developer
 sharded-slab,https://github.com/hawkw/sharded-slab,MIT,Eliza Weisman <eliza@buoyant.io>
 shlex,https://github.com/comex/rust-shlex,MIT OR Apache-2.0,"comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Taylor <adetaylor@chromium.org>, Alex Touchet <alextouchet@outlook.com>, Daniel Parks <dp+git@oxidized.org>, Garrett Berg <googberg@gmail.com>"
 signal-hook-registry,https://github.com/vorner/signal-hook,MIT OR Apache-2.0,"Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>"
-simd_cesu8,https://github.com/seancroach/simd_cesu8,Apache-2.0 OR MIT,Sean C. Roach <me@seancroach.dev>
-simdutf8,https://github.com/rusticstuff/simdutf8,MIT OR Apache-2.0,Hans Kratz <hans@appfour.com>
 similar,https://github.com/mitsuhiko/similar,Apache-2.0,"Armin Ronacher <armin.ronacher@active-4.com>, Pierre-Étienne Meunier <pe@pijul.org>, Brandon Williams <bwilliams.eng@gmail.com>"
 slab,https://github.com/tokio-rs/slab,MIT,Carl Lerche <me@carllerche.com>
 smallvec,https://github.com/servo/rust-smallvec,MIT OR Apache-2.0,The Servo Project Developers
@@ -291,7 +287,6 @@ time-macros,https://github.com/time-rs/time,MIT OR Apache-2.0,"Jacob Pratt <open
 tinystr,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 tinytemplate,https://github.com/bheisler/TinyTemplate,Apache-2.0 OR MIT,Brook Heisler <brookheisler@gmail.com>
 tinyvec,https://github.com/Lokathor/tinyvec,Zlib OR Apache-2.0 OR MIT,Lokathor <zefria@gmail.com>
-tinyvec_macros,https://github.com/Soveu/tinyvec_macros,MIT OR Apache-2.0 OR Zlib,Soveu <marx.tomasz@gmail.com>
 tokio,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tokio-macros,https://github.com/tokio-rs/tokio,MIT,Tokio Contributors <team@tokio.rs>
 tokio-rustls,https://github.com/rustls/tokio-rustls,MIT OR Apache-2.0,The tokio-rustls Authors
@@ -330,7 +325,7 @@ wasip2,https://github.com/bytecodealliance/wasi-rs,Apache-2.0 WITH LLVM-exceptio
 wasm-bindgen,https://github.com/wasm-bindgen/wasm-bindgen,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-futures,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-macro,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro,MIT OR Apache-2.0,The wasm-bindgen Developers
-wasm-bindgen-macro-support,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/macro-support,MIT OR Apache-2.0,The wasm-bindgen Developers
+wasm-bindgen-macro-support,https://github.com/wasm-bindgen/wasm-bindgen/tree/main/crates/macro-support,MIT OR Apache-2.0,The wasm-bindgen Developers
 wasm-bindgen-shared,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/shared,MIT OR Apache-2.0,The wasm-bindgen Developers
 web-sys,https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/web-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 web-time,https://github.com/daxpedda/web-time,MIT OR Apache-2.0,The web-time Authors
@@ -361,8 +356,8 @@ writeable,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Dev
 yansi,https://github.com/SergioBenitez/yansi,MIT OR Apache-2.0,Sergio Benitez <sb@sergio.bz>
 yoke,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
 yoke-derive,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
-zerocopy,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,"Joshua Liebow-Feeser <joshlf@google.com>, Jack Wrenn <jswrenn@amazon.com>"
-zerocopy-derive,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,"Joshua Liebow-Feeser <joshlf@google.com>, Jack Wrenn <jswrenn@amazon.com>"
+zerocopy,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,The zerocopy Authors
+zerocopy-derive,https://github.com/google/zerocopy,BSD-2-Clause OR Apache-2.0 OR MIT,The zerocopy-derive Authors
 zerofrom,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 zerofrom-derive,https://github.com/unicode-org/icu4x,Unicode-3.0,Manish Goregaokar <manishsmail@gmail.com>
 zeroize,https://github.com/RustCrypto/utils,Apache-2.0 OR MIT,The RustCrypto Project Developers

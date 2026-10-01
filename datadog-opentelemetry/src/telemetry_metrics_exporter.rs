@@ -1,13 +1,14 @@
-// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
 #![cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+
+use std::time::Duration;
 
 use opentelemetry_sdk::error::OTelSdkResult;
 use opentelemetry_sdk::metrics::data::ResourceMetrics;
 use opentelemetry_sdk::metrics::exporter::PushMetricExporter;
 use opentelemetry_sdk::metrics::Temporality;
-use std::time::Duration;
 
 use crate::configuration::OtlpProtocol;
 use crate::core::telemetry;
@@ -48,25 +49,20 @@ where
         };
 
         telemetry::add_point(1.0, attempts);
-
         match self.inner.export(metrics).await {
             Ok(()) => {
                 telemetry::add_point(1.0, successes);
                 Ok(())
             }
-            Err(e) => {
+            Err(error) => {
                 telemetry::add_point(1.0, failures);
-                Err(e)
+                Err(error)
             }
         }
     }
 
     fn force_flush(&self) -> OTelSdkResult {
         self.inner.force_flush()
-    }
-
-    fn shutdown(&self) -> OTelSdkResult {
-        self.inner.shutdown()
     }
 
     fn shutdown_with_timeout(&self, timeout: Duration) -> OTelSdkResult {

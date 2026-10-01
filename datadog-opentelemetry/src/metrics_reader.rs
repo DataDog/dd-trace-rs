@@ -4,8 +4,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-use opentelemetry_otlp::{MetricExporter, WithExportConfig};
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::Resource;
 
@@ -18,6 +16,8 @@ use crate::otlp_utils::{
 };
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 use crate::telemetry_metrics_exporter::TelemetryTrackingExporter;
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+use libdd_otel_telemetry::{build_datadog_metric_exporter, OtlpExporterConfig, Temporality};
 
 use crate::dd_warn;
 
@@ -33,6 +33,14 @@ pub(crate) type MetricView = Arc<
 ///
 /// Returns a no-op meter provider if metrics are disabled or if initialization fails.
 /// Errors are logged but not returned to ensure metrics functionality is always available.
+///
+/// The OTLP metrics exporter is now provided by libdatadog
+/// (`libdd_otel_telemetry::DatadogMetricExporter`), which also tracks export
+/// attempts/successes/failures. dd-trace-rs keeps ownership of the `SdkMeterProvider`,
+/// `PeriodicReader`, resource, and views.
+///
+/// A thin host wrapper reports export outcomes into dd-trace-rs telemetry while libdatadog owns
+/// transport and export behavior.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 pub fn create_meter_provider(
     config: Arc<Config>,
@@ -53,7 +61,7 @@ pub fn create_meter_provider(
     let protocol = get_otlp_protocol(&config);
 
     if crate::otlp_utils::is_unsupported_protocol(protocol) {
-        dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not natively supported by opentelemetry-otlp. Metrics will not be exported. Use 'grpc' or 'http/protobuf' instead.");
+        dd_warn!("UNSUPPORTED PROTOCOL: HTTP/JSON protocol is not supported. Metrics will not be exported. Use 'grpc' or 'http/protobuf' instead.");
         return SdkMeterProvider::builder().build();
     }
 
@@ -88,12 +96,13 @@ pub fn create_meter_provider(
         }
     }
 
-    let temporality = config
-        .otel_metrics_temporality_preference()
-        .unwrap_or(opentelemetry_sdk::metrics::Temporality::Delta);
+    let temporality = to_libdd_temporality(config.otel_metrics_temporality_preference());
     let timeout = Duration::from_millis(get_otlp_metrics_timeout(&config) as u64);
 
-    let exporter = match build_exporter(protocol, endpoint.clone(), timeout, temporality) {
+    let exporter_config =
+        OtlpExporterConfig::new(endpoint, to_libdd_protocol(protocol)).with_timeout(timeout);
+
+    let exporter = match build_exporter(exporter_config, temporality) {
         Ok(exporter) => exporter,
         Err(err) => {
             dd_warn!(
@@ -108,7 +117,6 @@ pub fn create_meter_provider(
         .unwrap_or_else(|| Duration::from_millis(config.metric_export_interval() as u64));
 
     let telemetry_exporter = TelemetryTrackingExporter::new(exporter, protocol);
-
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(telemetry_exporter)
         .with_interval(interval)
         .build();
@@ -126,36 +134,35 @@ pub fn create_meter_provider(
     builder.build()
 }
 
+/// Builds the libdatadog OTLP metrics exporter.
+///
+/// Libdatadog's shared runtime initializes the transport and drives exports from the SDK reader
+/// thread.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 fn build_exporter(
-    protocol: OtlpProtocol,
-    endpoint: String,
-    timeout: Duration,
-    temporality: opentelemetry_sdk::metrics::Temporality,
-) -> Result<MetricExporter, String> {
+    config: OtlpExporterConfig,
+    temporality: Temporality,
+) -> Result<libdd_otel_telemetry::DatadogMetricExporter, String> {
+    build_datadog_metric_exporter(&config, temporality).map_err(|warning| warning.to_string())
+}
+
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+fn to_libdd_protocol(protocol: OtlpProtocol) -> libdd_otel_telemetry::OtlpProtocol {
     match protocol {
-        #[cfg(feature = "metrics-grpc")]
-        OtlpProtocol::Grpc => opentelemetry_otlp::MetricExporter::builder()
-            .with_tonic()
-            .with_endpoint(endpoint)
-            .with_timeout(timeout)
-            .with_temporality(temporality)
-            .build()
-            .map_err(|e| format!("Failed to build OTLP gRPC exporter: {e}")),
-        #[cfg(not(feature = "metrics-grpc"))]
-        OtlpProtocol::Grpc => Err("gRPC protocol requires 'metrics-grpc' feature".to_string()),
-        #[cfg(feature = "metrics-http")]
-        OtlpProtocol::HttpProtobuf => opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(endpoint)
-            .with_timeout(timeout)
-            .with_temporality(temporality)
-            .build()
-            .map_err(|e| format!("Failed to build OTLP HTTP/protobuf exporter: {e}")),
-        #[cfg(not(feature = "metrics-http"))]
-        OtlpProtocol::HttpProtobuf => {
-            Err("HTTP/protobuf protocol requires 'metrics-http' feature".to_string())
+        OtlpProtocol::Grpc => libdd_otel_telemetry::OtlpProtocol::Grpc,
+        // HttpJson is filtered out earlier; treat it as HttpProtobuf defensively.
+        OtlpProtocol::HttpProtobuf | OtlpProtocol::HttpJson => {
+            libdd_otel_telemetry::OtlpProtocol::HttpProtobuf
         }
-        OtlpProtocol::HttpJson => Err("HTTP/JSON protocol not supported".to_string()),
+    }
+}
+
+#[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
+fn to_libdd_temporality(
+    temporality: Option<opentelemetry_sdk::metrics::Temporality>,
+) -> Temporality {
+    match temporality {
+        Some(opentelemetry_sdk::metrics::Temporality::Cumulative) => Temporality::Cumulative,
+        _ => Temporality::Delta,
     }
 }
