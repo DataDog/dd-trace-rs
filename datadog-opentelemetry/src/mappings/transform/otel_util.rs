@@ -17,14 +17,11 @@ pub(crate) trait OtelSpan<'a> {
     fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'a, str>>;
     fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T>;
 
-    fn attr_len(&self) -> usize;
-
     fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'a, str> {
         self.get_attr_str_opt(attr_key).unwrap_or_default()
     }
 
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<Value>;
-    fn res_len(&self) -> usize;
 }
 
 /// Returns the datadog operation name from the otel span
@@ -326,6 +323,7 @@ pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     get_res_attributes(span, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
 }
 
+/// Service name used when the OpenTelemetry resource defines none.
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272

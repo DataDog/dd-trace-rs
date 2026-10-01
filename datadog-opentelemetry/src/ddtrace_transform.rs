@@ -11,7 +11,7 @@ use crate::{
         VERSION_KEY,
     },
 };
-use libdd_trace_utils::span::SpanText;
+use libdd_trace_utils::span::{span_pool::SpanPool, SpanText};
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -42,25 +42,29 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
     span_data: I,
     otel_resource: &'a Resource,
+    span_pool: &SpanPool<SpanStr<'a>>,
 ) -> Vec<DdSpan<'a>>
 where
     I: IntoIterator<Item = &'a SpanData>,
 {
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
-    span_data
-        .into_iter()
-        .map(|s| {
-            let trace_flags = s.span_context.trace_flags();
-            let sdk_span = SdkSpan::from_sdk_span_data(s);
-            let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource);
-            otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
+    // Pull a recycled chunk from the pool (retained capacity) instead of allocating
+    // a fresh Vec; it will be handed back to the pool when the PooledChunks is dropped.
+    let mut chunk = span_pool.pull_empty_chunk();
+    chunk.extend(span_data.into_iter().map(|s| {
+        let trace_flags = s.span_context.trace_flags();
+        let sdk_span = SdkSpan::from_sdk_span_data(s);
 
-            add_config_metadata(&mut dd_span, cached_config, otel_resource);
+        let mut dd_span = span_pool.get_span();
+        otel_span_to_dd_span(&mut dd_span, &sdk_span, otel_resource);
+        otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
-            dd_span
-        })
-        .collect()
+        add_config_metadata(&mut dd_span, cached_config, otel_resource);
+
+        dd_span
+    }));
+    chunk
 }
 
 fn add_config_metadata<'a>(
