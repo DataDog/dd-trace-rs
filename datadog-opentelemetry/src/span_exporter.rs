@@ -19,12 +19,15 @@ use libdd_data_pipeline::trace_exporter::{
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
-use libdd_trace_utils::span::span_pool::PooledChunks;
+use libdd_trace_utils::span::span_pool::SpanPool;
 use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
-    configuration::Config, core::telemetry_session, ddtrace_transform, mappings::CachedConfig,
+    configuration::Config,
+    core::telemetry_session,
+    ddtrace_transform,
+    mappings::{CachedConfig, SpanStr},
 };
 
 pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
@@ -325,6 +328,7 @@ fn build_on_dedicated_thread(
         otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
+        span_pool: SpanPool::with_capacity(10_000),
     };
 
     let (trace_buffer, worker) =
@@ -415,6 +419,7 @@ struct SpanDataExport {
     otel_resource: Arc<ArcSwap<Resource>>,
     cached_config: CachedConfig,
     config: Arc<Config>,
+    span_pool: SpanPool<SpanStr<'static>>,
 }
 
 impl Export<BufferedSpan> for SpanDataExport {
@@ -431,6 +436,9 @@ impl Export<BufferedSpan> for SpanDataExport {
         // `flush_and_wait`); in that case we also drain buffered client-computed stats.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
+
+            let span_pool: &SpanPool<SpanStr<'_>> =
+                unsafe { std::mem::transmute::<&SpanPool<SpanStr<'static>>, _>(&self.span_pool) };
             let dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
@@ -438,6 +446,7 @@ impl Export<BufferedSpan> for SpanDataExport {
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),
                         &resource,
+                        span_pool,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -451,7 +460,7 @@ impl Export<BufferedSpan> for SpanDataExport {
 
             let result = if !dd_trace_chunks.is_empty() {
                 self.trace_exporter
-                    .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
+                    .send_trace_chunks_async(span_pool.wrap_chunks(dd_trace_chunks))
                     .await
             } else {
                 Ok(AgentResponse::Unchanged)

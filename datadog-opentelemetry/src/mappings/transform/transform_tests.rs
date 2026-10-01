@@ -756,8 +756,12 @@ mod tests {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 )
                 .build();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
+                &test_span_to_sdk_span(&test.input_span),
+                &input_resource,
+            );
             hashmap_diff(&output.meta, &test.expected_out.meta);
             hashmap_diff(&output.metrics, &test.expected_out.metrics);
             assert_eq!(

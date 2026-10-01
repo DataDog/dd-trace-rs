@@ -111,6 +111,8 @@ impl AttributeKey {
 }
 
 #[derive(Debug)]
+/// Cached positions of the well-known [`AttributeKey`]s in an OpenTelemetry span's
+/// attribute list, to skip linear key lookups during conversion.
 pub struct AttributeIndices([u32; NUMBER_OF_ATTRIBUTES]);
 
 impl Default for AttributeIndices {

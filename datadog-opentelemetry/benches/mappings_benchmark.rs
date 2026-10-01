@@ -9,7 +9,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
-use datadog_opentelemetry::mappings::transform_tests::test_span_to_sdk_span;
+use datadog_opentelemetry::mappings::{transform_tests::test_span_to_sdk_span, DdSpan};
 
 #[global_allocator]
 static GLOBAL: ReportingAllocator<std::alloc::System> = ReportingAllocator::new(std::alloc::System);
@@ -29,19 +29,22 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
             )
             .build();
 
+        // Reuse a single span across iterations, like the exporter's SpanPool does:
+        // the conversion clears the span's collections and refills them, so their
+        // capacity (and the span itself) is recycled instead of reallocated.
+        let mut dd_span = DdSpan::default();
+
         c.bench_function(
             &format!("otel_span_to_dd_span/{}/{}", test.name, M::name()),
             |b| {
-                b.iter_batched(
-                    || input_span.clone(),
-                    |input_span| {
-                        black_box(datadog_opentelemetry::mappings::otel_span_to_dd_span(
-                            &input_span,
-                            &input_resource,
-                        ));
-                    },
-                    criterion::BatchSize::LargeInput,
-                )
+                b.iter(|| {
+                    datadog_opentelemetry::mappings::otel_span_to_dd_span(
+                        &mut dd_span,
+                        &input_span,
+                        &input_resource,
+                    );
+                    black_box(&dd_span);
+                })
             },
         );
     }
