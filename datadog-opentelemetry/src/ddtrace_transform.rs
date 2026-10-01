@@ -18,6 +18,10 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
 
+/// Chunk-level tag marking whether the trace chunk was exported through OTLP. Set to "false" on
+/// the first span of every chunk exported natively to the Datadog agent.
+const SDK_OTLP_EXPORT_KEY: &str = "_dd.sdk.otlp_export";
+
 /// The OTLP receiver in the agent only receives sampled spans
 /// because others are dropped in the process. In this spirit, we check for the sampling
 /// decision taken by the datadog sampler, and if it is missing assign AUTO_KEEP/AUTO_DROP
@@ -50,7 +54,8 @@ where
     // and then handing off groups of span data?
     span_data
         .into_iter()
-        .map(|s| {
+        .enumerate()
+        .map(|(i, s)| {
             let trace_flags = s.span_context.trace_flags();
             let sdk_span = SdkSpan::from_sdk_span_data(s);
             let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource);
@@ -58,9 +63,23 @@ where
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);
 
+            // Traces are only exported natively today. When OTLP trace export is added, pass
+            // the export mode in and skip this tag for OTLP.
+            if i == 0 {
+                add_native_export_marker(&mut dd_span);
+            }
+
             dd_span
         })
         .collect()
+}
+
+/// Mark the span as exported natively to the Datadog agent. Set on the first span of each chunk.
+fn add_native_export_marker(dd_span: &mut DdSpan) {
+    dd_span.meta.insert(
+        SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
+        SpanStr::from_static_str("false"),
+    );
 }
 
 fn add_config_metadata<'a>(

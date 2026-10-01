@@ -9,6 +9,7 @@
     "type": "http",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "6aba787f0000000007c8917e6af0d112",
@@ -36,6 +37,7 @@
     "type": "http",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "6aba787f00000000303e0c3036d79def",
@@ -63,6 +65,7 @@
     "type": "http",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "6aba787f00000000f2753b76f5399802",
@@ -90,6 +93,7 @@
     "type": "http",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "6aba787f0000000074460ea23f9fc49f",

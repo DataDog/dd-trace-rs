@@ -434,6 +434,7 @@ impl Export<BufferedSpan> for SpanDataExport {
             let dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
+                    // When OTLP trace export is added, pass the export mode here too.
                     ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),

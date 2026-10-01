@@ -12,6 +12,7 @@
       "_dd.p.dm": "-4",
       "_dd.p.usr.id": "baz64",
       "_dd.parent_id": "00f067aa0ba902b7",
+      "_dd.sdk.otlp_export": "false",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "80f198ee56343ba864fe8b2a57d3eff7",

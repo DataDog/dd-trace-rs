@@ -10,6 +10,7 @@
     "meta": {
       "_dd.origin": "my_origin",
       "_dd.p.foo": "bar",
+      "_dd.sdk.otlp_export": "false",
       "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
       "code.module.name": "tests::integration_tests::tracing_api",
       "otel.scope.name": "test",

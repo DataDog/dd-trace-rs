@@ -8,6 +8,7 @@
     "parent_id": 987654321098765432,
     "type": "web",
     "meta": {
+      "_dd.sdk.otlp_export": "false",
       "baggage.user.id": "alice",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
