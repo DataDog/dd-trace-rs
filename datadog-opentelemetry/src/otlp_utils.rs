@@ -61,11 +61,7 @@ pub(crate) fn build_otel_resource(config: &Config, resource: Option<Resource>) -
         .explicit_env()
         .map(Cow::Borrowed)
         .or_else(|| resource.as_ref().and_then(resource_environment))
-        .or_else(|| {
-            config
-                .global_tags()
-                .find_map(|(key, value)| (key == "env").then(|| Cow::Owned(value.to_string())))
-        })
+        .or_else(|| config.global_tags_environment().map(Cow::Borrowed))
         .or_else(|| config.otel_resource_environment().map(Cow::Borrowed));
 
     for (key, value) in config.otel_resource_attributes() {
@@ -280,5 +276,40 @@ mod tests {
             resource.get(&Key::from_static_str("unrelated")),
             Some(Value::from("value"))
         );
+    }
+
+    #[test]
+    fn final_global_tag_environment_wins() {
+        let mut builder = Config::builder();
+        builder.set_global_tags(vec![
+            ("env".to_string(), "first".to_string()),
+            ("env".to_string(), "last".to_string()),
+        ]);
+        let config = builder.build();
+
+        let resource = build_otel_resource(&config, None);
+
+        assert_eq!(config.env(), Some("last"));
+        assert_eq!(resource_environment(&resource).as_deref(), Some("last"));
+    }
+
+    #[test]
+    fn empty_final_global_tag_environment_falls_back_to_otel_resource() {
+        let mut builder = Config::builder();
+        builder
+            .set_global_tags(vec![
+                ("env".to_string(), "first".to_string()),
+                ("env".to_string(), String::new()),
+            ])
+            .set_otel_resource_attributes(vec![(
+                DEPLOYMENT_ENVIRONMENT_NAME.to_string(),
+                "otel".to_string(),
+            )]);
+        let config = builder.build();
+
+        let resource = build_otel_resource(&config, None);
+
+        assert_eq!(config.env(), Some("otel"));
+        assert_eq!(resource_environment(&resource).as_deref(), Some("otel"));
     }
 }

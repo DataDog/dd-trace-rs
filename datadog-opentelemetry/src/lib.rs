@@ -392,7 +392,10 @@ impl DatadogTracingBuilder {
     /// context](https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4719-process-ctx.md).
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
-        let config = self.config.unwrap_or_else(|| Config::builder().build());
+        let config = Arc::new(self.config.unwrap_or_else(|| Config::builder().build()));
+
+        let (tracer_provider, propagator) =
+            make_tracer(config.clone(), self.tracer_provider, self.resource);
 
         // For now, otel process context spec is linux-specific.
         #[cfg(target_os = "linux")]
@@ -402,8 +405,6 @@ impl DatadogTracingBuilder {
             dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
         }
 
-        let (tracer_provider, propagator) =
-            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
         tracer_provider
@@ -565,6 +566,8 @@ fn make_tracer(
     resource: Option<Resource>,
 ) -> (SdkTracerProvider, DatadogPropagator) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let dd_resource =
+            resolve_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
         let registry = TraceRegistry::new(config.clone());
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
@@ -577,8 +580,6 @@ fn make_tracer(
 
         let agent_response_handler = sampler.on_agent_response();
 
-        let dd_resource =
-            create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
         tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
         let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
@@ -706,7 +707,10 @@ fn create_dd_resource(mut resource: Resource, cfg: &Config) -> Resource {
             Value::from(env.to_string()),
         ));
     } else if resource_environment(&resource).is_none() {
-        if let Some(env) = cfg.otel_resource_environment() {
+        if let Some(env) = cfg
+            .global_tags_environment()
+            .or_else(|| cfg.otel_resource_environment())
+        {
             attributes.push((
                 Key::from_static_str(DEPLOYMENT_ENVIRONMENT_NAME),
                 Value::from(env.to_string()),
@@ -720,6 +724,14 @@ fn create_dd_resource(mut resource: Resource, cfg: &Config) -> Resource {
     } else {
         merge_resource(Some(resource), attributes)
     }
+}
+
+fn resolve_dd_resource(resource: Resource, config: &Config) -> Resource {
+    let resource = create_dd_resource(resource, config);
+    config.set_calculated_environment(
+        resource_environment(&resource).map(|environment| environment.into_owned()),
+    );
+    resource
 }
 
 #[cfg(feature = "test-utils")]
