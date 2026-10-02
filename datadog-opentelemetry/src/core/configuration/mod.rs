@@ -5,19 +5,10 @@
 //!
 //! # Sources of configuration
 //!
-//! ```text
-//! ^ Highest precedence
-//! |
-//! * Opentelemetry Resource object
-//! |
-//! * ConfigBuilder setters
-//! |
-//! * "DD" prefixed env variables
-//! |
-//! * Default values
-//! |
-//! v Lowest level of precedence
-//! ```
+//! General precedence is: OpenTelemetry Resource object, `ConfigBuilder` setters, "DD"-prefixed
+//! environment variables, then defaults. Environment uses a field-specific order:
+//! `DD_ENV`/`ConfigBuilder::set_env`, Resource `deployment.environment.name` or
+//! `deployment.environment`, `DD_TAGS[env]`, then `OTEL_RESOURCE_ATTRIBUTES`.
 
 #[allow(clippy::module_inception)]
 mod configuration;

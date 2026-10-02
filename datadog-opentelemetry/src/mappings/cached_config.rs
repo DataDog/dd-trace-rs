@@ -19,6 +19,7 @@ impl CachedConfig {
 
         let global_tags = cfg
             .global_tags()
+            .filter(|(key, _)| *key != "env")
             .map(|(key, value)| (key.to_string(), value.to_string()))
             .collect();
 
