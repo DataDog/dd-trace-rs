@@ -42,6 +42,15 @@
         "propertyKeys": ["env"]
       }
     ],
+    "DD_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["hostname"],
+        "sensitive": true
+      }
+    ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
       {
         "version": "A",
@@ -219,6 +228,14 @@
         "propertyKeys": ["trace_rate_limit"]
       }
     ],
+    "DD_TRACE_REPORT_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["trace_report_hostname"]
+      }
+    ],
     "DD_TRACE_SAMPLE_RATE": [
       {
         "version": "B",
@@ -235,12 +252,52 @@
         "propertyKeys": ["trace_sampling_rules"]
       }
     ],
+    "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "100",
+        "propertyKeys": ["trace_stats_additional_tags_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_CARDINALITY_LIMIT": [
+      {
+        "version": "D",
+        "type": "int",
+        "default": "7000",
+        "propertyKeys": ["trace_stats_cardinality_limit"]
+      }
+    ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
       {
         "version": "B",
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["trace_stats_computation_enabled"]
+      }
+    ],
+    "DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "512",
+        "propertyKeys": ["trace_stats_http_endpoint_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "512",
+        "propertyKeys": ["trace_stats_peer_tags_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "1024",
+        "propertyKeys": ["trace_stats_resource_cardinality_limit"]
       }
     ],
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [

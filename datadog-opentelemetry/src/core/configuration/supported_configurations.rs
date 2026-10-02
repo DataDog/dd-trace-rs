@@ -13,6 +13,7 @@ pub(crate) enum SupportedConfigurations {
     DD_DOGSTATSD_PORT,
     DD_DOGSTATSD_URL,
     DD_ENV,
+    DD_HOSTNAME,
     DD_INSTRUMENTATION_TELEMETRY_ENABLED,
     DD_LOGS_OTEL_ENABLED,
     DD_LOG_LEVEL,
@@ -35,9 +36,15 @@ pub(crate) enum SupportedConfigurations {
     DD_TRACE_PROPAGATION_STYLE_EXTRACT,
     DD_TRACE_PROPAGATION_STYLE_INJECT,
     DD_TRACE_RATE_LIMIT,
+    DD_TRACE_REPORT_HOSTNAME,
     DD_TRACE_SAMPLE_RATE,
     DD_TRACE_SAMPLING_RULES,
+    DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT,
+    DD_TRACE_STATS_CARDINALITY_LIMIT,
     DD_TRACE_STATS_COMPUTATION_ENABLED,
+    DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT,
+    DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT,
+    DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT,
     DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH,
     DD_VERSION,
     OTEL_EXPORTER_OTLP_ENDPOINT,
@@ -85,6 +92,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",
             SupportedConfigurations::DD_ENV => "DD_ENV",
+            SupportedConfigurations::DD_HOSTNAME => "DD_HOSTNAME",
             SupportedConfigurations::DD_INSTRUMENTATION_TELEMETRY_ENABLED => "DD_INSTRUMENTATION_TELEMETRY_ENABLED",
             SupportedConfigurations::DD_LOGS_OTEL_ENABLED => "DD_LOGS_OTEL_ENABLED",
             SupportedConfigurations::DD_LOG_LEVEL => "DD_LOG_LEVEL",
@@ -107,9 +115,15 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_EXTRACT => "DD_TRACE_PROPAGATION_STYLE_EXTRACT",
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE_INJECT => "DD_TRACE_PROPAGATION_STYLE_INJECT",
             SupportedConfigurations::DD_TRACE_RATE_LIMIT => "DD_TRACE_RATE_LIMIT",
+            SupportedConfigurations::DD_TRACE_REPORT_HOSTNAME => "DD_TRACE_REPORT_HOSTNAME",
             SupportedConfigurations::DD_TRACE_SAMPLE_RATE => "DD_TRACE_SAMPLE_RATE",
             SupportedConfigurations::DD_TRACE_SAMPLING_RULES => "DD_TRACE_SAMPLING_RULES",
+            SupportedConfigurations::DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT => "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT",
+            SupportedConfigurations::DD_TRACE_STATS_CARDINALITY_LIMIT => "DD_TRACE_STATS_CARDINALITY_LIMIT",
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED => "DD_TRACE_STATS_COMPUTATION_ENABLED",
+            SupportedConfigurations::DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT => "DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT",
+            SupportedConfigurations::DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT => "DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT",
+            SupportedConfigurations::DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT => "DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT",
             SupportedConfigurations::DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH => "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH",
             SupportedConfigurations::DD_VERSION => "DD_VERSION",
             SupportedConfigurations::OTEL_EXPORTER_OTLP_ENDPOINT => "OTEL_EXPORTER_OTLP_ENDPOINT",
@@ -170,7 +184,8 @@ impl SupportedConfigurations {
     pub fn is_sensitive(&self) -> bool {
         matches!(
             self,
-            SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
+            SupportedConfigurations::DD_HOSTNAME
+                | SupportedConfigurations::OTEL_EXPORTER_OTLP_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_LOGS_HEADERS
                 | SupportedConfigurations::OTEL_EXPORTER_OTLP_METRICS_HEADERS
         )

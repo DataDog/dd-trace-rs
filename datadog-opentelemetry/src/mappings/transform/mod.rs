@@ -526,6 +526,10 @@ impl SpanText for CowStr<'_> {
     fn from_static_str(value: &'static str) -> Self {
         CowStr(Cow::Borrowed(value))
     }
+
+    fn from_owned(value: String) -> Self {
+        CowStr(Cow::Owned(value))
+    }
 }
 
 impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {

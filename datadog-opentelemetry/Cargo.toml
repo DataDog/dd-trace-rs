@@ -46,6 +46,8 @@ uuid = { version = "1.11.0", features = ["v4"] }
 arc-swap = "1.7.1"
 ctor = "0.2"
 libc = "0.2"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+log = { version = "0.4.21", optional = true }
 
 # core Test utils
 criterion = { version = "0.5.1", optional = true }
@@ -62,9 +64,10 @@ libdd-shared-runtime = { workspace = true }
 libdd-remote-config = { workspace = true }
 libdd-heap-allocator = { workspace = true, optional = true }
 percent-encoding = "2.3.1"
+hostname = "0.4.2"
 
 [target.'cfg(target_os="linux")'.dependencies]
-libdd-library-config = { workspace = true }
+libdd-library-config = { workspace = true, features = ["otel-thread-ctx"] }
 
 [dev-dependencies]
 assert_unordered = "0.3"
@@ -108,6 +111,7 @@ logs-http = [
     "opentelemetry-otlp/http-proto",
     "opentelemetry-otlp/reqwest-blocking-client",
 ]
+log-compat = ["dep:log"]
 _unstable_propagation = []
 # Emits sampled allocation USDT probes for out-of-process profilers to pick up.
 #
