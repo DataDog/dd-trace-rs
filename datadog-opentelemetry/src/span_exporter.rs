@@ -351,6 +351,7 @@ fn build_trace_exporter(
     let mut builder = TraceExporterBuilder::<BasicRuntime>::new();
     builder
         .set_shared_runtime(Arc::clone(shared_runtime))
+        .set_runtime_id(config.runtime_id())
         .set_url(&config.trace_agent_url())
         .set_dogstatsd_url(&config.dogstatsd_agent_url())
         .set_tracer_version(config.tracer_version())
@@ -390,7 +391,6 @@ fn build_trace_exporter(
     if config.telemetry_enabled() {
         builder.enable_telemetry(TelemetryConfig {
             heartbeat: (config.telemetry_heartbeat_interval() * 1000.0) as u64,
-            runtime_id: Some(config.runtime_id().to_string()),
             debug_enabled: false,
         });
         builder.set_telemetry_instrumentation_sessions(
