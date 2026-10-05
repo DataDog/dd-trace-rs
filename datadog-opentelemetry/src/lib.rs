@@ -23,11 +23,11 @@
 //!
 //! #### Tracing
 //!
-//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
 //! #### Metrics
 //!
-//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html).
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/metrics/index.html).
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 //!
 //! #### Logging
@@ -73,7 +73,7 @@
 //! #### Opentelemetry trace API
 //!
 //! Requires
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `trace`
 //!   feature enabled
 //!
 //! ```no_run
@@ -101,7 +101,7 @@
 //!
 //! Requires
 //! * the `metrics` feature of this crate to be enabled
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `metrics`
 //!   feature enabled
 //! * [`tokio`](https://docs.rs/tokio)
 //!
@@ -129,7 +129,7 @@
 //! Requires
 //! * the `logs` feature of this crate to be enabled
 //! * [`log`](https://docs.rs/log/0.4.29/log/)
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
 //! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The logger provider MUST be initialized within a tokio context
@@ -221,11 +221,11 @@
 //!
 //! * MSRV: 1.87
 //!
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
 //!   version: 0.33
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
-//!   version 0.32
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
+//!   version 0.33
 //! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 //!
 //! ## Features
@@ -322,6 +322,8 @@ mod telemetry_logs_exporter;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+mod thread_ctx;
 mod trace_id;
 
 use std::sync::{Arc, RwLock};
@@ -543,6 +545,12 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
+
+        // Publish the active span context into the per-thread TLS slot so out-of-process readers
+        // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
+        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+        crate::thread_ctx::install_observer(registry.clone());
+
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
         // Runtime updates come via config callback, so no need for shared config

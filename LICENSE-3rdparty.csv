@@ -141,6 +141,7 @@ libdd-data-pipeline-core,https://github.com/DataDog/libdatadog/tree/main/libdd-d
 libdd-ddsketch,https://github.com/DataDog/libdatadog/tree/main/libdd-ddsketch,Apache-2.0,The libdd-ddsketch Authors
 libdd-dogstatsd-client,https://github.com/DataDog/libdatadog/tree/main/libdd-dogstatsd-client,Apache-2.0,The libdd-dogstatsd-client Authors
 libdd-library-config,https://github.com/DataDog/libdatadog/tree/main/libdd-library-config,Apache-2.0,The libdd-library-config Authors
+libdd-otel-thread-ctx,https://github.com/DataDog/libdatadog/tree/main/libdd-otel-thread-ctx,Apache-2.0,The libdd-otel-thread-ctx Authors
 libdd-profiling-heap-allocator,https://github.com/DataDog/libdatadog/tree/main/libdd-profiling-heap-allocator,Apache-2.0,The libdd-profiling-heap-allocator Authors
 libdd-profiling-heap-sampler,https://github.com/DataDog/libdatadog/tree/main/libdd-profiling-heap-sampler,Apache-2.0,The libdd-profiling-heap-sampler Authors
 libdd-remote-config,https://github.com/DataDog/libdatadog/tree/main/libdd-remote-config,Apache-2.0,Datadog Inc. <info@datadoghq.com>
