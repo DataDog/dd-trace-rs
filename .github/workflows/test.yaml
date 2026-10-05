@@ -192,8 +192,7 @@ jobs:
     with:
       library: rust
       binaries_artifact: system_tests_binaries
-      scenarios_groups: tracer-release
-      scenarios: PARAMETRIC
+      scenarios_groups: tracer_release
       # Splits the end-to-end scenarios across parallel runners
       desired_execution_time: "600"
       parametric_job_count: 2
