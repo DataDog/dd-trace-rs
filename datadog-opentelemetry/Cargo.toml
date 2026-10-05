@@ -158,6 +158,11 @@ harness = false
 path = "benches/mappings_benchmark.rs"
 
 [[bench]]
+name = "span_pool_benchmark"
+harness = false
+path = "benches/span_pool_benchmark.rs"
+
+[[bench]]
 name = "inject_benchmark"
 harness = false
 path = "benches/inject_benchmark.rs"
