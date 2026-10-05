@@ -69,7 +69,7 @@ metrics
 Requires
 
 * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
 * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 
 ```rust ,no_run
@@ -260,8 +260,8 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 * MSRV: 1.87
 
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
-  version: 0.33
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
+  version: 0.34
 * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
   version 0.33
 * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
