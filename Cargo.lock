@@ -632,6 +632,7 @@ dependencies = [
  "arc-swap",
  "assert_unordered",
  "async-trait",
+ "bumpalo",
  "criterion",
  "ctor",
  "datadog-opentelemetry",

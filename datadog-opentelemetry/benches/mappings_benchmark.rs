@@ -5,6 +5,7 @@ use std::hint::black_box;
 
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
+use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, Criterion};
 use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
@@ -35,9 +36,11 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
                 b.iter_batched(
                     || input_span.clone(),
                     |input_span| {
+                        let alloc = Bump::new();
                         black_box(datadog_opentelemetry::mappings::otel_span_to_dd_span(
                             &input_span,
                             &input_resource,
+                            &alloc,
                         ));
                     },
                     criterion::BatchSize::LargeInput,
