@@ -478,12 +478,12 @@ pub fn get_dd_key_for_otlp_attribute_in<'a>(k: &'a str, alloc: &'a Bump) -> Cow<
 
 /// Maps an otel attribute key to its datadog equivalent, for callers that don't
 /// have an arena that lives long enough
-/// 
+///
 /// TODO(paulgdc): this is here because the SampledSpan trait requires returning
-/// a string with the same lifetime as the key. But the lifetime of the key 
+/// a string with the same lifetime as the key. But the lifetime of the key
 /// is never the same as the one of the bump allocator.
-/// 
-/// We should fix the SpanProperties trait in libdd-sampling and remove the duplicated 
+///
+/// We should fix the SpanProperties trait in libdd-sampling and remove the duplicated
 /// method
 pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
     if let Some(mapped_key) = http_mappings(k) {
