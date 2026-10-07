@@ -394,10 +394,12 @@ impl DatadogTracingBuilder {
     /// You will need to set them up yourself, at a latter point if you want to use global tracing
     /// methods and library integrations
     ///
-    /// # Process context
+    /// # Process-level and thread-level context
     ///
     /// As opposed as [Self::init], this method won't automatically publish tracer metadata to the
-    /// OTel process context.
+    /// OTel process context. Similarly, a locally initialized tracer won't additionally publish
+    /// contexts as OTel thread-level contexts, meaning they'll be invisible to the Full Host
+    /// Profiler (eBPF profiler).
     ///
     /// # Example
     ///
