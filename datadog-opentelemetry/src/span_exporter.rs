@@ -319,7 +319,9 @@ fn build_on_dedicated_thread(
     let buffer_config = TraceBufferConfig::default()
         .synchronous_export(config.trace_writer_synchronous_write())
         .synchronous_export_timeout(Some(config.trace_writer_synchronous_timeout()))
-        .max_flush_interval(config.trace_writer_max_flush_interval());
+        .max_flush_interval(config.trace_writer_max_flush_interval())
+        .max_buffered_bytes(5_000_000)
+        .flush_threshold_bytes(2_500_000);
 
     let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
 
@@ -328,6 +330,8 @@ fn build_on_dedicated_thread(
         otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
+        // We assume a single span is ~500 bytes.
+        // The buffer buffers at most 5MB, which is 10 000 spans
         span_pool: SpanPool::with_capacity(10_000),
     };
 
@@ -437,6 +441,12 @@ impl Export<BufferedSpan> for SpanDataExport {
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
 
+            // SAFETY: we cast the lifetime of the pool from 'static to 'a
+            // This is ok if and only if the pool respects the invariant that it zeroes any field
+            // containing strings before returning the span to the pool, which means no
+            // text with lifetime 'a can be converted back to a 'static lifetine.
+            // This invariant is currently true, and is tested in this file in
+            // `tests_span_pool_recycling_frees_string_data`
             let span_pool: &SpanPool<SpanStr<'_>> =
                 unsafe { std::mem::transmute::<&SpanPool<SpanStr<'static>>, _>(&self.span_pool) };
             let dd_trace_chunks = trace_chunks
@@ -575,5 +585,170 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(events[0].suppressed);
         assert!(events[0].message.contains("Invalid worker state: stopped"));
+    }
+}
+
+#[cfg(test)]
+/// This test verifies that string data does not survive after having been added back to the pool
+///
+/// The test implements a new type implementing SpanText that counts how much string data is
+/// currently alive. After pulling, initializing and returning spans to the pool, it checks the
+/// invariant that
+/// 1. there is a span in pool
+/// 2. all of the string data associated with the span has been freed
+///
+/// In order to be sure that all of the fields are emptied, this test uses pattern destructuring
+/// to make sure we don't miss new fields
+mod tests_span_pool_recycling_frees_string_data {
+    use super::*;
+    use libdd_trace_utils::span::{
+        v04::{AttributeAnyValue, AttributeArrayValue, Span as DdV04Span, SpanEvent, SpanLink},
+        SpanText, TraceData,
+    };
+    use std::borrow::Cow;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LIVE_OWNED_STRINGS: AtomicUsize = AtomicUsize::new(0);
+
+    fn live_owned_strings() -> usize {
+        LIVE_OWNED_STRINGS.load(Ordering::SeqCst)
+    }
+
+    #[derive(Debug, Eq, PartialEq, Hash)]
+    struct CountingStr(Cow<'static, str>);
+
+    impl Default for CountingStr {
+        fn default() -> Self {
+            Self(Cow::Borrowed(""))
+        }
+    }
+
+    impl Clone for CountingStr {
+        fn clone(&self) -> Self {
+            if matches!(self.0, Cow::Owned(_)) {
+                LIVE_OWNED_STRINGS.fetch_add(1, Ordering::SeqCst);
+            }
+            Self(self.0.clone())
+        }
+    }
+
+    impl Drop for CountingStr {
+        fn drop(&mut self) {
+            if matches!(self.0, Cow::Owned(_)) {
+                LIVE_OWNED_STRINGS.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    impl std::borrow::Borrow<str> for CountingStr {
+        fn borrow(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+
+    impl serde::Serialize for CountingStr {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.0.as_ref())
+        }
+    }
+
+    impl SpanText for CountingStr {
+        fn from_static_str(value: &'static str) -> Self {
+            Self(Cow::Borrowed(value))
+        }
+
+        fn from_owned(value: String) -> Self {
+            LIVE_OWNED_STRINGS.fetch_add(1, Ordering::SeqCst);
+            Self(Cow::Owned(value))
+        }
+    }
+
+    impl TraceData for CountingStr {
+        type Text = CountingStr;
+        type Bytes = &'static [u8];
+    }
+
+    fn fill_span_with_owned_strings(span: &mut DdV04Span<CountingStr>) {
+        let DdV04Span {
+            service,
+            name,
+            resource,
+            r#type,
+            trace_id: _,
+            span_id: _,
+            parent_id: _,
+            start: _,
+            duration: _,
+            error: _,
+            meta,
+            metrics,
+            meta_struct,
+            span_links,
+            span_events,
+        } = span;
+        *service = CountingStr::from_owned("my-service".to_owned());
+        *name = CountingStr::from_owned("my-operation".to_owned());
+        *resource = CountingStr::from_owned("GET /resource".to_owned());
+        *r#type = CountingStr::from_owned("web".to_owned());
+        meta.insert(
+            CountingStr::from_owned("meta.key".to_owned()),
+            CountingStr::from_owned("meta.value".to_owned()),
+        );
+        metrics.insert(CountingStr::from_owned("metric.key".to_owned()), 42.0);
+        meta_struct.insert(
+            CountingStr::from_owned("struct.key".to_owned()),
+            b"struct.value".as_slice(),
+        );
+        *span_links = vec![SpanLink {
+            tracestate: CountingStr::from_owned("tracestate".to_owned()),
+            attributes: HashMap::from([(
+                CountingStr::from_owned("link.key".to_owned()),
+                CountingStr::from_owned("link.value".to_owned()),
+            )]),
+            trace_id: 1,
+            trace_id_high: 0,
+            span_id: 1,
+            flags: 0,
+        }];
+        *span_events = vec![SpanEvent {
+            name: CountingStr::from_owned("event.name".to_owned()),
+            attributes: HashMap::from([(
+                CountingStr::from_owned("event.key".to_owned()),
+                AttributeAnyValue::Array(vec![AttributeArrayValue::String(
+                    CountingStr::from_owned("event.value".to_owned()),
+                )]),
+            )]),
+            time_unix_nano: 1,
+        }];
+    }
+
+    #[test]
+    fn owned_strings_are_released_when_spans_are_returned_to_the_pool() {
+        let pool = SpanPool::<CountingStr>::with_capacity(100);
+        assert_eq!(live_owned_strings(), 0, "test precondition");
+
+        // The pool's drop policy discards ~10% of returned chunks, so retry until a chunk
+        // actually makes it back into the pool.
+        let mut chunk_was_recycled = false;
+        while !chunk_was_recycled {
+            let mut span = pool.get_span();
+            fill_span_with_owned_strings(&mut span);
+            assert!(
+                live_owned_strings() > 0,
+                "filling the span should have created owned strings"
+            );
+
+            drop(pool.wrap_chunks(vec![vec![span]]));
+
+            // Whether the chunk is recycled or dropped by the pool's policy, every string
+            // added to the span must have been released.
+            assert_eq!(
+                live_owned_strings(),
+                0,
+                "all strings added to spans must be released when spans are returned to the pool"
+            );
+            chunk_was_recycled = !pool.is_empty();
+        }
     }
 }
