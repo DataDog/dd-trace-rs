@@ -18,7 +18,7 @@ use crate::{
         sampling::SamplingDecision,
         telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
-    create_dd_resource, dd_debug, dd_error,
+    dd_debug, dd_error,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
     spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
@@ -715,13 +715,12 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
     }
 
     fn set_resource(&mut self, resource: &opentelemetry_sdk::Resource) {
-        let dd_resource = create_dd_resource(resource.clone(), &self.config);
-        self.span_exporter.set_resource(dd_resource.clone());
+        self.span_exporter.set_resource(resource.clone());
         // set the shared resource in the DatadogSpanProcessor
-        *self.resource.write().unwrap() = dd_resource.clone();
+        *self.resource.write().unwrap() = resource.clone();
 
         // update config's service name and init telemetry once service name has been resolved
-        let service_name = dd_resource
+        let service_name = resource
             .get(&Key::from_static_str(SERVICE_NAME))
             .map(|service_name| service_name.as_str().to_string());
         // Only set calculated service name if DD_SERVICE is default
@@ -788,14 +787,16 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
+            DatadogSpanProcessor::new(Arc::new(config.clone()), registry, resource.clone(), None)
+                .unwrap();
 
         let otel_resource = Resource::builder()
             // .with_service_name("otel-service")
             .with_attribute(KeyValue::new("key1", "value1"))
             .build();
 
-        processor.set_resource(&otel_resource);
+        let dd_resource = crate::resolve_dd_resource(otel_resource, &config);
+        processor.set_resource(&dd_resource);
 
         let dd_resource = resource.read().unwrap();
         assert_eq!(
@@ -818,7 +819,8 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
+            DatadogSpanProcessor::new(Arc::new(config.clone()), registry, resource.clone(), None)
+                .unwrap();
 
         let attributes = [KeyValue::new("key_schema", "value_schema")];
 
@@ -828,7 +830,8 @@ mod tests {
             .with_schema_url(attributes, "schema_url")
             .build();
 
-        processor.set_resource(&otel_resource);
+        let dd_resource = crate::resolve_dd_resource(otel_resource, &config);
+        processor.set_resource(&dd_resource);
 
         let dd_resource = resource.read().unwrap();
         assert_eq!(
@@ -857,13 +860,15 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
+            DatadogSpanProcessor::new(Arc::new(config.clone()), registry, resource.clone(), None)
+                .unwrap();
 
         let otel_resource = Resource::builder_empty()
             .with_attribute(KeyValue::new("key1", "value1"))
             .build();
 
-        processor.set_resource(&otel_resource);
+        let dd_resource = crate::resolve_dd_resource(otel_resource, &config);
+        processor.set_resource(&dd_resource);
 
         let dd_resource = resource.read().unwrap();
         assert_eq!(
@@ -886,13 +891,15 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
+            DatadogSpanProcessor::new(Arc::new(config.clone()), registry, resource.clone(), None)
+                .unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
             .build();
 
-        processor.set_resource(&otel_resource);
+        let dd_resource = crate::resolve_dd_resource(otel_resource, &config);
+        processor.set_resource(&dd_resource);
 
         let dd_resource = resource.read().unwrap();
         assert_eq!(
@@ -909,13 +916,15 @@ mod tests {
         let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
 
         let mut processor =
-            DatadogSpanProcessor::new(Arc::new(config), registry, resource.clone(), None).unwrap();
+            DatadogSpanProcessor::new(Arc::new(config.clone()), registry, resource.clone(), None)
+                .unwrap();
 
         let otel_resource = Resource::builder()
             .with_service_name("otel-service")
             .build();
 
-        processor.set_resource(&otel_resource);
+        let dd_resource = crate::resolve_dd_resource(otel_resource, &config);
+        processor.set_resource(&dd_resource);
 
         let dd_resource = resource.read().unwrap();
         assert_eq!(
