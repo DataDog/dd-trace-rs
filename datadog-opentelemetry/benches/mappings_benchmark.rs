@@ -30,17 +30,23 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
             )
             .build();
 
+        // Reuse a single arena across iterations, resetting it between spans.
+        // This mirrors the exporter, which creates one arena per flush batch and
+        // amortizes it over all spans in the batch, instead of paying a fresh arena
+        // (and a global-allocator chunk) per span.
+        let mut arena = Bump::new();
+
         c.bench_function(
             &format!("otel_span_to_dd_span/{}/{}", test.name, M::name()),
             |b| {
                 b.iter_batched(
                     || input_span.clone(),
                     |input_span| {
-                        let alloc = Bump::new();
+                        arena.reset();
                         black_box(datadog_opentelemetry::mappings::otel_span_to_dd_span(
                             &input_span,
                             &input_resource,
-                            &alloc,
+                            &arena,
                         ));
                     },
                     criterion::BatchSize::LargeInput,
