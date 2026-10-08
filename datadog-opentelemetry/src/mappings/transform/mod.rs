@@ -466,8 +466,8 @@ impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
         T::try_from(i).ok()
     }
 
-    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<Value> {
-        self.resource.get(&Key::from_static_str(attr_key.key()))
+    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value> {
+        self.resource.get_ref(&Key::from_static_str(attr_key.key()))
     }
 }
 

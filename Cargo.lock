@@ -1504,9 +1504,9 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libdd-capabilities"
-version = "4.0.0"
+version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f9cb2c9db9807ae5c3f2eca9ba14561f51c3a85d31837bd60a7baaeba7f5420"
+checksum = "ebd351a5b324c0dc9eaca9a78a6c86660e01154fc1bfbd3f8995365342a13861"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1518,9 +1518,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-capabilities-impl"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64bd2696705ee3451cc56464926287620165a596356224ceba2cb085b82e5f20"
+checksum = "e5d3b7e0201e19eff71e5023e6a7eafcc67b627c18a43cfd2c94bf6f185ead55"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1533,11 +1533,12 @@ dependencies = [
 
 [[package]]
 name = "libdd-common"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07f750b5392281ae57764e1ad924d868d880f3b6c4f9529373adfb4823becff0"
+checksum = "6fe68e6dd16f4aa0b7b72fa7cf4c3ee5f6fd1cc9c9a569f08b712c9ef44750f3"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "bytes",
  "cc",
  "const_format",
@@ -1566,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "11.0.0"
+version = "12.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d81c7a52c05b78521740f7a3fcc2b361bb9f41c72521e3c032660f18386f06a"
+checksum = "645c1704ad126a3b4d417d24348b8f6b45357401d9fba9d0675ad47cab710fe3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1610,9 +1611,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline-core"
-version = "2.0.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e165f90cfe88d17c12b8fd52d621dcca02d92513f33ef06f53b661a8ebf7a18a"
+checksum = "5301c1b1431a8190f01968708515ab227c21995c3bb2604b5637c565cb27ad62"
 dependencies = [
  "anyhow",
  "http",
@@ -1627,18 +1628,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-ddsketch"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b625dfe5a456a5dd83fe2fc6ad14fd6b97c930c44041f4f899453707dbfb22c"
+checksum = "956deda8a7ac1ea46683e1c9f99a9c669118c82643afd8ad5424efd4d315d108"
 dependencies = [
  "prost",
 ]
 
 [[package]]
 name = "libdd-dogstatsd-client"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c87bc3d90c5113e430712f5f9ff3d74d57214f4648415a2b25f8c92964ad821f"
+checksum = "9b6118d6cf89d543b21673131345eb10427732906b607da3aa616fc1f5bd90b4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1653,9 +1654,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-library-config"
-version = "4.1.0"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b0fc44e0391476e2619f6e5a32d6abfe4bfcfc9015862742df59eaa0fc6fdf1"
+checksum = "c20b3ac53eb105f9d01f7d79e30795db71141002ee29e62b394c317a10f8897e"
 dependencies = [
  "anyhow",
  "libc",
@@ -1670,18 +1671,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-profiling-heap-allocator"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8dc8ea8019251309f950b0b4928176e387e9c455668667d73eb9f2a51cdaaaa"
+checksum = "596970a6daeeecd1e7b4034e443eea5249a07681490bfb2d6488ad71d98ee714"
 dependencies = [
  "libdd-profiling-heap-sampler",
 ]
 
 [[package]]
 name = "libdd-profiling-heap-sampler"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31b954ae7f9320c40ea54fb98f812b165bc01ba0dbedeeeacc26fde01601cd69"
+checksum = "b8faacabf9d7568527593ad6b3adf94d6c93dc951e0e7d9dfaa1c83a6797850d"
 dependencies = [
  "bindgen",
  "cc",
@@ -1689,9 +1690,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-remote-config"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11de619711aca9d1e5ca1baa1d989232011c3ea09aec7ee1451e8569a5b16c85"
+checksum = "2cb30426957d63e156547de871e3a8d36c9e10062dae188dc0dd930a3d17a9f6"
 dependencies = [
  "anyhow",
  "base64",
@@ -1722,9 +1723,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d06d27729cf81e422a99add51d8f640df59d314d77d851238cc6453478aabb6d"
+checksum = "cd0b343321f619f78d40a65df05a6fd02711d0a88402816c30aeb7030c28d9b9"
 dependencies = [
  "libdd-common",
  "lru",
@@ -1734,9 +1735,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-shared-runtime"
-version = "5.0.0"
+version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "748e2a65ee90cf24bc6c4476fb83a67baa58ab439da70667ad43f48551201c3c"
+checksum = "dd9215ca3c6ff11d95fe1045ebb01202c696fe6366407f5855d29e65dba21b6c"
 dependencies = [
  "async-trait",
  "futures",
@@ -1752,9 +1753,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-telemetry"
-version = "9.0.0"
+version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20804e3e4eb2a3344dc7276997ccbc92863ac3571a8367b95b1bcdaa7748d284"
+checksum = "b43c7066bde6a243b1190ce38d6b3a10787ab320468a05671d0bb57bf12b364b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1783,18 +1784,18 @@ dependencies = [
 
 [[package]]
 name = "libdd-tinybytes"
-version = "1.1.4"
+version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a590d3402b179059637d486e0ea1814b0403e2510b12b6cbc99c530f095b661"
+checksum = "861c7ffeb31a76638456c696d472651c7b413c8a366b4ae2c34afd788c861e2b"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "libdd-trace-normalization"
-version = "4.1.0"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b6d4eb38bba7fdda3c7dd590670197436edd55329d7353fd4d038f9592b9500"
+checksum = "4a3c8d6bc3cbf1f46d8bde7fe802e82603f3de3ebab5b1b3bc8036a81e4d7cea"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
@@ -1802,9 +1803,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-obfuscation"
-version = "9.0.0"
+version = "10.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "611acd5181823552c0ea064527c1d6775276773b48d9e16982e28cb11b814973"
+checksum = "08c1548ab9aae56439ca522fe86d14f3ac58f830de59214a98bd751dd1a04ad2"
 dependencies = [
  "anyhow",
  "fluent-uri",
@@ -1815,13 +1816,14 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
 name = "libdd-trace-protobuf"
-version = "5.0.1"
+version = "5.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6100376614b7eb8b308ae66785d01c68c78cf65994dd6a48149b2ea795ed64ec"
+checksum = "df1d89060df0b6ad5dac493d43468de2550121d177c6334868c646038a5ffca0"
 dependencies = [
  "prost",
  "serde",
@@ -1830,9 +1832,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "10.0.0"
+version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85f25dc7c09241e19553c167c14b453c988ba61da5fdcea01f7766cd73bbf57a"
+checksum = "ecd0032b57b2220ab8c535b3bbca15668541a3d8b965b15a70024f7b8b84ec5c"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1859,9 +1861,9 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-utils"
-version = "13.0.0"
+version = "14.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "143aef54b9a9c7569e5fc64cbfb09c6f6a2f3ab6b02233743fe5ec73c00a0070"
+checksum = "3a8a4fac534f744ab12645fcb2ef39c96ccc93d8ecf30f2469a89755fccee0de"
 dependencies = [
  "anyhow",
  "base64",

@@ -21,7 +21,7 @@ pub(crate) trait OtelSpan<'a> {
         self.get_attr_str_opt(attr_key).unwrap_or_default()
     }
 
-    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<Value>;
+    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value>;
 }
 
 /// Returns the datadog operation name from the otel span
@@ -389,9 +389,9 @@ fn get_res_span_attributes<'a>(
 ) -> Cow<'a, str> {
     for &attr_key in attributes {
         if let Some(res_attr) = span.get_res_attribute_opt(attr_key) {
-            let res_attr = res_attr.to_string();
+            let res_attr = res_attr.as_str();
             if !res_attr.is_empty() {
-                return Cow::Owned(res_attr);
+                return res_attr;
             }
         };
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
@@ -417,8 +417,9 @@ fn get_res_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey])
         let Some(res_attr) = span.get_res_attribute_opt(attr_key) else {
             continue;
         };
-        if !res_attr.as_str().is_empty() {
-            return Cow::Owned(res_attr.to_string());
+        let res_attr = res_attr.as_str();
+        if !res_attr.is_empty() {
+            return res_attr;
         }
     }
     Cow::Borrowed("")
