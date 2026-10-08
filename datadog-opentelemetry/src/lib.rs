@@ -383,8 +383,15 @@ impl DatadogTracingBuilder {
 
         let (tracer_provider, propagator) =
             make_tracer(Arc::new(config), self.tracer_provider, self.resource);
+        // Publish the active span context into the per-thread TLS slot so out-of-process readers
+        // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces. The
+        // registry is borrowed from the propagator, so this must happen before the propagator is
+        // moved into the global slot; `install_observer` takes ownership, hence the clone.
+        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+        crate::thread_ctx::install_observer(propagator.registry().clone());
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+
         tracer_provider
     }
 
@@ -547,11 +554,6 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
-
-        // Publish the active span context into the per-thread TLS slot so out-of-process readers
-        // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
-        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
-        crate::thread_ctx::install_observer(registry.clone());
 
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
