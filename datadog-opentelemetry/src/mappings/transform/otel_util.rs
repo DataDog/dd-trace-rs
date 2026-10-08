@@ -310,7 +310,7 @@ pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
                 Cow::Borrowed(check_db_type(&db))
             }
         }
-        _ => Cow::Borrowed("custom"),
+        _ => Cow::Borrowed(""),
     }
 }
 
