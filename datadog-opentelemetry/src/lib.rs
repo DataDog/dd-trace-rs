@@ -372,6 +372,10 @@ impl DatadogTracingBuilder {
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
+        // Whether tracing is enabled; decides whether the thread-context observer is installed
+        // below. Captured before `config` is moved into `make_tracer`.
+        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+        let tracing_enabled = config.enabled();
 
         // For now, otel process context spec is linux-specific.
         #[cfg(target_os = "linux")]
@@ -387,8 +391,15 @@ impl DatadogTracingBuilder {
         // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces. The
         // registry is borrowed from the propagator, so this must happen before the propagator is
         // moved into the global slot; `install_observer` takes ownership, hence the clone.
+        //
+        // Skip installation when tracing is disabled: dropped spans still carry valid span
+        // contexts, but they are never registered in the trace registry, so publishing them
+        // would mislabel them in the profiler. This mirrors `make_tracer`, which similarly
+        // skips the span processor when tracing is disabled.
         #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
-        crate::thread_ctx::install_observer(propagator.registry().clone());
+        if tracing_enabled {
+            crate::thread_ctx::install_observer(propagator.registry().clone());
+        }
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
