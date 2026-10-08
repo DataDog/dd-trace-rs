@@ -182,7 +182,7 @@ jobs:
   parametric:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@53687a2f4eab136c61d2a97474a37846d9ca6959  # main
+    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@1d664089d6aaac7e0fcd5f8a3ad21ddcbfdaa0fa  # main
     permissions:
       contents: read
       id-token: write
@@ -191,5 +191,5 @@ jobs:
       binaries_artifact: system_tests_binaries
       job_count: 2
       job_matrix: '[1,2]'
-      ref: 53687a2f4eab136c61d2a97474a37846d9ca6959 # main
+      ref: 1d664089d6aaac7e0fcd5f8a3ad21ddcbfdaa0fa # main
       push_to_test_optimization: true
