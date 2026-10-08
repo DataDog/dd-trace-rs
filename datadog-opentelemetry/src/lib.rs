@@ -372,8 +372,6 @@ impl DatadogTracingBuilder {
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
-        // Whether tracing is enabled; decides whether the thread-context observer is installed
-        // below. Captured before `config` is moved into `make_tracer`.
         #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
         let tracing_enabled = config.enabled();
 
@@ -387,15 +385,8 @@ impl DatadogTracingBuilder {
 
         let (tracer_provider, propagator) =
             make_tracer(Arc::new(config), self.tracer_provider, self.resource);
-        // Publish the active span context into the per-thread TLS slot so out-of-process readers
-        // (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces. The
-        // registry is borrowed from the propagator, so this must happen before the propagator is
-        // moved into the global slot; `install_observer` takes ownership, hence the clone.
-        //
-        // Skip installation when tracing is disabled: dropped spans still carry valid span
-        // contexts, but they are never registered in the trace registry, so publishing them
-        // would mislabel them in the profiler. This mirrors `make_tracer`, which similarly
-        // skips the span processor when tracing is disabled.
+        // Enable publishing the active span context to a specific TLS slot so out-of-process
+        // readers (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
         #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
         if tracing_enabled {
             crate::thread_ctx::install_observer(propagator.registry().clone());
