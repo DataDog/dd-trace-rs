@@ -49,7 +49,6 @@ opentelemetry = { version = "0.33.0", features = [
     "trace",
     "metrics",
     "logs",
-    "experimental_context_observer",
 ], default-features = false }
 opentelemetry-otlp = { version = "0.33.0", features = [
     "metrics",

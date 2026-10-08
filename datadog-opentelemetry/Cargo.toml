@@ -134,6 +134,7 @@ otel-thread-ctx = [
     "dep:libdd-otel-thread-ctx",
     "libdd-library-config/otel-thread-ctx",
     "libdd-library-config/process-context-writer",
+    "opentelemetry/experimental_context_observer",
 ]
 https = [
     "libdd-data-pipeline/https",
