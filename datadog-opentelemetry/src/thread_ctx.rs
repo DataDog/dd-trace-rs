@@ -27,13 +27,13 @@ use opentelemetry::{
     Context,
 };
 
-use crate::span_processor::TraceRegistry;
+use crate::{dd_warn, span_processor::TraceRegistry};
 
 /// Observer-side view of an OTel [`Context`], stored in the context's `observer_view` slot.
 ///
 /// It is a transparent newtype over a pre-built, immutable [`ThreadContext`]. `observer_view`
-/// already stores the view behind an `Arc`, so wrapping the record directly (rather than holding an
-/// `Arc<ThreadContext>`). We can then use it as a [SharedThreadContext] directly (see
+/// already stores the view behind an `Arc`, so we wrap the record directly (rather than holding an
+/// `Arc<ThreadContext>`). We can then use it as a [SharedThreadContext] (see
 /// [`Self::to_shared_thread_ctx`]).
 ///
 /// The record is built at most once per [`Context`] value, when the context is created, and reused
@@ -122,12 +122,23 @@ impl ContextObserver for DatadogContextObserver {
         let span_id = span_ctx.span_id().to_bytes();
 
         // If the local root span isn't registered yet (e.g. a freshly extracted remote context,
-        // before the first local child span starts), fall back to the current span id. The context
-        // created for the first local span will carry the correct local root span id.
-        let local_root_span_id = self
-            .registry
-            .get_local_root_span_id(trace_id)
-            .unwrap_or(span_id);
+        // before the first local child span starts), we could fall back to the current span id,
+        // hoping that the context created for the first local span will carry the correct local
+        // root span id.
+        //
+        // However, no local root span happens in case of:
+        //
+        // - double initialization of the the global tracer and the observer (we don't support)
+        // - dropped local root spans (we don't record)
+        // - a new remote context (which shouldn't have the span from the remote service as the
+        //   local root).
+        //
+        // Those cases are pathological (they can happen but we aren't expected to operate normally
+        // in these conditions). In the case of the double init, the proposed fallback would make
+        // _all the spans_ as local roots, which could be a problem. We default to not publishing
+        // such spans without root span id associated (by giving them a `None` view) instead.
+        // Missing data is the lesser evil.
+        let local_root_span_id = self.registry.get_local_root_span_id(trace_id)?;
 
         Some(Arc::new(DatadogContextView(ThreadContext::new(
             trace_id,
@@ -141,11 +152,26 @@ impl ContextObserver for DatadogContextObserver {
 
 /// Register the Datadog context observer globally.
 ///
-/// Must be called once, during SDK initialization, before any span is started. Because
-/// [`GlobalContextObserver`] is backed by a `OnceLock`, subsequent calls are silently ignored
-/// (with an `opentelemetry` warning log).
+/// **Must be called only once** during SDK initialization, before any span is started. Because
+/// [`GlobalContextObserver`] is backed by a `OnceLock`, subsequent calls are silently ignored (with
+/// a warning log).
+///
+/// If called multiple times, the old trace registry will be used for resolution, leading to missing
+/// data. The current behavior of the observer will then be to ignore spans, effectively disabling
+/// OTel thread context sharing (though the behavior in case of multiple installation is an
+/// implementation detail that might change in the future).
 pub(crate) fn install_observer(registry: TraceRegistry) {
-    GlobalContextObserver::set(Arc::new(DatadogContextObserver::new(registry)));
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static IS_INIT: AtomicBool = AtomicBool::new(false);
+
+    if IS_INIT.swap(true, Ordering::Relaxed) {
+        dd_warn!(
+            "Multiple initializations of the global tracer detected. This mode is not supported: the tracer should only be initialized once globally."
+        );
+    } else {
+        GlobalContextObserver::set(Arc::new(DatadogContextObserver::new(registry)));
+    }
 }
 
 #[cfg(test)]
