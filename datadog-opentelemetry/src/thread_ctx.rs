@@ -176,7 +176,11 @@ pub(crate) fn install_observer(registry: TraceRegistry) {
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+    use opentelemetry::trace::{
+        Span, SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState, Tracer,
+        TracerProvider,
+    };
+    use opentelemetry_sdk::trace::SdkTracerProvider;
 
     use super::*;
     use crate::Config;
@@ -185,17 +189,29 @@ mod tests {
         TraceRegistry::new(Arc::new(Config::builder().build()))
     }
 
-    /// A context carrying a valid (remote) span context. Going through
-    /// [`TraceContextExt::with_remote_span_context`] is what populates the observer view, so this
-    /// exercises the same creation path as a locally started span.
-    fn cx_with_span() -> Context {
-        Context::new().with_remote_span_context(SpanContext::new(
-            TraceId::from(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
-            SpanId::from(0x1122_3344_5566_7788),
+    /// Starts the first local span of a trace with a real SDK tracer, under a freshly extracted
+    /// remote context, and registers it as the local root of the trace. This mirrors what
+    /// `DatadogSpanProcessor::on_start` does when a local span starts with a remote parent: the
+    /// span becomes the local root and is registered in the trace registry, making it (and its
+    /// children) publishable to the OTel thread context.
+    fn start_local_root_span(
+        tracer: &opentelemetry_sdk::trace::Tracer,
+        registry: &TraceRegistry,
+        trace_id: TraceId,
+    ) -> opentelemetry_sdk::trace::Span {
+        let remote_parent_cx = Context::new().with_remote_span_context(SpanContext::new(
+            trace_id,
+            SpanId::from(0x9988_7766_5544_3322),
             TraceFlags::SAMPLED,
             true,
             TraceState::default(),
-        ))
+        ));
+        let span = tracer.start_with_context("local-root", &remote_parent_cx);
+        registry.register_local_root_span(
+            trace_id.to_bytes(),
+            span.span_context().span_id().to_bytes(),
+        );
+        span
     }
 
     #[test]
@@ -204,12 +220,37 @@ mod tests {
         assert!(observer.make_view(&Context::new()).is_none());
     }
 
+    /// A freshly extracted remote context has no local root registered (there is no local span
+    /// yet), so it must not get a view.
     #[test]
-    fn make_view_builds_a_downcastable_view() {
+    fn make_view_skips_remote_contexts_without_a_local_root() {
         let observer = DatadogContextObserver::new(registry());
+        let remote_cx = Context::new().with_remote_span_context(SpanContext::new(
+            TraceId::from(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+            SpanId::from(0x1122_3344_5566_7788),
+            TraceFlags::SAMPLED,
+            true,
+            TraceState::default(),
+        ));
+        assert!(observer.make_view(&remote_cx).is_none());
+    }
+
+    #[test]
+    fn make_view_builds_a_downcastable_view_for_a_local_span() {
+        let registry = registry();
+        let observer = DatadogContextObserver::new(registry.clone());
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("thread-ctx-tests");
+
+        let cx = Context::current_with_span(start_local_root_span(
+            &tracer,
+            &registry,
+            TraceId::from(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+        ));
+
         let view = observer
-            .make_view(&cx_with_span())
-            .expect("a context with a valid span must get a view");
+            .make_view(&cx)
+            .expect("a context with a local span must get a view");
         assert!(DatadogContextView::to_shared_thread_ctx(&view).is_some());
     }
 
@@ -217,16 +258,26 @@ mod tests {
     /// slot, so this test relies on `nextest` running each test in its own process.
     #[test]
     fn publish_attaches_then_detaches_the_tls_slot() {
-        install_observer(registry());
+        let registry = registry();
+        install_observer(registry.clone());
+        let provider = SdkTracerProvider::builder().build();
+        let tracer = provider.tracer("thread-ctx-tests");
 
-        publish(&cx_with_span());
+        // Building the context with an active local span is what triggers the (global) observer
+        // to build the view that `publish` then attaches to the TLS slot.
+        let cx = Context::current_with_span(start_local_root_span(
+            &tracer,
+            &registry,
+            TraceId::from(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+        ));
+
+        publish(&cx);
         assert!(
             SharedThreadContext::detach().is_some(),
-            "a context with a span must attach a record"
+            "a context with a local span must attach a record"
         );
 
         // Entering a context without a span retracts whatever was attached.
-        publish(&cx_with_span());
         publish(&Context::new());
         assert!(
             SharedThreadContext::detach().is_none(),
