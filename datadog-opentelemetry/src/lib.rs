@@ -324,8 +324,6 @@ mod telemetry_metrics_exporter;
 mod text_map_propagator;
 #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
 mod thread_ctx;
-#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
-pub use thread_ctx::build::emit_build_instructions as emit_otel_thread_ctx_build_instructions;
 mod trace_id;
 
 use std::sync::{Arc, RwLock};
@@ -982,5 +980,29 @@ pub fn logs() -> DatadogLogsBuilder {
     DatadogLogsBuilder {
         config: None,
         resource: None,
+    }
+}
+
+/// Build-time helper for OTel thread context sharing.
+// Since this is used at build time, we shouldn't gate it behind `otel-thread-ctx` or
+// `target_os="linux"`, which would break cross-compiling. Instead we check at build time that the
+// target is indeed Linux.
+pub mod build {
+    /// Emit the instructions required for an executable to expose thread context.
+    // allow: this is run at build time, so a panic is a compile error, not a runtime one
+    #[allow(clippy::disallowed_methods)]
+    pub fn emit_otel_thread_ctx_build_instructions() {
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
+            panic!("thread context sharing is only supported when targeting Linux");
+        }
+
+        let out_dir = std::env::var("OUT_DIR").expect("`OUT_DIR` is always set by cargo");
+        let dlist_path = format!("{out_dir}/otel-thread-ctx.dynlist");
+        std::fs::write(
+            &dlist_path,
+            include_str!("../otel-thread-ctx-build/dynlist"),
+        )
+        .expect("writing the dynamic list into `OUT_DIR` must succeed");
+        println!("cargo:rustc-link-arg=-Wl,--dynamic-list={dlist_path}");
     }
 }

@@ -180,27 +180,6 @@ pub(crate) fn install_observer(registry: TraceRegistry) {
     }
 }
 
-// Adapted from https://github.com/polarsignals/custom-labels/blob/77e5fc77821ad3c35c1382b8d2d4877af06604d4/src/lib.rs#L153
-/// Build helpers for binary crate consuming this library.
-pub mod build {
-    /// Emit the instructions required for an executable to expose thread context.
-    #[allow(clippy::disallowed_methods)]
-    pub fn emit_build_instructions() {
-        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
-            panic!("thread context sharing is only supported on Linux");
-        }
-
-        let out_dir = std::env::var("OUT_DIR").expect("`OUT_DIR` is always set by cargo");
-        let dlist_path = format!("{out_dir}/otel-thread-ctx.dynlist");
-        std::fs::write(
-            &dlist_path,
-            include_str!("../otel-thread-ctx-build/dynlist"),
-        )
-        .expect("writing the dynamic list into `OUT_DIR` must succeed");
-        println!("cargo:rustc-link-arg=-Wl,--dynamic-list={dlist_path}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use opentelemetry::trace::{
