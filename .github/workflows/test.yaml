@@ -163,7 +163,7 @@ jobs:
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
       - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "integration_tests::"
 
-  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch of run-parametric.yml
+  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch_map of system-tests.yml
   build-artifacts:
     runs-on: ubuntu-latest
     steps:
@@ -179,17 +179,22 @@ jobs:
           name: system_tests_binaries
           path: ./binaries/**/*
 
-  parametric:
+  system-tests:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@1d664089d6aaac7e0fcd5f8a3ad21ddcbfdaa0fa  # main
+    concurrency:
+      group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
+      cancel-in-progress: true
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@1d664089d6aaac7e0fcd5f8a3ad21ddcbfdaa0fa  # main
     permissions:
       contents: read
       id-token: write
     with:
       library: rust
       binaries_artifact: system_tests_binaries
-      job_count: 2
-      job_matrix: '[1,2]'
+      scenarios_groups: tracer_release
+      desired_execution_time: 600
+      parametric_job_count: 2
       ref: 1d664089d6aaac7e0fcd5f8a3ad21ddcbfdaa0fa # main
       push_to_test_optimization: true
+      skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}
