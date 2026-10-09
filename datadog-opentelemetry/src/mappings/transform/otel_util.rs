@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::borrow::Cow;
+use std::fmt::Write as _;
+
+use bumpalo::Bump;
 
 use super::{attribute_keys::*, semconv_shim};
 
@@ -10,26 +13,84 @@ use opentelemetry_semantic_conventions::{self as semconv};
 
 /// The Span trait is used to implement utils function is a way that is generic
 /// and could be ported to multiple Span models
+///
+/// String-returning methods either borrow from the span data (lifetime `'a`) or
+/// format into the arena returned by [`OtelSpan::alloc`], so they never allocate
+/// through the global allocator.
 pub(crate) trait OtelSpan<'a> {
+    /// Arena used to allocate formatted strings, outliving the returned `&'a str`s.
+    fn alloc(&self) -> &'a Bump;
     fn name(&self) -> &'a str;
     fn span_kind(&self) -> SpanKind;
     fn has_attr(&self, attr_key: AttributeKey) -> bool;
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'a, str>>;
+    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<&'a str>;
     fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T>;
 
     fn attr_len(&self) -> usize;
 
-    fn get_attr_str(&self, attr_key: AttributeKey) -> Cow<'a, str> {
-        self.get_attr_str_opt(attr_key).unwrap_or_default()
+    fn get_attr_str(&self, attr_key: AttributeKey) -> &'a str {
+        self.get_attr_str_opt(attr_key).unwrap_or("")
     }
 
-    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value>;
     fn res_len(&self) -> usize;
+
+    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value>;
+}
+
+/// `Display` wrapper that formats a string lowercased without going through
+/// the global allocator.
+struct Lower<'s>(&'s str);
+
+impl std::fmt::Display for Lower<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut src = self.0;
+        let mut buf = [0u8; 64];
+        // Fast path: lowercase the leading ASCII run into a stack buffer.
+        let mut fast_len = src
+            .as_bytes()
+            .iter()
+            .position(|b| !b.is_ascii())
+            .unwrap_or(src.len());
+
+        loop {
+            let batch_len = fast_len.min(64);
+            buf[..batch_len].copy_from_slice(&src.as_bytes()[..batch_len]);
+            buf[..batch_len].make_ascii_lowercase();
+            if batch_len > 0 {
+                // SAFETY: `buf[..batch_len]` holds a prefix of a valid `&str` whose
+                // bytes are all ASCII, and ASCII lowercasing preserves UTF-8
+                // validity, so it is valid UTF-8.
+                f.write_str(unsafe { std::str::from_utf8_unchecked(&buf[..batch_len]) })?;
+            }
+            fast_len -= batch_len;
+            src = &src[batch_len..];
+            if src.is_empty() {
+                return Ok(());
+            }
+            if fast_len == 0 {
+                break;
+            }
+        }
+
+        for c in src.chars() {
+            for lc in c.to_lowercase() {
+                f.write_char(lc)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Formats `args` into `alloc`, returning a `&str` borrowed from the arena.
+pub(crate) fn fmt_in<'a>(alloc: &'a Bump, args: std::fmt::Arguments<'_>) -> &'a str {
+    let mut s = bumpalo::collections::String::new_in(alloc);
+    let _ = s.write_fmt(args);
+    s.into_bump_str()
 }
 
 /// Returns the datadog operation name from the otel span
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
-pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
+pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
         return name;
     }
@@ -40,16 +101,16 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> 
     // http
     if span.has_attr(HTTP_METHOD) || span.has_attr(HTTP_REQUEST_METHOD) {
         if is_client {
-            return Cow::Borrowed("http.client.request");
+            return "http.client.request";
         } else if is_server {
-            return Cow::Borrowed("http.server.request");
+            return "http.server.request";
         }
     }
 
     // database
     let db_system = get_span_attributes(span, &[DB_SYSTEM, DB_SYSTEM_NAME]);
     if !db_system.is_empty() && is_client {
-        return Cow::Owned(format!("{}.query", db_system.to_lowercase()));
+        return fmt_in(span.alloc(), format_args!("{}.query", Lower(db_system)));
     }
 
     // messaging
@@ -63,7 +124,10 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> 
             SpanKind::Client | SpanKind::Server | SpanKind::Consumer | SpanKind::Producer
         )
     {
-        return Cow::Owned(format!("{messaging_system}.{messaging_operation}").to_lowercase());
+        return fmt_in(
+            span.alloc(),
+            format_args!("{}.{}", Lower(messaging_system), Lower(messaging_operation)),
+        );
     }
 
     // RPC & AWS
@@ -73,65 +137,85 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> 
     if is_client && is_aws {
         let rpc_service = span.get_attr_str(RPC_SERVICE);
         if !rpc_service.is_empty() {
-            return Cow::Owned(format!("aws.{}.request", rpc_service.to_lowercase()));
+            return fmt_in(
+                span.alloc(),
+                format_args!("aws.{}.request", Lower(rpc_service)),
+            );
         }
-        return Cow::Borrowed("aws.client.request");
+        return "aws.client.request";
     }
     if is_client && is_rpc {
-        return Cow::Owned(format!("{}.client.request", rpc_system.to_lowercase()));
+        return fmt_in(
+            span.alloc(),
+            format_args!("{}.client.request", Lower(rpc_system)),
+        );
     }
     if is_server && is_rpc {
-        return Cow::Owned(format!("{}.server.request", rpc_system.to_lowercase()));
+        return fmt_in(
+            span.alloc(),
+            format_args!("{}.server.request", Lower(rpc_system)),
+        );
     }
 
     // FAAS client
     let faas_invoked_provider = span.get_attr_str(FAAS_INVOKED_PROVIDER);
     let faas_invoked_name = span.get_attr_str(FAAS_INVOKED_NAME);
     if is_client && !faas_invoked_provider.is_empty() && !faas_invoked_name.is_empty() {
-        return Cow::Owned(
-            format!("{faas_invoked_provider}.{faas_invoked_name}.invoke").to_lowercase(),
+        return fmt_in(
+            span.alloc(),
+            format_args!(
+                "{}.{}.invoke",
+                Lower(faas_invoked_provider),
+                Lower(faas_invoked_name)
+            ),
         );
     }
 
     // FAAS server
     let faas_trigger = span.get_attr_str(FAAS_TRIGGER);
     if !faas_trigger.is_empty() && is_server {
-        return Cow::Owned(format!("{}.invoke", faas_trigger.to_lowercase()));
+        return fmt_in(span.alloc(), format_args!("{}.invoke", Lower(faas_trigger)));
     }
 
     // GraphQL
     if !span.get_attr_str(GRAPHQL_OPERATION_TYPE).is_empty() {
-        return Cow::Borrowed("graphql.server.request");
+        return "graphql.server.request";
     }
 
     // Generic HTTP server/client
     let protocol = span.get_attr_str(NETWORK_PROTOCOL_NAME);
     if is_server {
         if !protocol.is_empty() {
-            return Cow::Owned(format!("{}.server.request", protocol.to_lowercase()));
+            return fmt_in(
+                span.alloc(),
+                format_args!("{}.server.request", Lower(protocol)),
+            );
         }
-        return Cow::Borrowed("server.request");
+        return "server.request";
     } else if is_client {
         if !protocol.is_empty() {
-            return Cow::Owned(format!("{}.client.request", protocol.to_lowercase()));
+            return fmt_in(
+                span.alloc(),
+                format_args!("{}.client.request", Lower(protocol)),
+            );
         }
-        return Cow::Borrowed("client.request");
+        return "client.request";
     }
 
     // if nothing matches, checking for generic http server/client
 
     // Fallback in span kind
-    Cow::Borrowed(match span.span_kind() {
+    match span.span_kind() {
         SpanKind::Client => "client",
         SpanKind::Server => "server",
         SpanKind::Producer => "producer",
         SpanKind::Consumer => "consumer",
         SpanKind::Internal => "internal",
-    })
+    }
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
-pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
+pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let m = get_res_span_attributes(span, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
@@ -140,12 +224,12 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     let mut m = get_res_span_attributes(span, &[HTTP_REQUEST_METHOD, HTTP_METHOD]);
     if !m.is_empty() {
         if m == "_OTHER" {
-            m = Cow::Borrowed("HTTP");
+            m = "HTTP";
         }
         if matches!(span.span_kind(), SpanKind::Server) {
             let route = get_res_span_attributes(span, &[HTTP_ROUTE]);
             if !route.is_empty() {
-                return Cow::Owned(format!("{m} {route}"));
+                return fmt_in(span.alloc(), format_args!("{m} {route}"));
             }
         }
         return m;
@@ -158,7 +242,10 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
         let messaging_destination =
             get_res_span_attributes(span, &[MESSAGING_DESTINATION, MESSAGING_DESTINATION_NAME]);
         if !messaging_destination.is_empty() {
-            res_name = Cow::Owned(format!("{res_name} {messaging_destination}"));
+            res_name = fmt_in(
+                span.alloc(),
+                format_args!("{res_name} {messaging_destination}"),
+            );
         }
         return res_name;
     }
@@ -168,7 +255,7 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
         let mut res_name = rpc_method;
         let rpc_service = get_res_span_attributes(span, &[RPC_SERVICE]);
         if !rpc_service.is_empty() {
-            res_name = Cow::Owned(format!("{res_name} {rpc_service}"));
+            res_name = fmt_in(span.alloc(), format_args!("{res_name} {rpc_service}"));
         }
         return res_name;
     }
@@ -178,7 +265,10 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
         let mut res_name = graphql_operation_type;
         let graphql_operation_name = get_res_span_attributes(span, &[GRAPHQL_OPERATION_NAME]);
         if !graphql_operation_name.is_empty() {
-            res_name = Cow::Owned(format!("{res_name} {graphql_operation_name}"));
+            res_name = fmt_in(
+                span.alloc(),
+                format_args!("{res_name} {graphql_operation_name}"),
+            );
         }
         return res_name;
     }
@@ -194,7 +284,7 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
             return db_query;
         }
     }
-    Cow::Borrowed(span.name())
+    span.name()
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
@@ -298,27 +388,27 @@ fn check_db_type(db_type: &str) -> &'static str {
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L250
-pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
+pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let typ = get_res_span_attributes(span, &[SPAN_TYPE]);
     if !typ.is_empty() {
         return typ;
     }
     match span.span_kind() {
-        SpanKind::Server => Cow::Borrowed("web"),
+        SpanKind::Server => "web",
         SpanKind::Client => {
             let db = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
             if db.is_empty() {
-                Cow::Borrowed("http")
+                "http"
             } else {
-                Cow::Borrowed(check_db_type(&db))
+                check_db_type(db)
             }
         }
-        _ => Cow::Borrowed("custom"),
+        _ => "custom",
     }
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
-pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
+pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
     if !datadog_env.is_empty() {
         return datadog_env;
@@ -329,7 +419,7 @@ pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
-pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
+pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     // First, try to extract service from the span's attributes.
     if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
         if !service.is_empty() {
@@ -338,13 +428,13 @@ pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> Cow<'a, str> {
     }
 
     // If not in span attributes, check the resource attributes.
-    let service: Option<_> = span.get_res_attribute_opt(SERVICE_NAME);
-    if let Some(service) = service {
-        if !service.as_str().is_empty() {
-            return Cow::Owned(service.to_string());
+    if let Some(service) = span.get_res_attribute_opt(SERVICE_NAME) {
+        let service = super::otel_value_string_repr(service, span.alloc());
+        if !service.is_empty() {
+            return service;
         }
     }
-    Cow::Borrowed(DEFAULT_OTLP_SERVICE_NAME)
+    DEFAULT_OTLP_SERVICE_NAME
 }
 
 // https://github.com/DataDog/opentelemetry-mapping-go/blob/67e66831012599082cc42cf877ea340266d95bb4/pkg/otlp/attributes/attributes.go#L175
@@ -372,6 +462,29 @@ fn is_datadog_convention_key(k: &str) -> bool {
     ) || k.starts_with("datadog.")
 }
 
+/// Maps an otel attribute key to its datadog equivalent.
+pub fn get_dd_key_for_otlp_attribute_in<'a>(k: &'a str, alloc: &'a Bump) -> Cow<'a, str> {
+    if let Some(mapped_key) = http_mappings(k) {
+        return Cow::Borrowed(mapped_key);
+    }
+    if let Some(suffix) = k.strip_prefix("http.request.header.") {
+        return Cow::Borrowed(fmt_in(alloc, format_args!("http.request.headers.{suffix}")));
+    }
+    if is_datadog_convention_key(k) {
+        return Cow::Borrowed("");
+    }
+    Cow::Borrowed(k)
+}
+
+/// Maps an otel attribute key to its datadog equivalent, for callers that don't
+/// have an arena that lives long enough
+///
+/// TODO(paulgdc): this is here because the SampledSpan trait requires returning
+/// a string with the same lifetime as the key. But the lifetime of the key
+/// is never the same as the one of the bump allocator.
+///
+/// We should fix the SpanProperties trait in libdd-sampling and remove the duplicated
+/// method
 pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
     if let Some(mapped_key) = http_mappings(k) {
         return Cow::Borrowed(mapped_key);
@@ -385,13 +498,10 @@ pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
     Cow::Borrowed(k)
 }
 
-fn get_res_span_attributes<'a>(
-    span: &impl OtelSpan<'a>,
-    attributes: &[AttributeKey],
-) -> Cow<'a, str> {
+fn get_res_span_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> &'a str {
     for &attr_key in attributes {
         if let Some(res_attr) = span.get_res_attribute_opt(attr_key) {
-            let res_attr = res_attr.as_str();
+            let res_attr = super::otel_value_string_repr(res_attr, span.alloc());
             if !res_attr.is_empty() {
                 return res_attr;
             }
@@ -400,10 +510,10 @@ fn get_res_span_attributes<'a>(
             return attr;
         }
     }
-    Cow::Borrowed("")
+    ""
 }
 
-fn get_span_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> Cow<'a, str> {
+fn get_span_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> &'a str {
     for &attr_key in attributes {
         if let Some(attr) = span.get_attr_str_opt(attr_key) {
             if !attr.is_empty() {
@@ -411,18 +521,42 @@ fn get_span_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]
             }
         }
     }
-    Cow::Borrowed("")
+    ""
 }
 
-fn get_res_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> Cow<'a, str> {
+fn get_res_attributes<'a>(span: &impl OtelSpan<'a>, attributes: &[AttributeKey]) -> &'a str {
     for &attr_key in attributes {
         let Some(res_attr) = span.get_res_attribute_opt(attr_key) else {
             continue;
         };
-        let res_attr = res_attr.as_str();
+        let res_attr = super::otel_value_string_repr(res_attr, span.alloc());
         if !res_attr.is_empty() {
             return res_attr;
         }
     }
-    Cow::Borrowed("")
+    ""
+}
+
+#[cfg(test)]
+mod lower_tests {
+    use super::Lower;
+
+    fn lowered(src: &str) -> String {
+        Lower(src).to_string()
+    }
+
+    #[test]
+    fn mirrors_str_to_lowercase() {
+        // fast path (pure ASCII, fits in the 64-byte stack buffer)
+        assert_eq!(lowered(""), "");
+        assert_eq!(lowered("HTTP/2"), "http/2");
+        assert_eq!(lowered("MongoDB"), "mongodb");
+        // non-ASCII: downgrades to `char::to_lowercase`
+        assert_eq!(lowered("Gr\u{fc}\u{df}EN"), "gr\u{fc}\u{df}en");
+        assert_eq!(lowered("\u{130}"), "i\u{307}");
+        // >64 bytes of ASCII: fast path is capped, remainder goes through the
+        // slow path
+        let long = "A".repeat(100);
+        assert_eq!(lowered(&long), long.to_lowercase());
+    }
 }

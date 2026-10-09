@@ -11,6 +11,7 @@ use crate::{
         VERSION_KEY,
     },
 };
+use bumpalo::Bump;
 use libdd_trace_utils::span::SpanText;
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
@@ -42,6 +43,7 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
     span_data: I,
     otel_resource: &'a Resource,
+    alloc: &'a Bump,
 ) -> Vec<DdSpan<'a>>
 where
     I: IntoIterator<Item = &'a SpanData>,
@@ -53,7 +55,7 @@ where
         .map(|s| {
             let trace_flags = s.span_context.trace_flags();
             let sdk_span = SdkSpan::from_sdk_span_data(s);
-            let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource);
+            let mut dd_span = otel_span_to_dd_span(&sdk_span, otel_resource, alloc);
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);

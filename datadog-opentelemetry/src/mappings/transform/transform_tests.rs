@@ -734,6 +734,8 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
+    use bumpalo::Bump;
+
     use crate::mappings::{
         transform::{otel_span_to_dd_span, CowStr},
         DdSpan,
@@ -756,8 +758,12 @@ mod tests {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 )
                 .build();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            let alloc = Bump::new();
+            let output = otel_span_to_dd_span(
+                &test_span_to_sdk_span(&test.input_span),
+                &input_resource,
+                &alloc,
+            );
             hashmap_diff(&output.meta, &test.expected_out.meta);
             hashmap_diff(&output.metrics, &test.expected_out.metrics);
             assert_eq!(

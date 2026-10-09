@@ -65,6 +65,7 @@ serde_json = { version = "1.0.140" }
 
 hashbrown = { version = "0.15.5" }
 foldhash = { version = "0.1.5" }
+bumpalo = { version = "3.20", features = ["collections"] }
 
 [profile.dev]
 debug = 2 # full debug info
