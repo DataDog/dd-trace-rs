@@ -725,6 +725,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
+name = "elf"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1675,6 +1681,10 @@ name = "libdd-otel-thread-ctx"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f652c913051a2d8be95ed9e213502e6c1ee2b08d90e4587334fdf8824442d280"
+dependencies = [
+ "anyhow",
+ "elf",
+]
 
 [[package]]
 name = "libdd-profiling-heap-allocator"
