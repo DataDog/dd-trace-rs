@@ -324,6 +324,8 @@ mod telemetry_metrics_exporter;
 mod text_map_propagator;
 #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
 mod thread_ctx;
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+pub use thread_ctx::build::emit_build_instructions as emit_otel_thread_ctx_build_instructions;
 mod trace_id;
 
 use std::sync::{Arc, RwLock};
