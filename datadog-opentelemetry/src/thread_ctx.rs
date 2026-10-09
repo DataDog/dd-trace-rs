@@ -163,6 +163,12 @@ impl ContextObserver for DatadogContextObserver {
 pub(crate) fn install_observer(registry: TraceRegistry) {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    if let Err(e) = libdd_otel_thread_ctx::sanity_check::sanity_check() {
+        dd_warn!(
+            "OTel thread context: this binary may not expose its context to external readers properly. Thread context sharing requires a custom build step that appears to be missing; please refer to dd-trace-rs's README (sanity check failed: {e})"
+        );
+    }
+
     static IS_INIT: AtomicBool = AtomicBool::new(false);
 
     if IS_INIT.swap(true, Ordering::Relaxed) {
