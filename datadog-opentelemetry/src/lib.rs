@@ -23,11 +23,11 @@
 //!
 //! #### Tracing
 //!
-//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
+//! To trace functions, you can either use the `opentelemetry` crate's [API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/trace/index.html) or the `tracing` crate [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry` [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 //!
 //! #### Metrics
 //!
-//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html).
+//! To collect metrics, use the `opentelemetry` crate's [Metrics API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/metrics/index.html).
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 //!
 //! #### Logging
@@ -47,7 +47,7 @@
 //!
 //! Requires
 //! * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
 //! * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 //!
 //! ```no_run
@@ -73,7 +73,7 @@
 //! #### Opentelemetry trace API
 //!
 //! Requires
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `trace`
 //!   feature enabled
 //!
 //! ```no_run
@@ -101,7 +101,7 @@
 //!
 //! Requires
 //! * the `metrics` feature of this crate to be enabled
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics`
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `metrics`
 //!   feature enabled
 //! * [`tokio`](https://docs.rs/tokio)
 //!
@@ -129,7 +129,7 @@
 //! Requires
 //! * the `logs` feature of this crate to be enabled
 //! * [`log`](https://docs.rs/log/0.4.29/log/)
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
 //! * [`tokio`](https://docs.rs/tokio)
 //!
 //! The logger provider MUST be initialized within a tokio context
@@ -221,11 +221,11 @@
 //!
 //! * MSRV: 1.87
 //!
-//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
-//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
-//!   version: 0.33
-//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
-//!   version 0.32
+//! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
+//! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
+//!   version: 0.34
+//! * [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
+//!   version 0.33
 //! * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 //!
 //! ## Features
@@ -322,6 +322,8 @@ mod telemetry_logs_exporter;
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
 mod telemetry_metrics_exporter;
 mod text_map_propagator;
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+mod thread_ctx;
 mod trace_id;
 
 use std::sync::{Arc, RwLock};
@@ -370,6 +372,8 @@ impl DatadogTracingBuilder {
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
+        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+        let tracing_enabled = config.enabled();
 
         // For now, otel process context spec is linux-specific.
         #[cfg(target_os = "linux")]
@@ -381,8 +385,15 @@ impl DatadogTracingBuilder {
 
         let (tracer_provider, propagator) =
             make_tracer(Arc::new(config), self.tracer_provider, self.resource);
+        // Enable publishing the active span context to a specific TLS slot so out-of-process
+        // readers (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
+        #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+        if tracing_enabled {
+            crate::thread_ctx::install_observer(propagator.registry().clone());
+        }
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+
         tracer_provider
     }
 
@@ -392,10 +403,12 @@ impl DatadogTracingBuilder {
     /// You will need to set them up yourself, at a latter point if you want to use global tracing
     /// methods and library integrations
     ///
-    /// # Process context
+    /// # Process-level and thread-level context
     ///
     /// As opposed as [Self::init], this method won't automatically publish tracer metadata to the
-    /// OTel process context.
+    /// OTel process context. Similarly, a locally initialized tracer won't additionally publish
+    /// contexts as OTel thread-level contexts, meaning they'll be invisible to the Full Host
+    /// Profiler (eBPF profiler).
     ///
     /// # Example
     ///
@@ -543,6 +556,7 @@ fn make_tracer(
 ) -> (SdkTracerProvider, DatadogPropagator) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
+
         let resource_slot = Arc::new(RwLock::new(Resource::builder_empty().build()));
         // Sampler only needs config for initialization (reads initial sampling rules)
         // Runtime updates come via config callback, so no need for shared config

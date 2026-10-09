@@ -40,21 +40,21 @@ libdd-remote-config = { version = "7.0.0", default-features = false, features = 
     "client",
 ] }
 libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.2.0", default-features = false }
-opentelemetry_sdk = { version = "0.32.1", features = [
+opentelemetry_sdk = { version = "0.33.0", features = [
     "trace",
     "metrics",
     "logs",
 ], default-features = false }
-opentelemetry = { version = "0.32.0", features = [
+opentelemetry = { version = "0.33.0", features = [
     "trace",
     "metrics",
     "logs",
 ], default-features = false }
-opentelemetry-otlp = { version = "0.32.0", features = [
+opentelemetry-otlp = { version = "0.33.0", features = [
     "metrics",
     "logs",
 ], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32.0", features = [
+opentelemetry-semantic-conventions = { version = "0.33.0", features = [
     "semconv_experimental",
 ] }
 tokio = { version = "1.44.1" }
