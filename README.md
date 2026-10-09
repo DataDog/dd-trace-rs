@@ -187,7 +187,7 @@ standard.
 To enable thread-level context sharing on Linux:
 
 1. Enable the optional feature `otel-thread-ctx` on `datadog-opentelemetry`
-2. If you're building a standalone shared library, ignore this step: you're all set.
+2. If you're building a dynamic library, ignore this step: you're all set.
    If you're building a static executable, add `datadog-opentelemetry` to your
    `[build-dependencies]` as well:
 
@@ -199,7 +199,7 @@ To enable thread-level context sharing on Linux:
    Then add the following line to your `build.rs` main function (create one if needed):
 
    ```rust
-   datadog_opentelemetry::emit_otel_thread_ctx_build_instructions();
+   datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
    ```
 
 We are working on lifting the need for a custom build script in the future.
