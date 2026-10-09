@@ -39,11 +39,13 @@
 //! ```
 mod attribute_keys;
 mod invocation;
+mod span_inferrer;
 
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
+use libdd_trace_inferrer::SpanInferrer;
 use opentelemetry::trace::{FutureExt, TracerProvider};
 use opentelemetry_sdk::trace::SdkTracer;
 use serde::de::DeserializeOwned;
@@ -140,6 +142,7 @@ impl From<serde_json::Error> for TracedServiceError {
 pub struct TracedService<S, E, R> {
     inner: S,
     tracer: SdkTracer,
+    inferrer: SpanInferrer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
 }
@@ -185,6 +188,7 @@ impl<S, E, R> TracedService<S, E, R> {
         Self {
             inner,
             tracer,
+            inferrer: span_inferrer::build_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }
@@ -215,7 +219,13 @@ where
 
     fn call(&mut self, event: LambdaEvent<Box<RawValue>>) -> Self::Future {
         let cold_start = self.take_cold_start();
-        let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
+        let invocation = Invocation::start(
+            &self.tracer,
+            &self.inferrer,
+            event.payload.get(),
+            &event.context,
+            cold_start,
+        );
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
@@ -261,6 +271,7 @@ mod tests {
         TracedService {
             inner: ReadyService,
             tracer,
+            inferrer: span_inferrer::build_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }
