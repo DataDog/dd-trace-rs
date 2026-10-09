@@ -173,6 +173,38 @@ logger_provider.shutdown();
 For more details, see the
 [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
 
+### Thread context sharing
+
+This tracer supports sharing the active context with an external
+(out-of-process) reader, typically the Full Host Profiler, correlating CPU
+profiles with spans. The implementation follows the [OTel
+specification][otep-4947], making the context visible to other compatible eBPF
+profilers or any OTel-compliant external reader.
+
+The thread-level context sharing is **Linux-only**, as per the current
+standard.
+
+To enable thread-level context sharing on Linux:
+
+1. Enable the `otel-thread-ctx` feature on your `datadog-opentelemetry` dependency.
+2. If you're building a dynamic library, ignore this step: you're all set.
+   If you're building a static executable, add `datadog-opentelemetry` to your
+   `[build-dependencies]` as well (the `otel-thread-ctx` feature is not required):
+
+   ```toml
+   [build-dependencies]
+   datadog-opentelemetry = { version = "0.5.2" }
+   ```
+
+   Finally, add the following line to your `build.rs` main function (create one
+   if needed):
+
+   ```rust
+   datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
+   ```
+
+We are working on lifting the need for a custom build script in the future.
+
 ### Configuration
 
 Configuration can be passed either:
@@ -276,3 +308,8 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 * `logs-http` enabled the log provider, with HTTP OTLP export
 * `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
   subscriber is available
+* `otel-thread-ctx` enables [sharing contexts with external readers][otep-4947] (typically
+  an eBPF profiler). Executables additionally require a `build.rs` calling the build helper:
+  see the dedicated section above.
+
+[otep-4947]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4947-thread-ctx.md

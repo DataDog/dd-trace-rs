@@ -132,6 +132,7 @@ _memory-profiling = ["dep:libdd-heap-allocator"]
 # profiles with live traces. Linux-only (no effect on other platforms).
 otel-thread-ctx = [
     "dep:libdd-otel-thread-ctx",
+    "libdd-otel-thread-ctx/sanity-check",
     "libdd-library-config/otel-thread-ctx",
     "libdd-library-config/process-context-writer",
     "opentelemetry/experimental_context_observer",
