@@ -136,16 +136,8 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
         T::try_from(i).ok()
     }
 
-    fn attr_len(&self) -> usize {
-        self.attributes.len()
-    }
-
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a opentelemetry::Value> {
         self.resource.get_ref(&Key::from_static_str(attr_key.key()))
-    }
-
-    fn res_len(&self) -> usize {
-        self.resource.len()
     }
 }
 
