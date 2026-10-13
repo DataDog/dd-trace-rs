@@ -187,21 +187,45 @@ standard.
 To enable thread-level context sharing on Linux:
 
 1. Enable the `otel-thread-ctx` feature on your `datadog-opentelemetry` dependency.
-2. If you're building a dynamic library, ignore this step: you're all set.
-   If you're building a static executable, add `datadog-opentelemetry` to your
-   `[build-dependencies]` as well (the `otel-thread-ctx` feature is not required):
+2. Depending on the type of your crate:
 
-   ```toml
-   [build-dependencies]
-   datadog-opentelemetry = { version = "0.5.2" }
-   ```
+   - If you're building an executable, add `datadog-opentelemetry` to your
+     `[build-dependencies]` as well (do not enable the `otel-thread-ctx`
+     feature for the build dependency):
 
-   Finally, add the following line to your `build.rs` main function (create one
-   if needed):
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.2" }
+     ```
 
-   ```rust
-   datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
-   ```
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
+     ```
+   - If you're building a Rust library (`lib`/`rlib`), you'll have to ensure
+     the instructions above are applied to _every downstream executable that
+     uses your library_.
+   - If you're building a shared dynamic library (`cdylib`/`dylib`), please
+     note that **while the following instructions should work in most
+     environments, building a dynamic library with thread context support is
+     currently experimental at best**.
+
+     add `datadog-opentelemetry` to your `[build-dependencies]` as well (do not
+     enable the `otel-thread-ctx` feature for the build dependency):
+
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.2" }
+     ```
+
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_dylib_build_instructions();
+     ```
 
 We are working on lifting the need for a custom build script in the future.
 
