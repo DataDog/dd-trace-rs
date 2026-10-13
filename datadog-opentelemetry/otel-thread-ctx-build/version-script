@@ -1,13 +1,3 @@
-/*
- * Version script forcing `otel_thread_ctx_v1` to stay exported from the
- * shared library's dynamic symbol table (.dynsym).
- *
- * Rust's cdylib linker applies a version script with `local: *` that hides
- * all symbols not explicitly allowlisted, and also causes lld to relax the
- * TLSDESC access, eliminating the dynsym entry entirely. Passing our own
- * version script with an explicit `global:` entry for the symbol beats the
- * `local: *` wildcard and prevents that relaxation.
- */
 {
     global: otel_thread_ctx_v1;
 };
