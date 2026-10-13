@@ -78,6 +78,12 @@ pub struct DatadogPropagator {
 }
 
 impl DatadogPropagator {
+    /// Returns a reference to the [`TraceRegistry`] this propagator was built with.
+    #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+    pub(crate) fn registry(&self) -> &TraceRegistry {
+        &self.registry
+    }
+
     pub(crate) fn new(config: Arc<Config>, registry: TraceRegistry) -> Self {
         let baggage_extract =
             get_extractors(config.as_ref()).contains(&TracePropagationStyle::Baggage);

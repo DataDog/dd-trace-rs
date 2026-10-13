@@ -12,6 +12,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
 
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+use libdd_library_config::tracer_metadata::ThreadLocalMetadata;
 #[cfg(target_os = "linux")]
 use libdd_library_config::tracer_metadata::TracerMetadata;
 
@@ -2114,6 +2116,12 @@ impl Config {
             service_env: self.env().map(str::to_owned),
             service_version: self.version().map(str::to_owned),
             container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // Advertise that this process publishes per-thread OTel context records. The default
+            // metadata leaves `attribute_keys` empty, so we only advertise the implicit index-0 key
+            // (`datadog.local_root_span_id`); add more here if `thread_ctx` starts encoding extra
+            // attributes.
+            #[cfg(feature = "otel-thread-ctx")]
+            threadlocal_metadata: Some(ThreadLocalMetadata::default()),
             // TODO: add the process tags. For now, we can't easily get them.
             ..Default::default()
         }
