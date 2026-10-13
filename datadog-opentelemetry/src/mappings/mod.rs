@@ -18,7 +18,7 @@ pub(super) use transform::otel_util::{
 pub(super) use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
     otel_util::{OtelSpan, DEFAULT_OTLP_SERVICE_NAME},
-    DdSpan, SpanStr,
+    otel_value_string_repr, DdSpan, SpanStr,
 };
 
 #[cfg(feature = "test-utils")]

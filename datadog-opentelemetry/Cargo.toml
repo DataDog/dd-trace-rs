@@ -16,6 +16,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # External dependencies
+bumpalo = { workspace = true }
 foldhash = { workspace = true }
 hashbrown = { workspace = true }
 opentelemetry_sdk = { workspace = true }

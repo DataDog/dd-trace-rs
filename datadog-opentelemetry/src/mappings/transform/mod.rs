@@ -30,7 +30,16 @@
 //! Compared to the original code, we read attributes from span a bit differently.
 //! The go code loops through all attributes everytime it is looking for a specific one.
 //! The code in attribute_keys.rs loops only once and then stores the offsets at which the
-//! attributes are stored, for the set of keys we are interested in.  
+//! attributes are stored, for the set of keys we are interested in.
+//!
+//! # Allocations
+//!
+//! The converted spans have a scoped lifetime (they live until the trace chunk has been
+//! sent), so all strings produced by the conversion are allocated in a [`Bump`] arena
+//! passed down by the exporter. Formatted strings are stored in [`SpanStr`] as borrowed
+//! `&'a str`s pointing into the arena, avoiding per-span `String` allocations through
+//! the global allocator. Strings that already live long enough (span data, resource
+//! attributes, config) are borrowed directly.
 
 pub mod attribute_keys;
 pub mod otel_util;
@@ -43,7 +52,9 @@ use attribute_keys::*;
 use otel_util::*;
 
 use std::borrow::{Borrow, Cow};
+use std::fmt::Write;
 
+use bumpalo::Bump;
 use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText;
 use opentelemetry::{
@@ -73,12 +84,17 @@ fn set_meta_otlp<'a>(k: SpanStr<'a>, v: SpanStr<'a>, dd_span: &mut DdSpan<'a>) {
         "resource.name" => dd_span.resource = v,
         "span.type" => dd_span.r#type = v,
         "analytics.event" => {
-            if let Ok(parsed) = v.as_str().to_lowercase().parse::<bool>() {
-                dd_span.metrics.insert(
-                    SpanStr::from_static_str(SAMPLING_RATE_EVENT_EXTRACTION_KEY),
-                    if parsed { 1.0 } else { 0.0 },
-                );
-            }
+            let parsed = if v.as_str().eq_ignore_ascii_case("true") {
+                true
+            } else if v.as_str().eq_ignore_ascii_case("false") {
+                false
+            } else {
+                return;
+            };
+            dd_span.metrics.insert(
+                SpanStr::from_static_str(SAMPLING_RATE_EVENT_EXTRACTION_KEY),
+                if parsed { 1.0 } else { 0.0 },
+            );
         }
         _ => {
             dd_span.meta.insert(k, v);
@@ -90,8 +106,9 @@ fn set_meta_otlp_with_semconv_mappings<'a>(
     k: &'a str,
     value: &'a opentelemetry::Value,
     dd_span: &mut DdSpan<'a>,
+    alloc: &'a Bump,
 ) {
-    let mapped_key = get_dd_key_for_otlp_attribute(k);
+    let mapped_key = get_dd_key_for_otlp_attribute_in(k, alloc);
     if mapped_key.is_empty() {
         return;
     }
@@ -107,7 +124,7 @@ fn set_meta_otlp_with_semconv_mappings<'a>(
     }
     set_meta_otlp(
         mapped_key,
-        SpanStr::from_cow(otel_value_string_repr(value)),
+        SpanStr::from_str(otel_value_string_repr(value, alloc)),
         dd_span,
     );
 }
@@ -124,8 +141,13 @@ fn set_metric_otlp<'a>(s: &mut DdSpan<'a>, k: SpanStr<'a>, v: f64) {
     }
 }
 
-fn set_metric_otlp_with_semconv_mappings<'a>(k: &'a str, value: f64, dd_span: &mut DdSpan<'a>) {
-    let mapped_key = get_dd_key_for_otlp_attribute(k);
+fn set_metric_otlp_with_semconv_mappings<'a>(
+    k: &'a str,
+    value: f64,
+    dd_span: &mut DdSpan<'a>,
+    alloc: &'a Bump,
+) {
+    let mapped_key = get_dd_key_for_otlp_attribute_in(k, alloc);
     let mapped_key = SpanStr::from_cow(mapped_key);
 
     if !mapped_key.as_str().is_empty() {
@@ -141,6 +163,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     span: &SpanExtractArgs<'a, '_>,
     is_top_level: bool,
 ) -> DdSpan<'a> {
+    let alloc = span.alloc;
     let (trace_id_lower_half, _) = otel_trace_id_to_dd_id(span.span.span_context.trace_id());
     let span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
     let parent_id = otel_span_id_to_dd_id(span.span.parent_span_id);
@@ -150,10 +173,10 @@ fn otel_span_to_dd_span_minimal<'a>(
     let duration = end.checked_sub(start).unwrap_or(0).max(0);
 
     let mut dd_span = DdSpan {
-        service: SpanStr::from_cow(span.get_attr_str(DATADOG_SERVICE)),
-        name: SpanStr::from_cow(span.get_attr_str(DATADOG_NAME)),
-        resource: SpanStr::from_cow(span.get_attr_str(DATADOG_RESOURCE)),
-        r#type: SpanStr::from_cow(span.get_attr_str(DATADOG_TYPE)),
+        service: SpanStr::from_str(span.get_attr_str(DATADOG_SERVICE)),
+        name: SpanStr::from_str(span.get_attr_str(DATADOG_NAME)),
+        resource: SpanStr::from_str(span.get_attr_str(DATADOG_RESOURCE)),
+        r#type: SpanStr::from_str(span.get_attr_str(DATADOG_TYPE)),
         trace_id: trace_id_lower_half.into(),
         span_id,
         parent_id,
@@ -177,7 +200,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     if let Some(span_kind) = span.get_attr_str_opt(DATADOG_SPAN_KIND) {
         dd_span.meta.insert(
             SpanStr::from_static_str("span.kind"),
-            SpanStr::from_cow(span_kind),
+            SpanStr::from_str(span_kind),
         );
     } else {
         let span_kind_str: &'static str = match span.span_kind() {
@@ -194,18 +217,18 @@ fn otel_span_to_dd_span_minimal<'a>(
     }
 
     if dd_span.service.as_str().is_empty() {
-        dd_span.service = SpanStr::from_cow(get_otel_service(span));
+        dd_span.service = SpanStr::from_str(get_otel_service(span));
     }
 
     if dd_span.name.as_str().is_empty() {
-        dd_span.name = SpanStr::from_cow(get_otel_operation_name_v2(span));
+        dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
     }
 
     if dd_span.resource.as_str().is_empty() {
-        dd_span.resource = SpanStr::from_cow(get_otel_resource_v2(span));
+        dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
     }
     if dd_span.r#type.as_str().is_empty() {
-        dd_span.r#type = SpanStr::from_cow(get_otel_span_type(span));
+        dd_span.r#type = SpanStr::from_str(get_otel_span_type(span));
     }
     let code: u32 = if let Some(http_status_code) = span.get_attr_num(DATADOG_HTTP_STATUS_CODE) {
         http_status_code
@@ -215,7 +238,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     if code != 0 {
         dd_span.meta.insert(
             SpanStr::from_static_str("http.status_code"),
-            SpanStr::from_string(code.to_string()),
+            SpanStr::from_str(fmt_in(alloc, format_args!("{code}"))),
         );
     }
 
@@ -260,7 +283,11 @@ fn time_as_unix_nanos(time: std::time::SystemTime) -> i64 {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L495
-fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) -> i32 {
+fn status_to_error<'a>(
+    status: &'a opentelemetry::trace::Status,
+    dd_span: &mut DdSpan<'a>,
+    alloc: &'a Bump,
+) -> i32 {
     if !matches!(status, opentelemetry::trace::Status::Error { .. }) {
         return 0;
     }
@@ -274,9 +301,10 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
             (semconv::attribute::EXCEPTION_STACKTRACE, "error.stack"),
         ] {
             if let Some(attr) = e.attributes.get(&SpanStr::from_static_str(otel_key)) {
-                dd_span
-                    .meta
-                    .insert(SpanStr::from_static_str(dd_key), dd_value_to_string(attr));
+                dd_span.meta.insert(
+                    SpanStr::from_static_str(dd_key),
+                    dd_value_to_string(attr, alloc),
+                );
             }
         }
     }
@@ -284,9 +312,10 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
     if !dd_span.meta.contains_key(&error_msg_key) {
         match status {
             opentelemetry::trace::Status::Error { description, .. } if !description.is_empty() => {
+                // The description lives in the otel span, borrow it directly
                 dd_span
                     .meta
-                    .insert(error_msg_key, SpanStr::from_cow(description.clone()));
+                    .insert(error_msg_key, SpanStr::from_str(description.as_ref()));
             }
             _ => {
                 for key in ["http.response.status_code", "http.status_code"] {
@@ -297,10 +326,9 @@ fn status_to_error(status: &opentelemetry::trace::Status, dd_span: &mut DdSpan) 
                         .meta
                         .get(&SpanStr::from_static_str("http.status_text"))
                     {
-                        let value = SpanStr::from_string(format!(
-                            "{} {}",
-                            code.as_str(),
-                            http_text.as_str()
+                        let value = SpanStr::from_str(fmt_in(
+                            alloc,
+                            format_args!("{} {}", code.as_str(), http_text.as_str()),
                         ));
                         dd_span.meta.insert(error_msg_key, value);
                     } else {
@@ -330,7 +358,7 @@ fn tag_span_if_contains_exception(dd_span: &mut DdSpan) {
     }
 }
 
-fn otel_value_to_dd_scalar(value: &opentelemetry::Value) -> DdAttributeAnyValue<'_> {
+fn otel_value_to_dd_scalar<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttributeAnyValue<'a> {
     fn map_vec<'a, T: 'a>(
         v: impl IntoIterator<Item = T>,
         constructor: fn(T) -> DdScalarValue<'a>,
@@ -354,15 +382,14 @@ fn otel_value_to_dd_scalar(value: &opentelemetry::Value) -> DdAttributeAnyValue<
             v.iter().map(|s| SpanStr::from_str(s.as_str())),
             DdScalarValue::String,
         ),
-        _ => DdAnyValue::SingleValue(DdScalarValue::String(SpanStr::from_cow(
-            otel_value_string_repr(value),
+        _ => DdAnyValue::SingleValue(DdScalarValue::String(SpanStr::from_str(
+            otel_value_string_repr(value, alloc),
         ))),
     }
 }
 
-fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>) -> SpanStr<'a> {
-    use std::fmt::Write;
-    fn write_scalar(value: &DdAttributeArrayValue, w: &mut String) {
+fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
+    fn write_scalar(value: &DdAttributeArrayValue, w: &mut bumpalo::collections::String<'_>) {
         let _ = match value {
             DdAttributeArrayValue::String(s) => write!(w, "{}", s.as_str()),
             DdAttributeArrayValue::Integer(i) => write!(w, "{i}"),
@@ -370,7 +397,7 @@ fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>) -> SpanStr<'a> {
             DdAttributeArrayValue::Boolean(b) => write!(w, "{b}"),
         };
     }
-    fn write_vec(value: &[DdAttributeArrayValue], w: &mut String) {
+    fn write_vec(value: &[DdAttributeArrayValue], w: &mut bumpalo::collections::String<'_>) {
         w.push('[');
         for (i, v) in value.iter().enumerate() {
             if i != 0 {
@@ -381,16 +408,20 @@ fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>) -> SpanStr<'a> {
         w.push(']');
     }
     match value {
-        DdAttributeAnyValue::SingleValue(DdAttributeArrayValue::String(s)) => s.clone(),
+        DdAttributeAnyValue::SingleValue(DdAttributeArrayValue::String(s)) => {
+            // Cheap Cow clone: free when the string is borrowed, which is the case
+            // for all strings produced by the conversion (span data or arena)
+            s.clone()
+        }
         DdAttributeAnyValue::SingleValue(attribute_array_value) => {
-            let mut w = String::new();
+            let mut w = bumpalo::collections::String::new_in(alloc);
             write_scalar(attribute_array_value, &mut w);
-            SpanStr::from_string(w)
+            SpanStr::from_str(w.into_bump_str())
         }
         DdAttributeAnyValue::Array(attribute_array_values) => {
-            let mut w = String::new();
+            let mut w = bumpalo::collections::String::new_in(alloc);
             write_vec(attribute_array_values, &mut w);
-            SpanStr::from_string(w)
+            SpanStr::from_str(w.into_bump_str())
         }
     }
 }
@@ -416,21 +447,27 @@ fn is_meta_key(key: &str) -> bool {
 struct SpanExtractArgs<'a, 'b> {
     span: &'b SdkSpan<'a>,
     resource: &'a Resource,
+    alloc: &'a Bump,
     span_attrs: AttributeIndices,
 }
 
 impl<'a, 'b> SpanExtractArgs<'a, 'b> {
-    pub fn new(span: &'b SdkSpan<'a>, resource: &'a Resource) -> Self {
+    pub fn new(span: &'b SdkSpan<'a>, resource: &'a Resource, alloc: &'a Bump) -> Self {
         let span_attrs = AttributeIndices::from_attribute_slice(span.attributes);
         Self {
             span,
             span_attrs,
             resource,
+            alloc,
         }
     }
 }
 
 impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
+    fn alloc(&self) -> &'a Bump {
+        self.alloc
+    }
+
     fn name(&self) -> &'a str {
         self.span.name
     }
@@ -443,10 +480,10 @@ impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
         self.span_attrs.get(attr_key).is_some()
     }
 
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'a, str>> {
+    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<&'a str> {
         let idx = self.span_attrs.get(attr_key)?;
         let v = &self.span.attributes.get(idx)?.value;
-        Some(otel_value_string_repr(v))
+        Some(otel_value_string_repr(v, self.alloc))
     }
 
     fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T> {
@@ -473,19 +510,20 @@ impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
     }
 }
 
-pub fn otel_value_string_repr(v: &Value) -> Cow<'_, str> {
+pub fn otel_value_string_repr<'a>(v: &'a Value, alloc: &'a Bump) -> &'a str {
     match v {
-        Value::Bool(true) => Cow::Borrowed("true"),
-        Value::Bool(false) => Cow::Borrowed("false"),
-        Value::I64(0) => Cow::Borrowed("0"),
-        Value::I64(1) => Cow::Borrowed("1"),
-        Value::I64(i) => Cow::Owned(i.to_string()),
-        Value::F64(0.0) => Cow::Borrowed("0"),
-        Value::F64(1.0) => Cow::Borrowed("1"),
-        Value::F64(i) => Cow::Owned(i.to_string()),
-        Value::String(string_value) => Cow::Borrowed(string_value.as_str()),
-        Value::Array(a) => Cow::Owned(a.to_string()),
-        _ => Cow::Owned(v.to_string()),
+        Value::Bool(true) => "true",
+        Value::Bool(false) => "false",
+        Value::I64(0) => "0",
+        Value::I64(1) => "1",
+        Value::I64(i) => fmt_in(alloc, format_args!("{i}")),
+        Value::F64(0.0) => "0",
+        Value::F64(1.0) => "1",
+        Value::F64(i) => fmt_in(alloc, format_args!("{i}")),
+        Value::String(string_value) => string_value.as_str(),
+        Value::Array(a) => fmt_in(alloc, format_args!("{a}")),
+        // Value is #[non_exhaustive]
+        _ => fmt_in(alloc, format_args!("{v}")),
     }
 }
 
@@ -503,6 +541,13 @@ impl<'a> CowStr<'a> {
 
     pub fn from_str(s: &'a str) -> Self {
         Self(Cow::Borrowed(s))
+    }
+
+    /// Copies `s` into the arena `alloc`, producing a string that lives as long as
+    /// the arena. Used for short-lived owned strings (e.g. the tracestate `header()`
+    /// `String`) that must outlive the span conversion.
+    pub fn from_bump(alloc: &'a Bump, s: &str) -> Self {
+        Self(Cow::Borrowed(alloc.alloc_str(s)))
     }
 
     pub fn as_str(&self) -> &str {
@@ -548,9 +593,13 @@ impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {
 /// * `enable_otlp_compute_top_level_by_span_kind` => default to true
 /// * `IgnoreMissingDatadogFields` => default to false
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
+///
+/// `alloc` is the arena backing every string formatted during the conversion; it must
+/// outlive the returned `DdSpan`.
 pub fn otel_span_to_dd_span<'a>(
     otel_span: &SdkSpan<'a>,
     otel_resource: &'a Resource,
+    alloc: &'a Bump,
 ) -> DdSpan<'a> {
     // There is a performance optimization possible here:
     // The otlp receiver splits span conversion into two steps
@@ -560,7 +609,7 @@ pub fn otel_span_to_dd_span<'a>(
     // If we use CSS we could probably do only 1. if we know the span is going to be dropped before
     // being sent...
 
-    let span_extracted = SpanExtractArgs::new(otel_span, otel_resource);
+    let span_extracted = SpanExtractArgs::new(otel_span, otel_resource, alloc);
 
     // Top level spans are computed later
     let is_top_level = false;
@@ -571,38 +620,38 @@ pub fn otel_span_to_dd_span<'a>(
         if !value.is_empty() {
             dd_span
                 .meta
-                .insert(SpanStr::from_static_str(meta_key), SpanStr::from_cow(value));
+                .insert(SpanStr::from_static_str(meta_key), SpanStr::from_str(value));
         }
     }
 
     for (key, value) in otel_resource.iter() {
-        set_meta_otlp_with_semconv_mappings(key.as_str(), value, &mut dd_span);
+        set_meta_otlp_with_semconv_mappings(key.as_str(), value, &mut dd_span, alloc);
     }
 
     for opentelemetry::KeyValue { key, value, .. } in otel_span.instrumentation_scope.attributes() {
-        let key = SpanStr::from_string(key.to_string());
-        let value = SpanStr::from_string(value.to_string());
+        let key = SpanStr::from_str(key.as_str());
+        let value = SpanStr::from_str(otel_value_string_repr(value, alloc));
         dd_span.meta.insert(key, value);
     }
-    let otel_trace_id = format!(
-        "{:032x}",
-        u128::from_be_bytes(otel_span.span_context.trace_id().to_bytes())
-    );
     dd_span.meta.insert(
         SpanStr::from_static_str("otel.trace_id"),
-        SpanStr::from_string(otel_trace_id),
+        SpanStr::from_str(fmt_in(
+            alloc,
+            format_args!(
+                "{:032x}",
+                u128::from_be_bytes(otel_span.span_context.trace_id().to_bytes())
+            ),
+        )),
     );
 
     let version_key = SpanStr::from_static_str("version");
     if !dd_span.meta.contains_key(&version_key) {
         let version = otel_resource
-            .get(&Key::from_static_str(SERVICE_VERSION.key()))
-            .map(|v| v.to_string())
+            .get_ref(&Key::from_static_str(SERVICE_VERSION.key()))
+            .map(|v| otel_value_string_repr(v, alloc))
             .unwrap_or_default();
         if !version.is_empty() {
-            dd_span
-                .meta
-                .insert(version_key, SpanStr::from_string(version));
+            dd_span.meta.insert(version_key, SpanStr::from_str(version));
         }
     }
 
@@ -613,13 +662,13 @@ pub fn otel_span_to_dd_span<'a>(
         }
         match value {
             opentelemetry::Value::I64(v) => {
-                set_metric_otlp_with_semconv_mappings(key, *v as f64, &mut dd_span);
+                set_metric_otlp_with_semconv_mappings(key, *v as f64, &mut dd_span, alloc);
             }
             opentelemetry::Value::F64(v) => {
-                set_metric_otlp_with_semconv_mappings(key, *v, &mut dd_span);
+                set_metric_otlp_with_semconv_mappings(key, *v, &mut dd_span, alloc);
             }
             _ => {
-                set_meta_otlp_with_semconv_mappings(key, value, &mut dd_span);
+                set_meta_otlp_with_semconv_mappings(key, value, &mut dd_span, alloc);
             }
         }
     }
@@ -628,7 +677,7 @@ pub fn otel_span_to_dd_span<'a>(
     if !dd_span.meta.contains_key(&env_key) {
         let env = get_otel_env(&span_extracted);
         if !env.is_empty() {
-            dd_span.meta.insert(env_key, SpanStr::from_cow(env));
+            dd_span.meta.insert(env_key, SpanStr::from_str(env));
         }
     }
 
@@ -643,13 +692,22 @@ pub fn otel_span_to_dd_span<'a>(
              }| {
                 let (trace_id, trace_id_high) = otel_trace_id_to_dd_id(span_context.trace_id());
                 let span_id = otel_span_id_to_dd_id(span_context.span_id());
-                let tracestate = SpanStr::from_string(span_context.trace_state().header());
+                // TraceState has no borrowed serialization API, so build the header
+                // String and copy it into the arena
+                let mut tracestate = bumpalo::collections::String::new_in(alloc);
+                for (i, (k, v)) in span_context.trace_state().into_iter().enumerate() {
+                    if i > 0 {
+                        tracestate.push(',');
+                    }
+                    let _ = write!(tracestate, "{k}={v}");
+                }
+                let tracestate = SpanStr::from_str(tracestate.into_bump_str());
                 let flags = span_context.trace_flags().to_u8() as u32;
                 let attributes = otel_attributes
                     .iter()
                     .map(|KeyValue { key, value, .. }| {
                         let key = SpanStr::from_str(key.as_str());
-                        let value = SpanStr::from_cow(otel_value_string_repr(value));
+                        let value = SpanStr::from_str(otel_value_string_repr(value, alloc));
                         (key, value)
                     })
                     .collect();
@@ -669,13 +727,13 @@ pub fn otel_span_to_dd_span<'a>(
         .iter()
         .map(|e| {
             let time_unix_nano = time_as_unix_nanos(e.timestamp).max(0) as u64;
-            let name = SpanStr::from_string(e.name.to_string());
+            let name = SpanStr::from_str(e.name.as_ref());
             let attributes = e
                 .attributes
                 .iter()
                 .map(|KeyValue { key, value, .. }| {
                     let key = SpanStr::from_str(key.as_str());
-                    let value = otel_value_to_dd_scalar(value);
+                    let value = otel_value_to_dd_scalar(value, alloc);
                     (key, value)
                 })
                 .collect();
@@ -688,10 +746,13 @@ pub fn otel_span_to_dd_span<'a>(
         .collect();
     tag_span_if_contains_exception(&mut dd_span);
 
-    if !otel_span.span_context.trace_state().header().is_empty() {
+    // TraceState has no borrowed serialization API, build the header String once and
+    // copy it into the arena if present
+    let tracestate_header = otel_span.span_context.trace_state().header();
+    if !tracestate_header.is_empty() {
         dd_span.meta.insert(
             SpanStr::from_static_str("w3c.tracestate"),
-            SpanStr::from_string(otel_span.span_context.trace_state().header()),
+            SpanStr::from_bump(alloc, &tracestate_header),
         );
     }
 
@@ -736,7 +797,7 @@ pub fn otel_span_to_dd_span<'a>(
         .into_iter()
         .any(|k| !dd_span.meta.contains_key(&SpanStr::from_static_str(k)))
     {
-        dd_span.error = status_to_error(otel_span.status, &mut dd_span);
+        dd_span.error = status_to_error(otel_span.status, &mut dd_span, alloc);
     }
 
     dd_span

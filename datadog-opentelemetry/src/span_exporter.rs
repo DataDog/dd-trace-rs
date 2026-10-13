@@ -431,6 +431,7 @@ impl Export<BufferedSpan> for SpanDataExport {
         // `flush_and_wait`); in that case we also drain buffered client-computed stats.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
+            let alloc = bumpalo::Bump::new();
             let dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
@@ -438,6 +439,7 @@ impl Export<BufferedSpan> for SpanDataExport {
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),
                         &resource,
+                        &alloc,
                     )
                 })
                 .collect::<Vec<_>>();
