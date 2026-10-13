@@ -13,13 +13,11 @@
 [apache-badge]: https://img.shields.io/badge/license-Apache-blue.svg
 [apache-url]: LICENSE
 
-
 # dd-trace-rs
 
 This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/), metrics and logging.
 It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and
 optimizations.
-
 
 ## Usage
 
@@ -189,7 +187,7 @@ To enable thread-level context sharing on Linux:
 1. Enable the `otel-thread-ctx` feature on your `datadog-opentelemetry` dependency.
 2. Depending on the type of your crate:
 
-   - If you're building an executable, add `datadog-opentelemetry` to your
+   * If you're building an executable, add `datadog-opentelemetry` to your
      `[build-dependencies]` as well (do not enable the `otel-thread-ctx`
      feature for the build dependency):
 
@@ -204,10 +202,11 @@ To enable thread-level context sharing on Linux:
      ```rust
      datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
      ```
-   - If you're building a Rust library (`lib`/`rlib`), you'll have to ensure
+
+   * If you're building a Rust library (`lib`/`rlib`), you'll have to ensure
      the instructions above are applied to _every downstream executable that
      uses your library_.
-   - If you're building a shared dynamic library (`cdylib`/`dylib`), please
+   * If you're building a shared dynamic library (`cdylib`/`dylib`), please
      note that **while the following instructions should work in most
      environments, building a dynamic library with thread context support is
      currently experimental at best**.
@@ -314,7 +313,6 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 ## Support
 
 * MSRV: 1.87
-
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
   version: 0.34
