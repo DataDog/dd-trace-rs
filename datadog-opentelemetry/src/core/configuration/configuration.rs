@@ -1330,11 +1330,15 @@ impl Config {
             type Parsed = Vec<(String, String)>;
             type ParseError = Infallible;
 
+            /// Tags are comma separated, or space separated if there is no comma. A tag
+            /// without a `:` gets an empty value, and tags with an empty key are skipped.
             fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
-                Ok(s.split(',')
-                    .filter_map(|s| {
-                        s.split_once(':')
-                            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                let separator = if s.contains(',') { ',' } else { ' ' };
+                Ok(s.split(separator)
+                    .filter_map(|tag| {
+                        let (k, v) = tag.split_once(':').unwrap_or((tag, ""));
+                        let k = k.trim();
+                        (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
                     })
                     .collect())
             }
@@ -4255,8 +4259,84 @@ mod tests {
 
         let tags: Vec<(&str, &str)> = config.global_tags().collect();
 
-        assert_eq!(tags.len(), 2);
-        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", ""), ("key3", "")]);
+    }
+
+    #[test]
+    fn test_dd_tags_separators() {
+        let cases: &[(&str, &[(&str, &str)])] = &[
+            (
+                "key1:value1,key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "key1:value1 key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "env:test aKey:aVal bKey:bVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal,bKey:bVal,cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:test     bKey :bVal dKey: dVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("bKey", ""),
+                    ("dKey", ""),
+                    ("dVal", ""),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env :test, aKey : aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:keyWithA:Semicolon bKey:bVal cKey",
+                &[
+                    ("env", "keyWithA:Semicolon"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:keyWith:  , ,   Lots:Of:Semicolons ",
+                &[("env", "keyWith:"), ("Lots", "Of:Semicolons")],
+            ),
+            ("a:b,c,d", &[("a", "b"), ("c", ""), ("d", "")]),
+            ("a,1", &[("a", ""), ("1", "")]),
+            ("a:b:c:d", &[("a", "b:c:d")]),
+        ];
+
+        for (dd_tags, expected) in cases {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TAGS", *dd_tags)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+
+            let tags: Vec<(&str, &str)> = config.global_tags().collect();
+            assert_eq!(&tags, expected, "DD_TAGS={dd_tags:?}");
+        }
     }
 
     #[test]
