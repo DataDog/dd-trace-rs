@@ -190,7 +190,12 @@ fn set_metric_otlp_with_semconv_mappings<'a>(
     let mapped_key = SpanStr::from_cow(mapped_key);
 
     if !mapped_key.as_str().is_empty() {
-        if is_meta_key(mapped_key.as_str()) && metric_contains(dd_span, mapped_key.as_str()) {
+        // Unlike v0.4's separate `meta` and `metrics`, v1 spans have a single attribute
+        // namespace: a metric must not override the string tag already set for a meta key.
+        if is_meta_key(mapped_key.as_str())
+            && (metric_contains(dd_span, mapped_key.as_str())
+                || meta_contains(dd_span, mapped_key.as_str()))
+        {
             return;
         }
         set_metric_otlp(dd_span, mapped_key, value);

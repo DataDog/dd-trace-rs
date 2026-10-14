@@ -723,7 +723,9 @@ mod tests {
     use std::fmt::Write;
 
     use bumpalo::Bump;
+    use libdd_trace_utils::span::v1::AttributeValue;
     use libdd_trace_utils::span::vec_map::VecMap;
+    use libdd_trace_utils::span::SpanText as _;
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
@@ -732,7 +734,9 @@ mod tests {
         DdSpan,
     };
 
-    use crate::mappings::transform::transform_tests::{test_cases, test_span_to_sdk_span};
+    use crate::mappings::transform::transform_tests::{
+        test_cases, test_span_to_sdk_span, TestSpan,
+    };
 
     /// `v1::Span` is invariant over its text lifetime: shortens the `'static` expected span to the
     /// lifetime of the output span.
@@ -825,6 +829,39 @@ mod tests {
                 &alloc,
             );
             assert_span_eq(&output, &downcast_lifetime(test.expected_out), test.name);
+        }
+    }
+
+    /// A numeric attribute mapped to a meta key (e.g. `http.status_code`) must not override the
+    /// string tag already set for that key: v1 spans have a single attribute namespace, unlike
+    /// v0.4's separate `meta` and `metrics`.
+    #[test]
+    fn numeric_attribute_does_not_override_meta_key() {
+        for otel_key in ["http.response.status_code", "http.status_code"] {
+            let input_span = TestSpan {
+                attributes: vec![KeyValue::new(otel_key, 200)],
+                ..test_cases().remove(0).input_span
+            };
+            let resource = Resource::builder_empty().build();
+            let alloc = Bump::new();
+            let output =
+                otel_span_to_dd_span(&test_span_to_sdk_span(&input_span), &resource, &alloc);
+
+            let status_codes: Vec<_> = output
+                .attributes
+                .iter()
+                .filter(|(k, _)| k.as_str() == "http.status_code")
+                .map(|(_, v)| v)
+                .collect();
+            assert_eq!(
+                status_codes,
+                [&AttributeValue::String(CowStr::from_static_str("200"))],
+                "{otel_key}"
+            );
+            assert!(
+                !output.attributes.contains_key("http.response.status_code"),
+                "{otel_key}"
+            );
         }
     }
 
