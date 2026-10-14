@@ -30,7 +30,7 @@
             "context_headers": "datadog",
             "reason": "propagation_behavior_extract"
           },
-          "flags": 1
+          "flags": 2147483649
         }
       ],
       "duration": 39000,

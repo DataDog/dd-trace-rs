@@ -140,7 +140,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     ("a2".into(), "v2".into()),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
-                flags: 0,
+                flags: 1 << 31,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -148,7 +148,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: HashMap::new(),
                 tracestate: "".into(),
-                flags: 0,
+                flags: 1 << 31,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -156,7 +156,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: HashMap::new(),
                 tracestate: "".into(),
-                flags: 0,
+                flags: 1 << 31,
             },
         ],
     )

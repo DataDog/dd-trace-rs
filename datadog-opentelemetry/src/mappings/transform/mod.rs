@@ -71,6 +71,10 @@ use super::sdk_span::SdkSpan;
 pub type SpanStr<'a> = CowStr<'a>;
 pub type DdSpan<'a> = libdd_trace_utils::span::v04::Span<CowStr<'a>>;
 type DdSpanEvent<'a> = libdd_trace_utils::span::v04::SpanEvent<CowStr<'a>>;
+/// Bit 31 of a span link's `flags` tells the backend the W3C trace flags are set.
+/// OpenTelemetry links always carry trace flags, so it is always set.
+const SPAN_LINK_FLAGS_SET: u32 = 1 << 31;
+
 type DdSpanLink<'a> = libdd_trace_utils::span::v04::SpanLink<CowStr<'a>>;
 type DdAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
 type DdAttributeAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
@@ -702,7 +706,7 @@ pub fn otel_span_to_dd_span<'a>(
                     let _ = write!(tracestate, "{k}={v}");
                 }
                 let tracestate = SpanStr::from_str(tracestate.into_bump_str());
-                let flags = span_context.trace_flags().to_u8() as u32;
+                let flags = span_context.trace_flags().to_u8() as u32 | SPAN_LINK_FLAGS_SET;
                 let attributes = otel_attributes
                     .iter()
                     .map(|KeyValue { key, value, .. }| {
