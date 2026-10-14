@@ -61,6 +61,8 @@ pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a TracePool<CowStr<'a>> {
     // borrowing data past the call returning them, and the pool only ever stores values that are
     // valid for `'static`. Both types only differ by the lifetime of `CowStr`, so they have the
     // same layout.
+    //
+    // This invariant is tested by `tests_trace_pool_recycling_frees_text_data`.
     unsafe { &*std::ptr::from_ref(pool).cast::<TracePool<CowStr<'a>>>() }
 }
 
@@ -318,5 +320,207 @@ mod tests {
         assert_eq!(chunk.priority, Some(1));
         assert_eq!(chunk.origin.as_str(), "");
         assert_eq!(chunk.sampling_mechanism, None);
+    }
+}
+
+#[cfg(test)]
+/// Verifies the invariant [`trace_pool_for`] relies on: text data never survives a span or a chunk
+/// being returned to a [`TracePool`].
+///
+/// The test uses a text type counting how many owned strings are alive. After filling every text
+/// field of a chunk and of its span and returning the chunk to the pool, it checks that
+/// 1. the chunk or its span went back to the pool
+/// 2. all of the string data has been freed
+///
+/// Spans, chunks, links and events are filled through pattern destructuring, so that a field added
+/// to one of them fails to compile here rather than being silently left untested.
+mod tests_trace_pool_recycling_frees_text_data {
+    use std::borrow::Cow;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use libdd_trace_utils::span::{
+        v1::{AttributeValue, Span, SpanEvent, SpanLink, ThinVec, TraceChunk},
+        vec_map::VecMap,
+        SpanText, TraceData,
+    };
+
+    use super::TracePool;
+
+    static LIVE_OWNED_STRINGS: AtomicUsize = AtomicUsize::new(0);
+
+    fn live_owned_strings() -> usize {
+        LIVE_OWNED_STRINGS.load(Ordering::SeqCst)
+    }
+
+    #[derive(Debug, Eq, PartialEq, Hash)]
+    struct CountingStr(Cow<'static, str>);
+
+    impl Default for CountingStr {
+        fn default() -> Self {
+            Self(Cow::Borrowed(""))
+        }
+    }
+
+    impl Clone for CountingStr {
+        fn clone(&self) -> Self {
+            if matches!(self.0, Cow::Owned(_)) {
+                LIVE_OWNED_STRINGS.fetch_add(1, Ordering::SeqCst);
+            }
+            Self(self.0.clone())
+        }
+    }
+
+    impl Drop for CountingStr {
+        fn drop(&mut self) {
+            if matches!(self.0, Cow::Owned(_)) {
+                LIVE_OWNED_STRINGS.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    impl std::borrow::Borrow<str> for CountingStr {
+        fn borrow(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+
+    impl serde::Serialize for CountingStr {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.0.as_ref())
+        }
+    }
+
+    impl SpanText for CountingStr {
+        fn from_static_str(value: &'static str) -> Self {
+            Self(Cow::Borrowed(value))
+        }
+
+        fn from_owned(value: String) -> Self {
+            LIVE_OWNED_STRINGS.fetch_add(1, Ordering::SeqCst);
+            Self(Cow::Owned(value))
+        }
+    }
+
+    impl TraceData for CountingStr {
+        type Text = CountingStr;
+        type Bytes = &'static [u8];
+    }
+
+    fn owned(s: &str) -> CountingStr {
+        CountingStr::from_owned(s.to_owned())
+    }
+
+    /// Attributes holding owned text in every kind of value that can contain text.
+    fn owned_attributes(prefix: &str) -> VecMap<CountingStr, AttributeValue<CountingStr>> {
+        VecMap::from_iter([
+            (
+                owned(&format!("{prefix}.string")),
+                AttributeValue::String(owned("value")),
+            ),
+            (
+                owned(&format!("{prefix}.list")),
+                AttributeValue::List(vec![AttributeValue::String(owned("item"))]),
+            ),
+            (
+                owned(&format!("{prefix}.kv")),
+                AttributeValue::KeyValue(VecMap::from_iter([(
+                    owned("nested.key"),
+                    AttributeValue::String(owned("nested.value")),
+                )])),
+            ),
+            (
+                owned(&format!("{prefix}.bytes")),
+                AttributeValue::Bytes(b"bytes".as_slice()),
+            ),
+        ])
+    }
+
+    fn fill_span_with_owned_strings(span: &mut Span<CountingStr>) {
+        let Span {
+            service,
+            name,
+            resource,
+            r#type,
+            span_id: _,
+            parent_id: _,
+            start: _,
+            duration: _,
+            error: _,
+            span_kind: _,
+            env,
+            version,
+            component,
+            attributes,
+            span_links,
+            span_events,
+        } = span;
+        *service = owned("my-service");
+        *name = owned("my-operation");
+        *resource = owned("GET /resource");
+        *r#type = owned("web");
+        *env = owned("prod");
+        *version = owned("1.2.3");
+        *component = owned("http");
+        *attributes = owned_attributes("span");
+        *span_links = ThinVec::from_iter([SpanLink {
+            trace_id: [1; 16],
+            span_id: 1,
+            attributes: owned_attributes("link"),
+            tracestate: owned("tracestate"),
+            flags: 0,
+        }]);
+        *span_events = ThinVec::from_iter([SpanEvent {
+            time_unix_nano: 1,
+            name: owned("event.name"),
+            attributes: owned_attributes("event"),
+        }]);
+    }
+
+    fn fill_chunk_with_owned_strings(chunk: &mut TraceChunk<CountingStr>, span: Span<CountingStr>) {
+        let TraceChunk {
+            trace_id: _,
+            priority: _,
+            origin,
+            sampling_mechanism: _,
+            dropped_trace: _,
+            attributes,
+            spans,
+        } = chunk;
+        *origin = owned("synthetics");
+        *attributes = owned_attributes("chunk");
+        spans.push(span);
+    }
+
+    #[test]
+    fn owned_strings_are_released_when_chunks_are_returned_to_the_pool() {
+        let pool = TracePool::<CountingStr>::with_capacity(100);
+        assert_eq!(live_owned_strings(), 0, "test precondition");
+
+        // The pool's drop policy discards ~10% of returned spans and chunks, so retry until both
+        // a span and a chunk actually make it back into the pool.
+        for _ in 0..1000 {
+            let mut chunk = pool.get_chunk();
+            let mut span = pool.get_span();
+            fill_span_with_owned_strings(&mut span);
+            fill_chunk_with_owned_strings(&mut chunk, span);
+            assert!(
+                live_owned_strings() > 0,
+                "filling the chunk should have created owned strings"
+            );
+
+            drop(pool.wrap_chunks(vec![chunk]));
+
+            // Whether the chunk is recycled or dropped by the pool's policy, every string added
+            // to it or to its spans must have been released.
+            assert_eq!(
+                live_owned_strings(),
+                0,
+                "all strings must be released when chunks are returned to the pool"
+            );
+            if pool.pooled_spans() > 0 && pool.pooled_chunks() > 0 {
+                return;
+            }
+        }
+        panic!("no span and chunk were ever recycled into the pool");
     }
 }
