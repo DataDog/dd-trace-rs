@@ -51,6 +51,30 @@
         "sensitive": true
       }
     ],
+    "DD_INSTRUMENTATION_INSTALL_ID": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "",
+        "propertyKeys": ["instrumentation_install_id"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TIME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "",
+        "propertyKeys": ["instrumentation_install_time"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TYPE": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "",
+        "propertyKeys": ["instrumentation_install_type"]
+      }
+    ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
       {
         "version": "A",
