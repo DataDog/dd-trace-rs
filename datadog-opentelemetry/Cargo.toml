@@ -158,6 +158,12 @@ harness = false
 path = "benches/mappings_benchmark.rs"
 
 [[bench]]
+name = "export_pooling_benchmark"
+harness = false
+path = "benches/export_pooling_benchmark.rs"
+required-features = ["test-utils"]
+
+[[bench]]
 name = "inject_benchmark"
 harness = false
 path = "benches/inject_benchmark.rs"

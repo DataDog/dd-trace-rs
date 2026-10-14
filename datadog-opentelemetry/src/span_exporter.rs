@@ -19,12 +19,14 @@ use libdd_data_pipeline::trace_exporter::{
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
-use libdd_trace_utils::span::span_pool::PooledChunks;
 use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
-    configuration::Config, core::telemetry_session, ddtrace_transform, mappings::CachedConfig,
+    configuration::Config,
+    core::telemetry_session,
+    ddtrace_transform::{self, DdTracePool},
+    mappings::CachedConfig,
 };
 
 pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
@@ -44,6 +46,9 @@ const FIXED_SPAN_OVERHEAD: usize = 96;
 const ATTRIBUTE_ENTRY_OVERHEAD: usize = 24;
 const EVENT_OVERHEAD: usize = 16;
 const LINK_OVERHEAD: usize = 32;
+
+/// Maximum number of spans, and of chunks, kept by the pool recycling exported spans.
+const TRACE_POOL_CAPACITY: usize = 4096;
 
 fn attr_value_bytes(v: &opentelemetry::Value) -> usize {
     use opentelemetry::{Array, Value};
@@ -325,6 +330,7 @@ fn build_on_dedicated_thread(
         otel_resource: Arc::clone(&otel_resource),
         cached_config: CachedConfig::new(&config),
         config: Arc::clone(&config),
+        trace_pool: DdTracePool::with_capacity(TRACE_POOL_CAPACITY),
     };
 
     let (trace_buffer, worker) =
@@ -358,7 +364,7 @@ fn build_trace_exporter(
         .set_language(config.language())
         .set_language_version(config.language_version())
         .set_service(&config.service())
-        .set_output_format(TraceExporterOutputFormat::V04)
+        .set_output_format(TraceExporterOutputFormat::V1)
         .enable_health_metrics()
         .enable_agent_rates_payload_version();
 
@@ -415,6 +421,7 @@ struct SpanDataExport {
     otel_resource: Arc<ArcSwap<Resource>>,
     cached_config: CachedConfig,
     config: Arc<Config>,
+    trace_pool: DdTracePool,
 }
 
 impl Export<BufferedSpan> for SpanDataExport {
@@ -431,6 +438,7 @@ impl Export<BufferedSpan> for SpanDataExport {
         // `flush_and_wait`); in that case we also drain buffered client-computed stats.
         Box::pin(async move {
             let resource = self.otel_resource.load_full();
+            let pool = ddtrace_transform::trace_pool_for(&self.trace_pool);
             let dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
@@ -438,20 +446,21 @@ impl Export<BufferedSpan> for SpanDataExport {
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),
                         &resource,
+                        Some(pool),
                     )
                 })
                 .collect::<Vec<_>>();
 
             let services = dd_trace_chunks
                 .iter()
-                .flatten()
+                .flat_map(|chunk| &chunk.spans)
                 .map(|s| s.service.as_str())
                 .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
             self.config.add_extra_services(services);
 
             let result = if !dd_trace_chunks.is_empty() {
                 self.trace_exporter
-                    .send_trace_chunks_async(PooledChunks::unpooled(dd_trace_chunks))
+                    .send_trace_chunks_async_v1(pool.wrap_chunks(dd_trace_chunks))
                     .await
             } else {
                 Ok(AgentResponse::Unchanged)
