@@ -52,6 +52,7 @@ use attribute_keys::*;
 use otel_util::*;
 
 use std::borrow::{Borrow, Cow};
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use bumpalo::Bump;
@@ -388,6 +389,30 @@ fn otel_value_to_dd_scalar<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttribute
     }
 }
 
+/// Span link attributes are string-only, so arrays are flattened to `key.0`, `key.1`, …
+fn insert_link_attribute<'a>(
+    attributes: &mut HashMap<SpanStr<'a>, SpanStr<'a>>,
+    key: &'a str,
+    value: &'a Value,
+    alloc: &'a Bump,
+) {
+    if let (Value::Array(_), DdAnyValue::Array(values)) =
+        (value, otel_value_to_dd_scalar(value, alloc))
+    {
+        for (i, v) in values.into_iter().enumerate() {
+            attributes.insert(
+                SpanStr::from_str(fmt_in(alloc, format_args!("{key}.{i}"))),
+                dd_value_to_string(&DdAnyValue::SingleValue(v), alloc),
+            );
+        }
+    } else {
+        attributes.insert(
+            SpanStr::from_str(key),
+            SpanStr::from_str(otel_value_string_repr(value, alloc)),
+        );
+    }
+}
+
 fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
     fn write_scalar(value: &DdAttributeArrayValue, w: &mut bumpalo::collections::String<'_>) {
         let _ = match value {
@@ -703,14 +728,10 @@ pub fn otel_span_to_dd_span<'a>(
                 }
                 let tracestate = SpanStr::from_str(tracestate.into_bump_str());
                 let flags = span_context.trace_flags().to_u8() as u32;
-                let attributes = otel_attributes
-                    .iter()
-                    .map(|KeyValue { key, value, .. }| {
-                        let key = SpanStr::from_str(key.as_str());
-                        let value = SpanStr::from_str(otel_value_string_repr(value, alloc));
-                        (key, value)
-                    })
-                    .collect();
+                let mut attributes = HashMap::with_capacity(otel_attributes.len());
+                for KeyValue { key, value, .. } in otel_attributes {
+                    insert_link_attribute(&mut attributes, key.as_str(), value, alloc);
+                }
                 DdSpanLink {
                     trace_id,
                     trace_id_high,
