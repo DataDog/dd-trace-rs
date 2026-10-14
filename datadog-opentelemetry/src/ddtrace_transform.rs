@@ -13,7 +13,7 @@ use crate::{
 };
 use bumpalo::Bump;
 use libdd_trace_utils::span::SpanText;
-use opentelemetry::Key;
+use opentelemetry::{trace::SpanId, Key};
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
@@ -59,6 +59,9 @@ where
             otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
             add_config_metadata(&mut dd_span, cached_config, otel_resource);
+            if s.parent_span_id == SpanId::INVALID || s.parent_span_is_remote {
+                add_local_root_metadata(&mut dd_span, cached_config);
+            }
 
             dd_span
         })
@@ -99,4 +102,20 @@ fn add_config_metadata<'a>(
             }
         }
     }
+}
+
+/// Tags that the Datadog SDKs set on the local root span of each trace chunk.
+fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a CachedConfig) {
+    dd_span.meta.insert(
+        SpanStr::from_static_str("language"),
+        SpanStr::from_str(&cached_config.language),
+    );
+    dd_span.meta.insert(
+        SpanStr::from_static_str("runtime-id"),
+        SpanStr::from_str(&cached_config.runtime_id),
+    );
+    dd_span.metrics.insert(
+        SpanStr::from_static_str("process_id"),
+        cached_config.process_id,
+    );
 }

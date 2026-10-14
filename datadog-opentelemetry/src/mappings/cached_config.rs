@@ -11,6 +11,9 @@ pub(crate) struct CachedConfig {
     pub service: String,
     pub global_tags: Vec<(String, String)>,
     pub version: Option<String>,
+    pub language: String,
+    pub runtime_id: String,
+    pub process_id: f64,
 }
 
 impl CachedConfig {
@@ -29,6 +32,9 @@ impl CachedConfig {
             service,
             global_tags,
             version,
+            language: cfg.language().to_string(),
+            runtime_id: cfg.runtime_id().to_string(),
+            process_id: f64::from(std::process::id()),
         }
     }
 }

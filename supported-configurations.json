@@ -55,7 +55,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": "",
+        "default": null,
         "propertyKeys": ["instrumentation_install_id"]
       }
     ],
@@ -63,7 +63,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": "",
+        "default": null,
         "propertyKeys": ["instrumentation_install_time"]
       }
     ],
@@ -71,7 +71,7 @@
       {
         "version": "A",
         "type": "string",
-        "default": "",
+        "default": null,
         "propertyKeys": ["instrumentation_install_type"]
       }
     ],

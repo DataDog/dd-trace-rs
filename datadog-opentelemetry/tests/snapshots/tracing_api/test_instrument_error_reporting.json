@@ -14,6 +14,7 @@
       "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
       "code.module.name": "tests::integration_tests::tracing_api",
       "error.message": "this is an error",
+      "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Error",
       "otel.status_description": "this is an error",
