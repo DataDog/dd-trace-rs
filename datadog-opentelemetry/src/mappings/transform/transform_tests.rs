@@ -722,6 +722,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
 mod tests {
     use std::fmt::Write;
 
+    use bumpalo::Bump;
     use libdd_trace_utils::span::vec_map::VecMap;
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
@@ -817,8 +818,12 @@ mod tests {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 )
                 .build();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            let alloc = Bump::new();
+            let output = otel_span_to_dd_span(
+                &test_span_to_sdk_span(&test.input_span),
+                &input_resource,
+                &alloc,
+            );
             assert_span_eq(&output, &downcast_lifetime(test.expected_out), test.name);
         }
     }

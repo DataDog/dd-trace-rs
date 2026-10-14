@@ -12,6 +12,7 @@ use crate::{
         DEFAULT_OTLP_SERVICE_NAME, VERSION_KEY,
     },
 };
+use bumpalo::Bump;
 use libdd_trace_utils::span::{v1::chunk_pool::TracePool, SpanText};
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
@@ -73,6 +74,7 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
     span_data: I,
     otel_resource: &'a Resource,
+    alloc: &'a Bump,
     pool: Option<&TracePool<CowStr<'a>>>,
 ) -> DdTraceChunk<'a>
 where
@@ -87,7 +89,7 @@ where
         let trace_flags = s.span_context.trace_flags();
         let sdk_span = SdkSpan::from_sdk_span_data(s);
         let dd_span = pool.map_or_else(DdSpan::default, TracePool::get_span);
-        let mut dd_span = otel_span_to_dd_span_into(dd_span, &sdk_span, otel_resource);
+        let mut dd_span = otel_span_to_dd_span_into(dd_span, &sdk_span, otel_resource, alloc);
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
         add_config_metadata(&mut dd_span, cached_config, otel_resource);
@@ -169,7 +171,7 @@ pub mod bench_support {
     use opentelemetry_sdk::{trace::SpanData, Resource};
 
     pub use super::DdTracePool;
-    use super::{otel_trace_chunk_to_dd_trace_chunk, trace_pool_for};
+    use super::{otel_trace_chunk_to_dd_trace_chunk, trace_pool_for, Bump};
     use crate::{configuration::Config, mappings::CachedConfig};
 
     /// What happens to the converted chunks once exported.
@@ -203,6 +205,7 @@ pub mod bench_support {
             pool: &DdTracePool,
             recycling: Recycling,
         ) -> usize {
+            let alloc = Bump::new();
             let pool = trace_pool_for(pool);
             let pool_to_use = match recycling {
                 Recycling::None => None,
@@ -215,6 +218,7 @@ pub mod bench_support {
                         &self.cached_config,
                         c,
                         resource,
+                        &alloc,
                         pool_to_use,
                     )
                 })
@@ -242,7 +246,7 @@ mod tests {
         Resource,
     };
 
-    use super::otel_trace_chunk_to_dd_trace_chunk;
+    use super::{otel_trace_chunk_to_dd_trace_chunk, Bump};
     use crate::{configuration::Config, mappings::CachedConfig};
 
     const TRACE_ID: [u8; 16] = [
@@ -296,7 +300,9 @@ mod tests {
             ),
         ];
 
-        let chunk = otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, None);
+        let alloc = Bump::new();
+        let chunk =
+            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, &alloc, None);
 
         assert_eq!(chunk.trace_id, TRACE_ID);
         assert_eq!(chunk.priority, Some(2));
@@ -315,7 +321,9 @@ mod tests {
         let resource = Resource::builder_empty().build();
         let spans = [span_data(1, 0, vec![])];
 
-        let chunk = otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, None);
+        let alloc = Bump::new();
+        let chunk =
+            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, &alloc, None);
 
         assert_eq!(chunk.priority, Some(1));
         assert_eq!(chunk.origin.as_str(), "");

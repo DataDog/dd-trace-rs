@@ -12,6 +12,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
 
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+use libdd_library_config::tracer_metadata::ThreadLocalMetadata;
 #[cfg(target_os = "linux")]
 use libdd_library_config::tracer_metadata::TracerMetadata;
 
@@ -1328,11 +1330,15 @@ impl Config {
             type Parsed = Vec<(String, String)>;
             type ParseError = Infallible;
 
+            /// Tags are comma separated, or space separated if there is no comma. A tag
+            /// without a `:` gets an empty value, and tags with an empty key are skipped.
             fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
-                Ok(s.split(',')
-                    .filter_map(|s| {
-                        s.split_once(':')
-                            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                let separator = if s.contains(',') { ',' } else { ' ' };
+                Ok(s.split(separator)
+                    .filter_map(|tag| {
+                        let (k, v) = tag.split_once(':').unwrap_or((tag, ""));
+                        let k = k.trim();
+                        (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
                     })
                     .collect())
             }
@@ -2114,6 +2120,12 @@ impl Config {
             service_env: self.env().map(str::to_owned),
             service_version: self.version().map(str::to_owned),
             container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // Advertise that this process publishes per-thread OTel context records. The default
+            // metadata leaves `attribute_keys` empty, so we only advertise the implicit index-0 key
+            // (`datadog.local_root_span_id`); add more here if `thread_ctx` starts encoding extra
+            // attributes.
+            #[cfg(feature = "otel-thread-ctx")]
+            threadlocal_metadata: Some(ThreadLocalMetadata::default()),
             // TODO: add the process tags. For now, we can't easily get them.
             ..Default::default()
         }
@@ -2399,6 +2411,14 @@ fn default_config() -> Config {
     }
 }
 
+fn uri_host(host: &str) -> Cow<'_, str> {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        Cow::Owned(format!("[{host}]"))
+    } else {
+        Cow::Borrowed(host)
+    }
+}
+
 /// Builder for constructing a [`Config`] instance.
 ///
 /// Use [`Config::builder()`] to create a new builder instance.
@@ -2428,7 +2448,7 @@ impl ConfigBuilder {
             } else {
                 let host = &config.agent_host.value();
                 let port = *config.trace_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.trace_agent_url.set_calculated(url);
         }
@@ -2449,7 +2469,7 @@ impl ConfigBuilder {
             } else {
                 let host = &config.dogstatsd_agent_host.value();
                 let port = *config.dogstatsd_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.dogstatsd_agent_url.set_calculated(url);
         }
@@ -4247,8 +4267,84 @@ mod tests {
 
         let tags: Vec<(&str, &str)> = config.global_tags().collect();
 
-        assert_eq!(tags.len(), 2);
-        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", ""), ("key3", "")]);
+    }
+
+    #[test]
+    fn test_dd_tags_separators() {
+        let cases: &[(&str, &[(&str, &str)])] = &[
+            (
+                "key1:value1,key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "key1:value1 key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "env:test aKey:aVal bKey:bVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal,bKey:bVal,cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:test     bKey :bVal dKey: dVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("bKey", ""),
+                    ("dKey", ""),
+                    ("dVal", ""),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env :test, aKey : aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:keyWithA:Semicolon bKey:bVal cKey",
+                &[
+                    ("env", "keyWithA:Semicolon"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:keyWith:  , ,   Lots:Of:Semicolons ",
+                &[("env", "keyWith:"), ("Lots", "Of:Semicolons")],
+            ),
+            ("a:b,c,d", &[("a", "b"), ("c", ""), ("d", "")]),
+            ("a,1", &[("a", ""), ("1", "")]),
+            ("a:b:c:d", &[("a", "b:c:d")]),
+        ];
+
+        for (dd_tags, expected) in cases {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TAGS", *dd_tags)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+
+            let tags: Vec<(&str, &str)> = config.global_tags().collect();
+            assert_eq!(&tags, expected, "DD_TAGS={dd_tags:?}");
+        }
     }
 
     #[test]
@@ -4342,6 +4438,26 @@ mod tests {
             .build();
 
         assert_eq!(&*config.trace_agent_url(), "https://test-host");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_bracketed_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("[::1]".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[::1]:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("2001:db8:1::3".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[2001:db8:1::3]:4242");
     }
 
     #[test]
