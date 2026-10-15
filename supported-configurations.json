@@ -164,6 +164,22 @@
         "propertyKeys": ["enabled"]
       }
     ],
+    "DD_TRACE_HTTP_CLIENT_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "400-499",
+        "propertyKeys": ["trace_http_client_error_statuses"]
+      }
+    ],
+    "DD_TRACE_HTTP_SERVER_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "500-599",
+        "propertyKeys": ["trace_http_server_error_statuses"]
+      }
+    ],
     "DD_TRACE_PARTIAL_FLUSH_ENABLED": [
       {
         "version": "A",

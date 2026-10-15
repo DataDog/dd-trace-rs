@@ -1,7 +1,7 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core::configuration::Config;
+use crate::core::configuration::{Config, HttpErrorStatuses};
 
 pub(crate) const VERSION_KEY: &str = "version";
 
@@ -11,6 +11,8 @@ pub(crate) struct CachedConfig {
     pub service: String,
     pub global_tags: Vec<(String, String)>,
     pub version: Option<String>,
+    pub http_server_error_statuses: HttpErrorStatuses,
+    pub http_client_error_statuses: HttpErrorStatuses,
 }
 
 impl CachedConfig {
@@ -29,6 +31,8 @@ impl CachedConfig {
             service,
             global_tags,
             version,
+            http_server_error_statuses: cfg.trace_http_server_error_statuses().clone(),
+            http_client_error_statuses: cfg.trace_http_client_error_statuses().clone(),
         }
     }
 }

@@ -99,4 +99,96 @@ fn add_config_metadata<'a>(
             }
         }
     }
+
+    apply_http_error_statuses(dd_span, cached_config);
+}
+
+/// Server and client spans with an HTTP status code are errors if, and only if, the code is
+/// in `DD_TRACE_HTTP_SERVER_ERROR_STATUSES` or `DD_TRACE_HTTP_CLIENT_ERROR_STATUSES`. This
+/// overrides the OpenTelemetry span status, as in the other Datadog SDKs.
+fn apply_http_error_statuses(dd_span: &mut DdSpan, cached_config: &CachedConfig) {
+    let error_statuses = match dd_span
+        .meta
+        .get(&SpanStr::from_static_str("span.kind"))
+        .map(SpanStr::as_str)
+    {
+        Some("server") => &cached_config.http_server_error_statuses,
+        Some("client") => &cached_config.http_client_error_statuses,
+        _ => return,
+    };
+    let Some(status_code) = dd_span
+        .meta
+        .get(&SpanStr::from_static_str("http.status_code"))
+        .and_then(|code| code.as_str().parse::<u16>().ok())
+    else {
+        return;
+    };
+    dd_span.error = i32::from(error_statuses.contains(status_code));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::configuration::Config;
+
+    fn span(kind: &'static str, status_code: Option<&'static str>, error: i32) -> DdSpan<'static> {
+        let mut span = DdSpan {
+            error,
+            ..Default::default()
+        };
+        span.meta.insert(
+            SpanStr::from_static_str("span.kind"),
+            SpanStr::from_static_str(kind),
+        );
+        if let Some(code) = status_code {
+            span.meta.insert(
+                SpanStr::from_static_str("http.status_code"),
+                SpanStr::from_static_str(code),
+            );
+        }
+        span
+    }
+
+    fn error_after(cached_config: &CachedConfig, mut span: DdSpan) -> i32 {
+        apply_http_error_statuses(&mut span, cached_config);
+        span.error
+    }
+
+    #[test]
+    fn test_default_http_error_statuses() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+
+        assert_eq!(
+            error_after(&cached_config, span("server", Some("500"), 0)),
+            1
+        );
+        assert_eq!(
+            error_after(&cached_config, span("server", Some("404"), 1)),
+            0
+        );
+        assert_eq!(
+            error_after(&cached_config, span("client", Some("404"), 0)),
+            1
+        );
+        assert_eq!(
+            error_after(&cached_config, span("client", Some("500"), 1)),
+            0
+        );
+    }
+
+    #[test]
+    fn test_http_error_statuses_leave_other_spans_alone() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+
+        // No status code, e.g. a failed connection
+        assert_eq!(error_after(&cached_config, span("client", None, 1)), 1);
+        assert_eq!(
+            error_after(&cached_config, span("internal", Some("500"), 0)),
+            0
+        );
+        assert_eq!(
+            error_after(&cached_config, span("producer", Some("200"), 1)),
+            1
+        );
+    }
 }
