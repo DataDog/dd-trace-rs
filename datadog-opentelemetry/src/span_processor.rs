@@ -16,6 +16,7 @@ use crate::{
         configuration::{remote_config::RemoteConfigClientWorker, BaggageTagKeyFilter, Config},
         constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::SamplingDecision,
+        startup_log::log_startup_configuration,
         telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
     create_dd_resource, dd_debug, dd_error,
@@ -759,6 +760,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         {
             self.config.set_calculated_service_name(service_name);
         }
+        log_startup_configuration(&self.config);
         init_telemetry(&self.config);
     }
 }
