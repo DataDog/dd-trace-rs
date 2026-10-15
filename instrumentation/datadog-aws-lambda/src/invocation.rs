@@ -14,8 +14,8 @@
 //! 3. [`Invocation::finish`] — record errors and end all spans after the handler returns.
 
 use crate::attribute_keys as attr;
+use crate::inference::SpanInferrer;
 use crate::span_inferrer::{extract_trigger, InferredSpanScope, TriggerContext};
-use libdd_trace_inferrer::SpanInferrer;
 
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};

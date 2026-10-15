@@ -12,7 +12,8 @@
 //! # What it instruments
 //!
 //! [`TracedService`] wraps a Lambda Tower service and creates one `aws.lambda` server span for each
-//! Lambda invocation. The invocation span is a child of the current OpenTelemetry context and is
+//! Lambda invocation. Supported events create inferred parent spans and extract upstream trace
+//! context. Other events use the current OpenTelemetry context. The invocation span is
 //! made active while the user handler future runs, so spans created by the handler and supported
 //! AWS SDK client calls are parented to the invocation.
 //!
@@ -38,14 +39,15 @@
 //! # }
 //! ```
 mod attribute_keys;
+mod inference;
 mod invocation;
 mod span_inferrer;
 
+use crate::inference::SpanInferrer;
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
-use libdd_trace_inferrer::SpanInferrer;
 use opentelemetry::trace::{FutureExt, TracerProvider};
 use opentelemetry_sdk::trace::SdkTracer;
 use serde::de::DeserializeOwned;
