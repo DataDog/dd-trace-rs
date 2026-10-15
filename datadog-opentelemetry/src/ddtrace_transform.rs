@@ -14,7 +14,7 @@ use crate::{
 use bumpalo::Bump;
 use libdd_trace_utils::span::span_pool::SpanPool;
 use libdd_trace_utils::span::SpanText;
-use opentelemetry::Key;
+use opentelemetry::{Key, Value};
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
@@ -72,6 +72,18 @@ where
     chunk
 }
 
+/// The resolved application service. The cached config is built before the resource is set,
+/// so it doesn't know about a `service.name` coming from the OpenTelemetry resource.
+fn application_service<'a>(
+    cached_config: &'a CachedConfig,
+    otel_resource: &'a Resource,
+) -> &'a str {
+    match otel_resource.get_ref(&SERVICE_NAME_KEY) {
+        Some(Value::String(service)) if !service.as_str().is_empty() => service.as_str(),
+        _ => &cached_config.service,
+    }
+}
+
 fn add_config_metadata<'a>(
     dd_span: &mut DdSpan<'a>,
     cached_config: &'a CachedConfig,
@@ -90,11 +102,12 @@ fn add_config_metadata<'a>(
         dd_span.service = SpanStr::from_str(&cached_config.service);
     }
 
-    // Spans whose service was overridden keep a reference to the global service
-    if !dd_span.service.as_str().is_empty() && dd_span.service.as_str() != cached_config.service {
+    // Spans whose service was overridden keep a reference to the application service
+    let base_service = application_service(cached_config, otel_resource);
+    if !dd_span.service.as_str().is_empty() && dd_span.service.as_str() != base_service {
         dd_span.meta.insert(
             SpanStr::from_static_str(BASE_SERVICE_KEY),
-            SpanStr::from_str(&cached_config.service),
+            SpanStr::from_str(base_service),
         );
     }
 
@@ -121,11 +134,21 @@ mod tests {
     use super::*;
     use crate::core::configuration::Config;
 
-    fn base_service(span_service: &'static str) -> Option<String> {
+    fn base_service_with(
+        dd_service: Option<&str>,
+        resource_service: Option<&'static str>,
+        span_service: &'static str,
+    ) -> Option<String> {
         let mut config = Config::builder();
-        config.set_service("global-service".to_string());
+        if let Some(service) = dd_service {
+            config.set_service(service.to_string());
+        }
         let cached_config = CachedConfig::new(&config.build());
-        let otel_resource = Resource::builder_empty().build();
+        let mut otel_resource = Resource::builder_empty();
+        if let Some(service) = resource_service {
+            otel_resource = otel_resource.with_service_name(service);
+        }
+        let otel_resource = otel_resource.build();
 
         let mut span = DdSpan {
             service: SpanStr::from_static_str(span_service),
@@ -137,6 +160,10 @@ mod tests {
             .map(|v| v.as_str().to_string())
     }
 
+    fn base_service(span_service: &'static str) -> Option<String> {
+        base_service_with(Some("global-service"), None, span_service)
+    }
+
     #[test]
     fn test_base_service() {
         assert_eq!(
@@ -146,5 +173,18 @@ mod tests {
         assert_eq!(base_service("global-service"), None);
         // Replaced by the global service
         assert_eq!(base_service(DEFAULT_OTLP_SERVICE_NAME), None);
+    }
+
+    #[test]
+    fn test_base_service_from_resource() {
+        // DD_SERVICE unset: the resource's service.name is the application service
+        assert_eq!(
+            base_service_with(None, Some("otel-service"), "otel-service"),
+            None
+        );
+        assert_eq!(
+            base_service_with(None, Some("otel-service"), "other-service").as_deref(),
+            Some("otel-service")
+        );
     }
 }
