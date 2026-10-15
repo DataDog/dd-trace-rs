@@ -20,6 +20,8 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
 
+const BASE_SERVICE_KEY: &str = "_dd.base_service";
+
 /// The OTLP receiver in the agent only receives sampled spans
 /// because others are dropped in the process. In this spirit, we check for the sampling
 /// decision taken by the datadog sampler, and if it is missing assign AUTO_KEEP/AUTO_DROP
@@ -88,6 +90,14 @@ fn add_config_metadata<'a>(
         dd_span.service = SpanStr::from_str(&cached_config.service);
     }
 
+    // Spans whose service was overridden keep a reference to the global service
+    if !dd_span.service.as_str().is_empty() && dd_span.service.as_str() != cached_config.service {
+        dd_span.meta.insert(
+            SpanStr::from_static_str(BASE_SERVICE_KEY),
+            SpanStr::from_str(&cached_config.service),
+        );
+    }
+
     for (key, value) in &cached_config.global_tags {
         dd_span
             .meta
@@ -103,5 +113,38 @@ fn add_config_metadata<'a>(
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::configuration::Config;
+
+    fn base_service(span_service: &'static str) -> Option<String> {
+        let mut config = Config::builder();
+        config.set_service("global-service".to_string());
+        let cached_config = CachedConfig::new(&config.build());
+        let otel_resource = Resource::builder_empty().build();
+
+        let mut span = DdSpan {
+            service: SpanStr::from_static_str(span_service),
+            ..Default::default()
+        };
+        add_config_metadata(&mut span, &cached_config, &otel_resource);
+        span.meta
+            .get(&SpanStr::from_static_str(BASE_SERVICE_KEY))
+            .map(|v| v.as_str().to_string())
+    }
+
+    #[test]
+    fn test_base_service() {
+        assert_eq!(
+            base_service("other-service").as_deref(),
+            Some("global-service")
+        );
+        assert_eq!(base_service("global-service"), None);
+        // Replaced by the global service
+        assert_eq!(base_service(DEFAULT_OTLP_SERVICE_NAME), None);
     }
 }
