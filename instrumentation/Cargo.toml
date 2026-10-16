@@ -23,6 +23,7 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 publish = false
 
 [workspace.dependencies]
+libdd-trace-inferrer = { git = "https://github.com/DataDog/libdatadog", branch = "ygree/libdd-trace-inferrer" }
 datadog-aws-core = { version = "0.1.0", path = "datadog-aws-core" }
 datadog-opentelemetry = "0.5"
 base64 = "0.22.1"
