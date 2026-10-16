@@ -64,6 +64,7 @@ diff,https://github.com/utkarshkukreti/diff.rs,MIT OR Apache-2.0,Utkarsh Kukreti
 digest,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Developers
 displaydoc,https://github.com/yaahc/displaydoc,MIT OR Apache-2.0,Jane Lusby <jlusby@yaah.dev>
 either,https://github.com/rayon-rs/either,MIT OR Apache-2.0,The either Authors
+elf,https://github.com/cole14/rust-elf,MIT OR Apache-2.0,Christopher Cole <chris.cole.09@gmail.com>
 equivalent,https://github.com/indexmap-rs/equivalent,Apache-2.0 OR MIT,The equivalent Authors
 errno,https://github.com/lambda-fairy/rust-errno,MIT OR Apache-2.0,"Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfishcode.online>"
 event-listener,https://github.com/smol-rs/event-listener,Apache-2.0 OR MIT,"Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>"
