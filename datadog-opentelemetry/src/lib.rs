@@ -570,6 +570,11 @@ fn make_tracer(
 
         let dd_resource =
             create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+        if !config.enabled() {
+            // Without a span processor, `set_resource` never runs: log the configuration here
+            resolve_service_name(&config, &dd_resource);
+            core::startup_log::log_startup_configuration(&config);
+        }
         tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
         let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
@@ -641,6 +646,21 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
     }
     builder = builder.with_attributes(additional.into_iter().map(|(k, v)| KeyValue::new(k, v)));
     builder.build()
+}
+
+/// Makes the resource's service name the calculated service, when `DD_SERVICE` isn't set.
+fn resolve_service_name(cfg: &Config, dd_resource: &Resource) {
+    let service_name = dd_resource
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|service_name| service_name.as_str().to_string());
+    // Only set calculated service name if DD_SERVICE is default
+    // and otel service name is not default
+    if cfg.service_is_default()
+        && service_name.is_some()
+        && service_name.as_ref().unwrap().as_str() != cfg.service().to_string()
+    {
+        cfg.set_calculated_service_name(service_name);
+    }
 }
 
 fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
@@ -980,5 +1000,46 @@ pub fn logs() -> DatadogLogsBuilder {
     DatadogLogsBuilder {
         config: None,
         resource: None,
+    }
+}
+
+#[cfg(test)]
+mod startup_log_tests {
+    use std::sync::Arc;
+
+    use opentelemetry_sdk::Resource;
+
+    use super::{make_tracer, Config};
+    use crate::core::log::test_capture::capture;
+
+    #[test]
+    fn test_startup_log_when_tracing_disabled() {
+        let mut builder = Config::builder();
+        builder.set_enabled(false);
+        let config = Arc::new(builder.build());
+
+        let events = capture(|| {
+            let (provider, _) = make_tracer(
+                config,
+                opentelemetry_sdk::trace::SdkTracerProvider::builder(),
+                Some(
+                    Resource::builder()
+                        .with_service_name("otel-service")
+                        .build(),
+                ),
+            );
+            let _ = provider.shutdown();
+        });
+
+        let banners: Vec<_> = events
+            .iter()
+            .filter(|e| e.message.starts_with("DATADOG TRACER CONFIGURATION"))
+            .collect();
+        assert_eq!(banners.len(), 1, "{events:?}");
+        assert!(banners[0].message.contains(r#""DD_TRACE_ENABLED":"false""#));
+        // The resource's service name is resolved, as it is when tracing is enabled
+        assert!(banners[0]
+            .message
+            .contains(r#""DD_SERVICE":"otel-service""#));
     }
 }
