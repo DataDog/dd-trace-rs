@@ -52,6 +52,7 @@ use attribute_keys::*;
 use otel_util::*;
 
 use std::borrow::{Borrow, Cow};
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use bumpalo::Bump;
@@ -75,6 +76,10 @@ pub type SpanStr<'a> = CowStr<'a>;
 /// [`crate::mappings::otel_span_to_dd_span`].
 pub type DdSpan<'a> = libdd_trace_utils::span::v04::Span<CowStr<'a>>;
 type DdSpanEvent<'a> = libdd_trace_utils::span::v04::SpanEvent<CowStr<'a>>;
+/// Bit 31 of a span link's `flags` tells the backend the W3C trace flags are set.
+/// OpenTelemetry links always carry trace flags, so it is always set.
+const SPAN_LINK_FLAGS_SET: u32 = 1 << 31;
+
 type DdSpanLink<'a> = libdd_trace_utils::span::v04::SpanLink<CowStr<'a>>;
 type DdAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
 type DdAttributeAnyValue<'a> = libdd_trace_utils::span::v04::AttributeAnyValue<CowStr<'a>>;
@@ -394,6 +399,57 @@ fn otel_value_to_dd_scalar<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttribute
     }
 }
 
+/// Span link attributes are string-only, so arrays are flattened to `key.0`, `key.1`, …
+fn insert_link_attribute<'a>(
+    attributes: &mut HashMap<SpanStr<'a>, SpanStr<'a>>,
+    key: &'a str,
+    value: &'a Value,
+    alloc: &'a Bump,
+) {
+    let Value::Array(array) = value else {
+        attributes.insert(
+            SpanStr::from_str(key),
+            SpanStr::from_str(otel_value_string_repr(value, alloc)),
+        );
+        return;
+    };
+    let mut insert = |i: usize, v: &'a str| {
+        attributes.insert(
+            SpanStr::from_str(fmt_in(alloc, format_args!("{key}.{i}"))),
+            SpanStr::from_str(v),
+        );
+    };
+    match array {
+        opentelemetry::Array::Bool(v) => {
+            for (i, b) in v.iter().enumerate() {
+                insert(i, if *b { "true" } else { "false" });
+            }
+        }
+        opentelemetry::Array::I64(v) => {
+            for (i, n) in v.iter().enumerate() {
+                insert(i, fmt_in(alloc, format_args!("{n}")));
+            }
+        }
+        opentelemetry::Array::F64(v) => {
+            for (i, f) in v.iter().enumerate() {
+                insert(i, fmt_in(alloc, format_args!("{f}")));
+            }
+        }
+        opentelemetry::Array::String(v) => {
+            for (i, s) in v.iter().enumerate() {
+                insert(i, s.as_str());
+            }
+        }
+        // Array is #[non_exhaustive]
+        _ => {
+            attributes.insert(
+                SpanStr::from_str(key),
+                SpanStr::from_str(otel_value_string_repr(value, alloc)),
+            );
+        }
+    }
+}
+
 fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
     fn write_scalar(value: &DdAttributeArrayValue, w: &mut bumpalo::collections::String<'_>) {
         let _ = match value {
@@ -702,15 +758,11 @@ pub fn otel_span_to_dd_span<'a>(
                 let _ = write!(tracestate, "{k}={v}");
             }
             let tracestate = SpanStr::from_str(tracestate.into_bump_str());
-            let flags = span_context.trace_flags().to_u8() as u32;
-            let attributes = otel_attributes
-                .iter()
-                .map(|KeyValue { key, value, .. }| {
-                    let key = SpanStr::from_str(key.as_str());
-                    let value = SpanStr::from_str(otel_value_string_repr(value, alloc));
-                    (key, value)
-                })
-                .collect();
+            let flags = span_context.trace_flags().to_u8() as u32 | SPAN_LINK_FLAGS_SET;
+            let mut attributes = HashMap::with_capacity(otel_attributes.len());
+            for KeyValue { key, value, .. } in otel_attributes {
+                insert_link_attribute(&mut attributes, key.as_str(), value, alloc);
+            }
             DdSpanLink {
                 trace_id,
                 trace_id_high,

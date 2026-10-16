@@ -13,6 +13,9 @@ pub(crate) struct CachedConfig {
     pub version: Option<String>,
     pub http_server_error_statuses: HttpErrorStatuses,
     pub http_client_error_statuses: HttpErrorStatuses,
+    pub language: String,
+    pub runtime_id: String,
+    pub process_id: f64,
 }
 
 impl CachedConfig {
@@ -33,6 +36,9 @@ impl CachedConfig {
             version,
             http_server_error_statuses: cfg.trace_http_server_error_statuses().clone(),
             http_client_error_statuses: cfg.trace_http_client_error_statuses().clone(),
+            language: cfg.language().to_string(),
+            runtime_id: cfg.runtime_id().to_string(),
+            process_id: f64::from(std::process::id()),
         }
     }
 }

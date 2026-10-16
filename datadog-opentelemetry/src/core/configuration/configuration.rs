@@ -1191,6 +1191,10 @@ pub struct Config {
     // # Service tagging
     service: ConfigItemWithOverride<ServiceName>,
     env: ConfigItem<Option<String>>,
+    /// Install signature set by the APM installer, reported in the app-started telemetry event.
+    instrumentation_install_id: ConfigItem<Option<String>>,
+    instrumentation_install_time: ConfigItem<Option<String>>,
+    instrumentation_install_type: ConfigItem<Option<String>>,
     version: ConfigItem<Option<String>>,
 
     // # Agent
@@ -1455,6 +1459,12 @@ impl Config {
                 ServiceName::Configured,
             ),
             env: cisu.update_string(default.env, Some),
+            instrumentation_install_id: cisu
+                .update_string(default.instrumentation_install_id, Some),
+            instrumentation_install_time: cisu
+                .update_string(default.instrumentation_install_time, Some),
+            instrumentation_install_type: cisu
+                .update_string(default.instrumentation_install_type, Some),
             version: cisu.update_string(default.version, Some),
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu.update_parse_custom::<DdKeyValueTags, _>(default.global_tags),
@@ -1603,6 +1613,9 @@ impl Config {
         vec![
             &self.service,
             &self.env,
+            &self.instrumentation_install_id,
+            &self.instrumentation_install_time,
+            &self.instrumentation_install_type,
             &self.version,
             &self.global_tags,
             &self.agent_host,
@@ -1695,6 +1708,37 @@ impl Config {
     /// Returns the configured environment name (e.g., "production", "staging").
     pub fn env(&self) -> Option<&str> {
         self.env.value().as_deref()
+    }
+
+    /// Returns the install id set by the APM installer (`DD_INSTRUMENTATION_INSTALL_ID`).
+    pub fn instrumentation_install_id(&self) -> Option<&str> {
+        self.instrumentation_install_id.value().as_deref()
+    }
+
+    /// Returns the install time set by the APM installer (`DD_INSTRUMENTATION_INSTALL_TIME`).
+    pub fn instrumentation_install_time(&self) -> Option<&str> {
+        self.instrumentation_install_time.value().as_deref()
+    }
+
+    /// Returns the install type set by the APM installer (`DD_INSTRUMENTATION_INSTALL_TYPE`).
+    pub fn instrumentation_install_type(&self) -> Option<&str> {
+        self.instrumentation_install_type.value().as_deref()
+    }
+
+    /// Returns the install signature reported in the app-started telemetry event, or `None`
+    /// when the APM installer did not set any of its fields.
+    pub(crate) fn install_signature(&self) -> Option<libdd_telemetry::data::InstallSignature> {
+        let install_id = self.instrumentation_install_id().map(str::to_owned);
+        let install_time = self.instrumentation_install_time().map(str::to_owned);
+        let install_type = self.instrumentation_install_type().map(str::to_owned);
+        if install_id.is_none() && install_time.is_none() && install_type.is_none() {
+            return None;
+        }
+        Some(libdd_telemetry::data::InstallSignature {
+            install_id,
+            install_type,
+            install_time,
+        })
     }
 
     /// Returns the configured application version.
@@ -2224,6 +2268,18 @@ impl std::fmt::Debug for Config {
             .field("language_version", &self.language_version)
             .field("service", &self.service)
             .field("env", &self.env)
+            .field(
+                "instrumentation_install_id",
+                &self.instrumentation_install_id,
+            )
+            .field(
+                "instrumentation_install_time",
+                &self.instrumentation_install_time,
+            )
+            .field(
+                "instrumentation_install_type",
+                &self.instrumentation_install_type,
+            )
             .field("version", &self.version)
             .field("global_tags", &self.global_tags)
             .field("trace_agent_url", &self.trace_agent_url)
@@ -2278,6 +2334,18 @@ fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
         env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
+        instrumentation_install_id: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_ID,
+            None,
+        ),
+        instrumentation_install_time: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_TIME,
+            None,
+        ),
+        instrumentation_install_type: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_TYPE,
+            None,
+        ),
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_SERVICE,
@@ -4767,6 +4835,47 @@ mod tests {
             ParsedSamplingRules::parse(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn test_install_signature() {
+        assert!(Config::builder().build().install_signature().is_none());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                (
+                    "DD_INSTRUMENTATION_INSTALL_ID",
+                    "68e75c48-57ca-4a12-adfc-575c4b05fcbe",
+                ),
+                ("DD_INSTRUMENTATION_INSTALL_TYPE", "k8s_single_step"),
+                ("DD_INSTRUMENTATION_INSTALL_TIME", "1703188212"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let signature = Config::builder_with_sources(&sources)
+            .build()
+            .install_signature()
+            .expect("install signature");
+        assert_eq!(
+            signature.install_id.as_deref(),
+            Some("68e75c48-57ca-4a12-adfc-575c4b05fcbe")
+        );
+        assert_eq!(signature.install_type.as_deref(), Some("k8s_single_step"));
+        assert_eq!(signature.install_time.as_deref(), Some("1703188212"));
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_INSTRUMENTATION_INSTALL_TYPE", "k8s_single_step")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let signature = Config::builder_with_sources(&sources)
+            .build()
+            .install_signature()
+            .expect("install signature");
+        assert_eq!(signature.install_id, None);
+        assert_eq!(signature.install_type.as_deref(), Some("k8s_single_step"));
+        assert_eq!(signature.install_time, None);
     }
 
     #[test]
