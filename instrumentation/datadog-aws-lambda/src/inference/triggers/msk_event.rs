@@ -80,29 +80,19 @@ fn headers_has_trace_context(headers: &Value) -> bool {
 
 /// Scans all records in the records map and returns the `(topic_key, record_value)` of the first
 /// record whose headers contain a tracecontext key. Returns `None` if none found.
-fn find_record_with_trace_context(
-    records_map: &serde_json::Map<String, Value>,
+fn take_record_with_trace_context(
+    records_map: &mut serde_json::Map<String, Value>,
 ) -> Option<(String, Value)> {
-    for (key, group) in records_map {
-        match group {
-            Value::Array(arr) => {
-                for record in arr {
-                    if record.get("headers").is_some_and(headers_has_trace_context) {
-                        return Some((key.clone(), record.clone()));
-                    }
-                }
-            }
-            Value::Object(obj) => {
-                for record in obj.values() {
-                    if record.get("headers").is_some_and(headers_has_trace_context) {
-                        return Some((key.clone(), record.clone()));
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    let has_trace_context =
+        |record: &&mut Value| record.get("headers").is_some_and(headers_has_trace_context);
+    records_map.iter_mut().find_map(|(key, group)| {
+        let record = match group {
+            Value::Array(arr) => arr.iter_mut().find(has_trace_context),
+            Value::Object(obj) => obj.values_mut().find(has_trace_context),
+            _ => None,
+        }?;
+        Some((key.clone(), record.take()))
+    })
 }
 
 /// Decodes an MSK record's `headers` field into a `HashMap<String, String>` by converting
@@ -153,9 +143,9 @@ impl Trigger for MSKEvent {
         // delivered as a JSON object with numeric string keys; normalize to a single-element array
         // before deserializing.
         let chosen = payload
-            .get("records")
-            .and_then(Value::as_object)
-            .and_then(find_record_with_trace_context);
+            .get_mut("records")
+            .and_then(Value::as_object_mut)
+            .and_then(take_record_with_trace_context);
 
         if let Some((chosen_key, chosen_record)) = chosen {
             let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
@@ -173,7 +163,7 @@ impl Trigger for MSKEvent {
                 match entry {
                     Value::Array(arr) => arr.truncate(1),
                     Value::Object(obj) => {
-                        let first_record = obj.values().next()?.clone();
+                        let first_record = obj.values_mut().next()?.take();
                         *entry = Value::Array(vec![first_record]);
                     }
                     _ => return None,
@@ -245,7 +235,7 @@ impl Trigger for MSKEvent {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.event_source_arn.clone()
     }
 
@@ -374,7 +364,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"
         );
     }

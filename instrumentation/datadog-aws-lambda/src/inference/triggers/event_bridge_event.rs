@@ -5,6 +5,7 @@ use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -18,7 +19,7 @@ use crate::inference::{
 const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
 const DATADOG_RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct EventBridgeEvent {
     pub id: String,
     pub version: String,
@@ -32,6 +33,20 @@ pub struct EventBridgeEvent {
     pub detail: Value,
     #[serde(rename = "replay-name")]
     pub replay_name: Option<String>,
+    /// The Datadog carrier in `detail`, deserialized on first use.
+    #[serde(skip)]
+    carrier: OnceCell<HashMap<String, String>>,
+}
+
+impl EventBridgeEvent {
+    fn carrier(&self) -> &HashMap<String, String> {
+        self.carrier.get_or_init(|| {
+            self.detail
+                .get(DATADOG_CARRIER_KEY)
+                .and_then(|carrier| HashMap::deserialize(carrier).ok())
+                .unwrap_or_default()
+        })
+    }
 }
 
 impl Trigger for EventBridgeEvent {
@@ -64,16 +79,16 @@ impl Trigger for EventBridgeEvent {
         // nanosecond range would also overflow in milliseconds, so it is left unknown.
         let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
 
-        let carrier = self.get_carrier();
         let resource_name = self.get_specific_identifier();
-        let start_time = carrier
+        let start_time = self
+            .carrier()
             .get(DATADOG_START_TIME_KEY)
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
         let service_name = self.resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            &resource_name,
             "eventbridge",
             aws_service_representation_enabled,
         );
@@ -96,19 +111,12 @@ impl Trigger for EventBridgeEvent {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.source.clone()
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        if let Some(carrier) = self
-            .detail
-            .as_object()
-            .and_then(|detail| detail.get(DATADOG_CARRIER_KEY))
-        {
-            return serde_json::from_value(carrier.clone()).unwrap_or_default();
-        }
-        HashMap::new()
+        self.carrier().clone()
     }
 
     fn is_async(&self) -> bool {
@@ -118,8 +126,7 @@ impl Trigger for EventBridgeEvent {
 
 impl ServiceNameResolver for EventBridgeEvent {
     fn get_specific_identifier(&self) -> String {
-        let carrier = self.get_carrier();
-        carrier
+        self.carrier()
             .get(DATADOG_RESOURCE_NAME_KEY)
             .unwrap_or(&self.source)
             .clone()
@@ -165,6 +172,7 @@ mod tests {
                 }
             }),
             replay_name: None,
+            carrier: OnceCell::new(),
         };
 
         assert_eq!(result, expected);
@@ -251,7 +259,7 @@ mod tests {
         let json = read_json_file("eventbridge_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
-        assert_eq!(event.get_arn("us-east-1"), "my.event");
+        assert_eq!(event.get_arn("us-east-1", ""), "my.event");
     }
 
     #[test]

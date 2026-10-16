@@ -5,7 +5,7 @@ use crate::inference::SpanData as Span;
 use crate::{
     inference::get_aws_partition_by_region,
     inference::{
-        triggers::{body::Body, lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+        triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
         MS_TO_NS,
     },
 };
@@ -30,8 +30,6 @@ pub struct APIGatewayWebSocketEvent {
     #[serde(default)]
     pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
-    #[serde(flatten)]
-    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -162,7 +160,7 @@ impl Trigger for APIGatewayWebSocketEvent {
         tags
     }
 
-    fn get_arn(&self, region: &str) -> String {
+    fn get_arn(&self, region: &str, _function_name: &str) -> String {
         let partition = get_aws_partition_by_region(region);
         format!(
             "arn:{partition}:apigateway:{region}::/apis/{api_id}/stages/{stage}",
@@ -226,10 +224,6 @@ mod tests {
                     source_ip: Some("24.193.182.233".to_string()),
                 },
             },
-            body: Body {
-                body: Some(r#"{"action": "hello", "message":"in"}"#.to_string()),
-                is_base64_encoded: false,
-            },
         };
 
         assert_eq!(result, expected);
@@ -262,10 +256,6 @@ mod tests {
                 identity: Identity {
                     source_ip: Some("24.193.182.233".to_string()),
                 },
-            },
-            body: Body {
-                body: Some(r#"{"action": "hello", "message":"in"}"#.to_string()),
-                is_base64_encoded: false,
             },
         };
 
@@ -300,10 +290,6 @@ mod tests {
                 identity: Identity {
                     source_ip: Some("24.193.182.233".to_string()),
                 },
-            },
-            body: Body {
-                body: Some(r#"{"action": "hello", "message":"in"}"#.to_string()),
-                is_base64_encoded: false,
             },
         };
 
@@ -396,7 +382,7 @@ mod tests {
             .expect("Failed to deserialize APIGatewayWebSocketEvent");
 
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:apigateway:us-east-1::/apis/85fj5nw29d/stages/dev"
         );
     }

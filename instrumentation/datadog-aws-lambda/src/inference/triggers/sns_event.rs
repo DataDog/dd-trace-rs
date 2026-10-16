@@ -1,6 +1,7 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
@@ -24,6 +25,32 @@ pub struct SnsRecord {
     pub sns: SnsEntity,
     #[serde(rename = "EventSubscriptionArn")]
     pub event_subscription_arn: Option<String>,
+    /// The EventBridge event delivered as the message, parsed on first use.
+    #[serde(skip)]
+    wrapped: OnceCell<Option<Box<EventBridgeEvent>>>,
+}
+
+impl SnsRecord {
+    /// Wraps a notification delivered outside an SNS Lambda event, such as in an SQS body.
+    pub(crate) fn from_entity(sns: SnsEntity) -> Self {
+        Self {
+            sns,
+            event_subscription_arn: None,
+            wrapped: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn wrapped_event(&self) -> Option<&EventBridgeEvent> {
+        self.wrapped
+            .get_or_init(|| {
+                self.sns
+                    .message
+                    .as_deref()
+                    .and_then(|message| serde_json::from_str(message).ok())
+                    .map(Box::new)
+            })
+            .as_deref()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -53,16 +80,13 @@ pub struct MessageAttribute {
 }
 
 impl Trigger for SnsRecord {
-    fn new(payload: Value) -> Option<Self> {
-        match payload.get("Records").and_then(Value::as_array) {
-            Some(records) => match serde_json::from_value::<SnsRecord>(records.first()?.clone()) {
-                Ok(record) => Some(record),
-                Err(e) => {
-                    debug!("Failed to deserialize SNS Record: {e}");
-                    None
-                }
-            },
-            None => None,
+    fn new(mut payload: Value) -> Option<Self> {
+        match serde_json::from_value::<SnsRecord>(super::take_first_record(&mut payload)?) {
+            Ok(record) => Some(record),
+            Err(e) => {
+                debug!("Failed to deserialize SNS Record: {e}");
+                None
+            }
         }
     }
 
@@ -133,7 +157,7 @@ impl Trigger for SnsRecord {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.sns.topic_arn.clone()
     }
 
@@ -150,12 +174,7 @@ impl Trigger for SnsRecord {
                     debug!("Unsupported type in SNS message attribute");
                 }
             }
-        } else if let Some(event) = self
-            .sns
-            .message
-            .as_deref()
-            .and_then(|message| serde_json::from_str::<EventBridgeEvent>(message).ok())
-        {
+        } else if let Some(event) = self.wrapped_event() {
             return event.get_carrier();
         }
 
@@ -217,6 +236,7 @@ mod tests {
                 subject: None,
                 message: Some("Asynchronously invoking a Lambda function with SNS.".to_string()),
             },
+            wrapped: OnceCell::new(),
         };
 
         assert_eq!(result, expected);
@@ -284,7 +304,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:sns:sa-east-1:425362996713:serverlessTracingTopicPy"
         );
     }

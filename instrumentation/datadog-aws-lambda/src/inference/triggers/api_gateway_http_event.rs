@@ -5,7 +5,7 @@ use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
     triggers::{
-        body::Body, lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
+        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
         FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
@@ -30,8 +30,6 @@ pub struct APIGatewayHttpEvent {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub query_string_parameters: HashMap<String, String>,
-    #[serde(flatten)]
-    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -91,7 +89,7 @@ impl Trigger for APIGatewayHttpEvent {
         let resource = format!(
             "{http_method} {parameterized_route}",
             http_method = self.request_context.http.method,
-            parameterized_route = parameterize_api_resource(self.request_context.http.path.clone())
+            parameterized_route = parameterize_api_resource(&self.request_context.http.path)
         );
         let http_url = format!(
             "https://{domain_name}{path}",
@@ -191,7 +189,7 @@ impl Trigger for APIGatewayHttpEvent {
         tags
     }
 
-    fn get_arn(&self, region: &str) -> String {
+    fn get_arn(&self, region: &str, _function_name: &str) -> String {
         let partition = get_aws_partition_by_region(region);
         format!(
             "arn:{partition}:apigateway:{region}::/apis/{api_id}/stages/{stage}",
@@ -287,7 +285,6 @@ mod tests {
             },
             path_parameters: HashMap::default(),
             query_string_parameters: HashMap::default(),
-            body: Body::default(),
         };
 
         assert_eq!(result, expected);
@@ -439,7 +436,7 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         assert_eq!(
-            event.get_arn("sa-east-1"),
+            event.get_arn("sa-east-1", ""),
             "arn:aws:apigateway:sa-east-1::/apis/x02yirxc7a/stages/$default"
         );
     }

@@ -9,7 +9,6 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-pub mod body;
 mod serde_utils;
 
 pub mod alb_event;
@@ -60,10 +59,10 @@ pub trait ServiceNameResolver {
 }
 
 #[must_use]
-pub fn parameterize_api_resource(resource: String) -> String {
+pub fn parameterize_api_resource(resource: &str) -> String {
     // curly braces are used for APIGW parameters feature
     if resource.contains('{') && resource.contains('}') {
-        return resource;
+        return resource.to_string();
     }
 
     let parts: Vec<&str> = resource.split('/').collect();
@@ -133,7 +132,7 @@ pub trait Trigger: ServiceNameResolver {
         aws_service_representation_enabled: bool,
     );
     fn get_tags(&self) -> HashMap<String, String>;
-    fn get_arn(&self, region: &str) -> String;
+    fn get_arn(&self, region: &str, function_name: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
 
@@ -187,10 +186,10 @@ macro_rules! identified_triggers {
             $default,
         }
         impl $name {
-            $vis fn from_value(payload: &Value) -> Self {
+            $vis fn from_value(payload: Value) -> Self {
                 $(
-                if <$type>::is_match(payload) {
-                    return <$type>::new(payload.clone()).map_or(Self::$default, Self::$case);
+                if <$type>::is_match(&payload) {
+                    return <$type>::new(payload).map_or(Self::$default, Self::$case);
                 }
                 )+
                 Self::$default
@@ -226,6 +225,15 @@ identified_triggers!(
         else => Unknown,
     }
 );
+
+/// Moves the first record of a `Records` batch out of the payload instead of copying it.
+fn take_first_record(payload: &mut Value) -> Option<Value> {
+    payload
+        .get_mut("Records")?
+        .as_array_mut()?
+        .first_mut()
+        .map(Value::take)
+}
 
 /// Serialize a `HashMap` with lowercase keys
 pub fn lowercase_key<'de, D, V>(deserializer: D) -> Result<HashMap<String, V>, D::Error>

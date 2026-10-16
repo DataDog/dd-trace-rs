@@ -40,19 +40,13 @@ pub struct KinesisEntity {
 }
 
 impl Trigger for KinesisRecord {
-    fn new(payload: Value) -> Option<Self> {
-        let records = payload.get("Records").and_then(Value::as_array);
-        match records {
-            Some(records) => {
-                match serde_json::from_value::<KinesisRecord>(records.first()?.clone()) {
-                    Ok(event) => Some(event),
-                    Err(e) => {
-                        debug!("Failed to deserialize Kinesis Record: {e}");
-                        None
-                    }
-                }
+    fn new(mut payload: Value) -> Option<Self> {
+        match serde_json::from_value::<KinesisRecord>(super::take_first_record(&mut payload)?) {
+            Ok(event) => Some(event),
+            Err(e) => {
+                debug!("Failed to deserialize Kinesis Record: {e}");
+                None
             }
-            None => None,
         }
     }
 
@@ -114,7 +108,7 @@ impl Trigger for KinesisRecord {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.event_source_arn.clone()
     }
 
@@ -249,7 +243,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:kinesis:sa-east-1:425362996713:stream/kinesisStream".to_string()
         );
     }

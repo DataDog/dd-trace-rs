@@ -48,22 +48,16 @@ pub enum AttributeValue {
 }
 
 impl Trigger for DynamoDbRecord {
-    fn new(payload: Value) -> Option<Self>
+    fn new(mut payload: Value) -> Option<Self>
     where
         Self: Sized,
     {
-        let records = payload.get("Records").and_then(Value::as_array);
-        match records {
-            Some(records) => {
-                match serde_json::from_value::<DynamoDbRecord>(records.first()?.clone()) {
-                    Ok(event) => Some(event),
-                    Err(e) => {
-                        debug!("Failed to deserialize DynamoDB Record: {e}");
-                        None
-                    }
-                }
+        match serde_json::from_value::<DynamoDbRecord>(super::take_first_record(&mut payload)?) {
+            Ok(event) => Some(event),
+            Err(e) => {
+                debug!("Failed to deserialize DynamoDB Record: {e}");
+                None
             }
-            None => None,
         }
     }
 
@@ -135,7 +129,7 @@ impl Trigger for DynamoDbRecord {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.event_source_arn.clone()
     }
 
@@ -261,7 +255,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:dynamodb:us-east-1:123456789012:table/ExampleTableWithStream/stream/2015-06-27T00:48:05.899"
         );
     }

@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use super::ServiceNameResolver;
-use crate::inference::triggers::{
-    body::Body, lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
-};
+use crate::inference::triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use crate::inference::SpanData as Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,9 +32,6 @@ pub struct ALBEvent {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub multi_value_query_parameters: HashMap<String, Vec<String>>,
-
-    #[serde(flatten)]
-    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -87,7 +82,7 @@ impl Trigger for ALBEvent {
         ])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.request_context.elb.target_group_arn.clone()
     }
 
@@ -166,10 +161,6 @@ mod tests {
             multi_value_headers: HashMap::default(),
             query_parameters: HashMap::default(),
             multi_value_query_parameters: HashMap::default(),
-            body: Body {
-                body: Some(String::new()),
-                is_base64_encoded: false,
-            }
         };
 
         assert_eq!(result, expected);
@@ -240,7 +231,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
         assert_eq!(
-            event.get_arn("sa-east-1"),
+            event.get_arn("sa-east-1", ""),
             "arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0"
         );
     }

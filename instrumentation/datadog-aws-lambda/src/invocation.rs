@@ -17,6 +17,7 @@ use crate::attribute_keys as attr;
 use crate::inference::SpanInferrer;
 use crate::span_inferrer::{extract_trigger, InferredSpanScope, TriggerContext, TriggerExtraction};
 
+use datadog_opentelemetry::propagation::DatadogPropagator;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
@@ -120,6 +121,7 @@ pub(crate) struct Invocation {
 impl Invocation {
     pub(crate) fn start(
         tracer: &SdkTracer,
+        propagator: &DatadogPropagator,
         inferrer: &SpanInferrer,
         payload: &str,
         lambda_cx: &lambda_runtime::Context,
@@ -132,7 +134,7 @@ impl Invocation {
         let TriggerExtraction {
             upstream_cx,
             mut inference_result,
-        } = extract_trigger(inferrer, payload);
+        } = extract_trigger(inferrer, propagator, payload);
         let inferred_spans =
             InferredSpanScope::start(tracer, &upstream_cx, &inference_result, started_at);
         let trigger = TriggerContext {
@@ -205,6 +207,10 @@ mod tests {
             .with_simple_exporter(exporter.clone())
             .build();
         (provider, exporter)
+    }
+
+    fn test_propagator() -> DatadogPropagator {
+        datadog_opentelemetry::tracing().init_local().1
     }
 
     fn test_lambda_cx() -> lambda_runtime::Context {
@@ -366,7 +372,14 @@ mod tests {
         assert!(expected.contains_key("http.route"));
 
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
-        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
         let _: Result<(), String> = invocation.finish(Ok(()));
         provider.force_flush().unwrap();
 
@@ -440,7 +453,14 @@ mod tests {
 
         let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
-        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
         assert!(invocation
             .handler_context()
             .span()
@@ -456,7 +476,14 @@ mod tests {
 
         let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
-        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
         let _: Result<(), String> = invocation.finish(Ok(()));
         provider.force_flush().unwrap();
 

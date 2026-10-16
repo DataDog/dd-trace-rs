@@ -61,21 +61,18 @@ pub struct StateMachine {
 }
 
 impl Trigger for StepFunctionEvent {
-    fn new(payload: serde_json::Value) -> Option<Self>
+    fn new(mut payload: serde_json::Value) -> Option<Self>
     where
         Self: Sized,
     {
-        let p = payload
-            .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
-            .unwrap_or(&payload)
-            .get(DATADOG_CARRIER_KEY)
-            .unwrap_or(
-                payload
-                    .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
-                    .unwrap_or(&payload),
-            );
+        // The context may be nested under the legacy payload key, then under `_datadog`.
+        for key in [DATADOG_LEGACY_LAMBDA_PAYLOAD, DATADOG_CARRIER_KEY] {
+            if let Some(inner) = payload.get_mut(key).map(Value::take) {
+                payload = inner;
+            }
+        }
 
-        match serde_json::from_value::<StepFunctionEvent>(p.clone()) {
+        match serde_json::from_value::<StepFunctionEvent>(payload) {
             Ok(event) => Some(event),
             Err(e) => {
                 tracing::debug!("Failed to deserialize Step Function Event: {e}");
@@ -125,7 +122,7 @@ impl Trigger for StepFunctionEvent {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         if let Some(sm) = &self.state_machine {
             return sm.id.clone();
         }
@@ -150,7 +147,7 @@ impl StepFunctionEvent {
                 // Lambda Root
                 let lo_tid = trace_id
                     .parse()
-                    .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
+                    .unwrap_or_else(|_| Self::generate_trace_id(&self.execution.id).0);
 
                 let tags = crate::inference::extract_propagation_tags(trace_tags);
 
@@ -161,7 +158,7 @@ impl StepFunctionEvent {
                     .root_execution_id
                     .as_ref()
                     .unwrap_or(&self.execution.id);
-                let (lo_tid, hi_tid) = Self::generate_trace_id(execution_arn.clone());
+                let (lo_tid, hi_tid) = Self::generate_trace_id(execution_arn);
                 let tags = HashMap::from([(
                     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                     format!("{hi_tid:016x}"),
@@ -170,9 +167,9 @@ impl StepFunctionEvent {
             };
 
         let parent_id = Self::generate_parent_id(
-            self.execution.id.clone(),
-            self.state.name.clone(),
-            self.state.entered_time.clone(),
+            &self.execution.id,
+            &self.state.name,
+            &self.state.entered_time,
             self.state.retry_count,
             self.execution.redrive_count,
         );
@@ -196,9 +193,9 @@ impl StepFunctionEvent {
     /// Step Function context object. We omit `retry_count` and `redrive_count`
     /// when both are 0 to maintain backwards compatibility.
     fn generate_parent_id(
-        execution_id: String,
-        state_name: String,
-        state_entered_time: String,
+        execution_id: &str,
+        state_name: &str,
+        state_entered_time: &str,
         retry_count: u16,
         redrive_count: u16,
     ) -> u64 {
@@ -213,7 +210,7 @@ impl StepFunctionEvent {
     }
 
     /// Generates a random 128 bit ID from the Step Function Execution ARN
-    fn generate_trace_id(execution_arn: String) -> (u64, u64) {
+    fn generate_trace_id(execution_arn: &str) -> (u64, u64) {
         let hash = Sha256::digest(execution_arn.as_bytes());
 
         let lower_order_bits = Self::get_positive_u64(&hash[8..16]);
@@ -441,7 +438,7 @@ mod tests {
         let event =
             StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"
         );
     }
@@ -593,11 +590,9 @@ mod tests {
     #[test]
     fn test_generate_parent_id() {
         let parent_id = StepFunctionEvent::generate_parent_id(
-            String::from(
-                "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
-            ),
-            String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Z"),
+            "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
+            "step-one",
+            "2022-12-08T21:08:19.224Z",
             0,
             0,
         );
@@ -605,11 +600,9 @@ mod tests {
         assert_eq!(parent_id, 4_340_734_536_022_949_921);
 
         let parent_id = StepFunctionEvent::generate_parent_id(
-            String::from(
-                "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
-            ),
-            String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Y"),
+            "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
+            "step-one",
+            "2022-12-08T21:08:19.224Y",
             0,
             0,
         );
@@ -619,9 +612,9 @@ mod tests {
 
     #[test]
     fn test_generate_trace_id() {
-        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
+        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(
             "arn:aws:states:sa-east-1:425362996713:stateMachine:MyStateMachine-b276uka1j",
-        ));
+        );
         let hex_tid = format!("{hi_tid:016x}");
 
         assert_eq!(lo_tid, 1_680_583_253_837_593_461);
@@ -629,9 +622,7 @@ mod tests {
 
         assert_eq!(hex_tid, "60ee1db79e4803f8");
 
-        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
-            "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44",
-        ));
+        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44");
         let hex_tid = format!("{hi_tid:016x}");
 
         assert_eq!(lo_tid, 5_744_042_798_732_701_615);

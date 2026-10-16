@@ -33,8 +33,9 @@ longer requires the experimental `libdd-trace-inferrer` Git branch.
 The port replaces Bottlecap's protobuf span with the fields needed by the OpenTelemetry adapter. It
 retains event matching, service resolution, metadata, timestamps, carrier extraction, wrapped
 trigger detection, Step Functions IDs, and SQS AWS trace header fallback. Explicit carrier context
-is preferred over generated context. Datadog and W3C carriers use the tracer's configured
-propagator. Generated context is passed directly to the Datadog propagator so undecided sampling
+is preferred over generated context. Datadog and W3C carriers are extracted with the Datadog
+propagator the wrapper installs, using the configured styles, even if another global propagator
+is installed later. Generated context is passed directly to that propagator so undecided sampling
 remains eligible for local sampling, while continue, restart, and ignore settings still apply.
 Extension-only DSM checkpoints, span pointers, and AppSec processing are outside this module.
 

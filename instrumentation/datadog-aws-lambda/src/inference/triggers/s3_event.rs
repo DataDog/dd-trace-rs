@@ -46,17 +46,13 @@ pub struct S3Object {
 }
 
 impl Trigger for S3Record {
-    fn new(payload: serde_json::Value) -> Option<Self> {
-        let records = payload.get("Records").and_then(Value::as_array);
-        match records {
-            Some(records) => match serde_json::from_value::<S3Record>(records.first()?.clone()) {
-                Ok(event) => Some(event),
-                Err(e) => {
-                    debug!("Failed to deserialize S3 Record: {e}");
-                    None
-                }
-            },
-            None => None,
+    fn new(mut payload: serde_json::Value) -> Option<Self> {
+        match serde_json::from_value::<S3Record>(super::take_first_record(&mut payload)?) {
+            Ok(record) => Some(record),
+            Err(e) => {
+                debug!("Failed to deserialize S3 Record: {e}");
+                None
+            }
         }
     }
 
@@ -120,7 +116,7 @@ impl Trigger for S3Record {
         )])
     }
 
-    fn get_arn(&self, _region: &str) -> String {
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
         self.s3.bucket.arn.clone()
     }
 
@@ -227,7 +223,10 @@ mod tests {
         let json = read_json_file("s3_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
-        assert_eq!(event.get_arn("us-east-1"), "arn:aws:s3:::example-bucket");
+        assert_eq!(
+            event.get_arn("us-east-1", ""),
+            "arn:aws:s3:::example-bucket"
+        );
     }
 
     #[test]

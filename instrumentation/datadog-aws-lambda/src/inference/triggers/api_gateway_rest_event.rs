@@ -5,8 +5,8 @@ use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
     triggers::{
-        body::Body, lowercase_key, parameterize_api_resource, serde_utils::nullable_map,
-        ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        lowercase_key, parameterize_api_resource, serde_utils::nullable_map, ServiceNameResolver,
+        Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
@@ -31,8 +31,6 @@ pub struct APIGatewayRestEvent {
     #[serde(deserialize_with = "nullable_map")]
     pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
-    #[serde(flatten)]
-    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -88,7 +86,7 @@ impl Trigger for APIGatewayRestEvent {
         let resource = format!(
             "{http_method} {path}",
             http_method = self.request_context.method,
-            path = parameterize_api_resource(self.request_context.path.clone())
+            path = parameterize_api_resource(&self.request_context.path)
         );
         let http_url = format!(
             "https://{domain_name}{path}",
@@ -178,7 +176,7 @@ impl Trigger for APIGatewayRestEvent {
         tags
     }
 
-    fn get_arn(&self, region: &str) -> String {
+    fn get_arn(&self, region: &str, _function_name: &str) -> String {
         let partition = get_aws_partition_by_region(region);
         format!(
             "arn:{partition}:apigateway:{region}::/restapis/{api_id}/stages/{stage}",
@@ -233,32 +231,30 @@ mod tests {
     fn test_parameterize_resource() {
         // Test case with numeric IDs
         assert_eq!(
-            parameterize_api_resource("/users/12345/friends/67890".to_string()),
+            parameterize_api_resource("/users/12345/friends/67890"),
             "/users/{user_id}/friends/{friend_id}"
         );
 
         assert_eq!(
-            parameterize_api_resource("/dev/proxy_route/users/12345/friends/67890".to_string()),
+            parameterize_api_resource("/dev/proxy_route/users/12345/friends/67890"),
             "/dev/proxy_route/users/{user_id}/friends/{friend_id}"
         );
 
         // Test case with already parameterized path
         assert_eq!(
-            parameterize_api_resource("/users/{user_id}/profile".to_string()),
+            parameterize_api_resource("/users/{user_id}/profile"),
             "/users/{user_id}/profile"
         );
 
         // Test case with mixed segments
         assert_eq!(
-            parameterize_api_resource("/api/v1/users/12345/settings".to_string()),
+            parameterize_api_resource("/api/v1/users/12345/settings"),
             "/api/v1/users/{user_id}/settings"
         );
 
         // Test case with UUIDs
         assert_eq!(
-            parameterize_api_resource(
-                "/orders/123e4567-e89b-12d3-a456-426614174000/items".to_string()
-            ),
+            parameterize_api_resource("/orders/123e4567-e89b-12d3-a456-426614174000/items"),
             "/orders/{order_id}/items"
         );
     }
@@ -304,10 +300,6 @@ mod tests {
                     source_ip: "IP".to_string(),
                     user_agent: "user-agent".to_string(),
                 },
-            },
-            body: Body {
-                body: Some("Hello from Lambda!".to_string()),
-                is_base64_encoded: false,
             },
         };
 
@@ -463,7 +455,7 @@ mod tests {
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:apigateway:us-east-1::/restapis/id/stages/$default"
         );
     }

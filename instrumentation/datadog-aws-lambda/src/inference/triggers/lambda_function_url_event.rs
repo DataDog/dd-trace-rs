@@ -1,7 +1,7 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashMap, env};
+use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
 use serde::{Deserialize, Serialize};
@@ -9,9 +9,7 @@ use serde_json::Value;
 
 use crate::inference::{
     get_aws_partition_by_region,
-    triggers::{
-        body::Body, lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
-    },
+    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
     MS_TO_NS,
 };
 
@@ -24,8 +22,6 @@ pub struct LambdaFunctionUrlEvent {
     #[serde(default)]
     pub query_string_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
-    #[serde(flatten)]
-    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -167,9 +163,7 @@ impl Trigger for LambdaFunctionUrlEvent {
         tags
     }
 
-    fn get_arn(&self, region: &str) -> String {
-        #[allow(clippy::disallowed_methods)]
-        let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default();
+    fn get_arn(&self, region: &str, function_name: &str) -> String {
         let partition = get_aws_partition_by_region(region);
         format!(
             "arn:{partition}:lambda:{region}:{}:url:{}",
@@ -256,10 +250,6 @@ mod tests {
                 domain_name: String::from("a8hyhsshac.lambda-url.eu-south-1.amazonaws.com"),
                 api_id: String::from("a8hyhsshac"),
             },
-            body: Body {
-                body: None,
-                is_base64_encoded: false,
-            },
         };
 
         assert_eq!(result, expected);
@@ -333,8 +323,6 @@ mod tests {
 
     #[test]
     fn test_get_arn() {
-        #[allow(clippy::disallowed_methods)]
-        let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default();
         let json = read_json_file("lambda_function_url_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
@@ -345,8 +333,8 @@ mod tests {
             ("us-gov-west-1", "aws-us-gov"),
         ] {
             assert_eq!(
-                event.get_arn(region),
-                format!("arn:{partition}:lambda:{region}:601427279990:url:{function_name}")
+                event.get_arn(region, "my-function"),
+                format!("arn:{partition}:lambda:{region}:601427279990:url:my-function")
             );
         }
     }

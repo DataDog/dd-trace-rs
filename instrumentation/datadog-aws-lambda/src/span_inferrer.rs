@@ -14,17 +14,19 @@ use crate::attribute_keys as attr;
 use crate::inference::{InferConfig, InferenceResult, SpanInferrer};
 
 use datadog_opentelemetry::configuration::Config;
+use datadog_opentelemetry::propagation::DatadogPropagator;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
-use opentelemetry::{global, Context, KeyValue};
+use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
-/// Builds the inferrer from the tracer configuration and the Lambda region.
+/// Builds the inferrer from the tracer configuration and the Lambda runtime environment.
 #[allow(clippy::disallowed_methods)]
 pub(crate) fn build_inferrer(config: &Config) -> SpanInferrer {
     SpanInferrer::new(InferConfig {
         region: std::env::var("AWS_REGION").unwrap_or_default(),
+        function_name: std::env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
         service_mapping: config
             .service_mapping()
             .map(|(from, to)| (from.to_string(), to.to_string()))
@@ -214,12 +216,15 @@ pub(crate) struct TriggerExtraction {
 
 /// Infers trigger metadata from `payload` and extracts the upstream OTel context.
 ///
-/// Carrier formats are interpreted by the configured propagator, including W3C headers.
-pub(crate) fn extract_trigger(inferrer: &SpanInferrer, payload: &str) -> TriggerExtraction {
+/// Carriers are interpreted by `propagator` with the configured styles, including W3C headers.
+/// It is used instead of the global propagator so event-derived context is never dropped.
+pub(crate) fn extract_trigger(
+    inferrer: &SpanInferrer,
+    propagator: &DatadogPropagator,
+    payload: &str,
+) -> TriggerExtraction {
     let result = inferrer.infer_span(payload).unwrap_or_default();
-    let upstream_cx = global::get_text_map_propagator(|p| {
-        extract_upstream_context(p, &result, &Context::current())
-    });
+    let upstream_cx = extract_upstream_context(propagator, &result, &Context::current());
 
     TriggerExtraction {
         upstream_cx,
@@ -228,16 +233,11 @@ pub(crate) fn extract_trigger(inferrer: &SpanInferrer, payload: &str) -> Trigger
 }
 
 fn extract_upstream_context(
-    propagator: &dyn opentelemetry::propagation::TextMapPropagator,
+    propagator: &DatadogPropagator,
     result: &InferenceResult,
     ambient: &Context,
 ) -> Context {
-    datadog_opentelemetry::propagation::extract_with_fallback(
-        propagator,
-        ambient,
-        &result.carrier,
-        result.generated_context.as_ref(),
-    )
+    propagator.extract_with_fallback(ambient, &result.carrier, result.generated_context.as_ref())
 }
 
 #[cfg(test)]
@@ -431,8 +431,9 @@ mod tests {
             }]
         });
 
+        let (_dd_provider, propagator) = test_propagator();
         let inferrer = default_inferrer();
-        let extraction = extract_trigger(&inferrer, &event.to_string());
+        let extraction = extract_trigger(&inferrer, &propagator, &event.to_string());
 
         assert!(extraction.inference_result.is_async);
         assert_eq!(
@@ -455,7 +456,7 @@ mod tests {
         inferrer.infer_span(&read_json_file(name)).unwrap()
     }
 
-    fn test_propagator() -> (SdkTracerProvider, impl TextMapPropagator) {
+    fn test_propagator() -> (SdkTracerProvider, DatadogPropagator) {
         let mut config = datadog_opentelemetry::configuration::Config::builder();
         config.set_trace_propagation_style(vec![
             datadog_opentelemetry::configuration::TracePropagationStyle::Datadog,
@@ -816,7 +817,7 @@ mod tests {
     fn malformed_or_unknown_payloads_leave_the_ambient_context_intact() {
         let (provider, _) = test_provider();
         let ambient = Context::new().with_span(provider.tracer("test").start("ambient"));
-        let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::new();
+        let (_dd_provider, propagator) = test_propagator();
         for payload in [
             "null",
             "{}",
@@ -891,5 +892,20 @@ mod tests {
             sqs_service(&build_inferrer(&config.build())),
             "orders-queue"
         );
+    }
+
+    #[test]
+    fn extraction_does_not_depend_on_the_global_propagator() {
+        // Replacing the global propagator must not drop event-derived context.
+        opentelemetry::global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
+        let (_dd_provider, propagator) = test_propagator();
+        let extraction = extract_trigger(
+            &default_inferrer(),
+            &propagator,
+            &read_json_file("step_function_event.json"),
+        );
+        assert!(extraction.upstream_cx.span().span_context().is_valid());
     }
 }

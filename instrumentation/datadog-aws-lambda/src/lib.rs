@@ -45,6 +45,7 @@ mod span_inferrer;
 
 use crate::inference::SpanInferrer;
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
+use datadog_opentelemetry::propagation::DatadogPropagator;
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
@@ -144,6 +145,8 @@ impl From<serde_json::Error> for TracedServiceError {
 pub struct TracedService<S, E, R> {
     inner: S,
     tracer: SdkTracer,
+    /// Also installed globally; extraction uses this handle so it survives global replacement.
+    propagator: DatadogPropagator,
     inferrer: SpanInferrer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
@@ -185,11 +188,14 @@ impl<S, E, R> TracedService<S, E, R> {
             config.build()
         };
         let inferrer = span_inferrer::build_inferrer(&config);
-        let provider = datadog_opentelemetry::tracing().with_config(config).init();
+        let (provider, propagator) = datadog_opentelemetry::tracing()
+            .with_config(config)
+            .init_with_propagator();
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
             tracer,
+            propagator,
             inferrer,
             cold_start: true,
             _phantom: PhantomData,
@@ -223,6 +229,7 @@ where
         let cold_start = self.take_cold_start();
         let invocation = Invocation::start(
             &self.tracer,
+            &self.propagator,
             &self.inferrer,
             event.payload.get(),
             &event.context,
@@ -273,6 +280,7 @@ mod tests {
         TracedService {
             inner: ReadyService,
             tracer,
+            propagator: datadog_opentelemetry::tracing().init_local().1,
             inferrer: span_inferrer::default_inferrer(),
             cold_start: true,
             _phantom: PhantomData,

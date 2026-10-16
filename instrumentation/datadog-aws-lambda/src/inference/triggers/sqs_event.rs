@@ -15,6 +15,7 @@ use crate::inference::{
 use datadog_opentelemetry::propagation::context::{Sampling, SpanContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use tracing::debug;
 
@@ -36,6 +37,40 @@ pub struct SqsRecord {
     #[serde(rename = "awsRegion")]
     pub aws_region: String,
     pub body: String,
+    /// The SNS or EventBridge event delivered as the body, parsed on first use.
+    #[serde(skip)]
+    wrapped: OnceCell<Option<Box<SqsWrappedEvent>>>,
+}
+
+/// An SNS notification or EventBridge event delivered as the body of an SQS message.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum SqsWrappedEvent {
+    Sns(SnsRecord),
+    EventBridge(EventBridgeEvent),
+}
+
+impl SqsWrappedEvent {
+    fn parse(body: &str) -> Option<Self> {
+        if let Ok(sns) = serde_json::from_str::<SnsEntity>(body) {
+            return Some(Self::Sns(SnsRecord::from_entity(sns)));
+        }
+        serde_json::from_str(body).ok().map(Self::EventBridge)
+    }
+
+    pub(crate) fn as_trigger(&self) -> &dyn Trigger {
+        match self {
+            Self::Sns(record) => record,
+            Self::EventBridge(event) => event,
+        }
+    }
+}
+
+impl SqsRecord {
+    pub(crate) fn wrapped_event(&self) -> Option<&SqsWrappedEvent> {
+        self.wrapped
+            .get_or_init(|| SqsWrappedEvent::parse(&self.body).map(Box::new))
+            .as_deref()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -67,17 +102,13 @@ pub struct Attributes {
 }
 
 impl Trigger for SqsRecord {
-    fn new(payload: Value) -> Option<Self> {
-        let records = payload.get("Records").and_then(Value::as_array);
-        match records {
-            Some(records) => match serde_json::from_value::<SqsRecord>(records.first()?.clone()) {
-                Ok(event) => Some(event),
-                Err(e) => {
-                    debug!("Failed to deserialize SQS Record: {e}");
-                    None
-                }
-            },
-            None => None,
+    fn new(mut payload: Value) -> Option<Self> {
+        match serde_json::from_value::<SqsRecord>(super::take_first_record(&mut payload)?) {
+            Ok(record) => Some(record),
+            Err(e) => {
+                debug!("Failed to deserialize SQS Record: {e}");
+                None
+            }
         }
     }
 
@@ -153,7 +184,7 @@ impl Trigger for SqsRecord {
         ])
     }
 
-    fn get_arn(&self, region: &str) -> String {
+    fn get_arn(&self, region: &str, _function_name: &str) -> String {
         if let [_, _, _, _, account, queue_name] = self
             .event_source_arn
             .split(':')
@@ -197,16 +228,9 @@ impl Trigger for SqsRecord {
             }
         }
 
-        // Check for SNS event sent through SQS
-        if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&self.body) {
-            let sns_record = SnsRecord {
-                sns: sns_entity,
-                event_subscription_arn: None,
-            };
-
-            return sns_record.get_carrier();
-        } else if let Ok(event) = serde_json::from_str::<EventBridgeEvent>(&self.body) {
-            return event.get_carrier();
+        // Check for an SNS or EventBridge event sent through SQS
+        if let Some(wrapped) = self.wrapped_event() {
+            return wrapped.as_trigger().get_carrier();
         }
 
         // TODO: AWSTraceHeader
@@ -236,7 +260,7 @@ impl ServiceNameResolver for SqsRecord {
 // AWSTraceHeader directly. Unlike the other carriers in this file, it should
 // not be passed to the tracer.Propagator, instead extracting context directly.
 pub(crate) fn extract_trace_context_from_aws_trace_header(
-    headers_string: Option<String>,
+    headers_string: Option<&str>,
 ) -> Option<SpanContext> {
     let value = headers_string?;
     if !value.starts_with("Root=") {
@@ -343,6 +367,7 @@ mod tests {
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             aws_region: "us-east-1".to_string(),
             body: "Hello from SQS!".to_string(),
+            wrapped: OnceCell::new(),
         };
 
         assert_eq!(result, expected);
@@ -425,7 +450,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         assert_eq!(
-            event.get_arn("us-east-1"),
+            event.get_arn("us-east-1", ""),
             "arn:aws:sqs:us-east-1:123456789012:MyQueue"
         );
     }
@@ -708,9 +733,9 @@ mod tests {
         let event = SqsRecord::new(payload).expect("Failed to deserialize EventBridgeEvent");
 
         assert_eq!(
-            extract_trace_context_from_aws_trace_header(Some(
-                event.attributes.aws_trace_header.unwrap().clone()
-            ))
+            extract_trace_context_from_aws_trace_header(
+                event.attributes.aws_trace_header.as_deref()
+            )
             .unwrap(),
             SpanContext {
                 trace_id: 130_944_522_478_755_159,
@@ -731,8 +756,7 @@ mod tests {
     #[test]
     fn aws_generated_root_id_not_sampled_leaves_priority_unset() {
         let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0"
-                .to_string(),
+            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0",
         ))
         .expect("failed to extract context");
 
@@ -744,8 +768,7 @@ mod tests {
     #[test]
     fn datadog_planted_root_id_not_sampled_drops() {
         let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0"
-                .to_string(),
+            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0",
         ))
         .expect("failed to extract context");
 
@@ -756,7 +779,7 @@ mod tests {
     #[test]
     fn datadog_planted_root_id_without_sampled_leaves_priority_unset() {
         let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac".to_string(),
+            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac",
         ))
         .expect("failed to extract context");
 
@@ -768,8 +791,7 @@ mod tests {
     #[test]
     fn datadog_planted_root_id_sampled_keeps() {
         let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1"
-                .to_string(),
+            "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1",
         ))
         .expect("failed to extract context");
 
@@ -778,16 +800,13 @@ mod tests {
 
     #[test]
     fn truncated_root_does_not_panic() {
-        assert!(
-            extract_trace_context_from_aws_trace_header(Some("Root=1-64cc".to_string())).is_none()
-        );
+        assert!(extract_trace_context_from_aws_trace_header(Some("Root=1-64cc")).is_none());
     }
 
     #[test]
     fn aws_generated_root_id_sampled_keeps_priority() {
         let context = extract_trace_context_from_aws_trace_header(Some(
-            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=1"
-                .to_string(),
+            "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=1",
         ))
         .expect("failed to extract context");
 

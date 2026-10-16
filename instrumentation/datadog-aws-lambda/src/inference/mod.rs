@@ -8,14 +8,14 @@
 pub(crate) mod triggers;
 
 use base64::{engine::general_purpose, DecodeError, Engine};
-use datadog_opentelemetry::propagation::context::SpanContext;
+use datadog_opentelemetry::propagation::{
+    context::SpanContext, datadog::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use triggers::{
-    event_bridge_event::EventBridgeEvent,
-    sns_event::{SnsEntity, SnsRecord},
-    sqs_event::extract_trace_context_from_aws_trace_header,
-    IdentifiedTrigger, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+    sqs_event::extract_trace_context_from_aws_trace_header, IdentifiedTrigger, Trigger,
+    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
 };
 
 const MS_TO_NS: f64 = 1_000_000.0;
@@ -35,6 +35,8 @@ pub(crate) struct SpanData {
 
 pub(crate) struct InferConfig {
     pub region: String,
+    /// Name of the running function, used in Lambda function URL ARNs.
+    pub function_name: String,
     pub service_mapping: HashMap<String, String>,
     pub aws_service_representation_enabled: bool,
 }
@@ -43,6 +45,7 @@ impl Default for InferConfig {
     fn default() -> Self {
         Self {
             region: String::new(),
+            function_name: String::new(),
             service_mapping: HashMap::new(),
             aws_service_representation_enabled: true,
         }
@@ -76,7 +79,7 @@ impl SpanInferrer {
 
     pub fn infer_span(&self, payload: &str) -> serde_json::Result<InferenceResult> {
         let payload: Value = serde_json::from_str(payload)?;
-        let identified = IdentifiedTrigger::from_value(&payload);
+        let identified = IdentifiedTrigger::from_value(payload);
         let Some(trigger) = identified.as_trigger() else {
             return Ok(InferenceResult::default());
         };
@@ -86,7 +89,7 @@ impl SpanInferrer {
                 Some(generated_context(event.get_span_context()))
             }
             IdentifiedTrigger::SqsRecord(event) => extract_trace_context_from_aws_trace_header(
-                event.attributes.aws_trace_header.clone(),
+                event.attributes.aws_trace_header.as_deref(),
             )
             .map(generated_context),
             _ => None,
@@ -135,7 +138,7 @@ impl SpanInferrer {
         let mut trigger_tags = trigger.get_tags();
         trigger_tags.insert(
             FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.into(),
-            trigger.get_arn(&self.config.region),
+            trigger.get_arn(&self.config.region, &self.config.function_name),
         );
         InferenceResult {
             span_data,
@@ -148,21 +151,12 @@ impl SpanInferrer {
 
     fn infer_wrapped_trigger(&self, identified: &IdentifiedTrigger) -> Option<InferenceResult> {
         match identified {
-            IdentifiedTrigger::SqsRecord(event) => {
-                if let Ok(sns) = serde_json::from_str::<SnsEntity>(&event.body) {
-                    return Some(self.infer_trigger(&SnsRecord {
-                        sns,
-                        event_subscription_arn: None,
-                    }));
-                }
-                let event = serde_json::from_str::<EventBridgeEvent>(&event.body).ok()?;
-                Some(self.infer_trigger(&event))
-            }
-            IdentifiedTrigger::SnsRecord(event) => {
-                let event =
-                    serde_json::from_str::<EventBridgeEvent>(event.sns.message.as_ref()?).ok()?;
-                Some(self.infer_trigger(&event))
-            }
+            IdentifiedTrigger::SqsRecord(event) => event
+                .wrapped_event()
+                .map(|wrapped| self.infer_trigger(wrapped.as_trigger())),
+            IdentifiedTrigger::SnsRecord(event) => event
+                .wrapped_event()
+                .map(|wrapped| self.infer_trigger(wrapped)),
             _ => None,
         }
     }
@@ -173,7 +167,7 @@ impl SpanInferrer {
 fn generated_context(mut context: SpanContext) -> SpanContext {
     if let Some(high) = context
         .tags
-        .get("_dd.p.tid")
+        .get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
         .and_then(|value| u64::from_str_radix(value, 16).ok())
     {
         context.trace_id = (u128::from(high) << 64) | u128::from(context.trace_id as u64);
