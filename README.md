@@ -202,16 +202,16 @@ To enable thread-level context sharing on Linux:
      ```rust
      datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
      ```
+   * If you're building a Rust library (`(r)lib`), you'll have to ensure the
+     instructions above are applied to _every downstream executable that uses
+     your library_.
+   * If you're building a shared dynamic library (`(c)dylib`), please note that
+     **while the following instructions should work in most environments,
+     building a dynamic library with thread context support is currently
+     experimental at best**. In particular, a crate with both a binary target
+     and a (c)dylib target won't compile with the instructions below.
 
-   * If you're building a Rust library (`lib`/`rlib`), you'll have to ensure
-     the instructions above are applied to _every downstream executable that
-     uses your library_.
-   * If you're building a shared dynamic library (`cdylib`/`dylib`), please
-     note that **while the following instructions should work in most
-     environments, building a dynamic library with thread context support is
-     currently experimental at best**.
-
-     add `datadog-opentelemetry` to your `[build-dependencies]` as well (do not
+     Add `datadog-opentelemetry` to your `[build-dependencies]` as well (do not
      enable the `otel-thread-ctx` feature for the build dependency):
 
      ```toml
