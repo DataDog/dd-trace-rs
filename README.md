@@ -202,6 +202,7 @@ To enable thread-level context sharing on Linux:
      ```rust
      datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
      ```
+
    * If you're building a Rust library (`(r)lib`), you'll have to ensure the
      instructions above are applied to _every downstream executable that uses
      your library_.
