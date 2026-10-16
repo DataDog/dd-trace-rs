@@ -26,33 +26,6 @@ use crate::TraceRegistry;
 pub(crate) const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags =
     opentelemetry::TraceFlags::new(0x02);
 
-#[derive(Clone)]
-struct FallbackSpanContext(Option<SpanContext>);
-
-/// Extracts headers with an optional context supplied by an instrumentation.
-///
-/// The Datadog propagator uses the fallback only when no configured trace extractor
-/// succeeds. This preserves metadata such as an undecided sampling priority without
-/// encoding it as W3C headers. Continue, restart, ignore, and disabled extraction
-/// settings still apply. Restart links for the fallback use the Datadog style.
-/// Other propagators extract headers normally and do not use the fallback.
-#[cfg(any(test, feature = "test-utils", feature = "_unstable_propagation"))]
-pub fn extract_with_fallback(
-    propagator: &dyn TextMapPropagator,
-    cx: &opentelemetry::Context,
-    carrier: &dyn opentelemetry::propagation::Extractor,
-    fallback: Option<&SpanContext>,
-) -> opentelemetry::Context {
-    let Some(fallback) = fallback else {
-        return propagator.extract_with_context(cx, carrier);
-    };
-    let cx = cx.with_value(FallbackSpanContext(Some(fallback.clone())));
-    propagator
-        .extract_with_context(&cx, carrier)
-        // A fallback belongs to this extraction, not to subsequent extractions.
-        .with_value(FallbackSpanContext(None))
-}
-
 #[derive(Clone, Default, Debug)]
 pub struct DatadogExtractData {
     pub links: Vec<SpanLink>,
@@ -94,6 +67,7 @@ impl DatadogExtractData {
     }
 }
 
+/// OpenTelemetry text map propagator for the Datadog-configured propagation styles and baggage.
 #[derive(Debug)]
 pub struct DatadogPropagator {
     inner: DatadogCompositePropagator<Config>,
@@ -119,6 +93,27 @@ impl DatadogPropagator {
             baggage_extract,
             baggage_inject,
         }
+    }
+
+    /// Extracts context like [`TextMapPropagator::extract_with_context`], using `fallback` when
+    /// no configured trace extractor finds a context in `extractor`.
+    ///
+    /// Instrumentations use this for context derived from the event itself, such as AWS Step
+    /// Functions or an SQS `AWSTraceHeader`. Passing it directly preserves metadata such as an
+    /// undecided sampling priority without encoding it as W3C headers. Continue, restart,
+    /// ignore, and disabled extraction settings still apply. Restart links for the fallback use
+    /// the Datadog style.
+    #[cfg(any(test, feature = "test-utils", feature = "_unstable_propagation"))]
+    pub fn extract_with_fallback(
+        &self,
+        cx: &opentelemetry::Context,
+        extractor: &dyn opentelemetry::propagation::Extractor,
+        fallback: Option<&SpanContext>,
+    ) -> opentelemetry::Context {
+        if !self.cfg.enabled() {
+            return cx.clone();
+        }
+        catch_panic!(self.extract_context(cx, extractor, fallback), cx.clone())
     }
 
     /// Injects otel context delegating into [`DatadogCompositePropagator`]
@@ -209,14 +204,12 @@ impl DatadogPropagator {
     ///
     /// [`DatadogCompositePropagator`]: dd_trace_propagation::DatadogCompositePropagator
     /// [`DatadogSpanProcessor`]: crate::span_processor::DatadogSpanProcessor
-    fn extract_with_context(
+    fn extract_context(
         &self,
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
+        fallback: Option<&SpanContext>,
     ) -> opentelemetry::Context {
-        let fallback = cx
-            .get::<FallbackSpanContext>()
-            .and_then(|value| value.0.as_ref());
         let extracted = self.inner.extract_with_fallback(&extractor, fallback);
         let cx = match extracted {
             ExtractResult::Continue(dd_span_context) => {
@@ -259,6 +252,20 @@ impl DatadogPropagator {
     }
 }
 
+impl Clone for DatadogPropagator {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            registry: self.registry.clone(),
+            cfg: Arc::clone(&self.cfg),
+            // `BaggagePropagator` is stateless but does not implement `Clone`.
+            baggage_propagator: BaggagePropagator::new(),
+            baggage_extract: self.baggage_extract,
+            baggage_inject: self.baggage_inject,
+        }
+    }
+}
+
 impl TextMapPropagator for DatadogPropagator {
     fn inject_context(
         &self,
@@ -280,10 +287,7 @@ impl TextMapPropagator for DatadogPropagator {
             return cx.clone();
         }
 
-        catch_panic!(
-            DatadogPropagator::extract_with_context(self, cx, extractor),
-            cx.clone()
-        )
+        catch_panic!(self.extract_context(cx, extractor, None), cx.clone())
     }
 
     fn fields(&self) -> opentelemetry::propagation::text_map_propagator::FieldIter<'_> {
@@ -349,10 +353,7 @@ pub mod tests {
         TraceRegistry,
     };
 
-    use super::{
-        extract_with_fallback, DatadogPropagator, FallbackSpanContext, SpanContext,
-        TRACE_FLAG_DEFERRED,
-    };
+    use super::{DatadogPropagator, SpanContext, TRACE_FLAG_DEFERRED};
 
     const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
     const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
@@ -389,8 +390,7 @@ pub mod tests {
     #[test]
     fn fallback_preserves_undecided_sampling_and_metadata() {
         let propagator = get_propagator(Some(vec![TracePropagationStyle::TraceContext]));
-        let cx = extract_with_fallback(
-            &propagator,
+        let cx = propagator.extract_with_fallback(
             &Context::new(),
             &HashMap::<String, String>::new(),
             Some(&fallback_context()),
@@ -403,7 +403,6 @@ pub mod tests {
         assert_eq!(data.sampling.priority, None);
         assert_eq!(data.origin.as_deref(), Some("states"));
         assert_eq!(data.internal_tags["_dd.p.test"], "value");
-        assert!(cx.get::<FallbackSpanContext>().unwrap().0.is_none());
     }
 
     #[test]
@@ -424,8 +423,7 @@ pub mod tests {
             ("baggage".into(), "user=alice".into()),
         ]);
         for (trace_id, span_id) in [(123, 456), (42, 43)] {
-            let cx = extract_with_fallback(
-                &propagator,
+            let cx = propagator.extract_with_fallback(
                 &Context::new(),
                 &carrier,
                 Some(&fallback_context()),
@@ -466,8 +464,7 @@ pub mod tests {
             );
             let propagator =
                 DatadogPropagator::new(Arc::clone(&config), TraceRegistry::new(config));
-            let cx = extract_with_fallback(
-                &propagator,
+            let cx = propagator.extract_with_fallback(
                 &Context::new(),
                 &HashMap::<String, String>::new(),
                 Some(&fallback_context()),
