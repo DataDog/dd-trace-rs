@@ -173,7 +173,7 @@ impl<S, E, R> TracedService<S, E, R> {
     where
         S: Service<LambdaEvent<E>, Response = R>,
     {
-        let provider = {
+        let config = {
             let mut config = config;
             // Stats are computed server-side by the extension; client-side computation is
             // redundant.
@@ -182,15 +182,15 @@ impl<S, E, R> TracedService<S, E, R> {
             // to flush when the root span ends, which helps reduce span loss when the Lambda
             // process freezes after the handler returns.
             config.set_trace_writer_synchronous_write(true);
-            datadog_opentelemetry::tracing()
-                .with_config(config.build())
-                .init()
+            config.build()
         };
+        let inferrer = span_inferrer::build_inferrer(&config);
+        let provider = datadog_opentelemetry::tracing().with_config(config).init();
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
             tracer,
-            inferrer: span_inferrer::build_inferrer(),
+            inferrer,
             cold_start: true,
             _phantom: PhantomData,
         }
@@ -273,7 +273,7 @@ mod tests {
         TracedService {
             inner: ReadyService,
             tracer,
-            inferrer: span_inferrer::build_inferrer(),
+            inferrer: span_inferrer::default_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }

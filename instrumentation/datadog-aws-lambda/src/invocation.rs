@@ -361,7 +361,7 @@ mod tests {
     fn root_span_includes_all_trigger_tags() {
         let (provider, exporter) = test_provider();
         let payload = read_json_file("api_gateway_http_event.json");
-        let inferrer = crate::span_inferrer::build_inferrer();
+        let inferrer = crate::span_inferrer::default_inferrer();
         let expected = inferrer.infer_span(&payload).unwrap().trigger_tags;
         assert!(expected.contains_key("http.route"));
 
@@ -438,7 +438,7 @@ mod tests {
         let (provider, _) = test_provider();
         let payload = sqs_async_payload();
 
-        let inferrer = crate::span_inferrer::build_inferrer();
+        let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
         assert!(invocation
@@ -454,7 +454,7 @@ mod tests {
         let (provider, exporter) = test_provider();
         let payload = sqs_async_payload();
 
-        let inferrer = crate::span_inferrer::build_inferrer();
+        let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
         let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
         let _: Result<(), String> = invocation.finish(Ok(()));

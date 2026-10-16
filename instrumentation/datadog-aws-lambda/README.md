@@ -39,7 +39,8 @@ remains eligible for local sampling, while continue, restart, and ignore setting
 Extension-only DSM checkpoints, span pointers, and AppSec processing are outside this module.
 
 Inferred span service names honor `DD_SERVICE_MAPPING` and
-`DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`, as in Bottlecap.
+`DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED` (or the matching `ConfigBuilder` setters), as in
+Bottlecap.
 
 Async inferred spans end at invocation start; synchronous spans end at invocation completion.
 A wrapped outer span ends when the inner event starts. Without a usable event timestamp, an

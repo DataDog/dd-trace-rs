@@ -13,57 +13,29 @@
 use crate::attribute_keys as attr;
 use crate::inference::{InferConfig, InferenceResult, SpanInferrer};
 
+use datadog_opentelemetry::configuration::Config;
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
+/// Builds the inferrer from the tracer configuration and the Lambda region.
 #[allow(clippy::disallowed_methods)]
-pub(crate) fn build_inferrer() -> SpanInferrer {
-    SpanInferrer::new(infer_config(|name| std::env::var(name).ok()))
+pub(crate) fn build_inferrer(config: &Config) -> SpanInferrer {
+    SpanInferrer::new(InferConfig {
+        region: std::env::var("AWS_REGION").unwrap_or_default(),
+        service_mapping: config
+            .service_mapping()
+            .map(|(from, to)| (from.to_string(), to.to_string()))
+            .collect(),
+        aws_service_representation_enabled: config.trace_aws_service_representation_enabled(),
+    })
 }
 
-/// Reads the inference settings Bottlecap takes from the Lambda environment.
-fn infer_config(env: impl Fn(&str) -> Option<String>) -> InferConfig {
-    InferConfig {
-        region: env("AWS_REGION").unwrap_or_default(),
-        service_mapping: env("DD_SERVICE_MAPPING")
-            .as_deref()
-            .map(parse_service_mapping)
-            .unwrap_or_default(),
-        aws_service_representation_enabled: env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED")
-            .as_deref()
-            .and_then(parse_bool)
-            .unwrap_or(true),
-    }
-}
-
-/// Parses `DD_SERVICE_MAPPING` entries such as `lambda_sqs:orders,MyQueue:my-queue`.
-fn parse_service_mapping(value: &str) -> HashMap<String, String> {
-    value
-        .split(',')
-        .filter(|pair| !pair.trim().is_empty())
-        .filter_map(|pair| {
-            let mut parts = pair.split(':');
-            let (Some(service), Some(mapped)) = (parts.next(), parts.next()) else {
-                tracing::warn!(
-                    pair,
-                    "ignoring DD_SERVICE_MAPPING entry, expected service:mapped_service"
-                );
-                return None;
-            };
-            Some((service.trim().to_string(), mapped.trim().to_string()))
-        })
-        .collect()
-}
-
-fn parse_bool(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "1" => Some(true),
-        "false" | "0" => Some(false),
-        _ => None,
-    }
+#[cfg(test)]
+pub(crate) fn default_inferrer() -> SpanInferrer {
+    build_inferrer(&Config::builder().build())
 }
 
 /// Metadata extracted from the trigger event, used to parent the root span.
@@ -273,7 +245,7 @@ mod tests {
     use super::*;
     use crate::inference::triggers::test_utils::read_json_file;
     use crate::inference::{InferenceResult, SpanData};
-    use datadog_opentelemetry::configuration::{Config, TracePropagationStyle};
+    use datadog_opentelemetry::configuration::TracePropagationStyle;
     use opentelemetry::propagation::TextMapPropagator;
     use opentelemetry::trace::{TraceContextExt, TracerProvider as _};
     use opentelemetry::Value as OtelValue;
@@ -459,7 +431,7 @@ mod tests {
             }]
         });
 
-        let inferrer = build_inferrer();
+        let inferrer = default_inferrer();
         let extraction = extract_trigger(&inferrer, &event.to_string());
 
         assert!(extraction.inference_result.is_async);
@@ -617,7 +589,7 @@ mod tests {
             serde_json::from_str(&read_json_file("api_gateway_http_event.json")).unwrap();
         event["headers"] =
             json!({"traceparent": "00-1234567890abcdef1234567890abcdef-1234567890abcdef-01"});
-        let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+        let result = default_inferrer().infer_span(&event.to_string()).unwrap();
         let upstream = extract_upstream_context(&propagator, &result, &Context::new());
         assert_eq!(
             upstream.span().span_context().trace_id().to_string(),
@@ -676,7 +648,7 @@ mod tests {
             serde_json::from_str(&read_json_file("step_function_event.json")).unwrap();
         event["Execution"]["Id"] =
             json!("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:regression-3");
-        let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+        let result = default_inferrer().infer_span(&event.to_string()).unwrap();
         assert_eq!(
             result.generated_context.as_ref().unwrap().tags["_dd.p.tid"],
             "0a2cd4ab2e2818c4"
@@ -748,7 +720,7 @@ mod tests {
                     serde_json::from_str(&read_json_file("sqs_event.json")).unwrap();
                 event["Records"][0]["messageAttributes"] = json!({});
                 event["Records"][0]["attributes"]["AWSTraceHeader"] = json!(header);
-                let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+                let result = default_inferrer().infer_span(&event.to_string()).unwrap();
                 let upstream = extract_upstream_context(&propagator, &result, &Context::new());
                 assert_eq!(
                     upstream.span().span_context().trace_flags().to_u8(),
@@ -782,7 +754,7 @@ mod tests {
             let object = event["Records"][0]["s3"]["object"].as_object_mut().unwrap();
             object.remove("size");
             object.remove("eTag");
-            let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+            let result = default_inferrer().infer_span(&event.to_string()).unwrap();
             assert!(result.should_create_inferred_span());
             assert_eq!(result.span_data.name, "aws.s3");
             assert_eq!(result.span_data.meta["event_name"], name);
@@ -802,7 +774,7 @@ mod tests {
             serde_json::from_str(&read_json_file("sqs_event.json")).unwrap();
         event["Records"][0]["attributes"]["AWSTraceHeader"] =
             json!("Root=1-65e9fe55-00000000000000000000002a;Parent=000000000000002b;Sampled=0");
-        let inferrer = build_inferrer();
+        let inferrer = default_inferrer();
         let result = inferrer.infer_span(&event.to_string()).unwrap();
         let upstream = extract_upstream_context(&propagator, &result, &Context::new());
         assert_eq!(
@@ -830,7 +802,7 @@ mod tests {
         let mut event: serde_json::Value =
             serde_json::from_str(&read_json_file("application_load_balancer.json")).unwrap();
         event["headers"] = json!({"X-Datadog-Trace-Id": "42", "X-Datadog-Parent-Id": "43"});
-        let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+        let result = default_inferrer().infer_span(&event.to_string()).unwrap();
         assert!(!result.should_create_inferred_span());
         assert!(!result.is_async);
         let upstream = extract_upstream_context(&propagator, &result, &Context::new());
@@ -852,7 +824,7 @@ mod tests {
             r#"{"Records": []}"#,
             r#"{"Records": [{"eventSource": "aws:sqs"}]}"#,
         ] {
-            let result = build_inferrer().infer_span(payload).unwrap_or_default();
+            let result = default_inferrer().infer_span(payload).unwrap_or_default();
             assert!(!result.should_create_inferred_span(), "{payload}");
             let upstream = extract_upstream_context(&propagator, &result, &ambient);
             assert_eq!(
@@ -900,47 +872,24 @@ mod tests {
     }
 
     #[test]
-    fn infer_config_reads_service_mapping_and_representation_settings() {
-        let env = HashMap::from([
-            ("AWS_REGION", "us-east-1"),
-            (
-                "DD_SERVICE_MAPPING",
-                "lambda_sqs:orders-queue, MyTopic : topic-svc,invalid,",
-            ),
-            ("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "FALSE"),
-        ]);
-        let config = infer_config(|name| env.get(name).map(ToString::to_string));
-        assert_eq!(config.region, "us-east-1");
+    fn inferrer_uses_service_mapping_and_representation_config() {
+        let sqs_service = |inferrer: &SpanInferrer| {
+            inferrer
+                .infer_span(&read_json_file("sqs_event.json"))
+                .unwrap()
+                .span_data
+                .service
+        };
+        assert_eq!(sqs_service(&default_inferrer()), "MyQueue");
+
+        let mut config = Config::builder();
+        config.set_trace_aws_service_representation_enabled(false);
+        assert_eq!(sqs_service(&build_inferrer(&config.build())), "sqs");
+
+        config.set_service_mapping(vec![("lambda_sqs".into(), "orders-queue".into())]);
         assert_eq!(
-            config.service_mapping,
-            HashMap::from([
-                ("lambda_sqs".to_string(), "orders-queue".to_string()),
-                ("MyTopic".to_string(), "topic-svc".to_string()),
-            ])
+            sqs_service(&build_inferrer(&config.build())),
+            "orders-queue"
         );
-        assert!(!config.aws_service_representation_enabled);
-
-        let inferrer = SpanInferrer::new(config);
-        let sqs = inferrer
-            .infer_span(&read_json_file("sqs_event.json"))
-            .unwrap();
-        assert_eq!(sqs.span_data.service, "orders-queue");
-        let s3 = inferrer
-            .infer_span(&read_json_file("s3_event.json"))
-            .unwrap();
-        assert_eq!(s3.span_data.service, "s3");
-    }
-
-    #[test]
-    fn infer_config_defaults_without_environment() {
-        let config = infer_config(|_| None);
-        assert!(config.region.is_empty());
-        assert!(config.service_mapping.is_empty());
-        assert!(config.aws_service_representation_enabled);
-
-        let config = infer_config(|name| {
-            (name == "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED").then(|| "maybe".to_string())
-        });
-        assert!(config.aws_service_representation_enabled);
     }
 }
