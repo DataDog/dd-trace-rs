@@ -128,6 +128,10 @@ impl InnerTraceRegistry {
     /// Set the root span ID for a given trace ID.
     ///
     /// This should be paired, after a call to `register_local_root_trace_propagation_data`
+    ///
+    /// If the trace already has another local root, e.g. a service that receives a request
+    /// it sent itself, the new span is a nested local root of the same trace: it is counted as
+    /// an open span of the trace, so the trace is only flushed once both roots are finished.
     fn register_local_root_span(&mut self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
         let trace = self.registry.entry(trace_id).or_insert_with(|| Trace {
             local_root_span_id: [0; 8], // This will be set when the first span is registered
@@ -137,9 +141,11 @@ impl InnerTraceRegistry {
         });
         if trace.local_root_span_id == [0; 8] {
             trace.local_root_span_id = root_span_id;
-        } else {
+        } else if trace.local_root_span_id != root_span_id {
+            trace.open_span_count += 1;
+            self.metrics.spans_created += 1;
             dd_debug!(
-                "TraceRegistry.register_local_root_span: trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Ignoring the new root_span_id={:?}",
+                "TraceRegistry.register_local_root_span: trace with trace_id={:?} already has a root span registered with root_span_id={:?}. Registering root_span_id={:?} as a nested local root",
                 trace_id,
                 trace.local_root_span_id,
                 root_span_id
@@ -1086,6 +1092,47 @@ mod tests {
         let stats = registry.get_metrics();
         assert_eq!(stats.spans_created, 1);
         assert_eq!(stats.spans_finished, 1);
+        assert_eq!(stats.trace_segments_created, 1);
+        assert_eq!(stats.trace_segments_closed, 1);
+    }
+
+    #[test]
+    fn test_nested_local_root_keeps_trace_open() {
+        let registry = TraceRegistry::new(Arc::new(Config::builder().build()));
+        let trace_id = [4u8; 16];
+        let root_span_id = [1u8; 8];
+        let client_span_id = [2u8; 8];
+        let nested_root_span_id = [3u8; 8];
+
+        // A server span that calls its own service: the incoming request has a remote parent
+        // from the same, still open, trace.
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_span(trace_id, root_span_id);
+        // Registering the same local root again doesn't count it twice
+        registry.register_local_root_span(trace_id, root_span_id);
+        registry.register_span(trace_id, client_span_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_trace_propagation_data(trace_id, EMPTY_PROPAGATION_DATA);
+        registry.register_local_root_span(trace_id, nested_root_span_id);
+
+        for span_id in [nested_root_span_id, client_span_id] {
+            assert!(
+                registry
+                    .finish_span(trace_id, create_test_span_data(trace_id, span_id))
+                    .is_none(),
+                "Should not flush while the first local root is open"
+            );
+        }
+        let trace = registry
+            .finish_span(trace_id, create_test_span_data(trace_id, root_span_id))
+            .expect("Should flush complete trace");
+
+        assert_eq!(trace.finished_spans.len(), 3);
+        assert_eq!(
+            trace.finished_spans[0].span_context.span_id().to_bytes(),
+            root_span_id
+        );
+        let stats = registry.get_metrics();
+        assert_eq!(stats.spans_created, 3);
         assert_eq!(stats.trace_segments_created, 1);
         assert_eq!(stats.trace_segments_closed, 1);
     }
