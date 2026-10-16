@@ -365,6 +365,21 @@ macro_rules! dd_log {
     }};
 }
 
+/// Like `dd_log!`, but without the `DD_LOG_LEVEL` check
+#[macro_export]
+#[doc(hidden)]
+macro_rules! dd_log_always {
+    ($lvl:expr, $first:expr, $($rest:tt)*) => {{
+      let loc = std::panic::Location::caller();
+      $crate::core::log::print_log($lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first));
+    }};
+
+    ($lvl:expr, $first:expr) => {{
+      let loc = std::panic::Location::caller();
+      $crate::core::log::print_log($lvl, format_args!($first), loc.file(), loc.line(), Some($first));
+    }};
+}
+
 /// Serializes tests that touch process-global logging state — `MAX_LOG_LEVEL`, the `tracing`
 /// dispatcher, the `log` logger — since the default `cargo test` harness runs tests as threads
 /// within one process. Not reentrant: hold it at one level only.
