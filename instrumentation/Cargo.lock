@@ -586,10 +586,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-link",
 ]
 
@@ -819,14 +817,17 @@ dependencies = [
 name = "datadog-aws-lambda"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "chrono",
  "datadog-opentelemetry",
  "lambda_runtime",
- "libdd-trace-inferrer",
  "opentelemetry",
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
+ "regex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tracing",
 ]
@@ -869,8 +870,6 @@ dependencies = [
 [[package]]
 name = "datadog-opentelemetry"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2cc0474d0b32827fd8cff077e618c8ebd2d41f42515fc9a0505739d807a99c"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2066,21 +2065,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebcf69bb3096f9125c867f2086633e6bbc37b202fb4336d99624a972c763986e"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "libdd-trace-inferrer"
-version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=ygree%2Flibdd-trace-inferrer#1b2d05493619f0258b79ee82821330236870cb9d"
-dependencies = [
- "base64",
- "chrono",
- "hex",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tracing",
 ]
 
 [[package]]

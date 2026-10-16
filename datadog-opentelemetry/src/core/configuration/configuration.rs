@@ -1080,6 +1080,10 @@ pub struct Config {
     service: ConfigItemWithOverride<ServiceName>,
     env: ConfigItem<Option<String>>,
     version: ConfigItem<Option<String>>,
+    /// Service name overrides, keyed by integration or resource name
+    service_mapping: ConfigItem<Vec<(String, String)>>,
+    /// Whether AWS spans are named after their AWS resource rather than the AWS service
+    trace_aws_service_representation_enabled: ConfigItem<bool>,
 
     // # Agent
     /// A list of default tags to be added to every span
@@ -1309,6 +1313,17 @@ impl Config {
             ),
             env: cisu.update_string(default.env, Some),
             version: cisu.update_string(default.version, Some),
+            service_mapping: cisu.update_parsed_with_transform(
+                default.service_mapping,
+                |DdKeyValueTags(mappings)| {
+                    mappings
+                        .into_iter()
+                        .filter(|(from, to)| !from.is_empty() && !to.is_empty())
+                        .collect::<Vec<_>>()
+                },
+            ),
+            trace_aws_service_representation_enabled: cisu
+                .update_parsed(default.trace_aws_service_representation_enabled),
             // TODO(paullgdc): tags should be merged, not replaced
             global_tags: cisu
                 .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
@@ -1441,6 +1456,8 @@ impl Config {
             &self.service,
             &self.env,
             &self.version,
+            &self.service_mapping,
+            &self.trace_aws_service_representation_enabled,
             &self.global_tags,
             &self.agent_host,
             &self.trace_agent_port,
@@ -1528,6 +1545,19 @@ impl Config {
     /// Returns the configured application version.
     pub fn version(&self) -> Option<&str> {
         self.version.value().as_deref()
+    }
+
+    /// Returns an iterator over the configured service name mappings as `(from, to)` pairs.
+    pub fn service_mapping(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.service_mapping
+            .value()
+            .iter()
+            .map(|(from, to)| (from.as_str(), to.as_str()))
+    }
+
+    /// Returns whether AWS spans are named after their AWS resource rather than the AWS service.
+    pub fn trace_aws_service_representation_enabled(&self) -> bool {
+        *self.trace_aws_service_representation_enabled.value()
     }
 
     /// Returns an iterator over the configured global tags as key-value pairs.
@@ -2013,6 +2043,11 @@ impl std::fmt::Debug for Config {
             .field("service", &self.service)
             .field("env", &self.env)
             .field("version", &self.version)
+            .field("service_mapping", &self.service_mapping)
+            .field(
+                "trace_aws_service_representation_enabled",
+                &self.trace_aws_service_representation_enabled,
+            )
             .field("global_tags", &self.global_tags)
             .field("trace_agent_url", &self.trace_agent_url)
             .field("dogstatsd_agent_url", &self.dogstatsd_agent_url)
@@ -2064,6 +2099,11 @@ fn default_config() -> Config {
             ServiceName::Default,
         ),
         version: ConfigItem::new(SupportedConfigurations::DD_VERSION, None),
+        service_mapping: ConfigItem::new(SupportedConfigurations::DD_SERVICE_MAPPING, Vec::new()),
+        trace_aws_service_representation_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED,
+            true,
+        ),
         global_tags: ConfigItem::new(SupportedConfigurations::DD_TAGS, Vec::new()),
         otel_resource_attributes: ConfigItem::new(
             SupportedConfigurations::OTEL_RESOURCE_ATTRIBUTES,
@@ -2343,6 +2383,30 @@ impl ConfigBuilder {
     /// Env variable: `DD_VERSION`
     pub fn set_version(&mut self, version: String) -> &mut Self {
         self.config.version.set_code(Some(version));
+        self
+    }
+
+    /// Service name overrides in `(from, to)` format, where `from` is an integration or resource
+    /// name. Example: `[(lambda_sqs, orders-queue)]`. Used for inferred AWS Lambda trigger spans.
+    ///
+    /// **Default**: `(none)`
+    ///
+    /// Env variable: `DD_SERVICE_MAPPING`
+    pub fn set_service_mapping(&mut self, mapping: Vec<(String, String)>) -> &mut Self {
+        self.config.service_mapping.set_code(mapping);
+        self
+    }
+
+    /// Name AWS spans after their AWS resource, such as the queue name, rather than the AWS
+    /// service. Used for inferred AWS Lambda trigger spans.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`
+    pub fn set_trace_aws_service_representation_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config
+            .trace_aws_service_representation_enabled
+            .set_code(enabled);
         self
     }
 
@@ -3935,6 +3999,59 @@ mod tests {
 
         assert_eq!(tags.len(), 2);
         assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
+    }
+
+    #[test]
+    fn test_service_mapping() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [(
+                "DD_SERVICE_MAPPING",
+                "lambda_sqs:orders-queue, MyTopic : topic-svc,empty:,:empty,invalid",
+            )],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.service_mapping().collect::<Vec<_>>(),
+            vec![("lambda_sqs", "orders-queue"), ("MyTopic", "topic-svc")]
+        );
+
+        assert_eq!(Config::builder().build().service_mapping().count(), 0);
+
+        let config = Config::builder_with_sources(&sources)
+            .set_service_mapping(vec![("lambda_sns".into(), "topics".into())])
+            .build();
+        assert_eq!(
+            config.service_mapping().collect::<Vec<_>>(),
+            vec![("lambda_sns", "topics")]
+        );
+    }
+
+    #[test]
+    fn test_trace_aws_service_representation_enabled() {
+        assert!(Config::builder()
+            .build()
+            .trace_aws_service_representation_enabled());
+
+        for (value, expected) in [("false", false), ("true", true), ("a", true)] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", value)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(
+                config.trace_aws_service_representation_enabled(),
+                expected,
+                "{value}"
+            );
+        }
+
+        let config = Config::builder()
+            .set_trace_aws_service_representation_enabled(false)
+            .build();
+        assert!(!config.trace_aws_service_representation_enabled());
     }
 
     #[test]

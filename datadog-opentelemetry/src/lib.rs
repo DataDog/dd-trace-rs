@@ -369,6 +369,21 @@ impl DatadogTracingBuilder {
     /// context](https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4719-process-ctx.md).
     /// Publication errors are logged but otherwise ignored.
     pub fn init(self) -> SdkTracerProvider {
+        self.init_global().0
+    }
+
+    /// Initializes and installs tracing like [Self::init], and also returns the installed
+    /// propagator.
+    ///
+    /// Instrumentations use the returned propagator for Datadog-specific extraction, which
+    /// keeps working if another global propagator is installed later.
+    #[cfg(any(feature = "test-utils", feature = "_unstable_propagation"))]
+    #[doc(hidden)]
+    pub fn init_with_propagator(self) -> (SdkTracerProvider, DatadogPropagator) {
+        self.init_global()
+    }
+
+    fn init_global(self) -> (SdkTracerProvider, DatadogPropagator) {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
 
         // For now, otel process context spec is linux-specific.
@@ -381,9 +396,9 @@ impl DatadogTracingBuilder {
 
         let (tracer_provider, propagator) =
             make_tracer(Arc::new(config), self.tracer_provider, self.resource);
-        opentelemetry::global::set_text_map_propagator(propagator);
+        opentelemetry::global::set_text_map_propagator(propagator.clone());
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-        tracer_provider
+        (tracer_provider, propagator)
     }
 
     /// Initialize the Tracer Provider, and the Text Map Propagator without doing a global

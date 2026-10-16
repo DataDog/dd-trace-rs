@@ -61,7 +61,6 @@ ctutils,https://github.com/RustCrypto/utils,Apache-2.0 OR MIT,RustCrypto Develop
 darling,https://github.com/TedDriggs/darling,MIT,Ted Driggs <ted.driggs@outlook.com>
 darling_core,https://github.com/TedDriggs/darling,MIT,Ted Driggs <ted.driggs@outlook.com>
 darling_macro,https://github.com/TedDriggs/darling,MIT,Ted Driggs <ted.driggs@outlook.com>
-datadog-opentelemetry,https://github.com/DataDog/dd-trace-rs/tree/main/datadog-opentelemetry,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 deadpool,https://github.com/bikeshedder/deadpool,MIT OR Apache-2.0,Michael P. Jung <michael.jung@terreon.de>
 deadpool-runtime,https://github.com/bikeshedder/deadpool,MIT OR Apache-2.0,Michael P. Jung <michael.jung@terreon.de>
 der,https://github.com/RustCrypto/formats/tree/master/der,Apache-2.0 OR MIT,RustCrypto Developers
@@ -147,7 +146,6 @@ libdd-sampling,https://github.com/DataDog/libdatadog/tree/main/libdd-sampling,Ap
 libdd-shared-runtime,https://github.com/DataDog/libdatadog/tree/main/libdd-shared-runtime,Apache-2.0,The libdd-shared-runtime Authors
 libdd-telemetry,https://github.com/DataDog/libdatadog/tree/main/libdd-telemetry,Apache-2.0,The libdd-telemetry Authors
 libdd-tinybytes,https://github.com/DataDog/libdatadog/tree/main/libdd-tinybytes,Apache-2.0,The libdd-tinybytes Authors
-libdd-trace-inferrer,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-inferrer,Apache-2.0,The libdd-trace-inferrer Authors
 libdd-trace-normalization,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-normalization,Apache-2.0,David Lee <david.lee@datadoghq.com>
 libdd-trace-obfuscation,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-obfuscation,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 libdd-trace-protobuf,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-protobuf,Apache-2.0,The libdd-trace-protobuf Authors
