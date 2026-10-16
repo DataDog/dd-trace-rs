@@ -211,7 +211,11 @@ case "$NEW_VERSION" in
 esac
 lambda_manifest="instrumentation/datadog-aws-lambda/Cargo.toml"
 echo -e "${BLUE}--- Bumping datadog-opentelemetry pin in $lambda_manifest to $version_req ---${NC}"
-sed -i -E "s|(datadog-opentelemetry = \{ version = \")[^\"]+|\1${version_req}|g" "$lambda_manifest"
+# BSD sed (macOS) and GNU sed disagree on `-i` syntax, so write through a
+# temp file and move it back (same pattern as the changelog rewrite below).
+tmp_manifest="$(mktemp)"
+sed -E "s|(datadog-opentelemetry = \{ version = \")[^\"]+|\1${version_req}|g" "$lambda_manifest" > "$tmp_manifest"
+mv "$tmp_manifest" "$lambda_manifest"
 cargo update --manifest-path instrumentation/Cargo.toml --package datadog-opentelemetry
 
 # 3. Prepend a changelog section listing the commits since the last release.
@@ -244,7 +248,9 @@ tmp="$(mktemp)"
     printf '## %s (%s)\n\n' "$NEW_VERSION" "$release_date"
     printf '%s\n\n' "$commits"
     # everything after the original "# Changelog" title line (drop its following blank line)
-    tail -n +2 "$CHANGELOG" | sed '1{/^$/d}'
+    # Drop the leading blank line, if any. Split into separate -e scripts so BSD sed (macOS) parses
+    # the `1{...}` block; a single `'1{/^$/d}'` string is a GNU-only extension that BSD sed rejects.
+    tail -n +2 "$CHANGELOG" | sed -e '1{' -e '/^$/d' -e '}'
 } > "$tmp"
 mv "$tmp" "$CHANGELOG"
 
