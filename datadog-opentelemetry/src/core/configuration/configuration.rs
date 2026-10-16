@@ -5,7 +5,7 @@ use libdd_telemetry::data::Configuration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt::Display;
-use std::ops::Deref;
+use std::ops::{Deref, RangeInclusive};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -877,6 +877,70 @@ impl Display for TracePropagationBehaviorExtract {
     }
 }
 
+/// DD_TRACE_HTTP_SERVER_ERROR_STATUSES / DD_TRACE_HTTP_CLIENT_ERROR_STATUSES
+///
+/// A comma-separated list of HTTP status codes and inclusive ranges, e.g. `500-599,404`.
+/// Range bounds may be given in either order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HttpErrorStatuses(Vec<RangeInclusive<u16>>);
+
+impl HttpErrorStatuses {
+    fn range(range: RangeInclusive<u16>) -> Self {
+        Self(vec![range])
+    }
+
+    /// Returns whether `status` is in one of the ranges.
+    pub(crate) fn contains(&self, status: u16) -> bool {
+        self.0.iter().any(|range| range.contains(&status))
+    }
+}
+
+impl ConfigParser for HttpErrorStatuses {
+    type Parsed = Self;
+    type ParseError = String;
+
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
+        let parse_code = |code: &str| {
+            code.trim()
+                .parse::<u16>()
+                .map_err(|_| format!("Invalid HTTP status code: '{code}'"))
+        };
+        let ranges = s
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| match part.split_once('-') {
+                Some((start, end)) => {
+                    let (start, end) = (parse_code(start)?, parse_code(end)?);
+                    // Accept reversed bounds, e.g. `599-500`
+                    Ok(start.min(end)..=start.max(end))
+                }
+                None => parse_code(part).map(|code| code..=code),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if ranges.is_empty() {
+            return Err(format!("No HTTP status codes in '{s}'"));
+        }
+        Ok(Self(ranges))
+    }
+}
+
+impl Display for HttpErrorStatuses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, range) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(",")?;
+            }
+            if range.start() == range.end() {
+                write!(f, "{}", range.start())?;
+            } else {
+                write!(f, "{}-{}", range.start(), range.end())?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Trace context propagation style.
 ///
 /// Defines how trace context is propagated across service boundaries.
@@ -1099,7 +1163,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1242,6 +1306,10 @@ pub struct Config {
 
     /// Trace propagation behavior extract
     trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
+
+    /// HTTP status codes that mark server and client spans as errors
+    trace_http_server_error_statuses: ConfigItem<HttpErrorStatuses>,
+    trace_http_client_error_statuses: ConfigItem<HttpErrorStatuses>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -1418,6 +1486,10 @@ impl Config {
             trace_partial_flush_enabled: cisu.update_bool(default.trace_partial_flush_enabled),
             trace_partial_flush_min_spans: cisu
                 .update_parsed(default.trace_partial_flush_min_spans),
+            trace_http_server_error_statuses: cisu
+                .update_parsed(default.trace_http_server_error_statuses),
+            trace_http_client_error_statuses: cisu
+                .update_parsed(default.trace_http_client_error_statuses),
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
@@ -1571,6 +1643,8 @@ impl Config {
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
             &self.trace_propagation_behavior_extract,
+            &self.trace_http_server_error_statuses,
+            &self.trace_http_client_error_statuses,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
@@ -1952,6 +2026,16 @@ impl Config {
         *self.trace_partial_flush_min_spans.value()
     }
 
+    /// Returns the HTTP status codes that mark server spans as errors.
+    pub(crate) fn trace_http_server_error_statuses(&self) -> &HttpErrorStatuses {
+        self.trace_http_server_error_statuses.value()
+    }
+
+    /// Returns the HTTP status codes that mark client spans as errors.
+    pub(crate) fn trace_http_client_error_statuses(&self) -> &HttpErrorStatuses {
+        self.trace_http_client_error_statuses.value()
+    }
+
     /// Returns the trace propagation behavior when extracting trace context.
     pub fn trace_propagation_behavior_extract(&self) -> TracePropagationBehaviorExtract {
         *self.trace_propagation_behavior_extract.value()
@@ -2213,6 +2297,14 @@ impl std::fmt::Debug for Config {
                 "trace_propagation_behavior_extract",
                 &self.trace_propagation_behavior_extract,
             )
+            .field(
+                "trace_http_server_error_statuses",
+                &self.trace_http_server_error_statuses,
+            )
+            .field(
+                "trace_http_client_error_statuses",
+                &self.trace_http_client_error_statuses,
+            )
             .field("trace_propagation_style", &self.trace_propagation_style)
             .field(
                 "trace_propagation_style_extract",
@@ -2371,6 +2463,14 @@ fn default_config() -> Config {
         trace_propagation_behavior_extract: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
             TracePropagationBehaviorExtract::default(),
+        ),
+        trace_http_server_error_statuses: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_HTTP_SERVER_ERROR_STATUSES,
+            HttpErrorStatuses::range(500..=599),
+        ),
+        trace_http_client_error_statuses: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_HTTP_CLIENT_ERROR_STATUSES,
+            HttpErrorStatuses::range(400..=499),
         ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
@@ -3697,6 +3797,55 @@ mod tests {
         assert_eq!(
             config.trace_propagation_behavior_extract(),
             TracePropagationBehaviorExtract::Restart
+        );
+    }
+
+    #[test]
+    fn test_http_error_statuses_parse() {
+        let statuses = HttpErrorStatuses::parse(" 200-201, 202,404 ").unwrap();
+        assert_eq!(statuses.to_string(), "200-201,202,404");
+        assert!(statuses.contains(201));
+        assert!(statuses.contains(404));
+        assert!(!statuses.contains(203));
+        assert_eq!(
+            HttpErrorStatuses::parse("250-200").unwrap().to_string(),
+            "200-250"
+        );
+
+        for invalid in ["", " , ", "abc", "500-", "-500", "70000"] {
+            assert!(HttpErrorStatuses::parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn test_http_error_statuses_from_source() {
+        let config = Config::builder().build();
+        assert_eq!(
+            config.trace_http_server_error_statuses().to_string(),
+            "500-599"
+        );
+        assert_eq!(
+            config.trace_http_client_error_statuses().to_string(),
+            "400-499"
+        );
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_HTTP_SERVER_ERROR_STATUSES", "200-201,202"),
+                ("DD_TRACE_HTTP_CLIENT_ERROR_STATUSES", "not-a-status"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_http_server_error_statuses().to_string(),
+            "200-201,202"
+        );
+        // An invalid value keeps the default
+        assert_eq!(
+            config.trace_http_client_error_statuses().to_string(),
+            "400-499"
         );
     }
 
