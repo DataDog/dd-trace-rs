@@ -93,7 +93,19 @@ impl SpanInferrer {
         };
         result.wrapped_span = self.infer_wrapped_trigger(&identified).map(Box::new);
         if let Some(wrapped) = &result.wrapped_span {
-            result.span_data.meta.extend(wrapped.trigger_tags.clone());
+            // Bottlecap merges the wrapped trigger's tags before enriching the inner span,
+            // so inner span tags take precedence. The wrapped event source ARN is not merged.
+            wrapped
+                .trigger_tags
+                .iter()
+                .filter(|(key, _)| key.as_str() != FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG)
+                .for_each(|(key, value)| {
+                    result
+                        .span_data
+                        .meta
+                        .entry(key.clone())
+                        .or_insert_with(|| value.clone());
+                });
         }
         Ok(result)
     }
@@ -170,12 +182,22 @@ fn generated_context(mut context: SpanContext) -> SpanContext {
     context
 }
 
-fn get_aws_partition_by_region(region: &str) -> String {
-    match region {
-        r if r.starts_with("us-gov-") => "aws-us-gov".to_string(),
-        r if r.starts_with("cn-") => "aws-cn".to_string(),
-        _ => "aws".to_string(),
-    }
+/// Derives the AWS partition from a region, matching `datadog-aws-core`.
+///
+/// `us-isof-` and `us-isob-` must be checked before the shorter `us-iso-` prefix.
+fn get_aws_partition_by_region(region: &str) -> &'static str {
+    [
+        ("cn-", "aws-cn"),
+        ("us-gov-", "aws-us-gov"),
+        ("us-isof-", "aws-iso-f"),
+        ("us-isob-", "aws-iso-b"),
+        ("us-iso-", "aws-iso"),
+        ("eu-isoe-", "aws-iso-e"),
+        ("eusc-", "aws-eusc"),
+    ]
+    .into_iter()
+    .find_map(|(prefix, partition)| region.starts_with(prefix).then_some(partition))
+    .unwrap_or("aws")
 }
 
 fn base64_to_string(value: &str) -> Result<String, DecodeError> {
@@ -192,4 +214,81 @@ fn extract_propagation_tags(tags: &str) -> HashMap<String, String> {
                 .then(|| (key.to_string(), value.to_string()))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::triggers::test_utils::read_json_file;
+
+    fn infer_fixture(name: &str) -> InferenceResult {
+        SpanInferrer::new(InferConfig {
+            region: "us-east-1".into(),
+            ..InferConfig::default()
+        })
+        .infer_span(&read_json_file(name))
+        .unwrap()
+    }
+
+    #[test]
+    fn partition_matches_aws_partition_prefixes() {
+        for (region, partition) in [
+            ("us-east-1", "aws"),
+            ("cn-north-1", "aws-cn"),
+            ("us-gov-west-1", "aws-us-gov"),
+            ("us-iso-east-1", "aws-iso"),
+            ("us-isob-east-1", "aws-iso-b"),
+            ("eu-isoe-west-1", "aws-iso-e"),
+            ("us-isof-south-1", "aws-iso-f"),
+            ("eusc-de-east-1", "aws-eusc"),
+            ("unknown-region-1", "aws"),
+        ] {
+            assert_eq!(get_aws_partition_by_region(region), partition, "{region}");
+        }
+    }
+
+    #[test]
+    fn iso_region_arns_use_the_iso_partition() {
+        let result = SpanInferrer::new(InferConfig {
+            region: "us-iso-east-1".into(),
+            ..InferConfig::default()
+        })
+        .infer_span(&read_json_file("sqs_event.json"))
+        .unwrap();
+        assert!(
+            result.trigger_tags[FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG]
+                .starts_with("arn:aws-iso:sqs:us-iso-east-1:"),
+            "{}",
+            result.trigger_tags[FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG]
+        );
+    }
+
+    #[test]
+    fn wrapped_trigger_tags_exclude_the_wrapped_event_source_arn() {
+        for (fixture, wrapped_source) in [
+            ("sns_sqs_event.json", "sns"),
+            ("eventbridge_sqs_event.json", "eventbridge"),
+            ("eventbridge_sns_event.json", "eventbridge"),
+        ] {
+            let result = infer_fixture(fixture);
+            let meta = &result.span_data.meta;
+            assert_eq!(
+                meta.get(triggers::FUNCTION_TRIGGER_EVENT_SOURCE_TAG)
+                    .map(String::as_str),
+                Some(wrapped_source),
+                "{fixture}"
+            );
+            assert!(
+                !meta.contains_key(FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG),
+                "{fixture}"
+            );
+            // The invocation span still reports the outermost trigger's own ARN.
+            assert!(
+                result
+                    .trigger_tags
+                    .contains_key(FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG),
+                "{fixture}"
+            );
+        }
+    }
 }

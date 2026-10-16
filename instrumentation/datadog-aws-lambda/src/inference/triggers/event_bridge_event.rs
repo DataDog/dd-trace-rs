@@ -12,7 +12,7 @@ use crate::inference::{
     triggers::{
         ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
-    {MS_TO_NS, S_TO_NS},
+    MS_TO_NS,
 };
 
 const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
@@ -60,11 +60,9 @@ impl Trigger for EventBridgeEvent {
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
     ) {
-        // EventBridge events have a timestamp resolution in seconds
-        let start_time_seconds = self
-            .time
-            .timestamp_nanos_opt()
-            .unwrap_or((self.time.timestamp_millis() as f64 * S_TO_NS) as i64);
+        // EventBridge events have a timestamp resolution in seconds. A time outside the
+        // nanosecond range would also overflow in milliseconds, so it is left unknown.
+        let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
 
         let carrier = self.get_carrier();
         let resource_name = self.get_specific_identifier();
@@ -231,6 +229,21 @@ mod tests {
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
         assert_eq!(span.start, 1_731_140_535_000_000_000);
+    }
+
+    #[test]
+    fn test_enrich_span_out_of_range_timestamp_is_unknown() {
+        let json = read_json_file("eventbridge_no_timestamp_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        payload["time"] = Value::from("2300-01-01T00:00:00Z");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let mut span = Span::default();
+        event.enrich_span(&mut span, &HashMap::new(), true);
+
+        assert_eq!(span.start, 0);
     }
 
     #[test]

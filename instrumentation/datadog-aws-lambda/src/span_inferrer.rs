@@ -13,19 +13,58 @@
 use crate::attribute_keys as attr;
 use crate::inference::{InferConfig, InferenceResult, SpanInferrer};
 
-pub(crate) fn build_inferrer() -> SpanInferrer {
-    #[allow(clippy::disallowed_methods)]
-    let region = std::env::var("AWS_REGION").unwrap_or_default();
-    SpanInferrer::new(InferConfig {
-        region,
-        ..InferConfig::default()
-    })
-}
-
 use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
+use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
+
+#[allow(clippy::disallowed_methods)]
+pub(crate) fn build_inferrer() -> SpanInferrer {
+    SpanInferrer::new(infer_config(|name| std::env::var(name).ok()))
+}
+
+/// Reads the inference settings Bottlecap takes from the Lambda environment.
+fn infer_config(env: impl Fn(&str) -> Option<String>) -> InferConfig {
+    InferConfig {
+        region: env("AWS_REGION").unwrap_or_default(),
+        service_mapping: env("DD_SERVICE_MAPPING")
+            .as_deref()
+            .map(parse_service_mapping)
+            .unwrap_or_default(),
+        aws_service_representation_enabled: env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED")
+            .as_deref()
+            .and_then(parse_bool)
+            .unwrap_or(true),
+    }
+}
+
+/// Parses `DD_SERVICE_MAPPING` entries such as `lambda_sqs:orders,MyQueue:my-queue`.
+fn parse_service_mapping(value: &str) -> HashMap<String, String> {
+    value
+        .split(',')
+        .filter(|pair| !pair.trim().is_empty())
+        .filter_map(|pair| {
+            let mut parts = pair.split(':');
+            let (Some(service), Some(mapped)) = (parts.next(), parts.next()) else {
+                tracing::warn!(
+                    pair,
+                    "ignoring DD_SERVICE_MAPPING entry, expected service:mapped_service"
+                );
+                return None;
+            };
+            Some((service.trim().to_string(), mapped.trim().to_string()))
+        })
+        .collect()
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
+    }
+}
 
 /// Metadata extracted from the trigger event, used to parent the root span.
 pub(crate) struct TriggerContext {
@@ -37,10 +76,9 @@ pub(crate) struct TriggerContext {
     /// When `true`, inferred span duration = `invocation_start - event_time`.
     /// When `false`, inferred span duration = `invocation_end - event_time`.
     pub is_async: bool,
-    /// Short name of the outermost trigger, e.g. `"sqs"`. Added as a tag on the root span.
-    pub event_source: Option<String>,
-    /// ARN of the outermost trigger resource. Added as a tag on the root span when present.
-    pub event_source_arn: Option<String>,
+    /// Tags of the trigger that invoked the function, such as `function_trigger.event_source`
+    /// and HTTP request metadata. Added to the root span.
+    pub trigger_tags: HashMap<String, String>,
 }
 
 /// An inferred span that is currently open, held as an OTel context.
@@ -50,8 +88,8 @@ struct ActiveInferredSpan {
     /// Mirrors [`TriggerContext::is_async`] — determines the end-time passed to
     /// [`InferredSpanScope::end`].
     is_async: bool,
-    /// Source event timestamp for this inferred span, when known.
-    start_time: Option<SystemTime>,
+    /// Start time recorded on this inferred span.
+    start_time: SystemTime,
 }
 
 /// Handle for the set of inferred spans created for a trigger.
@@ -78,11 +116,20 @@ impl InferredSpanScope {
     /// Call [`innermost_context`](Self::innermost_context) after construction to get the
     /// OTel context whose active span is the innermost inferred span (e.g., SQS inside
     /// SNS). Callers should use that context as the parent for the `aws.lambda` root span.
-    pub(crate) fn start(tracer: &SdkTracer, parent_cx: &Context, result: &InferenceResult) -> Self {
+    ///
+    /// When an event time is unknown, the inner span starts at `invocation_start` and a wrapped
+    /// outer span starts when the inner span starts, so neither ends before it starts.
+    pub(crate) fn start(
+        tracer: &SdkTracer,
+        parent_cx: &Context,
+        result: &InferenceResult,
+        invocation_start: SystemTime,
+    ) -> Self {
         if !result.should_create_inferred_span() {
             return Self::empty();
         }
 
+        let inner_start = inferred_span_start_time(&result.span_data).unwrap_or(invocation_start);
         let mut current_cx = parent_cx.clone();
 
         let outer = result
@@ -90,19 +137,20 @@ impl InferredSpanScope {
             .as_ref()
             .filter(|w| w.should_create_inferred_span())
             .map(|w| {
-                current_cx = build_inferred_span(tracer, &w.span_data, &current_cx);
+                let start_time = inferred_span_start_time(&w.span_data).unwrap_or(inner_start);
+                current_cx = build_inferred_span(tracer, &w.span_data, &current_cx, start_time);
                 ActiveInferredSpan {
                     cx: current_cx.clone(),
                     is_async: w.is_async,
-                    start_time: inferred_span_start_time(&w.span_data),
+                    start_time,
                 }
             });
 
-        current_cx = build_inferred_span(tracer, &result.span_data, &current_cx);
+        current_cx = build_inferred_span(tracer, &result.span_data, &current_cx, inner_start);
         let inner = Some(ActiveInferredSpan {
             cx: current_cx,
             is_async: result.is_async,
-            start_time: inferred_span_start_time(&result.span_data),
+            start_time: inner_start,
         });
 
         Self { outer, inner }
@@ -129,8 +177,7 @@ impl InferredSpanScope {
             let outer_end_time = self
                 .inner
                 .as_ref()
-                .and_then(|inner| inner.start_time)
-                .unwrap_or(invocation_start);
+                .map_or(invocation_start, |inner| inner.start_time);
             outer.cx.span().end_with_timestamp(outer_end_time);
         }
 
@@ -154,20 +201,15 @@ fn inferred_span_start_time(span_data: &crate::inference::SpanData) -> Option<Sy
 ///
 /// Returns a new OTel context with the new span as the active span. All metadata
 /// from `span_data.meta` is added as span attributes.
-///
-/// If `span_data.start` is zero or negative (unknown event time), the OTel SDK
-/// assigns the current wall-clock time as the start time.
 fn build_inferred_span(
     tracer: &SdkTracer,
     span_data: &crate::inference::SpanData,
     parent_cx: &Context,
+    start_time: SystemTime,
 ) -> Context {
     let mut builder = tracer.span_builder(span_data.name.clone());
     builder.span_kind = Some(SpanKind::Server);
-
-    if let Some(start_time) = inferred_span_start_time(span_data) {
-        builder.start_time = Some(start_time);
-    }
+    builder.start_time = Some(start_time);
 
     let mut attrs = vec![
         KeyValue::new(attr::SERVICE_NAME, span_data.service.clone()),
@@ -196,12 +238,6 @@ pub(crate) struct TriggerExtraction {
     /// Full inference result from `crate::inference`, including span data, trigger
     /// tags, and async/sync classification.
     pub inference_result: InferenceResult,
-    /// Whether this trigger uses asynchronous invocation semantics.
-    pub is_async: bool,
-    /// Short name of the outermost trigger, e.g. `"sqs"`. Added as a tag on the root span.
-    pub event_source: Option<String>,
-    /// ARN of the outermost trigger resource. Added as a tag on the root span when present.
-    pub event_source_arn: Option<String>,
 }
 
 /// Infers trigger metadata from `payload` and extracts the upstream OTel context.
@@ -215,15 +251,6 @@ pub(crate) fn extract_trigger(inferrer: &SpanInferrer, payload: &str) -> Trigger
 
     TriggerExtraction {
         upstream_cx,
-        is_async: result.is_async,
-        event_source: result
-            .trigger_tags
-            .get("function_trigger.event_source")
-            .cloned(),
-        event_source_arn: result
-            .trigger_tags
-            .get("function_trigger.event_source_arn")
-            .cloned(),
         inference_result: result,
     }
 }
@@ -254,8 +281,6 @@ mod tests {
         InMemorySpanExporter, SdkTracerProvider, SpanData as OtelSpanData,
     };
     use serde_json::json;
-    use std::collections::HashMap;
-    use std::time::SystemTime;
 
     fn test_provider() -> (SdkTracerProvider, InMemorySpanExporter) {
         let exporter = InMemorySpanExporter::default();
@@ -301,8 +326,8 @@ mod tests {
         let tracer = provider.tracer("test");
 
         let result = make_result("aws.sqs", "my-queue");
-        let scope = InferredSpanScope::start(&tracer, &Context::current(), &result);
         let now = SystemTime::now();
+        let scope = InferredSpanScope::start(&tracer, &Context::current(), &result, now);
         scope.end(now, now);
         provider.force_flush().ok();
 
@@ -337,9 +362,9 @@ mod tests {
         result.wrapped_span = Some(Box::new(make_result("aws.sns", "my-topic")));
 
         let parent_cx = Context::current();
-        let scope = InferredSpanScope::start(&tracer, &parent_cx, &result);
-        let cx = scope.innermost_context(&parent_cx);
         let now = SystemTime::now();
+        let scope = InferredSpanScope::start(&tracer, &parent_cx, &result, now);
+        let cx = scope.innermost_context(&parent_cx);
         scope.end(now, now);
         provider.force_flush().ok();
 
@@ -375,7 +400,8 @@ mod tests {
         wrapped.span_data.start = outer_start_ns as i64;
         result.wrapped_span = Some(Box::new(wrapped));
 
-        let scope = InferredSpanScope::start(&tracer, &Context::current(), &result);
+        let scope =
+            InferredSpanScope::start(&tracer, &Context::current(), &result, invocation_start);
         scope.end(invocation_start, invocation_end);
         provider.force_flush().ok();
 
@@ -392,7 +418,7 @@ mod tests {
         let tracer = provider.tracer("test");
         let parent_cx = Context::current();
         let empty_result = InferenceResult::default();
-        let scope = InferredSpanScope::start(&tracer, &parent_cx, &empty_result);
+        let scope = InferredSpanScope::start(&tracer, &parent_cx, &empty_result, SystemTime::now());
         let result_cx = scope.innermost_context(&parent_cx);
 
         assert_eq!(
@@ -502,7 +528,7 @@ mod tests {
             assert_eq!(result.span_data.name, name, "{fixture}");
             assert_eq!(result.is_async, is_async, "{fixture}");
             let upstream = extract_upstream_context(&propagator, &result, &Context::new());
-            let scope = InferredSpanScope::start(&tracer, &upstream, &result);
+            let scope = InferredSpanScope::start(&tracer, &upstream, &result, invocation_start);
             let parent = scope.innermost_context(&upstream);
             let root = tracer.start_with_context("aws.lambda", &parent);
             let root_context = Context::new().with_span(root);
@@ -561,8 +587,8 @@ mod tests {
             let result = infer_fixture(fixture);
             let upstream = extract_upstream_context(&propagator, &result, &Context::new());
             assert!(upstream.span().span_context().is_valid(), "{fixture}");
-            let scope = InferredSpanScope::start(&tracer, &upstream, &result);
             let now = SystemTime::now();
+            let scope = InferredSpanScope::start(&tracer, &upstream, &result, now);
             scope.end(now, now);
             let spans = finished_spans(&exporter);
             assert_eq!(spans.len(), 2, "{fixture}");
@@ -834,5 +860,87 @@ mod tests {
                 ambient.span().span_context()
             );
         }
+    }
+
+    #[test]
+    fn unknown_event_times_never_end_before_they_start() {
+        let (provider, exporter) = test_provider();
+        let tracer = provider.tracer("test");
+        let invocation_start = nanos_to_system_time(10_000_000_000);
+        let invocation_end = nanos_to_system_time(20_000_000_000);
+
+        for (is_async, inner_start_ns, expected_inner, expected_inner_end) in [
+            (true, 0, invocation_start, invocation_start),
+            (false, 0, invocation_start, invocation_end),
+            (
+                true,
+                2_000_000_000,
+                nanos_to_system_time(2_000_000_000),
+                invocation_start,
+            ),
+        ] {
+            let mut result = make_result("aws.sqs", "my-queue");
+            result.span_data.start = inner_start_ns;
+            result.is_async = is_async;
+            result.wrapped_span = Some(Box::new(make_result("aws.sns", "my-topic")));
+
+            let scope =
+                InferredSpanScope::start(&tracer, &Context::current(), &result, invocation_start);
+            scope.end(invocation_start, invocation_end);
+
+            let spans = finished_spans(&exporter);
+            let outer = spans.iter().find(|s| s.name == "aws.sns").unwrap();
+            let inner = spans.iter().find(|s| s.name == "aws.sqs").unwrap();
+            assert_eq!(inner.start_time, expected_inner, "{inner_start_ns}");
+            assert_eq!(inner.end_time, expected_inner_end, "{inner_start_ns}");
+            assert_eq!(outer.start_time, expected_inner, "{inner_start_ns}");
+            assert_eq!(outer.end_time, expected_inner, "{inner_start_ns}");
+            exporter.reset();
+        }
+    }
+
+    #[test]
+    fn infer_config_reads_service_mapping_and_representation_settings() {
+        let env = HashMap::from([
+            ("AWS_REGION", "us-east-1"),
+            (
+                "DD_SERVICE_MAPPING",
+                "lambda_sqs:orders-queue, MyTopic : topic-svc,invalid,",
+            ),
+            ("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "FALSE"),
+        ]);
+        let config = infer_config(|name| env.get(name).map(ToString::to_string));
+        assert_eq!(config.region, "us-east-1");
+        assert_eq!(
+            config.service_mapping,
+            HashMap::from([
+                ("lambda_sqs".to_string(), "orders-queue".to_string()),
+                ("MyTopic".to_string(), "topic-svc".to_string()),
+            ])
+        );
+        assert!(!config.aws_service_representation_enabled);
+
+        let inferrer = SpanInferrer::new(config);
+        let sqs = inferrer
+            .infer_span(&read_json_file("sqs_event.json"))
+            .unwrap();
+        assert_eq!(sqs.span_data.service, "orders-queue");
+        let s3 = inferrer
+            .infer_span(&read_json_file("s3_event.json"))
+            .unwrap();
+        assert_eq!(s3.span_data.service, "s3");
+    }
+
+    #[test]
+    fn infer_config_defaults_without_environment() {
+        let config = infer_config(|_| None);
+        assert!(config.region.is_empty());
+        assert!(config.service_mapping.is_empty());
+        assert!(config.aws_service_representation_enabled);
+
+        let config = infer_config(|name| {
+            (name == "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED").then(|| "maybe".to_string())
+        });
+        assert!(config.aws_service_representation_enabled);
     }
 }

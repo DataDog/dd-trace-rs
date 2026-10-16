@@ -38,6 +38,11 @@ propagator. Generated context is passed directly to the Datadog propagator so un
 remains eligible for local sampling, while continue, restart, and ignore settings still apply.
 Extension-only DSM checkpoints, span pointers, and AppSec processing are outside this module.
 
+Inferred span service names honor `DD_SERVICE_MAPPING` and
+`DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`, as in Bottlecap.
+
 Async inferred spans end at invocation start; synchronous spans end at invocation completion.
-A wrapped outer span ends when the inner event starts. The handler's `aws.lambda` span is a child
-of the innermost inferred span, continuing the upstream trace when context is available.
+A wrapped outer span ends when the inner event starts. Without a usable event timestamp, an
+inferred span starts at invocation start, or for a wrapped outer span, when the inner event
+starts. The handler's `aws.lambda` span is a child of the innermost inferred span,
+continuing the upstream trace when context is available, and carries the trigger's tags.
