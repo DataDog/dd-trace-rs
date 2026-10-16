@@ -202,6 +202,11 @@ impl FromStr for Tracestate {
             }
 
             if key == "dd" {
+                if dd.is_some() {
+                    dd_debug!("Tracestate: ignoring duplicate dd member: {v}");
+                    continue;
+                }
+
                 dd = Some(
                     value
                         .trim()
@@ -928,6 +933,44 @@ mod test {
             context.tags.get(TRACESTATE_KEY).unwrap(),
             "foo=1,bar=2,rojo=1,congo=2,baz=3"
         );
+    }
+
+    #[test]
+    fn test_extract_tracestate_keeps_first_dd_member() {
+        let single_header = vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (
+                TRACESTATE_KEY,
+                "dd=s:2;o:new,foo=1,dd=s:-1;o:old,foo=2,bar=3",
+            ),
+        ];
+        let split_headers = vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (TRACESTATE_KEY, "dd=s:2;o:new,foo=1"),
+            (TRACESTATE_KEY, "dd=s:-1;o:old,foo=2,bar=3"),
+        ];
+
+        for headers in [single_header, split_headers] {
+            let tracestate = try_extract(&MultiValueCarrier(headers))
+                .unwrap()
+                .unwrap()
+                .tracestate
+                .unwrap();
+
+            assert_eq!(
+                tracestate.sampling.unwrap().priority.unwrap(),
+                priority::USER_KEEP
+            );
+            assert_eq!(tracestate.origin.as_deref(), Some("new"));
+            assert_eq!(
+                tracestate.additional_values.unwrap(),
+                vec![
+                    ("foo".to_string(), "1".to_string()),
+                    ("foo".to_string(), "2".to_string()),
+                    ("bar".to_string(), "3".to_string()),
+                ]
+            );
+        }
     }
 
     #[test]
