@@ -406,20 +406,47 @@ fn insert_link_attribute<'a>(
     value: &'a Value,
     alloc: &'a Bump,
 ) {
-    if let (Value::Array(_), DdAnyValue::Array(values)) =
-        (value, otel_value_to_dd_scalar(value, alloc))
-    {
-        for (i, v) in values.into_iter().enumerate() {
-            attributes.insert(
-                SpanStr::from_str(fmt_in(alloc, format_args!("{key}.{i}"))),
-                dd_value_to_string(&DdAnyValue::SingleValue(v), alloc),
-            );
-        }
-    } else {
+    let Value::Array(array) = value else {
         attributes.insert(
             SpanStr::from_str(key),
             SpanStr::from_str(otel_value_string_repr(value, alloc)),
         );
+        return;
+    };
+    let mut insert = |i: usize, v: &'a str| {
+        attributes.insert(
+            SpanStr::from_str(fmt_in(alloc, format_args!("{key}.{i}"))),
+            SpanStr::from_str(v),
+        );
+    };
+    match array {
+        opentelemetry::Array::Bool(v) => {
+            for (i, b) in v.iter().enumerate() {
+                insert(i, if *b { "true" } else { "false" });
+            }
+        }
+        opentelemetry::Array::I64(v) => {
+            for (i, n) in v.iter().enumerate() {
+                insert(i, fmt_in(alloc, format_args!("{n}")));
+            }
+        }
+        opentelemetry::Array::F64(v) => {
+            for (i, f) in v.iter().enumerate() {
+                insert(i, fmt_in(alloc, format_args!("{f}")));
+            }
+        }
+        opentelemetry::Array::String(v) => {
+            for (i, s) in v.iter().enumerate() {
+                insert(i, s.as_str());
+            }
+        }
+        // Array is #[non_exhaustive]
+        _ => {
+            attributes.insert(
+                SpanStr::from_str(key),
+                SpanStr::from_str(otel_value_string_repr(value, alloc)),
+            );
+        }
     }
 }
 
