@@ -14,7 +14,7 @@ use crate::{
 use bumpalo::Bump;
 use libdd_trace_utils::span::span_pool::SpanPool;
 use libdd_trace_utils::span::SpanText;
-use opentelemetry::{Key, Value};
+use opentelemetry::{trace::SpanId, Key, Value};
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
@@ -66,6 +66,9 @@ where
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
         add_config_metadata(&mut dd_span, cached_config, otel_resource);
+        if s.parent_span_id == SpanId::INVALID || s.parent_span_is_remote {
+            add_local_root_metadata(&mut dd_span, cached_config);
+        }
 
         dd_span
     }));
@@ -129,10 +132,29 @@ fn add_config_metadata<'a>(
     }
 }
 
+/// Tags that the Datadog SDKs set on the local root span of each trace chunk.
+fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a CachedConfig) {
+    dd_span.meta.insert(
+        SpanStr::from_static_str("language"),
+        SpanStr::from_str(&cached_config.language),
+    );
+    dd_span.meta.insert(
+        SpanStr::from_static_str("runtime-id"),
+        SpanStr::from_str(&cached_config.runtime_id),
+    );
+    dd_span.metrics.insert(
+        SpanStr::from_static_str("process_id"),
+        cached_config.process_id,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::configuration::Config;
+    use opentelemetry::trace::{SpanContext, TraceFlags, TraceId};
+    use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+    use std::borrow::Cow;
 
     fn base_service_with(
         dd_service: Option<&str>,
@@ -186,5 +208,75 @@ mod tests {
             base_service_with(None, Some("otel-service"), "other-service").as_deref(),
             Some("otel-service")
         );
+    }
+
+    fn span_data(span_id: u64, parent_span_id: u64, parent_span_is_remote: bool) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from(1),
+                SpanId::from(span_id),
+                TraceFlags::SAMPLED,
+                false,
+                Default::default(),
+            ),
+            parent_span_id: SpanId::from(parent_span_id),
+            parent_span_is_remote,
+            span_kind: opentelemetry::trace::SpanKind::Internal,
+            name: Cow::Borrowed("span"),
+            start_time: std::time::SystemTime::now(),
+            end_time: std::time::SystemTime::now(),
+            attributes: Vec::new(),
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: opentelemetry::trace::Status::Unset,
+            instrumentation_scope: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_local_root_metadata() {
+        let config = Config::builder().build();
+        let cached_config = CachedConfig::new(&config);
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let span_data = [
+            span_data(1, 0, false), // local root of a new trace
+            span_data(2, 1, false), // its child
+            span_data(3, 99, true), // local root continuing a remote trace
+        ];
+
+        // Declared last: the pooled spans borrow from everything above
+        let span_pool = SpanPool::with_capacity(10);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(
+            &cached_config,
+            &span_data,
+            &resource,
+            &span_pool,
+            &alloc,
+        );
+
+        assert_eq!(chunk.len(), 3);
+        let process_id = f64::from(std::process::id());
+        for (span, is_local_root) in chunk.iter().zip([true, false, true]) {
+            let meta = |key| {
+                span.meta
+                    .get(&SpanStr::from_static_str(key))
+                    .map(SpanStr::as_str)
+            };
+            let process_id_metric = span
+                .metrics
+                .get(&SpanStr::from_static_str("process_id"))
+                .copied();
+            if is_local_root {
+                assert_eq!(meta("language"), Some("rust"), "span {}", span.span_id);
+                assert_eq!(meta("runtime-id"), Some(config.runtime_id()));
+                assert_eq!(process_id_metric, Some(process_id));
+            } else {
+                assert_eq!(meta("language"), None, "span {}", span.span_id);
+                assert_eq!(meta("runtime-id"), None);
+                assert_eq!(process_id_metric, None);
+            }
+        }
     }
 }

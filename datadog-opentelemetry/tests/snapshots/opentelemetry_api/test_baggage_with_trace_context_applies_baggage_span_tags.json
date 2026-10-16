@@ -9,6 +9,7 @@
     "type": "web",
     "meta": {
       "baggage.user.id": "alice",
+      "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "0000000000000000112210f47de98115",
