@@ -34,8 +34,9 @@ The port replaces Bottlecap's protobuf span with the fields needed by the OpenTe
 retains event matching, service resolution, metadata, timestamps, carrier extraction, wrapped
 trigger detection, Step Functions IDs, and SQS AWS trace header fallback. Explicit carrier context
 is preferred over generated context. Datadog and W3C carriers use the tracer's configured
-propagator. Extension-only DSM checkpoints, span pointers, and AppSec processing are outside this
-module.
+propagator. Generated context is passed directly to the Datadog propagator so undecided sampling
+remains eligible for local sampling, while continue, restart, and ignore settings still apply.
+Extension-only DSM checkpoints, span pointers, and AppSec processing are outside this module.
 
 Async inferred spans end at invocation start; synchronous spans end at invocation completion.
 A wrapped outer span ends when the inner event starts. The handler's `aws.lambda` span is a child

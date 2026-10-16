@@ -92,7 +92,7 @@ impl Trigger for ALBEvent {
     }
 
     fn is_async(&self) -> bool {
-        true
+        false
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {

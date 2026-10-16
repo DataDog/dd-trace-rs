@@ -233,15 +233,12 @@ fn extract_upstream_context(
     result: &InferenceResult,
     ambient: &Context,
 ) -> Context {
-    // Extract against an empty context so an ambient span cannot mask generated fallback.
-    let extracted = propagator.extract_with_context(&Context::new(), &result.carrier);
-    if extracted.span().span_context().is_valid() {
-        return propagator.extract_with_context(ambient, &result.carrier);
-    }
-    if !result.generated_carrier.is_empty() {
-        return propagator.extract_with_context(ambient, &result.generated_carrier);
-    }
-    propagator.extract_with_context(ambient, &result.carrier)
+    datadog_opentelemetry::propagation::extract_with_fallback(
+        propagator,
+        ambient,
+        &result.carrier,
+        result.generated_context.as_ref(),
+    )
 }
 
 #[cfg(test)]
@@ -249,6 +246,7 @@ mod tests {
     use super::*;
     use crate::inference::triggers::test_utils::read_json_file;
     use crate::inference::{InferenceResult, SpanData};
+    use datadog_opentelemetry::configuration::{Config, TracePropagationStyle};
     use opentelemetry::propagation::TextMapPropagator;
     use opentelemetry::trace::{TraceContextExt, TracerProvider as _};
     use opentelemetry::Value as OtelValue;
@@ -628,7 +626,10 @@ mod tests {
             assert!(context.is_valid(), "{fixture}");
             assert_eq!(
                 context.trace_id().to_string(),
-                result.generated_carrier["traceparent"][3..35]
+                format!(
+                    "{:032x}",
+                    result.generated_context.as_ref().unwrap().trace_id
+                )
             );
             assert!(u128::from_be_bytes(context.trace_id().to_bytes()) > u128::from(u64::MAX));
             assert!(context.is_sampled());
@@ -640,6 +641,131 @@ mod tests {
             propagator.inject_context(&invocation_cx, &mut injected);
             invocation_cx.span().end();
             assert_eq!(injected["x-datadog-origin"], "states");
+        }
+    }
+
+    #[test]
+    fn step_functions_keep_leading_zero_high_trace_bits() {
+        let mut event: serde_json::Value =
+            serde_json::from_str(&read_json_file("step_function_event.json")).unwrap();
+        event["Execution"]["Id"] =
+            json!("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:regression-3");
+        let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+        assert_eq!(
+            result.generated_context.as_ref().unwrap().tags["_dd.p.tid"],
+            "0a2cd4ab2e2818c4"
+        );
+        let (provider, propagator) = test_propagator();
+        let upstream = extract_upstream_context(&propagator, &result, &Context::new());
+        assert_eq!(
+            upstream.span().span_context().trace_id().to_string(),
+            "0a2cd4ab2e2818c46eed62ec038b1422"
+        );
+        let invocation = provider
+            .tracer("test")
+            .start_with_context("aws.lambda", &upstream);
+        let cx = upstream.with_span(invocation);
+        let mut carrier = HashMap::new();
+        propagator.inject_context(&cx, &mut carrier);
+        cx.span().end();
+        let roundtrip = propagator.extract_with_context(&Context::new(), &carrier);
+        assert_eq!(
+            roundtrip.span().span_context().trace_id(),
+            cx.span().span_context().trace_id()
+        );
+    }
+
+    #[test]
+    fn sqs_xray_sampling_preserves_local_and_upstream_decisions() {
+        for styles in [
+            vec![TracePropagationStyle::TraceContext],
+            vec![
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::Datadog,
+            ],
+            vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+        ] {
+            for (header, flags, sampled) in [
+                (
+                    "Root=1-64cc2edd-112fbf1701d1355973a11d57;Parent=7d5a9776024b2d42;Sampled=0",
+                    2,
+                    true,
+                ),
+                (
+                    "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac",
+                    2,
+                    true,
+                ),
+                (
+                    "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=0",
+                    0,
+                    false,
+                ),
+                (
+                    "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1",
+                    1,
+                    true,
+                ),
+            ] {
+                let (provider, propagator) = datadog_opentelemetry::tracing()
+                    .with_config(
+                        Config::builder()
+                            .set_trace_propagation_style(styles.clone())
+                            .set_trace_sample_rate(1.0)
+                            .build(),
+                    )
+                    .init_local();
+                let mut event: serde_json::Value =
+                    serde_json::from_str(&read_json_file("sqs_event.json")).unwrap();
+                event["Records"][0]["messageAttributes"] = json!({});
+                event["Records"][0]["attributes"]["AWSTraceHeader"] = json!(header);
+                let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+                let upstream = extract_upstream_context(&propagator, &result, &Context::new());
+                assert_eq!(
+                    upstream.span().span_context().trace_flags().to_u8(),
+                    flags,
+                    "{styles:?}: {header}"
+                );
+                let span = provider
+                    .tracer("test")
+                    .start_with_context("aws.lambda", &upstream);
+                let cx = upstream.with_span(span);
+                assert_eq!(
+                    cx.span().span_context().is_sampled(),
+                    sampled,
+                    "{styles:?}: {header}"
+                );
+                assert_eq!(
+                    cx.span().span_context().trace_id(),
+                    upstream.span().span_context().trace_id()
+                );
+                cx.span().end();
+            }
+        }
+    }
+
+    #[test]
+    fn s3_removals_without_object_metadata_still_create_spans() {
+        for name in ["ObjectRemoved:Delete", "ObjectRemoved:DeleteMarkerCreated"] {
+            let mut event: serde_json::Value =
+                serde_json::from_str(&read_json_file("s3_event.json")).unwrap();
+            event["Records"][0]["eventName"] = json!(name);
+            let object = event["Records"][0]["s3"]["object"].as_object_mut().unwrap();
+            object.remove("size");
+            object.remove("eTag");
+            let result = build_inferrer().infer_span(&event.to_string()).unwrap();
+            assert!(result.should_create_inferred_span());
+            assert_eq!(result.span_data.name, "aws.s3");
+            assert_eq!(result.span_data.meta["event_name"], name);
+            assert!(!result.span_data.meta.contains_key("object_size"));
+            assert!(!result.span_data.meta.contains_key("object_etag"));
+            assert_eq!(
+                result.trigger_tags["function_trigger.event_source_arn"],
+                "arn:aws:s3:::example-bucket"
+            );
         }
     }
 
@@ -680,6 +806,7 @@ mod tests {
         event["headers"] = json!({"X-Datadog-Trace-Id": "42", "X-Datadog-Parent-Id": "43"});
         let result = build_inferrer().infer_span(&event.to_string()).unwrap();
         assert!(!result.should_create_inferred_span());
+        assert!(!result.is_async);
         let upstream = extract_upstream_context(&propagator, &result, &Context::new());
         assert_eq!(
             u128::from_be_bytes(upstream.span().span_context().trace_id().to_bytes()),

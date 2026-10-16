@@ -33,6 +33,8 @@ pub(crate) mod trace_propagation_style;
 pub mod tracecontext;
 
 pub use crate::core::configuration::TracePropagationStyle;
+#[cfg(any(feature = "test-utils", feature = "_unstable_propagation"))]
+pub use crate::text_map_propagator::extract_with_fallback;
 
 /// Configuration required for trace context propagation.
 ///
@@ -172,6 +174,34 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
                 }
                 None => ExtractResult::Passthrough,
             },
+        }
+    }
+
+    pub(crate) fn extract_with_fallback(
+        &self,
+        carrier: &dyn Extractor,
+        fallback: Option<&SpanContext>,
+    ) -> ExtractResult {
+        let extracted = self.extract(carrier);
+        if !matches!(extracted, ExtractResult::Passthrough)
+            || !self
+                .extractors
+                .iter()
+                .any(|style| *style != TracePropagationStyle::Baggage)
+        {
+            return extracted;
+        }
+        let Some(fallback) =
+            fallback.filter(|context| context.trace_id != 0 && context.span_id != 0)
+        else {
+            return extracted;
+        };
+        match self.config.trace_propagation_behavior_extract() {
+            TracePropagationBehaviorExtract::Continue => ExtractResult::Continue(fallback.clone()),
+            TracePropagationBehaviorExtract::Restart => {
+                ExtractResult::Restart(SpanLink::restart(fallback, TracePropagationStyle::Datadog))
+            }
+            TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
         }
     }
 

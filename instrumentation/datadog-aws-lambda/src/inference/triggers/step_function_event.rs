@@ -164,7 +164,7 @@ impl StepFunctionEvent {
                 let (lo_tid, hi_tid) = Self::generate_trace_id(execution_arn.clone());
                 let tags = HashMap::from([(
                     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                    format!("{hi_tid:x}"),
+                    format!("{hi_tid:016x}"),
                 )]);
                 (lo_tid, tags)
             };
@@ -622,7 +622,7 @@ mod tests {
         let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
             "arn:aws:states:sa-east-1:425362996713:stateMachine:MyStateMachine-b276uka1j",
         ));
-        let hex_tid = format!("{hi_tid:x}");
+        let hex_tid = format!("{hi_tid:016x}");
 
         assert_eq!(lo_tid, 1_680_583_253_837_593_461);
         assert_eq!(hi_tid, 6_984_552_746_569_958_392);
@@ -632,7 +632,7 @@ mod tests {
         let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
             "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44",
         ));
-        let hex_tid = format!("{hi_tid:x}");
+        let hex_tid = format!("{hi_tid:016x}");
 
         assert_eq!(lo_tid, 5_744_042_798_732_701_615);
         assert_eq!(hi_tid, 1_807_349_139_850_867_390);

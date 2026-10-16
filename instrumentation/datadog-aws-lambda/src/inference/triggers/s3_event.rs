@@ -40,9 +40,9 @@ pub struct S3Bucket {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Object {
     pub key: String,
-    pub size: i64,
+    pub size: Option<i64>,
     #[serde(rename = "eTag")]
-    pub e_tag: String,
+    pub e_tag: Option<String>,
 }
 
 impl Trigger for S3Record {
@@ -104,9 +104,13 @@ impl Trigger for S3Record {
             ("bucketname".to_string(), bucket_name),
             ("bucket_arn".to_string(), self.s3.bucket.arn.clone()),
             ("object_key".to_string(), self.s3.object.key.clone()),
-            ("object_size".to_string(), self.s3.object.size.to_string()),
-            ("object_etag".to_string(), self.s3.object.e_tag.clone()),
         ]));
+        if let Some(size) = self.s3.object.size {
+            span.meta.insert("object_size".into(), size.to_string());
+        }
+        if let Some(etag) = &self.s3.object.e_tag {
+            span.meta.insert("object_etag".into(), etag.clone());
+        }
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -117,7 +121,7 @@ impl Trigger for S3Record {
     }
 
     fn get_arn(&self, _region: &str) -> String {
-        self.event_source.clone()
+        self.s3.bucket.arn.clone()
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
@@ -152,7 +156,7 @@ mod tests {
         let result = S3Record::new(payload).expect("Failed to deserialize into Record");
 
         let expected = S3Record {
-            event_source: String::from("aws:s3:sample:event:source"),
+            event_source: String::from("aws:s3"),
             event_time: DateTime::parse_from_rfc3339("2023-01-07T00:00:00.000Z")
                 .unwrap()
                 .with_timezone(&Utc),
@@ -164,8 +168,8 @@ mod tests {
                 },
                 object: S3Object {
                     key: String::from("test/key"),
-                    size: 1024,
-                    e_tag: String::from("0123456789abcdef0123456789abcdef"),
+                    size: Some(1024),
+                    e_tag: Some(String::from("0123456789abcdef0123456789abcdef")),
                 },
             },
         };
@@ -223,7 +227,7 @@ mod tests {
         let json = read_json_file("s3_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
-        assert_eq!(event.get_arn("us-east-1"), "aws:s3:sample:event:source");
+        assert_eq!(event.get_arn("us-east-1"), "arn:aws:s3:::example-bucket");
     }
 
     #[test]

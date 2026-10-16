@@ -870,8 +870,6 @@ dependencies = [
 [[package]]
 name = "datadog-opentelemetry"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2cc0474d0b32827fd8cff077e618c8ebd2d41f42515fc9a0505739d807a99c"
 dependencies = [
  "anyhow",
  "arc-swap",

@@ -26,6 +26,33 @@ use crate::TraceRegistry;
 pub(crate) const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags =
     opentelemetry::TraceFlags::new(0x02);
 
+#[derive(Clone)]
+struct FallbackSpanContext(Option<SpanContext>);
+
+/// Extracts headers with an optional context supplied by an instrumentation.
+///
+/// The Datadog propagator uses the fallback only when no configured trace extractor
+/// succeeds. This preserves metadata such as an undecided sampling priority without
+/// encoding it as W3C headers. Continue, restart, ignore, and disabled extraction
+/// settings still apply. Restart links for the fallback use the Datadog style.
+/// Other propagators extract headers normally and do not use the fallback.
+#[cfg(any(test, feature = "test-utils", feature = "_unstable_propagation"))]
+pub fn extract_with_fallback(
+    propagator: &dyn TextMapPropagator,
+    cx: &opentelemetry::Context,
+    carrier: &dyn opentelemetry::propagation::Extractor,
+    fallback: Option<&SpanContext>,
+) -> opentelemetry::Context {
+    let Some(fallback) = fallback else {
+        return propagator.extract_with_context(cx, carrier);
+    };
+    let cx = cx.with_value(FallbackSpanContext(Some(fallback.clone())));
+    propagator
+        .extract_with_context(&cx, carrier)
+        // A fallback belongs to this extraction, not to subsequent extractions.
+        .with_value(FallbackSpanContext(None))
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct DatadogExtractData {
     pub links: Vec<SpanLink>,
@@ -187,7 +214,10 @@ impl DatadogPropagator {
         cx: &opentelemetry::Context,
         extractor: &dyn opentelemetry::propagation::Extractor,
     ) -> opentelemetry::Context {
-        let extracted = self.inner.extract(&extractor);
+        let fallback = cx
+            .get::<FallbackSpanContext>()
+            .and_then(|value| value.0.as_ref());
+        let extracted = self.inner.extract_with_fallback(&extractor, fallback);
         let cx = match extracted {
             ExtractResult::Continue(dd_span_context) => {
                 let trace_flags = extract_trace_flags(&dd_span_context);
@@ -298,7 +328,7 @@ pub mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
     use crate::core::{
-        configuration::{Config, TracePropagationStyle},
+        configuration::{Config, TracePropagationBehaviorExtract, TracePropagationStyle},
         sampling::SamplingDecision,
     };
     use assert_unordered::assert_eq_unordered;
@@ -319,7 +349,10 @@ pub mod tests {
         TraceRegistry,
     };
 
-    use super::DatadogPropagator;
+    use super::{
+        extract_with_fallback, DatadogPropagator, FallbackSpanContext, SpanContext,
+        TRACE_FLAG_DEFERRED,
+    };
 
     const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
     const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
@@ -340,6 +373,108 @@ pub mod tests {
         let config = Arc::new(config);
 
         DatadogPropagator::new(config.clone(), TraceRegistry::new(config))
+    }
+
+    fn fallback_context() -> SpanContext {
+        SpanContext {
+            trace_id: 42,
+            span_id: 43,
+            is_remote: true,
+            origin: Some("states".into()),
+            tags: HashMap::from([("_dd.p.test".into(), "value".into())]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn fallback_preserves_undecided_sampling_and_metadata() {
+        let propagator = get_propagator(Some(vec![TracePropagationStyle::TraceContext]));
+        let cx = extract_with_fallback(
+            &propagator,
+            &Context::new(),
+            &HashMap::<String, String>::new(),
+            Some(&fallback_context()),
+        );
+        assert_eq!(cx.span().span_context().trace_id(), TraceId::from(42));
+        assert_eq!(cx.span().span_context().span_id(), SpanId::from(43));
+        assert_eq!(cx.span().span_context().trace_flags(), TRACE_FLAG_DEFERRED);
+        assert!(cx.span().span_context().is_remote());
+        let data = cx.get::<DatadogExtractData>().unwrap();
+        assert_eq!(data.sampling.priority, None);
+        assert_eq!(data.origin.as_deref(), Some("states"));
+        assert_eq!(data.internal_tags["_dd.p.test"], "value");
+        assert!(cx.get::<FallbackSpanContext>().unwrap().0.is_none());
+    }
+
+    #[test]
+    fn restart_prefers_carrier_over_fallback_and_preserves_baggage() {
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_propagation_style_extract(vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::Baggage,
+                ])
+                .set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
+                .build(),
+        );
+        let propagator = DatadogPropagator::new(Arc::clone(&config), TraceRegistry::new(config));
+        let mut carrier = HashMap::from([
+            ("x-datadog-trace-id".into(), "123".into()),
+            ("x-datadog-parent-id".into(), "456".into()),
+            ("baggage".into(), "user=alice".into()),
+        ]);
+        for (trace_id, span_id) in [(123, 456), (42, 43)] {
+            let cx = extract_with_fallback(
+                &propagator,
+                &Context::new(),
+                &carrier,
+                Some(&fallback_context()),
+            );
+            assert!(!cx.span().span_context().is_valid());
+            let data = cx.get::<DatadogExtractData>().unwrap();
+            assert_eq!(data.links.len(), 1);
+            assert_eq!(data.links[0].trace_id, trace_id);
+            assert_eq!(data.links[0].span_id, span_id);
+            assert_eq!(data.sampling.priority, None);
+            assert_eq!(cx.baggage().get("user").unwrap().as_str(), "alice");
+            carrier.remove("x-datadog-trace-id");
+            carrier.remove("x-datadog-parent-id");
+        }
+    }
+
+    #[test]
+    fn fallback_respects_ignored_and_disabled_extraction() {
+        for (behavior, style) in [
+            (
+                TracePropagationBehaviorExtract::Ignore,
+                TracePropagationStyle::Datadog,
+            ),
+            (
+                TracePropagationBehaviorExtract::Continue,
+                TracePropagationStyle::None,
+            ),
+            (
+                TracePropagationBehaviorExtract::Continue,
+                TracePropagationStyle::Baggage,
+            ),
+        ] {
+            let config = Arc::new(
+                Config::builder()
+                    .set_trace_propagation_style_extract(vec![style])
+                    .set_trace_propagation_behavior_extract(behavior)
+                    .build(),
+            );
+            let propagator =
+                DatadogPropagator::new(Arc::clone(&config), TraceRegistry::new(config));
+            let cx = extract_with_fallback(
+                &propagator,
+                &Context::new(),
+                &HashMap::<String, String>::new(),
+                Some(&fallback_context()),
+            );
+            assert!(!cx.span().span_context().is_valid());
+            assert!(cx.get::<DatadogExtractData>().is_none());
+        }
     }
 
     #[derive(Debug)]

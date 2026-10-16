@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::inference::{
+    get_aws_partition_by_region,
     triggers::{
         body::Body, lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
@@ -169,8 +170,9 @@ impl Trigger for LambdaFunctionUrlEvent {
     fn get_arn(&self, region: &str) -> String {
         #[allow(clippy::disallowed_methods)]
         let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default();
+        let partition = get_aws_partition_by_region(region);
         format!(
-            "arn:aws:lambda:{region}:{}:url:{}",
+            "arn:{partition}:lambda:{region}:{}:url:{}",
             self.request_context.account_id, function_name
         )
     }
@@ -337,10 +339,16 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
-        assert_eq!(
-            event.get_arn("sa-east-1"),
-            format!("arn:aws:lambda:sa-east-1:601427279990:url:{function_name}")
-        );
+        for (region, partition) in [
+            ("sa-east-1", "aws"),
+            ("cn-north-1", "aws-cn"),
+            ("us-gov-west-1", "aws-us-gov"),
+        ] {
+            assert_eq!(
+                event.get_arn(region),
+                format!("arn:{partition}:lambda:{region}:601427279990:url:{function_name}")
+            );
+        }
     }
 
     #[test]

@@ -194,7 +194,7 @@ impl Trigger for APIGatewayHttpEvent {
     fn get_arn(&self, region: &str) -> String {
         let partition = get_aws_partition_by_region(region);
         format!(
-            "arn:{partition}:apigateway:{region}::/restapis/{api_id}/stages/{stage}",
+            "arn:{partition}:apigateway:{region}::/apis/{api_id}/stages/{stage}",
             partition = partition,
             region = region,
             api_id = self.request_context.api_id,
@@ -440,7 +440,7 @@ mod tests {
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         assert_eq!(
             event.get_arn("sa-east-1"),
-            "arn:aws:apigateway:sa-east-1::/restapis/x02yirxc7a/stages/$default"
+            "arn:aws:apigateway:sa-east-1::/apis/x02yirxc7a/stages/$default"
         );
     }
 

@@ -55,7 +55,7 @@ pub(crate) struct InferenceResult {
     pub is_async: bool,
     pub trigger_tags: HashMap<String, String>,
     pub carrier: HashMap<String, String>,
-    pub generated_carrier: HashMap<String, String>,
+    pub generated_context: Option<SpanContext>,
     pub wrapped_span: Option<Box<InferenceResult>>,
 }
 
@@ -81,16 +81,15 @@ impl SpanInferrer {
             return Ok(InferenceResult::default());
         };
         let mut result = self.infer_trigger(trigger);
-        result.generated_carrier = match &identified {
+        result.generated_context = match &identified {
             IdentifiedTrigger::StepFunctionEvent(event) => {
-                generated_carrier(event.get_span_context())
+                Some(generated_context(event.get_span_context()))
             }
             IdentifiedTrigger::SqsRecord(event) => extract_trace_context_from_aws_trace_header(
                 event.attributes.aws_trace_header.clone(),
             )
-            .map(generated_carrier)
-            .unwrap_or_default(),
-            _ => HashMap::new(),
+            .map(generated_context),
+            _ => None,
         };
         result.wrapped_span = self.infer_wrapped_trigger(&identified).map(Box::new);
         if let Some(wrapped) = &result.wrapped_span {
@@ -157,59 +156,18 @@ impl SpanInferrer {
     }
 }
 
-// Reuse the configured tracer propagator for generated context, including its sampling
-// and origin metadata. Supply both formats so W3C-only configurations also work.
-fn generated_carrier(context: SpanContext) -> HashMap<String, String> {
-    let low = context.trace_id as u64;
-    let high = context
+// Bottlecap represents Step Functions' high trace bits in propagation tags.
+// Reconstitute the full ID before passing the context directly to the tracer.
+fn generated_context(mut context: SpanContext) -> SpanContext {
+    if let Some(high) = context
         .tags
         .get("_dd.p.tid")
         .and_then(|value| u64::from_str_radix(value, 16).ok())
-        .unwrap_or((context.trace_id >> 64) as u64);
-    let trace_id = (u128::from(high) << 64) | u128::from(low);
-    let mut carrier = HashMap::from([
-        ("x-datadog-trace-id".into(), low.to_string()),
-        ("x-datadog-parent-id".into(), context.span_id.to_string()),
-    ]);
-    let mut state = Vec::new();
-    if let Some(priority) = context.sampling.priority {
-        let priority = priority.into_i8();
-        carrier.insert("x-datadog-sampling-priority".into(), priority.to_string());
-        state.push(format!("s:{priority}"));
+    {
+        context.trace_id = (u128::from(high) << 64) | u128::from(context.trace_id as u64);
     }
-    if let Some(origin) = context.origin {
-        state.push(format!("o:{origin}"));
-        carrier.insert("x-datadog-origin".into(), origin);
-    }
-    if !context.tags.is_empty() {
-        carrier.insert(
-            "x-datadog-tags".into(),
-            context
-                .tags
-                .iter()
-                .map(|(key, value)| format!("{key}={value}"))
-                .collect::<Vec<_>>()
-                .join(","),
-        );
-        state.extend(context.tags.iter().filter_map(|(key, value)| {
-            key.strip_prefix("_dd.p.")
-                .map(|key| format!("t.{key}:{value}"))
-        }));
-    }
-    let sampled = u8::from(
-        context
-            .sampling
-            .priority
-            .is_some_and(|priority| priority.is_keep()),
-    );
-    carrier.insert(
-        "traceparent".into(),
-        format!("00-{trace_id:032x}-{:016x}-{sampled:02x}", context.span_id),
-    );
-    if !state.is_empty() {
-        carrier.insert("tracestate".into(), format!("dd={}", state.join(";")));
-    }
-    carrier
+    context.is_remote = true;
+    context
 }
 
 fn get_aws_partition_by_region(region: &str) -> String {
