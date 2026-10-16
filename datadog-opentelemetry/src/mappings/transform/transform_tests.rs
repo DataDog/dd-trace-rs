@@ -14,7 +14,9 @@ use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue
 use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText as _;
 
-use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
+use crate::{
+    core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY, mappings::transform::SPAN_LINK_FLAGS_SET,
+};
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -153,7 +155,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     ("a2".into(), "v2".into()),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -169,7 +171,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     ("floats.0".into(), "1.5".into()),
                 ]),
                 tracestate: "".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -177,7 +179,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: HashMap::new(),
                 tracestate: "".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
         ],
     )

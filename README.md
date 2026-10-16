@@ -13,13 +13,11 @@
 [apache-badge]: https://img.shields.io/badge/license-Apache-blue.svg
 [apache-url]: LICENSE
 
-
 # dd-trace-rs
 
 This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/), metrics and logging.
 It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and
 optimizations.
-
 
 ## Usage
 
@@ -173,6 +171,64 @@ logger_provider.shutdown();
 For more details, see the
 [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
 
+### Thread context sharing
+
+This tracer supports sharing the active context with an external
+(out-of-process) reader, typically the Full Host Profiler, correlating CPU
+profiles with spans. The implementation follows the [OTel
+specification][otep-4947], making the context visible to other compatible eBPF
+profilers or any OTel-compliant external reader.
+
+The thread-level context sharing is **Linux-only**, as per the current
+standard.
+
+To enable thread-level context sharing on Linux:
+
+1. Enable the `otel-thread-ctx` feature on your `datadog-opentelemetry` dependency.
+2. Depending on the type of your crate:
+
+   * If you're building an executable, add `datadog-opentelemetry` to your
+     `[build-dependencies]` as well (do not enable the `otel-thread-ctx`
+     feature for the build dependency):
+
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.2" }
+     ```
+
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
+     ```
+
+   * If you're building a Rust library (`(r)lib`), you'll have to ensure the
+     instructions above are applied to _every downstream executable that uses
+     your library_.
+   * If you're building a shared dynamic library (`(c)dylib`), please note that
+     **while the following instructions should work in most environments,
+     building a dynamic library with thread context support is currently
+     experimental at best**. In particular, a crate with both a binary target
+     and a (c)dylib target won't compile with the instructions below.
+
+     Add `datadog-opentelemetry` to your `[build-dependencies]` as well (do not
+     enable the `otel-thread-ctx` feature for the build dependency):
+
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.2" }
+     ```
+
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_dylib_build_instructions();
+     ```
+
+We are working on lifting the need for a custom build script in the future.
+
 ### Configuration
 
 Configuration can be passed either:
@@ -258,7 +314,6 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 ## Support
 
 * MSRV: 1.87
-
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
   version: 0.34
@@ -276,3 +331,8 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 * `logs-http` enabled the log provider, with HTTP OTLP export
 * `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
   subscriber is available
+* `otel-thread-ctx` enables [sharing contexts with external readers][otep-4947] (typically
+  an eBPF profiler). Executables additionally require a `build.rs` calling the build helper:
+  see the dedicated section above.
+
+[otep-4947]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4947-thread-ctx.md
