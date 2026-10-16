@@ -2479,6 +2479,14 @@ fn default_config() -> Config {
     }
 }
 
+fn uri_host(host: &str) -> Cow<'_, str> {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        Cow::Owned(format!("[{host}]"))
+    } else {
+        Cow::Borrowed(host)
+    }
+}
+
 /// Builder for constructing a [`Config`] instance.
 ///
 /// Use [`Config::builder()`] to create a new builder instance.
@@ -2508,7 +2516,7 @@ impl ConfigBuilder {
             } else {
                 let host = &config.agent_host.value();
                 let port = *config.trace_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.trace_agent_url.set_calculated(url);
         }
@@ -2529,7 +2537,7 @@ impl ConfigBuilder {
             } else {
                 let host = &config.dogstatsd_agent_host.value();
                 let port = *config.dogstatsd_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.dogstatsd_agent_url.set_calculated(url);
         }
@@ -4498,6 +4506,26 @@ mod tests {
             .build();
 
         assert_eq!(&*config.trace_agent_url(), "https://test-host");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_bracketed_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("[::1]".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[::1]:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("2001:db8:1::3".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[2001:db8:1::3]:4242");
     }
 
     #[test]
