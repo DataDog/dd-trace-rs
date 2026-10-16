@@ -117,7 +117,20 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     false,
                     TraceState::default(),
                 ),
-                vec![],
+                vec![
+                    KeyValue::new(
+                        "array",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "bools",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("nested", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("floats", opentelemetry::Value::Array(vec![1.5].into())),
+                ],
                 2,
             ),
             Link::new(
@@ -148,7 +161,15 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 trace_id: 12379813738877118345,
                 trace_id_high: 12379813738877118345,
                 span_id: 18364758544493064720,
-                attributes: HashMap::new(),
+                attributes: HashMap::from_iter([
+                    ("array.0".into(), "a".into()),
+                    ("array.1".into(), "b".into()),
+                    ("bools.0".into(), "true".into()),
+                    ("bools.1".into(), "false".into()),
+                    ("nested.0".into(), "1".into()),
+                    ("nested.1".into(), "2".into()),
+                    ("floats.0".into(), "1.5".into()),
+                ]),
                 tracestate: "".into(),
                 flags: SPAN_LINK_FLAGS_SET,
             },
