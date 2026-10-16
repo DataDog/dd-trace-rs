@@ -27,7 +27,7 @@ use opentelemetry::{
     Context,
 };
 
-use crate::{dd_warn, span_processor::TraceRegistry};
+use crate::{dd_error, span_processor::TraceRegistry};
 
 /// Observer-side view of an OTel [`Context`], stored in the context's `observer_view` slot.
 ///
@@ -163,11 +163,17 @@ impl ContextObserver for DatadogContextObserver {
 pub(crate) fn install_observer(registry: TraceRegistry) {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    if let Err(e) = libdd_otel_thread_ctx::sanity_check::sanity_check() {
+        dd_error!(
+            "OTel thread context: this binary may not expose its context to external readers properly. Thread context sharing requires a custom build step that appears to be missing; please refer to dd-trace-rs's README (sanity check failed: {e})"
+        );
+    }
+
     static IS_INIT: AtomicBool = AtomicBool::new(false);
 
     if IS_INIT.swap(true, Ordering::Relaxed) {
-        dd_warn!(
-            "Multiple initializations of the global tracer detected. This mode is not supported: the tracer should only be initialized once globally."
+        dd_error!(
+            "Multiple initializations of the global tracer detected. This mode is not supported: the tracer should only be initialized once globally. Thread context sharing might not work as expected"
         );
     } else {
         GlobalContextObserver::set(Arc::new(DatadogContextObserver::new(registry)));

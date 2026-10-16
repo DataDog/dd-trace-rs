@@ -365,6 +365,7 @@ fn build_trace_exporter(
         .set_tracer_version(config.tracer_version())
         .set_language(config.language())
         .set_language_version(config.language_version())
+        .set_language_interpreter("rustc")
         .set_service(&config.service())
         .set_output_format(TraceExporterOutputFormat::V04)
         .enable_health_metrics()

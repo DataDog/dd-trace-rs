@@ -1002,6 +1002,8 @@ pub fn logs() -> DatadogLogsBuilder {
     }
 }
 
+pub mod build;
+
 #[cfg(test)]
 mod startup_log_tests {
     use std::sync::Arc;

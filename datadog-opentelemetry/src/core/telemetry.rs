@@ -317,6 +317,7 @@ fn make_telemetry_worker(
         builder.config.session_id = inst.session_id;
         builder.config.root_session_id = inst.root_session_id;
         builder.config.parent_session_id = inst.parent_session_id;
+        builder.install_signature = config.install_signature();
         // builder.config.debug_enabled = true;
 
         builder.run::<NativeCapabilities>().map(|handle| {
