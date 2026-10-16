@@ -128,7 +128,15 @@ fn apply_http_error_statuses(dd_span: &mut DdSpan, cached_config: &CachedConfig)
     else {
         return;
     };
+    let was_error = dd_span.error != 0;
     dd_span.error = i32::from(error_statuses.contains(status_code));
+    if was_error && dd_span.error == 0 {
+        // The error tags describe the error that was just cleared. Any exception details are
+        // still in the span events.
+        for key in ["error.message", "error.type", "error.stack"] {
+            dd_span.meta.remove_slow(&SpanStr::from_static_str(key));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +187,44 @@ mod tests {
             error_after(&cached_config, span("client", Some("500"), 1)),
             0
         );
+    }
+
+    #[test]
+    fn test_http_error_statuses_clear_error_tags() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+        let error_tags = ["error.message", "error.type", "error.stack"];
+        let with_error_tags = |code| {
+            let mut span = span("server", Some(code), 1);
+            for key in error_tags {
+                span.meta.insert(
+                    SpanStr::from_static_str(key),
+                    SpanStr::from_static_str("boom"),
+                );
+            }
+            span
+        };
+
+        // Cleared error: the tags go with it
+        let mut cleared = with_error_tags("404");
+        apply_http_error_statuses(&mut cleared, &cached_config);
+        assert_eq!(cleared.error, 0);
+        for key in error_tags {
+            assert!(
+                cleared.meta.get(&SpanStr::from_static_str(key)).is_none(),
+                "{key} should be removed"
+            );
+        }
+
+        // Kept error: the tags stay
+        let mut kept = with_error_tags("500");
+        apply_http_error_statuses(&mut kept, &cached_config);
+        assert_eq!(kept.error, 1);
+        for key in error_tags {
+            assert!(
+                kept.meta.get(&SpanStr::from_static_str(key)).is_some(),
+                "{key} should be kept"
+            );
+        }
     }
 
     #[test]
