@@ -11,7 +11,7 @@ use tracing::debug;
 
 use crate::inference::{
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        resolve_service_name, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
@@ -72,23 +72,29 @@ impl Trigger for EventBridgeEvent {
         // nanosecond range would also overflow in milliseconds, so it is left unknown.
         let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
 
-        let resource_name = self.get_specific_identifier();
+        let resource_name = self
+            .carrier()
+            .get(DATADOG_RESOURCE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or(&self.source);
         let start_time = self
             .carrier()
             .get(DATADOG_START_TIME_KEY)
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &resource_name,
+            resource_name,
+            "lambda_eventbridge",
+            resource_name,
             "eventbridge",
             aws_service_representation_enabled,
         );
 
         span.name = String::from("aws.eventbridge");
         span.service.clone_from(&service_name);
-        span.resource = resource_name;
+        span.resource = resource_name.to_owned();
         span.r#type = String::from("web");
         span.start = start_time;
         span.meta.extend(HashMap::from([
@@ -114,19 +120,6 @@ impl Trigger for EventBridgeEvent {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for EventBridgeEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.carrier()
-            .get(DATADOG_RESOURCE_NAME_KEY)
-            .unwrap_or(&self.source)
-            .clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_eventbridge"
     }
 }
 

@@ -12,7 +12,7 @@ use tracing::debug;
 
 use crate::inference::{
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        resolve_service_name, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     S_TO_NS,
 };
@@ -69,11 +69,17 @@ impl Trigger for KinesisRecord {
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
     ) {
-        let stream_name = self.get_specific_identifier();
+        let stream_name = self
+            .event_source_arn
+            .split('/')
+            .next_back()
+            .unwrap_or_default();
         let shard_id = self.event_id.split(':').next().unwrap_or_default();
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &stream_name,
+            stream_name,
+            "lambda_kinesis",
+            stream_name,
             "kinesis",
             aws_service_representation_enabled,
         );
@@ -81,11 +87,11 @@ impl Trigger for KinesisRecord {
         span.name = String::from("aws.kinesis");
         span.service = service_name;
         span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
-        span.resource.clone_from(&stream_name);
+        span.resource = stream_name.to_owned();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
-            ("stream_name".to_string(), stream_name.clone()),
+            ("stream_name".to_string(), stream_name.to_owned()),
             ("shard_id".to_string(), shard_id.to_string()),
             (
                 "event_source_arn".to_string(),
@@ -126,20 +132,6 @@ impl Trigger for KinesisRecord {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for KinesisRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split('/')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_kinesis"
     }
 }
 

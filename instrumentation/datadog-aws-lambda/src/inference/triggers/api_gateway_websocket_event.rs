@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-use super::{http_trigger_tags, http_url, ServiceNameResolver};
+use super::{http_trigger_tags, http_url, resolve_service_name};
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -72,8 +72,10 @@ impl Trigger for APIGatewayWebSocketEvent {
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_api_gateway",
             &self.request_context.domain_name,
             "api_gateway_websocket",
             aws_service_representation_enabled,
@@ -142,16 +144,6 @@ impl Trigger for APIGatewayWebSocketEvent {
 
     fn get_carrier(&self) -> HashMap<String, String> {
         self.headers.clone()
-    }
-}
-
-impl ServiceNameResolver for APIGatewayWebSocketEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_api_gateway"
     }
 }
 

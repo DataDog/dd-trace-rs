@@ -5,7 +5,7 @@ use super::{is_async_http, HttpMetadata};
 use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
-    triggers::{lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger},
+    triggers::{lowercase_key, parameterize_api_resource, resolve_service_name, Trigger},
     MS_TO_NS,
 };
 use serde::Deserialize;
@@ -92,8 +92,10 @@ impl Trigger for APIGatewayRestEvent {
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_api_gateway",
             &self.request_context.domain_name,
             &self.request_context.domain_name,
             aws_service_representation_enabled,
@@ -156,16 +158,6 @@ impl Trigger for APIGatewayRestEvent {
 
     fn get_carrier(&self) -> HashMap<String, String> {
         self.headers.clone()
-    }
-}
-
-impl ServiceNameResolver for APIGatewayRestEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_api_gateway"
     }
 }
 

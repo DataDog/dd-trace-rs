@@ -13,7 +13,7 @@ use tracing::debug;
 use crate::inference::{
     base64_to_string,
     triggers::{
-        event_bridge_event::EventBridgeEvent, ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY,
+        event_bridge_event::EventBridgeEvent, resolve_service_name, Trigger, DATADOG_CARRIER_KEY,
         FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
@@ -110,7 +110,12 @@ impl Trigger for SnsRecord {
         aws_service_representation_enabled: bool,
     ) {
         debug!("Enriching an Inferred Span for an SNS Event");
-        let resource_name = self.get_specific_identifier();
+        let resource_name = self
+            .sns
+            .topic_arn
+            .split(':')
+            .next_back()
+            .unwrap_or_default();
 
         let start_time = self
             .sns
@@ -118,21 +123,23 @@ impl Trigger for SnsRecord {
             .timestamp_nanos_opt()
             .unwrap_or((self.sns.timestamp.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            resource_name,
+            "lambda_sns",
+            resource_name,
             "sns",
             aws_service_representation_enabled,
         );
 
         span.name = "aws.sns".to_string();
         span.service.clone_from(&service_name);
-        span.resource.clone_from(&resource_name);
+        span.resource = resource_name.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend([
             ("operation_name".to_string(), "aws.sns".to_string()),
-            ("topicname".to_string(), resource_name),
+            ("topicname".to_string(), resource_name.to_owned()),
             ("topic_arn".to_string(), self.sns.topic_arn.clone()),
             ("message_id".to_string(), self.sns.message_id.clone()),
             ("type".to_string(), self.sns.r#type.clone()),
@@ -183,21 +190,6 @@ impl Trigger for SnsRecord {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for SnsRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.sns
-            .topic_arn
-            .split(':')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_sns"
     }
 }
 

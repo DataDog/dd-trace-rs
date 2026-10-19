@@ -1,7 +1,9 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::inference::triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
+use crate::inference::triggers::{
+    resolve_service_name, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+};
 use crate::inference::SpanData as Span;
 use crate::inference::MS_TO_NS;
 use serde::{de::Error, Deserialize, Deserializer};
@@ -148,10 +150,13 @@ impl Trigger for MSKEvent {
     ) {
         debug!("Enriching an Inferred Span for an MSK event");
 
+        let cluster_name = self.event_source_arn.split('/').nth(1).unwrap_or_default();
         span.name = String::from("aws.msk");
-        span.service = self.resolve_service_name(
+        span.service = resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            cluster_name,
+            "lambda_msk",
+            cluster_name,
             "msk",
             aws_service_representation_enabled,
         );
@@ -188,20 +193,6 @@ impl Trigger for MSKEvent {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for MSKEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split('/')
-            .nth(1)
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_msk"
     }
 }
 

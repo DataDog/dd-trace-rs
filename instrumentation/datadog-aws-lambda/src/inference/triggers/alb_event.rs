@@ -1,7 +1,6 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use super::ServiceNameResolver;
 use crate::inference::triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use crate::inference::SpanData as Span;
 use serde::Deserialize;
@@ -91,20 +90,6 @@ impl Trigger for ALBEvent {
             }
         }
         flat_map
-    }
-}
-
-impl ServiceNameResolver for ALBEvent {
-    fn get_specific_identifier(&self) -> String {
-        // arn is of format:
-        // arn:aws:elasticloadbalancing:<region>:<account-id>:targetgroup/<alb-name>/<some-uid>
-        let arn = &self.request_context.elb.target_group_arn;
-
-        arn.split('/').nth(1).unwrap_or_default().to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_application_load_balancer"
     }
 }
 

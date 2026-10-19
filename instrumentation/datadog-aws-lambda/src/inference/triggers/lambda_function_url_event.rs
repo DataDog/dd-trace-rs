@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::inference::{
     get_aws_partition_by_region,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger},
+    triggers::{lowercase_key, resolve_service_name, Trigger},
     MS_TO_NS,
 };
 
@@ -90,8 +90,10 @@ impl Trigger for LambdaFunctionUrlEvent {
 
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_url",
             &self.request_context.domain_name,
             &self.request_context.domain_name,
             aws_service_representation_enabled,
@@ -129,16 +131,6 @@ impl Trigger for LambdaFunctionUrlEvent {
 
     fn is_async(&self) -> bool {
         is_async_http(&self.headers)
-    }
-}
-
-impl ServiceNameResolver for LambdaFunctionUrlEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_url"
     }
 }
 

@@ -7,8 +7,9 @@ use crate::inference::{
     base64_to_string,
     triggers::{
         event_bridge_event::EventBridgeEvent,
+        resolve_service_name,
         sns_event::{SnsEntity, SnsRecord},
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
@@ -123,7 +124,11 @@ impl Trigger for SqsRecord {
         aws_service_representation_enabled: bool,
     ) {
         debug!("Enriching an Inferred Span for an SQS Event");
-        let resource = self.get_specific_identifier();
+        let resource = self
+            .event_source_arn
+            .split(':')
+            .next_back()
+            .unwrap_or_default();
         let start_time = (self
             .attributes
             .sent_timestamp
@@ -131,16 +136,18 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            resource,
+            "lambda_sqs",
+            resource,
             "sqs",
             aws_service_representation_enabled,
         );
 
         span.name = "aws.sqs".to_string();
         span.service.clone_from(&service_name);
-        span.resource = resource;
+        span.resource = resource.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
@@ -227,20 +234,6 @@ impl Trigger for SqsRecord {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for SqsRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split(':')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_sqs"
     }
 }
 

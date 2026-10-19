@@ -110,17 +110,6 @@ fn is_async_http(headers: &HashMap<String, String>) -> bool {
         .is_some_and(|value| value == "Event")
 }
 
-/// Resolves the service name for a given trigger depending on
-/// service mapping configuration.
-pub trait ServiceNameResolver {
-    /// Get the specific service name for this trigger type, it will
-    /// be used as a key to resolve the service name
-    fn get_specific_identifier(&self) -> String;
-
-    /// Get the generic service mapping key for the trigger
-    fn get_generic_identifier(&self) -> &'static str;
-}
-
 #[must_use]
 pub fn parameterize_api_resource(resource: &str) -> String {
     // curly braces are used for APIGW parameters feature
@@ -168,20 +157,28 @@ pub fn parameterize_api_resource(resource: &str) -> String {
     result.join("/")
 }
 
-#[must_use]
-pub fn get_default_service_name(
+fn resolve_service_name(
+    service_mapping: &HashMap<String, String>,
+    specific_identifier: &str,
+    generic_identifier: &str,
     instance_name: &str,
     fallback: &str,
     aws_service_representation_enabled: bool,
 ) -> String {
-    if !aws_service_representation_enabled {
-        return fallback.to_string();
-    }
-
-    instance_name.to_string()
+    let default = if aws_service_representation_enabled {
+        instance_name
+    } else {
+        fallback
+    };
+    service_mapping
+        .get(specific_identifier)
+        .or_else(|| service_mapping.get(generic_identifier))
+        .map(String::as_str)
+        .unwrap_or(default)
+        .to_owned()
 }
 
-pub trait Trigger: ServiceNameResolver {
+pub trait Trigger {
     fn new(payload: Value) -> Option<Self>
     where
         Self: Sized;
@@ -201,27 +198,6 @@ pub trait Trigger: ServiceNameResolver {
 
     fn get_dd_resource_key(&self, _region: &str) -> Option<String> {
         None
-    }
-
-    /// Default implementation for service name resolution
-    fn resolve_service_name(
-        &self,
-        service_mapping: &HashMap<String, String>,
-        instance_name: &str,
-        fallback: &str,
-        aws_service_representation_enabled: bool,
-    ) -> String {
-        service_mapping
-            .get(&self.get_specific_identifier())
-            .or_else(|| service_mapping.get(self.get_generic_identifier()))
-            .cloned()
-            .unwrap_or_else(|| {
-                get_default_service_name(
-                    instance_name,
-                    fallback,
-                    aws_service_representation_enabled,
-                )
-            })
     }
 }
 

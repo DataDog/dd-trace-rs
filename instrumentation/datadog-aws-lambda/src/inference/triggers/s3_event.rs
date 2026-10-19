@@ -10,7 +10,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::inference::{
-    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{resolve_service_name, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
     MS_TO_NS,
 };
 
@@ -74,28 +74,30 @@ impl Trigger for S3Record {
         aws_service_representation_enabled: bool,
     ) {
         debug!("Enriching an InferredSpan span with S3 event");
-        let bucket_name = self.get_specific_identifier();
+        let bucket_name = self.s3.bucket.name.as_str();
         let start_time = self
             .event_time
             .timestamp_nanos_opt()
             .unwrap_or((self.event_time.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &bucket_name,
+            bucket_name,
+            "lambda_s3",
+            bucket_name,
             "s3",
             aws_service_representation_enabled,
         );
 
         span.name = String::from("aws.s3");
         span.service = service_name;
-        span.resource.clone_from(&bucket_name);
+        span.resource = bucket_name.to_owned();
         span.r#type = String::from("web");
         span.start = start_time;
         span.meta.extend(HashMap::from([
             ("operation_name".to_string(), String::from("aws.s3")),
             ("event_name".to_string(), self.event_name.clone()),
-            ("bucketname".to_string(), bucket_name),
+            ("bucketname".to_string(), bucket_name.to_owned()),
             ("bucket_arn".to_string(), self.s3.bucket.arn.clone()),
             ("object_key".to_string(), self.s3.object.key.clone()),
         ]));
@@ -124,16 +126,6 @@ impl Trigger for S3Record {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for S3Record {
-    fn get_specific_identifier(&self) -> String {
-        self.s3.bucket.name.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_s3"
     }
 }
 

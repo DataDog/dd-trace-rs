@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use tracing::debug;
 
 use crate::inference::{
-    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{resolve_service_name, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
     S_TO_NS,
 };
 
@@ -73,14 +73,16 @@ impl Trigger for DynamoDbRecord {
         aws_service_representation_enabled: bool,
     ) {
         debug!("Enriching an Inferred Span for a DynamoDB event");
-        let table_name = self.get_specific_identifier();
+        let table_name = self.event_source_arn.split('/').nth(1).unwrap_or_default();
         let resource = format!("{} {}", self.event_name.clone(), table_name);
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &table_name,
+            table_name,
+            "lambda_dynamodb",
+            table_name,
             "dynamodb",
             aws_service_representation_enabled,
         );
@@ -107,7 +109,7 @@ impl Trigger for DynamoDbRecord {
                 "stream_view_type".to_string(),
                 self.dynamodb.stream_view_type.clone(),
             ),
-            ("table_name".to_string(), table_name.clone()),
+            ("table_name".to_string(), table_name.to_owned()),
         ]));
     }
 
@@ -128,20 +130,6 @@ impl Trigger for DynamoDbRecord {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for DynamoDbRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split('/')
-            .nth(1)
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_dynamodb"
     }
 }
 

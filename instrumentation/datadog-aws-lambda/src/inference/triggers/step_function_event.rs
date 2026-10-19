@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::inference::triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
+use crate::inference::triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use datadog_opentelemetry::propagation::{
     context::{Sampling, SpanContext},
     datadog::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
@@ -233,16 +233,6 @@ impl StepFunctionEvent {
         } else {
             result
         }
-    }
-}
-
-impl ServiceNameResolver for StepFunctionEvent {
-    fn get_specific_identifier(&self) -> String {
-        String::new()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_stepfunction"
     }
 }
 
