@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::debug;
 
@@ -19,7 +19,7 @@ use crate::inference::{
     MS_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SnsRecord {
     #[serde(rename = "Sns")]
     pub sns: SnsEntity,
@@ -53,7 +53,7 @@ impl SnsRecord {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SnsEntity {
     #[serde(rename = "MessageId")]
     pub message_id: String,
@@ -71,7 +71,7 @@ pub struct SnsEntity {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct MessageAttribute {
     #[serde(rename = "Type")]
     pub r#type: String,

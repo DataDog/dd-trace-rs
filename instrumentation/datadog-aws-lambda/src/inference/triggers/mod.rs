@@ -9,8 +9,6 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-mod serde_utils;
-
 pub mod alb_event;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;

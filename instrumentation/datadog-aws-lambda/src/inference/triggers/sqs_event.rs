@@ -13,25 +13,19 @@ use crate::inference::{
     MS_TO_NS,
 };
 use datadog_opentelemetry::propagation::context::{Sampling, SpanContext};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SqsRecord {
-    #[serde(rename = "messageId")]
-    pub message_id: String,
     #[serde(rename = "receiptHandle")]
     pub receipt_handle: String,
     pub attributes: Attributes,
     #[serde(rename = "messageAttributes")]
     pub message_attributes: HashMap<String, MessageAttribute>,
-    #[serde(rename = "md5OfBody")]
-    pub md5_of_body: String,
-    #[serde(rename = "eventSource")]
-    pub event_source: String,
     #[serde(rename = "eventSourceARN")]
     pub event_source_arn: String,
     #[serde(rename = "awsRegion")]
@@ -73,24 +67,18 @@ impl SqsRecord {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct MessageAttribute {
     #[serde(rename = "stringValue")]
     pub string_value: Option<String>,
     #[serde(rename = "binaryValue")]
     pub binary_value: Option<String>,
-    #[serde(rename = "stringListValues")]
-    pub string_list_values: Option<Vec<String>>,
-    #[serde(rename = "binaryListValues")]
-    pub binary_list_values: Option<Vec<String>>,
     #[serde(rename = "dataType")]
     pub data_type: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct Attributes {
-    #[serde(rename = "ApproximateFirstReceiveTimestamp")]
-    pub approximate_first_receive_timestamp: String,
     #[serde(rename = "ApproximateReceiveCount")]
     pub approximate_receive_count: String,
     #[serde(rename = "SentTimestamp")]
@@ -345,25 +333,19 @@ mod tests {
             ("_datadog".to_string(), MessageAttribute {
                 string_value: Some("{\"x-datadog-trace-id\":\"2684756524522091840\",\"x-datadog-parent-id\":\"7431398482019833808\",\"x-datadog-sampling-priority\":\"1\"}".to_string()),
                 binary_value: None,
-                string_list_values: Some(vec![]),
-                binary_list_values: Some(vec![]),
                 data_type: "String".to_string(),
             })
         ]);
 
         let expected = SqsRecord {
-            message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
             receipt_handle: "MessageReceiptHandle".to_string(),
             attributes: Attributes {
-                approximate_first_receive_timestamp: "1523232000001".to_string(),
                 approximate_receive_count: "1".to_string(),
                 sent_timestamp: "1523232000000".to_string(),
                 sender_id: "123456789012".to_string(),
                 aws_trace_header: None,
             },
             message_attributes,
-            md5_of_body: "{{{md5_of_body}}}".to_string(),
-            event_source: "aws:sqs".to_string(),
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             aws_region: "us-east-1".to_string(),
             body: "Hello from SQS!".to_string(),

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::inference::{
@@ -13,18 +13,15 @@ use crate::inference::{
     MS_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LambdaFunctionUrlEvent {
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
-    pub cookies: Option<Vec<String>>,
-    #[serde(default)]
-    pub query_string_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub http: Http,
@@ -35,7 +32,7 @@ pub struct RequestContext {
     pub api_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Http {
     pub method: String,
@@ -205,7 +202,6 @@ mod tests {
             .expect("Failed to deserialize into LambdaFunctionUrlEvent");
 
         let expected = LambdaFunctionUrlEvent {
-            query_string_parameters: HashMap::default(),
             headers: HashMap::from([
                 ("accept".to_string(), "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9".to_string()),
                 ("accept-language".to_string(), "en-US,en;q=0.9".to_string()),
@@ -235,7 +231,6 @@ mod tests {
                 ("host".to_string(), "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com".to_string()),
 
             ]),
-            cookies: None,
             request_context: RequestContext {
                 request_id: String::from("ec4d58f8-2b8b-4ceb-a1d5-2be7bff58505"),
                 time_epoch: 1_637_169_449_721,

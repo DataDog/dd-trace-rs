@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::debug;
 
@@ -14,10 +14,8 @@ use crate::inference::{
     MS_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct S3Record {
-    #[serde(rename = "eventSource")]
-    pub event_source: String,
     #[serde(rename = "eventTime")]
     pub event_time: DateTime<Utc>,
     #[serde(rename = "eventName")]
@@ -25,19 +23,19 @@ pub struct S3Record {
     pub s3: S3Entity,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct S3Entity {
     pub bucket: S3Bucket,
     pub object: S3Object,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct S3Bucket {
     pub name: String,
     pub arn: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct S3Object {
     pub key: String,
     pub size: Option<i64>,
@@ -152,7 +150,6 @@ mod tests {
         let result = S3Record::new(payload).expect("Failed to deserialize into Record");
 
         let expected = S3Record {
-            event_source: String::from("aws:s3"),
             event_time: DateTime::parse_from_rfc3339("2023-01-07T00:00:00.000Z")
                 .unwrap()
                 .with_timezone(&Utc),

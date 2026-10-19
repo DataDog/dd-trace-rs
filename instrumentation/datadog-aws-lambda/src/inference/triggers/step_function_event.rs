@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
@@ -18,7 +18,7 @@ use super::DATADOG_CARRIER_KEY;
 
 pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct StepFunctionEvent {
     #[serde(rename = "Execution")]
     pub execution: Execution,
@@ -32,11 +32,9 @@ pub struct StepFunctionEvent {
     pub trace_tags: Option<String>,
     #[serde(rename = "RootExecutionId")]
     pub root_execution_id: Option<String>,
-    #[serde(rename = "serverless-version")]
-    pub serverless_version: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct Execution {
     #[serde(rename = "Id")]
     id: String,
@@ -44,7 +42,7 @@ pub struct Execution {
     redrive_count: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct State {
     #[serde(rename = "Name")]
     name: String,
@@ -54,7 +52,7 @@ pub struct State {
     retry_count: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct StateMachine {
     #[serde(rename = "Id")]
     id: String,
@@ -283,7 +281,6 @@ mod tests {
             trace_id: None,
             trace_tags: None,
             root_execution_id: None,
-            serverless_version: None,
         };
 
         for file in test_files {
@@ -322,7 +319,6 @@ mod tests {
             root_execution_id: Some(String::from(
                 "arn:aws:states:sa-east-1:425362996713:execution:invokeJavaLambda:4875aba4-ae31-4a4c-bf8a-63e9eee31dad",
             )),
-            serverless_version: Some(String::from("v1")),
         };
 
         for file in test_files {
@@ -359,7 +355,6 @@ mod tests {
             trace_id: Some(String::from("5821803790426892636")),
             trace_tags: Some(String::from("_dd.p.dm=-0,_dd.p.tid=672a7cb100000000")),
             root_execution_id: None,
-            serverless_version: Some(String::from("v1")),
         };
 
         for file in test_files {

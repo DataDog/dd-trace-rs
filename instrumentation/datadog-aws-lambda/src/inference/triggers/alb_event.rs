@@ -4,42 +4,31 @@
 use super::ServiceNameResolver;
 use crate::inference::triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use crate::inference::SpanData as Span;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ALBEvent {
     pub request_context: RequestContext,
     pub http_method: String,
-    pub path: Option<String>,
 
     // Either one OR the other is present, not both
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub multi_value_headers: HashMap<String, Vec<String>>,
-
-    // Either one OR the other is present, not both
-    #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub query_parameters: HashMap<String, String>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub multi_value_query_parameters: HashMap<String, Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct RequestContext {
     pub elb: Elb,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Elb {
     pub target_group_arn: String,
@@ -138,7 +127,6 @@ mod tests {
                 }
             },
             http_method: "GET".to_string(),
-            path: Some("/".to_string()),
             headers: HashMap::from([
                 ("accept".to_string(), "*/*".to_string()),
                 ("accept-encoding".to_string(), "gzip, deflate".to_string()),
@@ -159,8 +147,6 @@ mod tests {
                 ("x-forwarded-proto".to_string(), "http".to_string()),
             ]),
             multi_value_headers: HashMap::default(),
-            query_parameters: HashMap::default(),
-            multi_value_query_parameters: HashMap::default(),
         };
 
         assert_eq!(result, expected);

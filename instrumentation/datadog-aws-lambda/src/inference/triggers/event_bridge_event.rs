@@ -3,7 +3,7 @@
 
 use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -19,20 +19,13 @@ use crate::inference::{
 const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
 const DATADOG_RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct EventBridgeEvent {
-    pub id: String,
-    pub version: String,
-    pub account: String,
     pub time: DateTime<Utc>,
-    pub region: String,
-    pub resources: Vec<String>,
     pub source: String,
     #[serde(rename = "detail-type")]
     pub detail_type: String,
     pub detail: Value,
-    #[serde(rename = "replay-name")]
-    pub replay_name: Option<String>,
     /// The Datadog carrier in `detail`, deserialized on first use.
     #[serde(skip)]
     carrier: OnceCell<HashMap<String, String>>,
@@ -150,14 +143,9 @@ mod tests {
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
         let expected = EventBridgeEvent {
-            id: "bd3c8258-8d30-007c-2562-64715b2d0ea8".to_string(),
-            version: "0".to_string(),
-            account: "601427279990".to_string(),
             time: DateTime::parse_from_rfc3339("2024-11-09T08:22:15Z")
                 .expect("Failed to parse time")
                 .with_timezone(&Utc),
-            region: "eu-west-1".to_string(),
-            resources: vec![],
             source: "my.event".to_string(),
             detail_type: "UserSignUp".to_string(),
             detail: serde_json::json!({
@@ -171,7 +159,6 @@ mod tests {
                     "x-datadog-start-time": "1731183820135"
                 }
             }),
-            replay_name: None,
             carrier: OnceCell::new(),
         };
 

@@ -5,35 +5,25 @@ use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
     triggers::{
-        lowercase_key, parameterize_api_resource, serde_utils::nullable_map, ServiceNameResolver,
-        Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct APIGatewayRestEvent {
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
-    #[serde(deserialize_with = "lowercase_key")]
-    pub multi_value_headers: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "nullable_map")]
-    #[serde(rename = "multiValueQueryStringParameters")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub query_parameters: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "nullable_map")]
-    pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub stage: String,
@@ -50,7 +40,7 @@ pub struct RequestContext {
     pub identity: Identity,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub source_ip: String,
@@ -271,21 +261,6 @@ mod tests {
                 ("header1".to_string(), "value1".to_string()),
                 ("header2".to_string(), "value2".to_string()),
             ]),
-            multi_value_headers: HashMap::from([
-                ("header1".to_string(), vec!["value1".to_string()]),
-                (
-                    "header2".to_string(),
-                    vec!["value1".to_string(), "value2".to_string()],
-                ),
-            ]),
-            query_parameters: HashMap::from([
-                (
-                    "parameter1".to_string(),
-                    vec!["value1".to_string(), "value2".to_string()],
-                ),
-                ("parameter2".to_string(), vec!["value".to_string()]),
-            ]),
-            path_parameters: HashMap::default(),
             request_context: RequestContext {
                 stage: "$default".to_string(),
                 request_id: "id=".to_string(),

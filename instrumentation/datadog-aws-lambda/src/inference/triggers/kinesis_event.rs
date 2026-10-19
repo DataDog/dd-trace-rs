@@ -5,7 +5,7 @@
 use crate::inference::SpanData as Span;
 use base64::engine::general_purpose;
 use base64::Engine;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{from_slice, Value};
 use std::collections::HashMap;
 use tracing::debug;
@@ -17,7 +17,7 @@ use crate::inference::{
     S_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct KinesisRecord {
     #[serde(rename = "eventID")]
     pub event_id: String,
@@ -30,7 +30,7 @@ pub struct KinesisRecord {
     pub kinesis: KinesisEntity,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct KinesisEntity {
     #[serde(rename = "approximateArrivalTimestamp")]
     pub approximate_arrival_timestamp: f64,

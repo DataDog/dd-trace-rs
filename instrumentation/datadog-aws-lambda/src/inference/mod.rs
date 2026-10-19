@@ -225,6 +225,67 @@ mod tests {
     }
 
     #[test]
+    fn irrelevant_fields_do_not_affect_inference() {
+        let inferrer = SpanInferrer::new(InferConfig::default());
+        for (fixture, object_path, fields) in [
+            (
+                "api_gateway_http_event.json",
+                "",
+                &["cookies", "pathParameters", "queryStringParameters"][..],
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "",
+                &[
+                    "multiValueHeaders",
+                    "multiValueQueryStringParameters",
+                    "pathParameters",
+                ][..],
+            ),
+            (
+                "sqs_event.json",
+                "/Records/0",
+                &["messageId", "md5OfBody"][..],
+            ),
+            ("dynamodb_event.json", "/Records/0/dynamodb", &["Keys"][..]),
+            (
+                "eventbridge_event.json",
+                "",
+                &[
+                    "id",
+                    "version",
+                    "account",
+                    "region",
+                    "resources",
+                    "replay-name",
+                ][..],
+            ),
+        ] {
+            let original = read_json_file(fixture);
+            let expected = inferrer.infer_span(&original).unwrap();
+            for malformed in [false, true] {
+                let mut payload: Value = serde_json::from_str(&original).unwrap();
+                let object = payload
+                    .pointer_mut(object_path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap();
+                for field in fields {
+                    if malformed {
+                        object.insert((*field).into(), serde_json::json!({"irrelevant": true}));
+                    } else {
+                        object.remove(*field);
+                    }
+                }
+                let result = inferrer.infer_span(&payload.to_string()).unwrap();
+                assert_eq!(result.span_data, expected.span_data, "{fixture}");
+                assert_eq!(result.trigger_tags, expected.trigger_tags, "{fixture}");
+                assert_eq!(result.carrier, expected.carrier, "{fixture}");
+            }
+        }
+    }
+
+    #[test]
     fn partition_matches_aws_partition_prefixes() {
         for (region, partition) in [
             ("us-east-1", "aws"),

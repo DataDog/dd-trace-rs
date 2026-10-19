@@ -9,30 +9,22 @@ use crate::{
         MS_TO_NS,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
 use super::ServiceNameResolver;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct APIGatewayWebSocketEvent {
-    pub path: Option<String>,
     #[serde(deserialize_with = "lowercase_key", default)]
     pub headers: HashMap<String, String>,
-    #[serde(deserialize_with = "lowercase_key", default)]
-    pub multi_value_headers: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(rename = "multiValueQueryStringParameters")]
-    pub query_parameters: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub route_key: String,
@@ -40,20 +32,11 @@ pub struct RequestContext {
     #[serde(rename = "requestTimeEpoch")]
     pub time_epoch: i64,
     pub request_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http_method: Option<String>,
     pub api_id: String,
     pub stage: String,
     pub connection_id: String,
     pub event_type: String,
     pub message_direction: String,
-    pub identity: Identity,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Identity {
-    pub source_ip: Option<String>,
 }
 
 impl Trigger for APIGatewayWebSocketEvent {
@@ -204,25 +187,17 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "MESSAGE".to_string(),
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 
@@ -237,25 +212,17 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "MESSAGE".to_string(),
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 
@@ -270,26 +237,18 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "production".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "DISCONNECT".to_string(), /* Note: The example payload shows MESSAGE
                                                        * event type, not DISCONNECT */
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 

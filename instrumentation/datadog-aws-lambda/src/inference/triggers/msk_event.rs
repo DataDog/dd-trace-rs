@@ -4,12 +4,12 @@
 use crate::inference::triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use crate::inference::SpanData as Span;
 use crate::inference::MS_TO_NS;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MSKEvent {
     pub event_source: String,
@@ -17,7 +17,7 @@ pub struct MSKEvent {
     pub records: HashMap<String, Vec<MSKRecord>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct MSKRecord {
     pub topic: String,
     pub partition: i32,

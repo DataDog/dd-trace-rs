@@ -10,29 +10,23 @@ use crate::inference::{
     },
     MS_TO_NS,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct APIGatewayHttpEvent {
     #[serde(default)]
     pub route_key: String,
-    pub cookies: Option<Vec<String>>,
     #[serde(default)]
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     pub request_context: RequestContext,
-    #[serde(default)]
-    pub path_parameters: HashMap<String, String>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub query_string_parameters: HashMap<String, String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     #[serde(default)]
@@ -48,7 +42,7 @@ pub struct RequestContext {
     pub http: RequestContextHTTP,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContextHTTP {
     pub method: String,
@@ -249,7 +243,6 @@ mod tests {
 
         let expected = APIGatewayHttpEvent {
             route_key: "GET /httpapi/get".to_string(),
-            cookies: None,
             headers: HashMap::from([
                 ("accept".to_string(), "*/*".to_string()),
                 ("content-length".to_string(), "0".to_string()),
@@ -283,8 +276,6 @@ mod tests {
                     user_agent: "curl/7.64.1".to_string(),
                 },
             },
-            path_parameters: HashMap::default(),
-            query_string_parameters: HashMap::default(),
         };
 
         assert_eq!(result, expected);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::inference::SpanData as Span;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
@@ -12,7 +12,7 @@ use crate::inference::{
     S_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbRecord {
     #[serde(rename = "dynamodb")]
     pub dynamodb: DynamoDbEntity,
@@ -26,7 +26,7 @@ pub struct DynamoDbRecord {
     pub event_source_arn: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbEntity {
     #[serde(rename = "ApproximateCreationDateTime")]
     pub approximate_creation_date_time: f64,
@@ -34,17 +34,6 @@ pub struct DynamoDbEntity {
     pub size_bytes: i64,
     #[serde(rename = "StreamViewType")]
     pub stream_view_type: String,
-    #[serde(rename = "Keys")]
-    pub keys: HashMap<String, AttributeValue>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-// An attribute value is formatted like this: {"S": "string_value"}
-// and it can be a string, number (as a string), or binary value (as a Base64-encoded string).
-pub enum AttributeValue {
-    S(String),
-    N(String),
-    B(String),
 }
 
 impl Trigger for DynamoDbRecord {
@@ -167,15 +156,11 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = DynamoDbRecord::new(payload).expect("Failed to deserialize into Record");
 
-        let mut expected_keys = HashMap::new();
-        expected_keys.insert("Id".to_string(), AttributeValue::N("101".to_string()));
-
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
                 approximate_creation_date_time: 1_428_537_600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
-                keys: expected_keys,
             },
             event_id: String::from("c4ca4238a0b923820dcc509a6f75849b"),
             event_name: String::from("INSERT"),
