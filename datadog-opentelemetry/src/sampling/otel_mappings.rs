@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use bumpalo::Bump;
 
 use crate::mappings::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
+    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource,
     get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan,
 };
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
@@ -171,7 +171,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     }
 
     fn resource(&self) -> Cow<'_, str> {
-        Cow::Borrowed(get_otel_resource_v2(self))
+        Cow::Borrowed(get_otel_resource(self))
     }
 
     fn status_code(&self) -> Option<u32> {
