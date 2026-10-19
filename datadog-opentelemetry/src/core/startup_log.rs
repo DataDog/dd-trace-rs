@@ -13,14 +13,14 @@ const STARTUP_LOG_PREFIX: &str = "DATADOG TRACER CONFIGURATION";
 
 /// Logs the effective configuration, if `DD_TRACE_STARTUP_LOGS` is enabled.
 ///
-/// The banner is logged at warn level regardless of `DD_LOG_LEVEL`, since it is enabled by its
+/// The banner is logged at info level regardless of `DD_LOG_LEVEL`, since it is enabled by its
 /// own setting (see [`dd_log_always!`]).
 pub(crate) fn log_startup_configuration(config: &Config) {
     if !config.trace_startup_logs() {
         return;
     }
     dd_log_always!(
-        Level::Warn,
+        Level::Info,
         "{STARTUP_LOG_PREFIX} {}",
         startup_configuration(config)
     );
