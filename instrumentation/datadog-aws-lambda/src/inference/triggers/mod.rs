@@ -45,6 +45,71 @@ static ULID_UUID_GUID: LazyLock<Option<Regex>> = LazyLock::new(|| {
     .ok()
 });
 
+struct HttpMetadata<'a> {
+    domain: &'a str,
+    path: &'a str,
+    method: &'a str,
+    protocol: &'a str,
+    source_ip: &'a str,
+    user_agent: &'a str,
+    request_id: &'a str,
+}
+
+impl HttpMetadata<'_> {
+    fn span_tags(&self) -> HashMap<String, String> {
+        HashMap::from([
+            ("endpoint".into(), self.path.into()),
+            ("http.url".into(), http_url(self.domain, self.path)),
+            ("http.method".into(), self.method.into()),
+            ("http.protocol".into(), self.protocol.into()),
+            ("http.source_ip".into(), self.source_ip.into()),
+            ("http.user_agent".into(), self.user_agent.into()),
+            ("request_id".into(), self.request_id.into()),
+        ])
+    }
+
+    fn trigger_tags(
+        &self,
+        source: &str,
+        headers: &HashMap<String, String>,
+        user_agent: Option<&str>,
+    ) -> HashMap<String, String> {
+        let mut tags = http_trigger_tags(self.domain, self.path, source, headers);
+        tags.insert("http.method".into(), self.method.into());
+        if let Some(user_agent) = user_agent {
+            tags.insert("http.user_agent".into(), user_agent.into());
+        }
+        tags
+    }
+}
+
+fn http_url(domain: &str, path: &str) -> String {
+    format!("https://{domain}{path}")
+}
+
+fn http_trigger_tags(
+    domain: &str,
+    path: &str,
+    source: &str,
+    headers: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut tags = HashMap::from([
+        ("http.url".into(), http_url(domain, path)),
+        ("http.url_details.path".into(), path.into()),
+        (FUNCTION_TRIGGER_EVENT_SOURCE_TAG.into(), source.into()),
+    ]);
+    if let Some(referer) = headers.get("referer") {
+        tags.insert("http.referer".into(), referer.clone());
+    }
+    tags
+}
+
+fn is_async_http(headers: &HashMap<String, String>) -> bool {
+    headers
+        .get("x-amz-invocation-type")
+        .is_some_and(|value| value == "Event")
+}
+
 /// Resolves the service name for a given trigger depending on
 /// service mapping configuration.
 pub trait ServiceNameResolver {
@@ -264,6 +329,44 @@ pub mod test_utils {
 mod tests {
     use super::test_utils::read_json_file;
     use super::*;
+
+    #[test]
+    fn http_triggers_preserve_user_agent_sources_and_invocation_type() {
+        for (fixture, user_agent_path, expected_agent) in [
+            (
+                "api_gateway_http_event.json",
+                "/requestContext/http/userAgent",
+                "header-agent",
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "/requestContext/identity/userAgent",
+                "context-agent",
+            ),
+            (
+                "lambda_function_url_event.json",
+                "/requestContext/http/userAgent",
+                "context-agent",
+            ),
+        ] {
+            for (invocation_type, expected_async) in [("Event", true), ("RequestResponse", false)] {
+                let mut payload: Value = serde_json::from_str(&read_json_file(fixture)).unwrap();
+                *payload.pointer_mut(user_agent_path).unwrap() = "context-agent".into();
+                payload["headers"]["User-Agent"] = "header-agent".into();
+                payload["headers"]["Referer"] = "https://example.com".into();
+                payload["headers"]["X-Amz-Invocation-Type"] = invocation_type.into();
+                let identified = IdentifiedTrigger::from_value(payload);
+                let trigger = identified.as_trigger().unwrap();
+                let mut span = Span::default();
+                trigger.enrich_span(&mut span, &HashMap::new(), true);
+                assert_eq!(span.meta["http.user_agent"], "context-agent", "{fixture}");
+                let tags = trigger.get_tags();
+                assert_eq!(tags["http.user_agent"], expected_agent, "{fixture}");
+                assert_eq!(tags["http.referer"], "https://example.com", "{fixture}");
+                assert_eq!(trigger.is_async(), expected_async, "{fixture}");
+            }
+        }
+    }
 
     #[test]
     fn service_names_follow_mapping_precedence_and_representation() {

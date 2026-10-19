@@ -1,13 +1,11 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use super::{is_async_http, HttpMetadata};
 use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
-    triggers::{
-        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
-    },
+    triggers::{lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger},
     MS_TO_NS,
 };
 use serde::Deserialize;
@@ -47,6 +45,20 @@ pub struct Identity {
     pub user_agent: String,
 }
 
+impl APIGatewayRestEvent {
+    fn http_metadata(&self) -> HttpMetadata<'_> {
+        HttpMetadata {
+            domain: &self.request_context.domain_name,
+            path: &self.request_context.path,
+            method: &self.request_context.method,
+            protocol: &self.request_context.protocol,
+            source_ip: &self.request_context.identity.source_ip,
+            user_agent: &self.request_context.identity.user_agent,
+            request_id: &self.request_context.request_id,
+        }
+    }
+}
+
 impl Trigger for APIGatewayRestEvent {
     fn new(payload: Value) -> Option<Self> {
         match serde_json::from_value(payload) {
@@ -78,11 +90,6 @@ impl Trigger for APIGatewayRestEvent {
             http_method = self.request_context.method,
             path = parameterize_api_resource(&self.request_context.path)
         );
-        let http_url = format!(
-            "https://{domain_name}{path}",
-            domain_name = self.request_context.domain_name,
-            path = self.request_context.path
-        );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
         let service_name = self.resolve_service_name(
@@ -97,71 +104,23 @@ impl Trigger for APIGatewayRestEvent {
         span.resource = resource;
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("endpoint".to_string(), self.request_context.path.clone()),
-            ("http.url".to_string(), http_url),
-            (
-                "http.method".to_string(),
-                self.request_context.method.clone(),
-            ),
-            (
-                "http.protocol".to_string(),
-                self.request_context.protocol.clone(),
-            ),
-            (
-                "http.source_ip".to_string(),
-                self.request_context.identity.source_ip.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.clone(),
-            ),
-            (
-                "request_id".to_string(),
-                self.request_context.request_id.clone(),
-            ),
-            (
-                "http.route".to_string(),
-                self.request_context.resource_path.clone(),
-            ),
-        ]));
+        span.meta.extend(self.http_metadata().span_tags());
+        span.meta.insert(
+            "http.route".into(),
+            self.request_context.resource_path.clone(),
+        );
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{path}",
-                    domain_name = self.request_context.domain_name,
-                    path = self.request_context.path
-                ),
-            ),
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.path.clone(),
-            ),
-            (
-                "http.method".to_string(),
-                self.request_context.method.clone(),
-            ),
-            (
-                "http.route".to_string(),
-                self.request_context.resource_path.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "api-gateway".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
+        let mut tags = self.http_metadata().trigger_tags(
+            "api-gateway",
+            &self.headers,
+            Some(&self.request_context.identity.user_agent),
+        );
+        tags.insert(
+            "http.route".into(),
+            self.request_context.resource_path.clone(),
+        );
 
         tags
     }
@@ -192,9 +151,7 @@ impl Trigger for APIGatewayRestEvent {
     }
 
     fn is_async(&self) -> bool {
-        self.headers
-            .get("x-amz-invocation-type")
-            .is_some_and(|v| v == "Event")
+        is_async_http(&self.headers)
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {

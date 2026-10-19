@@ -1,13 +1,11 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use super::{is_async_http, HttpMetadata};
 use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
-    triggers::{
-        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
-    },
+    triggers::{lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger},
     MS_TO_NS,
 };
 use serde::Deserialize;
@@ -56,6 +54,20 @@ pub struct RequestContextHTTP {
     pub user_agent: String,
 }
 
+impl APIGatewayHttpEvent {
+    fn http_metadata(&self) -> HttpMetadata<'_> {
+        HttpMetadata {
+            domain: &self.request_context.domain_name,
+            path: &self.request_context.http.path,
+            method: &self.request_context.http.method,
+            protocol: &self.request_context.http.protocol,
+            source_ip: &self.request_context.http.source_ip,
+            user_agent: &self.request_context.http.user_agent,
+            request_id: &self.request_context.request_id,
+        }
+    }
+}
+
 impl Trigger for APIGatewayHttpEvent {
     fn new(payload: Value) -> Option<Self> {
         serde_json::from_value(payload).ok()?
@@ -85,11 +97,6 @@ impl Trigger for APIGatewayHttpEvent {
             http_method = self.request_context.http.method,
             parameterized_route = parameterize_api_resource(&self.request_context.http.path)
         );
-        let http_url = format!(
-            "https://{domain_name}{path}",
-            domain_name = self.request_context.domain_name,
-            path = self.request_context.http.path
-        );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
         let service_name = self.resolve_service_name(
@@ -104,60 +111,15 @@ impl Trigger for APIGatewayHttpEvent {
         span.resource.clone_from(&resource);
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            (
-                "endpoint".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            ("http.url".to_string(), http_url),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                "http.protocol".to_string(),
-                self.request_context.http.protocol.clone(),
-            ),
-            (
-                "http.source_ip".to_string(),
-                self.request_context.http.source_ip.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.http.user_agent.clone(),
-            ),
-            (
-                "request_id".to_string(),
-                self.request_context.request_id.clone(),
-            ),
-        ]));
+        span.meta.extend(self.http_metadata().span_tags());
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{path}",
-                    domain_name = self.request_context.domain_name.clone(),
-                    path = self.request_context.http.path.clone()
-                ),
-            ),
-            // path and URL are full
-            // /users/12345/profile
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "api-gateway".to_string(),
-            ),
-        ]);
+        let mut tags = self.http_metadata().trigger_tags(
+            "api-gateway",
+            &self.headers,
+            self.headers.get("user-agent").map(String::as_str),
+        );
         // route is parameterized
         // /users/{id}/profile
         if !self.route_key.is_empty() {
@@ -170,14 +132,6 @@ impl Trigger for APIGatewayHttpEvent {
                     .unwrap_or(&self.route_key.clone())
                     .to_string(),
             );
-        }
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
-
-        if let Some(user_agent) = self.headers.get("user-agent") {
-            tags.insert("http.user_agent".to_string(), user_agent.clone());
         }
 
         tags
@@ -209,9 +163,7 @@ impl Trigger for APIGatewayHttpEvent {
     }
 
     fn is_async(&self) -> bool {
-        self.headers
-            .get("x-amz-invocation-type")
-            .is_some_and(|v| v == "Event")
+        is_async_http(&self.headers)
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {

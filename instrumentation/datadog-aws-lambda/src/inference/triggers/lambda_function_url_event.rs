@@ -3,13 +3,14 @@
 
 use std::collections::HashMap;
 
+use super::{is_async_http, HttpMetadata};
 use crate::inference::SpanData as Span;
 use serde::Deserialize;
 use serde_json::Value;
 
 use crate::inference::{
     get_aws_partition_by_region,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{lowercase_key, ServiceNameResolver, Trigger},
     MS_TO_NS,
 };
 
@@ -40,6 +41,20 @@ pub struct Http {
     pub protocol: String,
     pub source_ip: String,
     pub user_agent: String,
+}
+
+impl LambdaFunctionUrlEvent {
+    fn http_metadata(&self) -> HttpMetadata<'_> {
+        HttpMetadata {
+            domain: &self.request_context.domain_name,
+            path: &self.request_context.http.path,
+            method: &self.request_context.http.method,
+            protocol: &self.request_context.http.protocol,
+            source_ip: &self.request_context.http.source_ip,
+            user_agent: &self.request_context.http.user_agent,
+            request_id: &self.request_context.request_id,
+        }
+    }
 }
 
 impl Trigger for LambdaFunctionUrlEvent {
@@ -73,12 +88,6 @@ impl Trigger for LambdaFunctionUrlEvent {
             self.request_context.http.method, self.request_context.http.path
         );
 
-        let http_url = format!(
-            "https://{domain_name}{path}",
-            domain_name = self.request_context.domain_name.clone(),
-            path = self.request_context.http.path.clone()
-        );
-
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
         let service_name = self.resolve_service_name(
@@ -93,71 +102,17 @@ impl Trigger for LambdaFunctionUrlEvent {
         span.resource = resource;
         span.r#type = String::from("http");
         span.start = start_time;
-        span.meta.extend([
-            (
-                "endpoint".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            ("http.url".to_string(), http_url),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.http.user_agent.clone(),
-            ),
-            (
-                "http.source_ip".to_string(),
-                self.request_context.http.source_ip.clone(),
-            ),
-            (
-                "http.protocol".to_string(),
-                self.request_context.http.protocol.clone(),
-            ),
-            ("operation_name".to_string(), "aws.lambda.url".to_string()),
-            (
-                "request_id".to_string(),
-                self.request_context.request_id.clone(),
-            ),
-        ]);
+        span.meta.extend(self.http_metadata().span_tags());
+        span.meta
+            .insert("operation_name".into(), "aws.lambda.url".into());
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{path}",
-                    domain_name = self.request_context.domain_name.clone(),
-                    path = self.request_context.http.path.clone()
-                ),
-            ),
-            // path and URL are full
-            // /users/12345/profile
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.http.user_agent.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "lambda-function-url".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
-
-        tags
+        self.http_metadata().trigger_tags(
+            "lambda-function-url",
+            &self.headers,
+            Some(&self.request_context.http.user_agent),
+        )
     }
 
     fn get_arn(&self, region: &str, function_name: &str) -> String {
@@ -173,9 +128,7 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     fn is_async(&self) -> bool {
-        self.headers
-            .get("x-amz-invocation-type")
-            .is_some_and(|v| v == "Event")
+        is_async_http(&self.headers)
     }
 }
 

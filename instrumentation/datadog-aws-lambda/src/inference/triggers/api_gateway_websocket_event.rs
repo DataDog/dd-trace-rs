@@ -5,7 +5,7 @@ use crate::inference::SpanData as Span;
 use crate::{
     inference::get_aws_partition_by_region,
     inference::{
-        triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+        triggers::{lowercase_key, Trigger},
         MS_TO_NS,
     },
 };
@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-use super::ServiceNameResolver;
+use super::{http_trigger_tags, http_url, ServiceNameResolver};
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -66,10 +66,9 @@ impl Trigger for APIGatewayWebSocketEvent {
     ) {
         debug!("Enriching an Inferred Span for an API Gateway WebSocket Event");
         let resource = &self.request_context.route_key;
-        let http_url = format!(
-            "https://{domain_name}{route_key}",
-            domain_name = self.request_context.domain_name,
-            route_key = self.request_context.route_key
+        let http_url = http_url(
+            &self.request_context.domain_name,
+            &self.request_context.route_key,
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
@@ -117,30 +116,12 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{route_key}",
-                    domain_name = self.request_context.domain_name,
-                    route_key = self.request_context.route_key
-                ),
-            ),
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.route_key.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "api-gateway".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
-
-        tags
+        http_trigger_tags(
+            &self.request_context.domain_name,
+            &self.request_context.route_key,
+            "api-gateway",
+            &self.headers,
+        )
     }
 
     fn get_arn(&self, region: &str, _function_name: &str) -> String {
