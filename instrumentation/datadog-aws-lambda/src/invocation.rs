@@ -14,9 +14,10 @@
 //! 3. [`Invocation::finish`] — record errors and end all spans after the handler returns.
 
 use crate::attribute_keys as attr;
-use crate::span_inferrer::{extract_trigger, InferredSpanScope, TriggerContext};
-use libdd_trace_inferrer::SpanInferrer;
+use crate::inference::SpanInferrer;
+use crate::span_inferrer::{extract_trigger, InferredSpanScope, TriggerContext, TriggerExtraction};
 
+use datadog_opentelemetry::propagation::DatadogPropagator;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
@@ -39,9 +40,9 @@ pub(crate) struct LambdaSpan {
 impl LambdaSpan {
     /// Creates and starts the `aws.lambda` root span.
     ///
-    /// The span is parented to `trigger.parent_cx` when that context contains a valid
-    /// span (i.e., a propagated or inferred upstream span exists). Otherwise it falls
-    /// back to the ambient OTel context, which is typically a new root trace.
+    /// The span is built from `trigger.parent_cx`, which extends the ambient OTel context. It
+    /// is a child of the innermost inferred or propagated span when one exists, and otherwise
+    /// starts a new trace that keeps extracted baggage and restart span links.
     pub(crate) fn start(
         tracer: &SdkTracer,
         trigger: &TriggerContext,
@@ -52,12 +53,6 @@ impl LambdaSpan {
         let request_id = lambda_cx.request_id.clone();
 
         tracing::debug!(request_id, "creating invocation root span");
-
-        let effective_cx = if trigger.parent_cx.span().span_context().is_valid() {
-            trigger.parent_cx.clone()
-        } else {
-            Context::current()
-        };
 
         let mut builder = tracer.span_builder(ROOT_SPAN_NAME);
         builder.span_kind = Some(SpanKind::Server);
@@ -75,22 +70,16 @@ impl LambdaSpan {
             KeyValue::new(attr::RESOURCE_NAMES, function_name.clone()),
             KeyValue::new(attr::DD_ORIGIN, "lambda"),
         ];
-        if let Some(ref source) = trigger.event_source {
-            attrs.push(KeyValue::new(
-                attr::FUNCTION_TRIGGER_EVENT_SOURCE,
-                source.clone(),
-            ));
-        }
-        if let Some(ref arn) = trigger.event_source_arn {
-            attrs.push(KeyValue::new(
-                attr::FUNCTION_TRIGGER_EVENT_SOURCE_ARN,
-                arn.clone(),
-            ));
-        }
+        attrs.extend(
+            trigger
+                .trigger_tags
+                .iter()
+                .map(|(key, value)| KeyValue::new(key.clone(), value.clone())),
+        );
         builder.attributes = Some(attrs);
 
-        let span = tracer.build_with_context(builder, &effective_cx);
-        let cx = effective_cx.with_span(span);
+        let span = tracer.build_with_context(builder, &trigger.parent_cx);
+        let cx = trigger.parent_cx.with_span(span);
 
         Self { cx, request_id }
     }
@@ -132,6 +121,7 @@ pub(crate) struct Invocation {
 impl Invocation {
     pub(crate) fn start(
         tracer: &SdkTracer,
+        propagator: &DatadogPropagator,
         inferrer: &SpanInferrer,
         payload: &str,
         lambda_cx: &lambda_runtime::Context,
@@ -141,17 +131,16 @@ impl Invocation {
         // inferred spans (which end at invocation start) measure the true propagation delay
         // and do not include local parsing/instrumentation overhead.
         let started_at = SystemTime::now();
-        let extraction = extract_trigger(inferrer, payload);
-        let inferred_spans = InferredSpanScope::start(
-            tracer,
-            &extraction.upstream_cx,
-            &extraction.inference_result,
-        );
+        let TriggerExtraction {
+            upstream_cx,
+            mut inference_result,
+        } = extract_trigger(inferrer, propagator, payload);
+        let inferred_spans =
+            InferredSpanScope::start(tracer, &upstream_cx, &inference_result, started_at);
         let trigger = TriggerContext {
-            parent_cx: inferred_spans.innermost_context(&extraction.upstream_cx),
-            is_async: extraction.is_async,
-            event_source: extraction.event_source,
-            event_source_arn: extraction.event_source_arn,
+            parent_cx: inferred_spans.innermost_context(&upstream_cx),
+            is_async: inference_result.is_async,
+            trigger_tags: std::mem::take(&mut inference_result.trigger_tags),
         };
         let lambda_span = LambdaSpan::start(tracer, &trigger, lambda_cx, cold_start);
 
@@ -202,12 +191,15 @@ impl Invocation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::triggers::test_utils::read_json_file;
     use crate::span_inferrer::TriggerContext;
+    use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::{
         SpanContext, SpanId, TraceFlags, TraceId, TraceState, TracerProvider as _,
     };
     use opentelemetry::Value;
     use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
+    use std::collections::HashMap;
 
     fn test_provider() -> (SdkTracerProvider, InMemorySpanExporter) {
         let exporter = InMemorySpanExporter::default();
@@ -215,6 +207,10 @@ mod tests {
             .with_simple_exporter(exporter.clone())
             .build();
         (provider, exporter)
+    }
+
+    fn test_propagator() -> DatadogPropagator {
+        datadog_opentelemetry::tracing().init_local().1
     }
 
     fn test_lambda_cx() -> lambda_runtime::Context {
@@ -230,8 +226,7 @@ mod tests {
         TriggerContext {
             parent_cx: Context::current(),
             is_async: false,
-            event_source: None,
-            event_source_arn: None,
+            trigger_tags: HashMap::new(),
         }
     }
 
@@ -351,6 +346,57 @@ mod tests {
         assert_eq!(span.cx.span().span_context().trace_id(), trace_id);
     }
 
+    #[test]
+    fn root_span_keeps_extracted_context_without_a_parent_span() {
+        let (provider, _) = test_provider();
+        let tracer = provider.tracer("test");
+        let trigger = TriggerContext {
+            parent_cx: Context::new().with_baggage([KeyValue::new("user.id", "42")]),
+            ..test_trigger()
+        };
+
+        let span = LambdaSpan::start(&tracer, &trigger, &test_lambda_cx(), false);
+        assert!(span.cx.span().span_context().is_valid());
+        assert_eq!(
+            span.cx.baggage().get("user.id").map(|value| value.as_str()),
+            Some("42")
+        );
+    }
+
+    #[test]
+    fn root_span_includes_all_trigger_tags() {
+        let (provider, exporter) = test_provider();
+        let payload = read_json_file("api_gateway_http_event.json");
+        let inferrer = crate::span_inferrer::default_inferrer();
+        let expected = inferrer.infer_span(&payload).unwrap().trigger_tags;
+        assert!(expected.contains_key("http.route"));
+
+        let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
+        let _: Result<(), String> = invocation.finish(Ok(()));
+        provider.force_flush().unwrap();
+
+        let spans = finished_spans(&exporter);
+        let root = spans
+            .iter()
+            .find(|s| s.name.as_ref() == ROOT_SPAN_NAME)
+            .expect("root span");
+        for (key, value) in &expected {
+            assert_eq!(
+                find_attr(&root.attributes, key),
+                Some(&Value::from(value.clone())),
+                "{key}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn error_handler_sets_error_attributes() {
         let (provider, exporter) = test_provider();
@@ -405,9 +451,16 @@ mod tests {
         let (provider, _) = test_provider();
         let payload = sqs_async_payload();
 
-        let inferrer = crate::span_inferrer::build_inferrer();
+        let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
-        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
         assert!(invocation
             .handler_context()
             .span()
@@ -421,9 +474,16 @@ mod tests {
         let (provider, exporter) = test_provider();
         let payload = sqs_async_payload();
 
-        let inferrer = crate::span_inferrer::build_inferrer();
+        let inferrer = crate::span_inferrer::default_inferrer();
         let tracer = opentelemetry::trace::TracerProvider::tracer(&provider, TRACER_NAME);
-        let invocation = Invocation::start(&tracer, &inferrer, &payload, &test_lambda_cx(), false);
+        let invocation = Invocation::start(
+            &tracer,
+            &test_propagator(),
+            &inferrer,
+            &payload,
+            &test_lambda_cx(),
+            false,
+        );
         let _: Result<(), String> = invocation.finish(Ok(()));
         provider.force_flush().unwrap();
 

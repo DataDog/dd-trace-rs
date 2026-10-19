@@ -99,6 +99,14 @@
         "propertyKeys": ["service"]
       }
     ],
+    "DD_SERVICE_MAPPING": [
+      {
+        "version": "C",
+        "type": "map",
+        "default": "",
+        "propertyKeys": ["service_mapping"]
+      }
+    ],
     "DD_TAGS": [
       {
         "version": "A",
@@ -137,6 +145,14 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["trace_agent_url"]
+      }
+    ],
+    "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED": [
+      {
+        "version": "B",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["trace_aws_service_representation_enabled"]
       }
     ],
     "DD_TRACE_BAGGAGE_TAG_KEYS": [
