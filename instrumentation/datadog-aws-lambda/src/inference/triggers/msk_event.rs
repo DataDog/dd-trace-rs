@@ -4,7 +4,7 @@
 use crate::inference::triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use crate::inference::SpanData as Span;
 use crate::inference::MS_TO_NS;
-use serde::Deserialize;
+use serde::{de::Error, Deserialize, Deserializer};
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
@@ -14,7 +14,8 @@ use tracing::debug;
 pub struct MSKEvent {
     pub event_source: String,
     pub event_source_arn: String,
-    pub records: HashMap<String, Vec<MSKRecord>>,
+    #[serde(rename = "records", deserialize_with = "selected_record")]
+    pub record: MSKRecord,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -57,127 +58,72 @@ fn bytes_from_header_value(val: &Value) -> Option<Vec<u8>> {
     }
 }
 
-/// Returns true if the `headers` JSON contains a trace context header key.
-/// This performs a lightweight scan of the raw JSON structure without decoding
-/// header values or allocating intermediate collections.
-fn headers_has_trace_context(headers: &Value) -> bool {
-    let is_trace_context_entry = |entry: &Value| {
-        if let Value::Object(header_map) = entry {
-            header_map.keys().any(|k| {
-                k.eq_ignore_ascii_case("x-datadog-trace-id")
-                    || k.eq_ignore_ascii_case("traceparent")
-            })
-        } else {
-            false
-        }
-    };
-    match headers {
-        Value::Array(arr) => arr.iter().any(is_trace_context_entry),
-        Value::Object(obj) => obj.values().any(is_trace_context_entry),
-        _ => false,
-    }
+fn values(value: &Value) -> impl Iterator<Item = &Value> {
+    value.as_array().into_iter().flatten().chain(
+        value
+            .as_object()
+            .into_iter()
+            .flat_map(|object| object.values()),
+    )
 }
 
-/// Scans all records in the records map and returns the `(topic_key, record_value)` of the first
-/// record whose headers contain a tracecontext key. Returns `None` if none found.
-fn take_record_with_trace_context(
-    records_map: &mut serde_json::Map<String, Value>,
-) -> Option<(String, Value)> {
-    let has_trace_context =
-        |record: &&mut Value| record.get("headers").is_some_and(headers_has_trace_context);
-    records_map.iter_mut().find_map(|(key, group)| {
-        let record = match group {
-            Value::Array(arr) => arr.iter_mut().find(has_trace_context),
-            Value::Object(obj) => obj.values_mut().find(has_trace_context),
-            _ => None,
-        }?;
-        Some((key.clone(), record.take()))
+fn values_mut(value: &mut Value) -> impl Iterator<Item = &mut Value> {
+    let (array, object) = match value {
+        Value::Array(array) => (Some(array), None),
+        Value::Object(object) => (None, Some(object)),
+        _ => (None, None),
+    };
+    array
+        .into_iter()
+        .flatten()
+        .chain(object.into_iter().flat_map(|object| object.values_mut()))
+}
+
+fn headers_has_trace_context(headers: &Value) -> bool {
+    values(headers).filter_map(Value::as_object).any(|entry| {
+        entry.keys().any(|key| {
+            key.eq_ignore_ascii_case("x-datadog-trace-id")
+                || key.eq_ignore_ascii_case("traceparent")
+        })
     })
 }
 
-/// Decodes an MSK record's `headers` field into a `HashMap<String, String>` by converting
-/// each header's byte values to a UTF-8 string. The `headers` field may be either a JSON
-/// array or a JSON object with numeric string keys, one entry per Kafka header, ordered by index.
+fn selected_record<'de, D: Deserializer<'de>>(deserializer: D) -> Result<MSKRecord, D::Error> {
+    let mut records = Value::deserialize(deserializer)?;
+    let records = records
+        .as_object_mut()
+        .ok_or_else(|| D::Error::custom("invalid MSK records"))?;
+    let selected = records
+        .values_mut()
+        .flat_map(values_mut)
+        .find(|record| record.get("headers").is_some_and(headers_has_trace_context))
+        .map(Value::take);
+    let selected = selected
+        .or_else(|| {
+            values_mut(records.values_mut().next()?)
+                .next()
+                .map(Value::take)
+        })
+        .ok_or_else(|| D::Error::custom("missing MSK record"))?;
+    serde_json::from_value(selected).map_err(D::Error::custom)
+}
+
 fn headers_to_string_map(headers: &Value) -> HashMap<String, String> {
-    let mut carrier = HashMap::new();
-
-    match headers {
-        Value::Array(arr) => {
-            for entry in arr {
-                if let Value::Object(header_map) = entry {
-                    for (key, val) in header_map {
-                        if let Some(s) = bytes_from_header_value(val)
-                            .and_then(|bytes| String::from_utf8(bytes).ok())
-                        {
-                            carrier.insert(key.to_lowercase(), s);
-                        }
-                    }
-                }
-            }
-        }
-        // Object format: numeric string keys are just ordering artifacts from the Java runtime;
-        // insertion order into the HashMap doesn't matter so no sort needed.
-        Value::Object(obj) => {
-            for entry in obj.values() {
-                if let Value::Object(header_map) = entry {
-                    for (key, val) in header_map {
-                        if let Some(s) = bytes_from_header_value(val)
-                            .and_then(|bytes| String::from_utf8(bytes).ok())
-                        {
-                            carrier.insert(key.to_lowercase(), s);
-                        }
-                    }
-                }
-            }
-        }
-        _ => {}
-    }
-
-    carrier
+    values(headers)
+        .filter_map(Value::as_object)
+        .flat_map(|entry| entry.iter())
+        .filter_map(|(key, value)| {
+            let bytes = bytes_from_header_value(value)?;
+            Some((key.to_lowercase(), String::from_utf8(bytes).ok()?))
+        })
+        .collect()
 }
 
 impl Trigger for MSKEvent {
-    fn new(mut payload: Value) -> Option<Self> {
-        // We only need one record: prefer the first one carrying Datadog trace context so we can
-        // propagate the trace, falling back to the very first record otherwise. Records may be
-        // delivered as a JSON object with numeric string keys; normalize to a single-element array
-        // before deserializing.
-        let chosen = payload
-            .get_mut("records")
-            .and_then(Value::as_object_mut)
-            .and_then(take_record_with_trace_context);
-
-        if let Some((chosen_key, chosen_record)) = chosen {
-            let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
-            records_map.retain(|k, _| k == &chosen_key);
-            if let Some(entry) = records_map.get_mut(&chosen_key) {
-                *entry = Value::Array(vec![chosen_record]);
-            }
-        } else {
-            // Fallback: no record with Datadog trace context; normalize to the very first record
-            // without cloning the full record payload.
-            let records_map = payload.get_mut("records").and_then(Value::as_object_mut)?;
-            let first_key = records_map.keys().next()?.to_owned();
-            records_map.retain(|k, _| k == &first_key);
-            if let Some(entry) = records_map.get_mut(&first_key) {
-                match entry {
-                    Value::Array(arr) => arr.truncate(1),
-                    Value::Object(obj) => {
-                        let first_record = obj.values_mut().next()?.take();
-                        *entry = Value::Array(vec![first_record]);
-                    }
-                    _ => return None,
-                }
-            }
-        }
-
-        match serde_json::from_value::<Self>(payload) {
-            Ok(event) => Some(event),
-            Err(e) => {
-                debug!("Failed to deserialize modified MSKEvent: {e}");
-                None
-            }
-        }
+    fn new(payload: Value) -> Option<Self> {
+        serde_json::from_value(payload)
+            .map_err(|error| debug!("Failed to deserialize MSKEvent: {error}"))
+            .ok()
     }
 
     fn is_match(payload: &Value) -> bool {
@@ -211,21 +157,18 @@ impl Trigger for MSKEvent {
         );
         span.r#type = String::from("web");
 
-        let first_value = self.records.values().find_map(|arr| arr.first());
-        if let Some(first_value) = first_value {
-            span.resource.clone_from(&first_value.topic);
-            span.start = (first_value.timestamp * MS_TO_NS) as i64;
-            span.meta.extend([
-                ("operation_name".to_string(), String::from("aws.msk")),
-                ("topic".to_string(), first_value.topic.clone()),
-                ("partition".to_string(), first_value.partition.to_string()),
-                ("event_source".to_string(), self.event_source.clone()),
-                (
-                    "event_source_arn".to_string(),
-                    self.event_source_arn.clone(),
-                ),
-            ]);
-        }
+        span.resource.clone_from(&self.record.topic);
+        span.start = (self.record.timestamp * MS_TO_NS) as i64;
+        span.meta.extend([
+            ("operation_name".to_string(), String::from("aws.msk")),
+            ("topic".to_string(), self.record.topic.clone()),
+            ("partition".to_string(), self.record.partition.to_string()),
+            ("event_source".to_string(), self.event_source.clone()),
+            (
+                "event_source_arn".to_string(),
+                self.event_source_arn.clone(),
+            ),
+        ]);
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -240,12 +183,7 @@ impl Trigger for MSKEvent {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        self.records
-            .values()
-            .find_map(|arr| arr.first())
-            .map_or_else(HashMap::new, |record| {
-                headers_to_string_map(&record.headers)
-            })
+        headers_to_string_map(&self.record.headers)
     }
 
     fn is_async(&self) -> bool {
@@ -273,6 +211,54 @@ mod tests {
     use crate::inference::triggers::test_utils::read_json_file;
 
     #[test]
+    fn selects_trace_record_across_groups_in_both_formats() {
+        for object_format in [false, true] {
+            let mut payload: Value =
+                serde_json::from_str(&read_json_file("msk_event.json")).unwrap();
+            let first = serde_json::json!({"topic": "first", "partition": 0, "timestamp": 1000});
+            let traced = serde_json::json!({
+                "topic": "traced", "partition": 2, "timestamp": 2000,
+                "headers": [{"TraceParent": [49, 50, 51]}]
+            });
+            payload["records"] = if object_format {
+                serde_json::json!({"a": {"0": first}, "b": {"0": traced}})
+            } else {
+                serde_json::json!({"a": [first], "b": [traced]})
+            };
+            let event = MSKEvent::new(payload).unwrap();
+            assert_eq!(event.record.topic, "traced");
+            assert_eq!(event.record.partition, 2);
+            assert_eq!(event.record.timestamp, 2000.0);
+            assert_eq!(event.get_carrier()["traceparent"], "123");
+        }
+    }
+
+    #[test]
+    fn header_formats_preserve_decoding_and_duplicate_precedence() {
+        let entries = serde_json::json!([
+            {"TRACEPARENT": [49, "50", 51]},
+            {"TraceParent": {"2": "54", "0": "52", "1": "53"}},
+            {"invalid-utf8": [255], "invalid-byte": [256]},
+            null
+        ]);
+        let object = Value::Object(
+            entries
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(index, value)| (index.to_string(), value.clone()))
+                .collect(),
+        );
+        for headers in [entries, object] {
+            assert_eq!(
+                headers_to_string_map(&headers),
+                HashMap::from([("traceparent".into(), "456".into())])
+            );
+        }
+    }
+
+    #[test]
     fn test_new() {
         let json = read_json_file("msk_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
@@ -284,15 +270,12 @@ mod tests {
             timestamp: 1_745_846_213_022f64,
             headers: Value::Array(vec![]),
         };
-        let mut expected_records = HashMap::new();
-        expected_records.insert(String::from("topic1"), vec![record]);
-
         let expected = MSKEvent {
             event_source: String::from("aws:kafka"),
             event_source_arn: String::from(
                 "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
             ),
-            records: expected_records,
+            record,
         };
 
         assert_eq!(result, expected);
@@ -387,11 +370,7 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = MSKEvent::new(payload).expect("Failed to deserialize into MSKEvent");
 
-        let record = result
-            .records
-            .values()
-            .find_map(|arr| arr.first())
-            .expect("Expected at least one record");
+        let record = &result.record;
         assert_eq!(record.topic, "demo-topic");
         // headers is an object with 6 entries (2 non-datadog + 4 datadog)
         assert_eq!(
@@ -499,11 +478,7 @@ mod tests {
         });
 
         let event = MSKEvent::new(payload).expect("Should deserialize despite no trace context");
-        let record = event
-            .records
-            .values()
-            .find_map(|arr| arr.first())
-            .expect("Expected at least one record");
+        let record = &event.record;
         assert_eq!(record.topic, "demo-topic");
         assert_eq!(record.partition, 0);
         assert!(event.get_carrier().is_empty());
