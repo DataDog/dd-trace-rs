@@ -315,7 +315,7 @@ mod tests {
     use opentelemetry::trace::SpanKind;
     use opentelemetry::{Key, KeyValue, Value};
     use opentelemetry_semantic_conventions::attribute::{
-        DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
+        DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, HTTP_ROUTE, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
     };
     use opentelemetry_semantic_conventions::trace::{
         HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME,
@@ -323,6 +323,34 @@ mod tests {
 
     fn create_empty_resource() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder_empty().build()
+    }
+
+    #[test]
+    fn test_resource_is_span_name() {
+        // The attributes that the operation name is derived from don't shape the resource
+        let attrs = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(HTTP_ROUTE, "/users/{id}"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("get-user", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "get-user");
+        assert_eq!(span.operation_name(), "http.server.request");
+    }
+
+    #[test]
+    fn test_resource_name_attribute_overrides_span_name() {
+        let attrs = vec![
+            KeyValue::new("resource.name", "GET /users/{id}"),
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("get-user", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "GET /users/{id}");
     }
 
     #[test]

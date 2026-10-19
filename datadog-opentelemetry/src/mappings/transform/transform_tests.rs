@@ -535,7 +535,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 end_time,
                 attributes: vec![
                     KeyValue::new("operation.name", "READ"),
-                    KeyValue::new("resource.name", "/path"),
+                    KeyValue::new("resource.name", "SELECT name FROM users"),
                     KeyValue::new("span.type", "db"),
                     KeyValue::new("name", "john"),
                     KeyValue::new("container.id", "cid"),
@@ -558,7 +558,8 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "READ".into(),
-                resource: "/path".into(),
+                // resource.name, not the span name
+                resource: "SELECT name FROM users".into(),
                 service: "mongo".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
