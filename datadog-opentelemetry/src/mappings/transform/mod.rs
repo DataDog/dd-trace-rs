@@ -236,7 +236,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     // The sampler resolves service, name and resource with the same functions
     dd_span.service = SpanStr::from_str(get_otel_service(span));
     dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
-    dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
+    dd_span.resource = SpanStr::from_str(get_otel_resource(span));
     dd_span.r#type = SpanStr::from_str(span.get_attr_str(DATADOG_TYPE));
     dd_span.trace_id = trace_id_lower_half.into();
     dd_span.span_id = span_id;
