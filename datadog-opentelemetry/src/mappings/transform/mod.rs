@@ -238,7 +238,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     }
 
     if dd_span.resource.as_str().is_empty() {
-        dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
+        dd_span.resource = SpanStr::from_str(get_otel_resource(span));
     }
     if dd_span.r#type.as_str().is_empty() {
         dd_span.r#type = SpanStr::from_str(get_otel_span_type(span));
