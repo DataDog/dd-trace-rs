@@ -22,6 +22,7 @@
 use std::{
     fmt::{self, Display},
     mem,
+    panic::Location,
     str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -169,21 +170,21 @@ pub(crate) const LOG_TARGET: &str = env!("CARGO_CRATE_NAME");
 pub(crate) fn print_log(
     lvl: Level,
     log: fmt::Arguments,
-    file: &str,
-    line: u32,
+    location: Option<&Location<'_>>,
     template: Option<&str>,
 ) {
     if lvl == LevelFilter::Error {
         if let Some(template) = template {
             // we should only send the template to telemetry to not leak sensitive information
-            super::telemetry::add_log_error(
-                template,
-                Some(format!("Error: {template}\n at {file}:{line}")),
-            );
+            let stack_trace = match location {
+                Some(loc) => format!("Error: {template}\n at {}:{}", loc.file(), loc.line()),
+                None => format!("Error: {template}"),
+            };
+            super::telemetry::add_log_error(template, Some(stack_trace));
         }
     }
 
-    emit(lvl, log, file, line);
+    emit(lvl, log, location);
 }
 
 /// Whether the calling thread would actually dispatch an event to a subscriber.
@@ -252,8 +253,10 @@ fn tracing_can_deliver(lvl: Level) -> bool {
         && has_current_subscriber()
 }
 
-fn emit(lvl: Level, log: fmt::Arguments, file: &str, line: u32) -> Destination {
+fn emit(lvl: Level, log: fmt::Arguments, location: Option<&Location<'_>>) -> Destination {
     if tracing_can_deliver(lvl) {
+        let file = location.map(Location::file);
+        let line = location.map(Location::line);
         match lvl {
             Level::Error => tracing::error!(target: LOG_TARGET, file, line, "{log}"),
             Level::Warn => tracing::warn!(target: LOG_TARGET, file, line, "{log}"),
@@ -262,12 +265,16 @@ fn emit(lvl: Level, log: fmt::Arguments, file: &str, line: u32) -> Destination {
         }
         Destination::Subscriber
     } else {
-        emit_without_tracing(lvl, log, file, line)
+        emit_without_tracing(lvl, log, location)
     }
 }
 
 #[cfg(feature = "log-compat")]
-fn emit_without_tracing(lvl: Level, message: fmt::Arguments, file: &str, line: u32) -> Destination {
+fn emit_without_tracing(
+    lvl: Level,
+    message: fmt::Arguments,
+    location: Option<&Location<'_>>,
+) -> Destination {
     let level = match lvl {
         Level::Error => log::Level::Error,
         Level::Warn => log::Level::Warn,
@@ -285,8 +292,8 @@ fn emit_without_tracing(lvl: Level, message: fmt::Arguments, file: &str, line: u
             &log::Record::builder()
                 .metadata(metadata)
                 .args(message)
-                .file(Some(file))
-                .line(Some(line))
+                .file(location.map(Location::file))
+                .line(location.map(Location::line))
                 .build(),
         );
     }
@@ -295,17 +302,25 @@ fn emit_without_tracing(lvl: Level, message: fmt::Arguments, file: &str, line: u
 }
 
 #[cfg(not(feature = "log-compat"))]
-fn emit_without_tracing(lvl: Level, log: fmt::Arguments, file: &str, line: u32) -> Destination {
-    print_to_streams(lvl, log, file, line);
+fn emit_without_tracing(
+    lvl: Level,
+    log: fmt::Arguments,
+    location: Option<&Location<'_>>,
+) -> Destination {
+    print_to_streams(lvl, log, location);
     Destination::Streams
 }
 
 #[cfg(not(feature = "log-compat"))]
-fn print_to_streams(lvl: Level, log: fmt::Arguments, file: &str, line: u32) {
+fn print_to_streams(lvl: Level, log: fmt::Arguments, location: Option<&Location<'_>>) {
+    let location = match location {
+        Some(loc) => format!("{}:{} - ", loc.file(), loc.line()),
+        None => String::new(),
+    };
     if lvl == LevelFilter::Error {
-        eprintln!("\x1b[91m{lvl}\x1b[0m {file}:{line} - {log}");
+        eprintln!("\x1b[91m{lvl}\x1b[0m {location}{log}");
     } else {
-        println!("\x1b[93m{lvl}\x1b[0m {file}:{line} - {log}");
+        println!("\x1b[93m{lvl}\x1b[0m {location}{log}");
     }
 }
 
@@ -352,7 +367,7 @@ macro_rules! dd_log {
       let lvl = $lvl;
       if lvl <= $crate::core::log::max_level() {
         let loc = std::panic::Location::caller();
-        $crate::core::log::print_log(lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first));
+        $crate::core::log::print_log(lvl, format_args!($first, $($rest)*), Some(loc), Some($first));
       }
     }};
 
@@ -360,23 +375,21 @@ macro_rules! dd_log {
       let lvl = $lvl;
       if lvl <= $crate::core::log::max_level() {
         let loc = std::panic::Location::caller();
-        $crate::core::log::print_log(lvl, format_args!($first), loc.file(), loc.line(), Some($first));
+        $crate::core::log::print_log(lvl, format_args!($first), Some(loc), Some($first));
       }
     }};
 }
 
-/// Like `dd_log!`, but without the `DD_LOG_LEVEL` check
+/// Like `dd_log!`, but without the `DD_LOG_LEVEL` check nor the call site's location
 #[macro_export]
 #[doc(hidden)]
 macro_rules! dd_log_always {
     ($lvl:expr, $first:expr, $($rest:tt)*) => {{
-      let loc = std::panic::Location::caller();
-      $crate::core::log::print_log($lvl, format_args!($first, $($rest)*), loc.file(), loc.line(), Some($first));
+      $crate::core::log::print_log($lvl, format_args!($first, $($rest)*), None, Some($first));
     }};
 
     ($lvl:expr, $first:expr) => {{
-      let loc = std::panic::Location::caller();
-      $crate::core::log::print_log($lvl, format_args!($first), loc.file(), loc.line(), Some($first));
+      $crate::core::log::print_log($lvl, format_args!($first), None, Some($first));
     }};
 }
 
@@ -593,6 +606,8 @@ pub(crate) mod test_capture {
 mod routing_tests {
     use opentelemetry::Context;
 
+    use std::panic::Location;
+
     use super::test_capture::{capture, capture_at, capture_filtered_out, capture_log_records};
     use super::{
         emit, has_current_subscriber, print_log, within_static_ceiling, Destination, Level,
@@ -608,10 +623,18 @@ mod routing_tests {
     fn emission_after_a_scoped_subscriber_exits_uses_the_fallback() {
         let mut inside = None;
         let events = capture(|| {
-            inside = Some(emit(Level::Warn, format_args!("in scope"), "a.rs", 1));
+            inside = Some(emit(
+                Level::Warn,
+                format_args!("in scope"),
+                Some(Location::caller()),
+            ));
         });
         // The same call on the same thread, once the scope has gone away.
-        let outside = emit(Level::Warn, format_args!("after scope"), "a.rs", 2);
+        let outside = emit(
+            Level::Warn,
+            format_args!("after scope"),
+            Some(Location::caller()),
+        );
 
         assert_eq!(inside, Some(Destination::Subscriber));
         assert!(events.iter().any(|e| e.message == "in scope"));
@@ -628,9 +651,15 @@ mod routing_tests {
         let mut worker = None;
         let events = capture(|| {
             worker = Some(
-                std::thread::spawn(|| emit(Level::Warn, format_args!("from worker"), "w.rs", 3))
-                    .join()
-                    .expect("worker thread panicked"),
+                std::thread::spawn(|| {
+                    emit(
+                        Level::Warn,
+                        format_args!("from worker"),
+                        Some(Location::caller()),
+                    )
+                })
+                .join()
+                .expect("worker thread panicked"),
             );
         });
 
@@ -663,7 +692,11 @@ mod routing_tests {
         let mut destination = None;
         let events = capture(|| {
             let _suppress_guard = Context::enter_telemetry_suppressed_scope();
-            destination = Some(emit(Level::Error, format_args!("suppressed"), "a.rs", 5));
+            destination = Some(emit(
+                Level::Error,
+                format_args!("suppressed"),
+                Some(Location::caller()),
+            ));
         });
 
         assert_eq!(destination, Some(Destination::Subscriber));
@@ -676,7 +709,11 @@ mod routing_tests {
     fn a_subscriber_that_filters_the_event_gets_no_fallback() {
         let mut destination = None;
         let events = capture_filtered_out(|| {
-            destination = Some(emit(Level::Warn, format_args!("filtered"), "a.rs", 4));
+            destination = Some(emit(
+                Level::Warn,
+                format_args!("filtered"),
+                Some(Location::caller()),
+            ));
         });
 
         assert_eq!(
@@ -715,11 +752,32 @@ mod routing_tests {
 
     #[test]
     fn every_level_reaches_the_host_subscriber_with_target_message_and_location() {
+        let location = Location::caller();
         let events = capture(|| {
-            print_log(Level::Error, format_args!("boom: {}", 42), "a.rs", 1, None);
-            print_log(Level::Warn, format_args!("warned"), "b.rs", 2, None);
-            print_log(Level::Info, format_args!("informed"), "c.rs", 3, None);
-            print_log(Level::Debug, format_args!("debugged"), "d.rs", 4, None);
+            print_log(
+                Level::Error,
+                format_args!("boom: {}", 42),
+                Some(location),
+                None,
+            );
+            print_log(
+                Level::Warn,
+                format_args!("warned"),
+                Some(Location::caller()),
+                None,
+            );
+            print_log(
+                Level::Info,
+                format_args!("informed"),
+                Some(Location::caller()),
+                None,
+            );
+            print_log(
+                Level::Debug,
+                format_args!("debugged"),
+                Some(Location::caller()),
+                None,
+            );
         });
 
         assert_eq!(events.len(), 4);
@@ -737,8 +795,8 @@ mod routing_tests {
         assert_eq!(events[0].message, "boom: 42");
         // The call site's location travels as fields, since the callsite metadata would only ever
         // point back at this module.
-        assert_eq!(events[0].file.as_deref(), Some("a.rs"));
-        assert_eq!(events[0].line, Some(1));
+        assert_eq!(events[0].file.as_deref(), Some(location.file()));
+        assert_eq!(events[0].line, Some(u64::from(location.line())));
         assert_eq!(events[3].message, "debugged");
     }
 
@@ -756,6 +814,16 @@ mod routing_tests {
     }
 
     #[test]
+    fn always_logged_events_have_no_location() {
+        let events = capture(|| crate::dd_log_always!(Level::Info, "always"));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].message, "always");
+        assert_eq!(events[0].file, None);
+        assert_eq!(events[0].line, None);
+    }
+
+    #[test]
     #[cfg(not(feature = "log-compat"))]
     fn nothing_is_routed_through_the_log_crate() {
         // Holds either way: with a subscriber installed `tracing` consumes the event, and without
@@ -768,8 +836,7 @@ mod routing_tests {
             print_log(
                 Level::Warn,
                 format_args!("printed instead"),
-                "a.rs",
-                7,
+                Some(Location::caller()),
                 None,
             )
         });
@@ -788,12 +855,12 @@ mod routing_tests {
     #[cfg(feature = "log-compat")]
     fn log_compat_routes_to_the_log_facade_when_tracing_is_unavailable() {
         let mut destination = None;
+        let location = Location::caller();
         let records = capture_log_records(|| {
             destination = Some(emit(
                 Level::Warn,
                 format_args!("captured by log"),
-                "caller.rs",
-                17,
+                Some(location),
             ));
         });
 
@@ -802,13 +869,20 @@ mod routing_tests {
         assert_eq!(records[0].target, LOG_TARGET);
         assert_eq!(records[0].level, log::Level::Warn);
         assert_eq!(records[0].message, "captured by log");
-        assert_eq!(records[0].file.as_deref(), Some("caller.rs"));
-        assert_eq!(records[0].line, Some(17));
+        assert_eq!(records[0].file.as_deref(), Some(location.file()));
+        assert_eq!(records[0].line, Some(location.line()));
     }
 
     #[test]
     fn events_outside_the_export_path_are_not_suppressed() {
-        let events = capture(|| print_log(Level::Error, format_args!("plain"), "a.rs", 1, None));
+        let events = capture(|| {
+            print_log(
+                Level::Error,
+                format_args!("plain"),
+                Some(Location::caller()),
+                None,
+            )
+        });
 
         assert_eq!(events.len(), 1);
         assert!(!events[0].suppressed);
