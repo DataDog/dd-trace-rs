@@ -85,12 +85,12 @@ impl Trigger for APIGatewayHttpEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an API Gateway HTTP Event");
         let resource = format!(
             "{http_method} {parameterized_route}",
@@ -114,6 +114,7 @@ impl Trigger for APIGatewayHttpEvent {
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(self.http_metadata().span_tags());
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -249,9 +250,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.httpapi");
         assert_eq!(
             span.service,
@@ -312,9 +312,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.httpapi");
         assert_eq!(
             span.service,

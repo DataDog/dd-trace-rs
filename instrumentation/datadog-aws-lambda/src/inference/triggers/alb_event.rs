@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::inference::triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
-use crate::inference::SpanData as Span;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -50,14 +49,6 @@ impl Trigger for ALBEvent {
             .and_then(|v| v.get("elb"))
             .and_then(|v| v.get("targetGroupArn"));
         target_group_arn.is_some()
-    }
-
-    fn enrich_span(
-        &self,
-        _span: &mut Span,
-        _service_mapping: &HashMap<String, String>,
-        _aws_service_representation_enabled: bool,
-    ) {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {

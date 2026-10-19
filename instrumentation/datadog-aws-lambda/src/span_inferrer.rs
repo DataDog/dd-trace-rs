@@ -68,7 +68,7 @@ struct ActiveInferredSpan {
 
 /// Handle for the set of inferred spans created for a trigger.
 pub(crate) struct InferredSpanScope {
-    outer: Option<ActiveInferredSpan>,
+    outer: Option<Context>,
     inner: Option<ActiveInferredSpan>,
 }
 
@@ -99,28 +99,20 @@ impl InferredSpanScope {
         result: &InferenceResult,
         invocation_start: SystemTime,
     ) -> Self {
-        if !result.should_create_inferred_span() {
+        let Some(span_data) = &result.span_data else {
             return Self::empty();
-        }
+        };
 
-        let inner_start = inferred_span_start_time(&result.span_data).unwrap_or(invocation_start);
+        let inner_start = inferred_span_start_time(span_data).unwrap_or(invocation_start);
         let mut current_cx = parent_cx.clone();
 
-        let outer = result
-            .wrapped_span
-            .as_ref()
-            .filter(|w| w.should_create_inferred_span())
-            .map(|w| {
-                let start_time = inferred_span_start_time(&w.span_data).unwrap_or(inner_start);
-                current_cx = build_inferred_span(tracer, &w.span_data, &current_cx, start_time);
-                ActiveInferredSpan {
-                    cx: current_cx.clone(),
-                    is_async: w.is_async,
-                    start_time,
-                }
-            });
+        let outer = result.wrapped_span.as_ref().map(|wrapped| {
+            let start_time = inferred_span_start_time(wrapped).unwrap_or(inner_start);
+            current_cx = build_inferred_span(tracer, wrapped, &current_cx, start_time);
+            current_cx.clone()
+        });
 
-        current_cx = build_inferred_span(tracer, &result.span_data, &current_cx, inner_start);
+        current_cx = build_inferred_span(tracer, span_data, &current_cx, inner_start);
         let inner = Some(ActiveInferredSpan {
             cx: current_cx,
             is_async: result.is_async,
@@ -152,7 +144,7 @@ impl InferredSpanScope {
                 .inner
                 .as_ref()
                 .map_or(invocation_start, |inner| inner.start_time);
-            outer.cx.span().end_with_timestamp(outer_end_time);
+            outer.span().end_with_timestamp(outer_end_time);
         }
 
         if let Some(inner) = self.inner.as_ref() {
@@ -275,14 +267,14 @@ mod tests {
 
     fn make_result(name: &str, service: &str) -> InferenceResult {
         InferenceResult {
-            span_data: SpanData {
+            span_data: Some(SpanData {
                 name: name.to_string(),
                 service: service.to_string(),
                 resource: service.to_string(),
                 r#type: "web".to_string(),
                 start: 0,
                 meta: HashMap::new(),
-            },
+            }),
             is_async: false,
             ..InferenceResult::default()
         }
@@ -331,7 +323,7 @@ mod tests {
         let tracer = provider.tracer("test");
 
         let mut result = make_result("aws.sqs", "my-queue");
-        result.wrapped_span = Some(Box::new(make_result("aws.sns", "my-topic")));
+        result.wrapped_span = make_result("aws.sns", "my-topic").span_data;
 
         let parent_cx = Context::current();
         let now = SystemTime::now();
@@ -365,12 +357,12 @@ mod tests {
         let invocation_end = nanos_to_system_time(20_000_000_000);
 
         let mut result = make_result("aws.sqs", "my-queue");
-        result.span_data.start = inner_start_ns as i64;
+        result.span_data.as_mut().unwrap().start = inner_start_ns as i64;
         result.is_async = true;
 
         let mut wrapped = make_result("aws.sns", "my-topic");
-        wrapped.span_data.start = outer_start_ns as i64;
-        result.wrapped_span = Some(Box::new(wrapped));
+        wrapped.span_data.as_mut().unwrap().start = outer_start_ns as i64;
+        result.wrapped_span = wrapped.span_data;
 
         let scope =
             InferredSpanScope::start(&tracer, &Context::current(), &result, invocation_start);
@@ -444,8 +436,11 @@ mod tests {
                 .map(String::as_str),
             Some("sqs")
         );
-        assert!(extraction.inference_result.should_create_inferred_span());
-        assert_eq!(extraction.inference_result.span_data.name, "aws.sqs");
+        assert!(extraction.inference_result.span_data.is_some());
+        assert_eq!(
+            extraction.inference_result.span_data.as_ref().unwrap().name,
+            "aws.sqs"
+        );
     }
 
     fn infer_fixture(name: &str) -> InferenceResult {
@@ -470,7 +465,7 @@ mod tests {
     #[test]
     fn default_inference_preserves_resource_service_names() {
         let result = infer_fixture("sqs_event.json");
-        assert_eq!(result.span_data.service, "MyQueue");
+        assert_eq!(result.span_data.as_ref().unwrap().service, "MyQueue");
     }
 
     #[test]
@@ -498,7 +493,7 @@ mod tests {
             ("msk_event_with_headers.json", "aws.msk", true),
         ] {
             let result = infer_fixture(fixture);
-            assert_eq!(result.span_data.name, name, "{fixture}");
+            assert_eq!(result.span_data.as_ref().unwrap().name, name, "{fixture}");
             assert_eq!(result.is_async, is_async, "{fixture}");
             let upstream = extract_upstream_context(&propagator, &result, &Context::new());
             let scope = InferredSpanScope::start(&tracer, &upstream, &result, invocation_start);
@@ -513,7 +508,7 @@ mod tests {
             let root = &spans[1];
             assert_eq!(
                 inferred.start_time,
-                inferred_span_start_time(&result.span_data).unwrap()
+                inferred_span_start_time(result.span_data.as_ref().unwrap()).unwrap()
             );
             assert_eq!(
                 inferred.end_time,
@@ -614,7 +609,7 @@ mod tests {
             "step_function_lambda_root_legacy_event.json",
         ] {
             let result = infer_fixture(fixture);
-            assert!(!result.should_create_inferred_span(), "{fixture}");
+            assert!(result.span_data.is_none(), "{fixture}");
             assert_eq!(
                 result.trigger_tags["function_trigger.event_source"],
                 "states"
@@ -756,11 +751,11 @@ mod tests {
             object.remove("size");
             object.remove("eTag");
             let result = default_inferrer().infer_span(&event.to_string()).unwrap();
-            assert!(result.should_create_inferred_span());
-            assert_eq!(result.span_data.name, "aws.s3");
-            assert_eq!(result.span_data.meta["event_name"], name);
-            assert!(!result.span_data.meta.contains_key("object_size"));
-            assert!(!result.span_data.meta.contains_key("object_etag"));
+            let span_data = result.span_data.as_ref().unwrap();
+            assert_eq!(span_data.name, "aws.s3");
+            assert_eq!(span_data.meta["event_name"], name);
+            assert!(!span_data.meta.contains_key("object_size"));
+            assert!(!span_data.meta.contains_key("object_etag"));
             assert_eq!(
                 result.trigger_tags["function_trigger.event_source_arn"],
                 "arn:aws:s3:::example-bucket"
@@ -804,7 +799,7 @@ mod tests {
             serde_json::from_str(&read_json_file("application_load_balancer.json")).unwrap();
         event["headers"] = json!({"X-Datadog-Trace-Id": "42", "X-Datadog-Parent-Id": "43"});
         let result = default_inferrer().infer_span(&event.to_string()).unwrap();
-        assert!(!result.should_create_inferred_span());
+        assert!(result.span_data.is_none());
         assert!(!result.is_async);
         let upstream = extract_upstream_context(&propagator, &result, &Context::new());
         assert_eq!(
@@ -826,7 +821,7 @@ mod tests {
             r#"{"Records": [{"eventSource": "aws:sqs"}]}"#,
         ] {
             let result = default_inferrer().infer_span(payload).unwrap_or_default();
-            assert!(!result.should_create_inferred_span(), "{payload}");
+            assert!(result.span_data.is_none(), "{payload}");
             let upstream = extract_upstream_context(&propagator, &result, &ambient);
             assert_eq!(
                 upstream.span().span_context(),
@@ -853,9 +848,9 @@ mod tests {
             ),
         ] {
             let mut result = make_result("aws.sqs", "my-queue");
-            result.span_data.start = inner_start_ns;
+            result.span_data.as_mut().unwrap().start = inner_start_ns;
             result.is_async = is_async;
-            result.wrapped_span = Some(Box::new(make_result("aws.sns", "my-topic")));
+            result.wrapped_span = make_result("aws.sns", "my-topic").span_data;
 
             let scope =
                 InferredSpanScope::start(&tracer, &Context::current(), &result, invocation_start);
@@ -879,6 +874,7 @@ mod tests {
                 .infer_span(&read_json_file("sqs_event.json"))
                 .unwrap()
                 .span_data
+                .unwrap()
                 .service
         };
         assert_eq!(sqs_service(&default_inferrer()), "MyQueue");

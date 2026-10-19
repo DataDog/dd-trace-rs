@@ -77,12 +77,12 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         let resource = format!(
             "{} {}",
             self.request_context.http.method, self.request_context.http.path
@@ -107,6 +107,7 @@ impl Trigger for LambdaFunctionUrlEvent {
         span.meta.extend(self.http_metadata().span_tags());
         span.meta
             .insert("operation_name".into(), "aws.lambda.url".into());
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -218,9 +219,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.lambda.url");
         assert_eq!(
             span.service,

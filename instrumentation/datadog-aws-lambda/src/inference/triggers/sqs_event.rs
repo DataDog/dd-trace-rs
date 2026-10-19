@@ -117,12 +117,12 @@ impl Trigger for SqsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an SQS Event");
         let resource = self
             .event_source_arn
@@ -161,6 +161,7 @@ impl Trigger for SqsRecord {
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
         ]));
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -368,9 +369,8 @@ mod tests {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.sqs");
         assert_eq!(span.service, "MyQueue");
         assert_eq!(span.resource, "MyQueue");

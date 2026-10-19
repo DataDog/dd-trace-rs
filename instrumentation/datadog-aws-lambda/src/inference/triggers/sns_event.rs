@@ -103,12 +103,12 @@ impl Trigger for SnsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an SNS Event");
         let resource_name = self
             .sns
@@ -155,6 +155,7 @@ impl Trigger for SnsRecord {
                 event_subscription_arn.clone(),
             );
         }
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -196,7 +197,6 @@ impl Trigger for SnsRecord {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::inference::SpanData as Span;
 
     use super::*;
     use crate::inference::triggers::test_utils::read_json_file;
@@ -254,9 +254,8 @@ mod tests {
         let json = read_json_file("sns_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.sns");
         assert_eq!(span.service, "serverlessTracingTopicPy");
         assert_eq!(span.resource, "serverlessTracingTopicPy");

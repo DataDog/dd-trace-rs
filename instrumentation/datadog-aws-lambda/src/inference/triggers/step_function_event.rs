@@ -105,14 +105,6 @@ impl Trigger for StepFunctionEvent {
         execution_id.is_some() && name.is_some() && entered_time.is_some()
     }
 
-    fn enrich_span(
-        &self,
-        _span: &mut crate::inference::SpanData,
-        _service_mapping: &HashMap<String, String>,
-        _aws_service_representation_enabled: bool,
-    ) {
-    }
-
     fn get_tags(&self) -> HashMap<String, String> {
         HashMap::from([(
             FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),

@@ -67,12 +67,12 @@ impl Trigger for S3Record {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an InferredSpan span with S3 event");
         let bucket_name = self.s3.bucket.name.as_str();
         let start_time = self
@@ -107,6 +107,7 @@ impl Trigger for S3Record {
         if let Some(etag) = &self.s3.object.e_tag {
             span.meta.insert("object_etag".into(), etag.clone());
         }
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -182,9 +183,8 @@ mod tests {
         let json = read_json_file("s3_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.s3");
         assert_eq!(span.service, "example-bucket");
         assert_eq!(span.resource, "example-bucket");

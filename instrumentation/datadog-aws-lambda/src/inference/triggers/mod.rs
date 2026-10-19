@@ -185,12 +185,13 @@ pub trait Trigger {
     fn is_match(payload: &Value) -> bool
     where
         Self: Sized;
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
-        service_mapping: &HashMap<String, String>,
-        aws_service_representation_enabled: bool,
-    );
+        _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
+    ) -> Option<Span> {
+        None
+    }
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str, function_name: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
@@ -333,8 +334,7 @@ mod tests {
                 payload["headers"]["X-Amz-Invocation-Type"] = invocation_type.into();
                 let identified = IdentifiedTrigger::from_value(payload);
                 let trigger = identified.as_trigger().unwrap();
-                let mut span = Span::default();
-                trigger.enrich_span(&mut span, &HashMap::new(), true);
+                let span = trigger.span_data(&HashMap::new(), true).unwrap();
                 assert_eq!(span.meta["http.user_agent"], "context-agent", "{fixture}");
                 let tags = trigger.get_tags();
                 assert_eq!(tags["http.user_agent"], expected_agent, "{fixture}");
@@ -450,8 +450,7 @@ mod tests {
                     .into_iter()
                     .map(|(key, value)| (key.into(), value.into()))
                     .collect();
-                let mut span = Span::default();
-                trigger.enrich_span(&mut span, &mapping, enabled);
+                let span = trigger.span_data(&mapping, enabled).unwrap();
                 assert_eq!(span.service, expected, "{fixture}, enabled={enabled}");
             }
         }
@@ -468,12 +467,14 @@ mod tests {
                 ("lambda_stepfunction".into(), "states".into()),
             ]);
             for enabled in [false, true] {
-                let mut span = Span::default();
-                event
-                    .as_trigger()
-                    .unwrap()
-                    .enrich_span(&mut span, &mapping, enabled);
-                assert_eq!(span, Span::default(), "{fixture}");
+                assert!(
+                    event
+                        .as_trigger()
+                        .unwrap()
+                        .span_data(&mapping, enabled)
+                        .is_none(),
+                    "{fixture}"
+                );
             }
         }
     }

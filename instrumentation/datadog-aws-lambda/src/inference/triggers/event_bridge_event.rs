@@ -62,12 +62,12 @@ impl Trigger for EventBridgeEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         // EventBridge events have a timestamp resolution in seconds. A time outside the
         // nanosecond range would also overflow in milliseconds, so it is left unknown.
         let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
@@ -101,6 +101,7 @@ impl Trigger for EventBridgeEvent {
             ("operation_name".to_string(), "aws.eventbridge".to_string()),
             ("detail_type".to_string(), self.detail_type.clone()),
         ]));
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -180,9 +181,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         let expected = serde_json::from_str(&read_json_file("eventbridge_span.json"))
             .expect("Failed to deserialize into Span");
@@ -196,9 +196,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         assert_eq!(span.resource, "my.event");
     }
@@ -210,9 +209,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
@@ -228,8 +226,7 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
-        event.enrich_span(&mut span, &HashMap::new(), true);
+        let span = event.span_data(&HashMap::new(), true).unwrap();
 
         assert_eq!(span.start, 0);
     }

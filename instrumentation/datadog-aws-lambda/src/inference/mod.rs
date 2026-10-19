@@ -54,18 +54,12 @@ impl Default for InferConfig {
 
 #[derive(Default)]
 pub(crate) struct InferenceResult {
-    pub span_data: SpanData,
+    pub span_data: Option<SpanData>,
     pub is_async: bool,
     pub trigger_tags: HashMap<String, String>,
     pub carrier: HashMap<String, String>,
     pub generated_context: Option<SpanContext>,
-    pub wrapped_span: Option<Box<InferenceResult>>,
-}
-
-impl InferenceResult {
-    pub fn should_create_inferred_span(&self) -> bool {
-        !self.span_data.name.is_empty()
-    }
+    pub wrapped_span: Option<SpanData>,
 }
 
 pub(crate) struct SpanInferrer {
@@ -94,36 +88,28 @@ impl SpanInferrer {
             .map(generated_context),
             _ => None,
         };
-        result.wrapped_span = self.infer_wrapped_trigger(&identified).map(Box::new);
-        if let Some(wrapped) = &result.wrapped_span {
-            // Bottlecap merges the wrapped trigger's tags before enriching the inner span,
-            // so inner span tags take precedence. The wrapped event source ARN is not merged.
-            wrapped
-                .trigger_tags
-                .iter()
-                .filter(|(key, _)| key.as_str() != FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG)
-                .for_each(|(key, value)| {
-                    result
-                        .span_data
-                        .meta
-                        .entry(key.clone())
-                        .or_insert_with(|| value.clone());
-                });
+        if let Some(wrapped) = self.infer_wrapped_trigger(&identified) {
+            if let Some(span_data) = &mut result.span_data {
+                for (key, value) in wrapped
+                    .trigger_tags
+                    .into_iter()
+                    .filter(|(key, _)| key != FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG)
+                {
+                    span_data.meta.entry(key).or_insert(value);
+                }
+            }
+            result.wrapped_span = wrapped.span_data;
         }
         Ok(result)
     }
 
     fn infer_trigger(&self, trigger: &dyn Trigger) -> InferenceResult {
-        let mut span_data = SpanData::default();
-        // ALB and Step Functions intentionally leave span_data empty: they propagate
-        // context and trigger tags but do not create an additional service span.
-        trigger.enrich_span(
-            &mut span_data,
+        let is_async = trigger.is_async();
+        let mut span_data = trigger.span_data(
             &self.config.service_mapping,
             self.config.aws_service_representation_enabled,
         );
-        let is_async = trigger.is_async();
-        if !span_data.name.is_empty() {
+        if let Some(span_data) = &mut span_data {
             span_data
                 .meta
                 .insert("_inferred_span.tag_source".into(), "self".into());
@@ -326,7 +312,7 @@ mod tests {
             ("eventbridge_sns_event.json", "eventbridge"),
         ] {
             let result = infer_fixture(fixture);
-            let meta = &result.span_data.meta;
+            let meta = &result.span_data.as_ref().unwrap().meta;
             assert_eq!(
                 meta.get(triggers::FUNCTION_TRIGGER_EVENT_SOURCE_TAG)
                     .map(String::as_str),
