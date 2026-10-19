@@ -259,3 +259,143 @@ pub mod test_utils {
         fs::read_to_string(path).expect("Failed to read file")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::test_utils::read_json_file;
+    use super::*;
+
+    #[test]
+    fn service_names_follow_mapping_precedence_and_representation() {
+        for (fixture, specific, generic, instance, fallback) in [
+            (
+                "api_gateway_http_event.json",
+                "x02yirxc7a",
+                "lambda_api_gateway",
+                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "id",
+                "lambda_api_gateway",
+                "id.execute-api.us-east-1.amazonaws.com",
+                "id.execute-api.us-east-1.amazonaws.com",
+            ),
+            (
+                "api_gateway_websocket_connect_event.json",
+                "85fj5nw29d",
+                "lambda_api_gateway",
+                "85fj5nw29d.execute-api.eu-west-1.amazonaws.com",
+                "api_gateway_websocket",
+            ),
+            (
+                "lambda_function_url_event.json",
+                "a8hyhsshac",
+                "lambda_url",
+                "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com",
+                "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com",
+            ),
+            (
+                "msk_event.json",
+                "demo-cluster",
+                "lambda_msk",
+                "demo-cluster",
+                "msk",
+            ),
+            ("sqs_event.json", "MyQueue", "lambda_sqs", "MyQueue", "sqs"),
+            (
+                "sns_event.json",
+                "serverlessTracingTopicPy",
+                "lambda_sns",
+                "serverlessTracingTopicPy",
+                "sns",
+            ),
+            (
+                "dynamodb_event.json",
+                "ExampleTableWithStream",
+                "lambda_dynamodb",
+                "ExampleTableWithStream",
+                "dynamodb",
+            ),
+            (
+                "s3_event.json",
+                "example-bucket",
+                "lambda_s3",
+                "example-bucket",
+                "s3",
+            ),
+            (
+                "eventbridge_event.json",
+                "testBus",
+                "lambda_eventbridge",
+                "testBus",
+                "eventbridge",
+            ),
+            (
+                "kinesis_event.json",
+                "kinesisStream",
+                "lambda_kinesis",
+                "kinesisStream",
+                "kinesis",
+            ),
+        ] {
+            assert_service_names(fixture, specific, generic, instance, fallback);
+        }
+    }
+
+    fn assert_service_names(
+        fixture: &str,
+        specific: &str,
+        generic: &str,
+        instance: &str,
+        fallback: &str,
+    ) {
+        let event =
+            IdentifiedTrigger::from_value(serde_json::from_str(&read_json_file(fixture)).unwrap());
+        let trigger = event.as_trigger().unwrap();
+        for enabled in [false, true] {
+            for (entries, expected) in [
+                (
+                    vec![(specific, "specific"), (generic, "generic")],
+                    "specific",
+                ),
+                (vec![(generic, "generic")], "generic"),
+                (
+                    vec![("unrelated", "other")],
+                    if enabled { instance } else { fallback },
+                ),
+                (vec![], if enabled { instance } else { fallback }),
+            ] {
+                let mapping = entries
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect();
+                let mut span = Span::default();
+                trigger.enrich_span(&mut span, &mapping, enabled);
+                assert_eq!(span.service, expected, "{fixture}, enabled={enabled}");
+            }
+        }
+    }
+
+    #[test]
+    fn context_only_triggers_do_not_resolve_services() {
+        for fixture in ["application_load_balancer.json", "step_function_event.json"] {
+            let event = IdentifiedTrigger::from_value(
+                serde_json::from_str(&read_json_file(fixture)).unwrap(),
+            );
+            let mapping = HashMap::from([
+                ("lambda_application_load_balancer".into(), "alb".into()),
+                ("lambda_stepfunction".into(), "states".into()),
+            ]);
+            for enabled in [false, true] {
+                let mut span = Span::default();
+                event
+                    .as_trigger()
+                    .unwrap()
+                    .enrich_span(&mut span, &mapping, enabled);
+                assert_eq!(span, Span::default(), "{fixture}");
+            }
+        }
+    }
+}
