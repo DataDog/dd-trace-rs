@@ -1012,16 +1012,17 @@ mod startup_log_tests {
     use opentelemetry_sdk::Resource;
 
     use super::{make_tracer, Config};
-    use crate::core::log::test_capture::capture;
+    use crate::core::startup_log::startup_configuration;
 
-    fn startup_banners(enabled: bool) -> Vec<String> {
-        let mut builder = Config::builder();
-        builder.set_enabled(enabled);
-        let config = Arc::new(builder.build());
+    #[test]
+    fn test_startup_configuration_resolved_by_make_tracer() {
+        for enabled in [true, false] {
+            let mut builder = Config::builder();
+            builder.set_enabled(enabled);
+            let config = Arc::new(builder.build());
 
-        let events = capture(|| {
             let (provider, _) = make_tracer(
-                config,
+                config.clone(),
                 opentelemetry_sdk::trace::SdkTracerProvider::builder(),
                 Some(
                     Resource::builder()
@@ -1030,23 +1031,17 @@ mod startup_log_tests {
                 ),
             );
             let _ = provider.shutdown_with_timeout(Duration::from_millis(100));
-        });
 
-        events
-            .into_iter()
-            .map(|e| e.message)
-            .filter(|m| m.starts_with("DATADOG TRACER CONFIGURATION"))
-            .collect()
-    }
-
-    #[test]
-    fn test_startup_log() {
-        for enabled in [true, false] {
-            let banners = startup_banners(enabled);
-            assert_eq!(banners.len(), 1, "enabled={enabled}: {banners:?}");
-            assert!(banners[0].contains(&format!(r#""DD_TRACE_ENABLED":"{enabled}""#)));
-            // The resource's service name is resolved before logging
-            assert!(banners[0].contains(r#""DD_SERVICE":"otel-service""#));
+            // The resource's service name is resolved before the banner is logged
+            let startup = startup_configuration(&config);
+            assert_eq!(
+                startup["configuration"]["DD_SERVICE"], "otel-service",
+                "enabled={enabled}"
+            );
+            assert_eq!(
+                startup["configuration"]["DD_TRACE_ENABLED"],
+                enabled.to_string()
+            );
         }
     }
 }
