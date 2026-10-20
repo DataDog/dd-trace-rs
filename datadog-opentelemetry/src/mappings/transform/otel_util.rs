@@ -211,7 +211,13 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
+///
+/// `datadog.resource` takes precedence, as for the exported span.
 pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let resource = span.get_attr_str(DATADOG_RESOURCE);
+    if !resource.is_empty() {
+        return resource;
+    }
     let m = get_res_span_attributes(span, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
