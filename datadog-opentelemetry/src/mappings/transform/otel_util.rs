@@ -210,11 +210,15 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     }
 }
 
-/// The resource of a span created through the OpenTelemetry API: `resource.name` if set,
-/// otherwise the span name, as in the other Datadog SDKs. Unlike the Agent's mapping for OTLP
-/// spans, the resource isn't derived from the HTTP, messaging or RPC attributes; those already
-/// shape the operation name.
+/// The resource of a span created through the OpenTelemetry API: `datadog.resource` or
+/// `resource.name` if set, otherwise the span name, as in the other Datadog SDKs. Unlike the
+/// Agent's mapping for OTLP spans, the resource isn't derived from the HTTP, messaging or RPC
+/// attributes; those already shape the operation name.
 pub fn get_otel_resource<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let resource = span.get_attr_str(DATADOG_RESOURCE);
+    if !resource.is_empty() {
+        return resource;
+    }
     let resource = get_res_span_attributes(span, &[RESOURCE_NAME]);
     if !resource.is_empty() {
         return resource;

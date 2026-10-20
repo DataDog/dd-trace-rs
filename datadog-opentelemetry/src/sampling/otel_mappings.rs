@@ -354,6 +354,20 @@ mod tests {
     }
 
     #[test]
+    fn test_datadog_resource_attribute_overrides_resource_name() {
+        // Same precedence as the exported span, so resource sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.resource", "GET"),
+            KeyValue::new("resource.name", "GET /users/{id}"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("request", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "GET");
+    }
+
+    #[test]
     fn test_operation_name_http_client() {
         let attrs = vec![KeyValue::new(
             Key::from_static_str(HTTP_REQUEST_METHOD),
