@@ -9,20 +9,6 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
-use self::alb_event::ALBEvent;
-use self::api_gateway_http_event::APIGatewayHttpEvent;
-use self::api_gateway_rest_event::APIGatewayRestEvent;
-use self::api_gateway_websocket_event::APIGatewayWebSocketEvent;
-use self::dynamodb_event::DynamoDbRecord;
-use self::event_bridge_event::EventBridgeEvent;
-use self::kinesis_event::KinesisRecord;
-use self::lambda_function_url_event::LambdaFunctionUrlEvent;
-use self::msk_event::MSKEvent;
-use self::s3_event::S3Record;
-use self::sns_event::SnsRecord;
-use self::sqs_event::SqsRecord;
-use self::step_function_event::StepFunctionEvent;
-
 pub mod alb_event;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
@@ -221,19 +207,19 @@ pub trait Trigger {
 #[must_use]
 #[non_exhaustive]
 pub enum IdentifiedTrigger {
-    APIGatewayHttpEvent(APIGatewayHttpEvent),
-    APIGatewayRestEvent(APIGatewayRestEvent),
-    APIGatewayWebSocketEvent(APIGatewayWebSocketEvent),
-    ALBEvent(ALBEvent),
-    LambdaFunctionUrlEvent(LambdaFunctionUrlEvent),
-    MSKEvent(MSKEvent),
-    SqsRecord(SqsRecord),
-    SnsRecord(SnsRecord),
-    DynamoDbRecord(DynamoDbRecord),
-    S3Record(S3Record),
-    EventBridgeEvent(EventBridgeEvent),
-    KinesisRecord(KinesisRecord),
-    StepFunctionEvent(StepFunctionEvent),
+    APIGatewayHttpEvent(api_gateway_http_event::APIGatewayHttpEvent),
+    APIGatewayRestEvent(api_gateway_rest_event::APIGatewayRestEvent),
+    APIGatewayWebSocketEvent(api_gateway_websocket_event::APIGatewayWebSocketEvent),
+    ALBEvent(alb_event::ALBEvent),
+    LambdaFunctionUrlEvent(lambda_function_url_event::LambdaFunctionUrlEvent),
+    MSKEvent(msk_event::MSKEvent),
+    SqsRecord(sqs_event::SqsRecord),
+    SnsRecord(sns_event::SnsRecord),
+    DynamoDbRecord(dynamodb_event::DynamoDbRecord),
+    S3Record(s3_event::S3Record),
+    EventBridgeEvent(event_bridge_event::EventBridgeEvent),
+    KinesisRecord(kinesis_event::KinesisRecord),
+    StepFunctionEvent(step_function_event::StepFunctionEvent),
 }
 
 impl IdentifiedTrigger {
@@ -242,32 +228,34 @@ impl IdentifiedTrigger {
     /// Returns `None` if no source matches or the first matching source fails to parse,
     /// without trying later sources.
     pub fn from_value(payload: Value) -> Option<Self> {
-        if APIGatewayHttpEvent::is_match(&payload) {
-            APIGatewayHttpEvent::new(payload).map(Self::APIGatewayHttpEvent)
-        } else if APIGatewayRestEvent::is_match(&payload) {
-            APIGatewayRestEvent::new(payload).map(Self::APIGatewayRestEvent)
-        } else if APIGatewayWebSocketEvent::is_match(&payload) {
-            APIGatewayWebSocketEvent::new(payload).map(Self::APIGatewayWebSocketEvent)
-        } else if ALBEvent::is_match(&payload) {
-            ALBEvent::new(payload).map(Self::ALBEvent)
-        } else if LambdaFunctionUrlEvent::is_match(&payload) {
-            LambdaFunctionUrlEvent::new(payload).map(Self::LambdaFunctionUrlEvent)
-        } else if MSKEvent::is_match(&payload) {
-            MSKEvent::new(payload).map(Self::MSKEvent)
-        } else if SqsRecord::is_match(&payload) {
-            SqsRecord::new(payload).map(Self::SqsRecord)
-        } else if SnsRecord::is_match(&payload) {
-            SnsRecord::new(payload).map(Self::SnsRecord)
-        } else if DynamoDbRecord::is_match(&payload) {
-            DynamoDbRecord::new(payload).map(Self::DynamoDbRecord)
-        } else if S3Record::is_match(&payload) {
-            S3Record::new(payload).map(Self::S3Record)
-        } else if EventBridgeEvent::is_match(&payload) {
-            EventBridgeEvent::new(payload).map(Self::EventBridgeEvent)
-        } else if KinesisRecord::is_match(&payload) {
-            KinesisRecord::new(payload).map(Self::KinesisRecord)
-        } else if StepFunctionEvent::is_match(&payload) {
-            StepFunctionEvent::new(payload).map(Self::StepFunctionEvent)
+        if api_gateway_http_event::APIGatewayHttpEvent::is_match(&payload) {
+            api_gateway_http_event::APIGatewayHttpEvent::new(payload).map(Self::APIGatewayHttpEvent)
+        } else if api_gateway_rest_event::APIGatewayRestEvent::is_match(&payload) {
+            api_gateway_rest_event::APIGatewayRestEvent::new(payload).map(Self::APIGatewayRestEvent)
+        } else if api_gateway_websocket_event::APIGatewayWebSocketEvent::is_match(&payload) {
+            api_gateway_websocket_event::APIGatewayWebSocketEvent::new(payload)
+                .map(Self::APIGatewayWebSocketEvent)
+        } else if alb_event::ALBEvent::is_match(&payload) {
+            alb_event::ALBEvent::new(payload).map(Self::ALBEvent)
+        } else if lambda_function_url_event::LambdaFunctionUrlEvent::is_match(&payload) {
+            lambda_function_url_event::LambdaFunctionUrlEvent::new(payload)
+                .map(Self::LambdaFunctionUrlEvent)
+        } else if msk_event::MSKEvent::is_match(&payload) {
+            msk_event::MSKEvent::new(payload).map(Self::MSKEvent)
+        } else if sqs_event::SqsRecord::is_match(&payload) {
+            sqs_event::SqsRecord::new(payload).map(Self::SqsRecord)
+        } else if sns_event::SnsRecord::is_match(&payload) {
+            sns_event::SnsRecord::new(payload).map(Self::SnsRecord)
+        } else if dynamodb_event::DynamoDbRecord::is_match(&payload) {
+            dynamodb_event::DynamoDbRecord::new(payload).map(Self::DynamoDbRecord)
+        } else if s3_event::S3Record::is_match(&payload) {
+            s3_event::S3Record::new(payload).map(Self::S3Record)
+        } else if event_bridge_event::EventBridgeEvent::is_match(&payload) {
+            event_bridge_event::EventBridgeEvent::new(payload).map(Self::EventBridgeEvent)
+        } else if kinesis_event::KinesisRecord::is_match(&payload) {
+            kinesis_event::KinesisRecord::new(payload).map(Self::KinesisRecord)
+        } else if step_function_event::StepFunctionEvent::is_match(&payload) {
+            step_function_event::StepFunctionEvent::new(payload).map(Self::StepFunctionEvent)
         } else {
             None
         }
@@ -341,9 +329,11 @@ mod tests {
         payload["requestContext"]["elb"] = serde_json::json!({
             "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/test"
         });
-        assert!(APIGatewayRestEvent::is_match(&payload));
-        assert!(ALBEvent::is_match(&payload));
-        assert!(ALBEvent::new(payload.clone()).is_some());
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::is_match(
+            &payload
+        ));
+        assert!(alb_event::ALBEvent::is_match(&payload));
+        assert!(alb_event::ALBEvent::new(payload.clone()).is_some());
 
         assert!(matches!(
             IdentifiedTrigger::from_value(payload),
@@ -359,10 +349,12 @@ mod tests {
             "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/test"
         });
         payload["requestContext"]["identity"] = Value::Null;
-        assert!(APIGatewayRestEvent::is_match(&payload));
-        assert!(APIGatewayRestEvent::new(payload.clone()).is_none());
-        assert!(ALBEvent::is_match(&payload));
-        assert!(ALBEvent::new(payload.clone()).is_some());
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::is_match(
+            &payload
+        ));
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::new(payload.clone()).is_none());
+        assert!(alb_event::ALBEvent::is_match(&payload));
+        assert!(alb_event::ALBEvent::new(payload.clone()).is_some());
 
         assert!(IdentifiedTrigger::from_value(payload).is_none());
     }
