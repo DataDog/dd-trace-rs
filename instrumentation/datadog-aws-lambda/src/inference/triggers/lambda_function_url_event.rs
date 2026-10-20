@@ -105,8 +105,6 @@ impl Trigger for LambdaFunctionUrlEvent {
         span.r#type = String::from("http");
         span.start = start_time;
         span.meta.extend(self.http_metadata().span_tags());
-        span.meta
-            .insert("operation_name".into(), "aws.lambda.url".into());
         Some(span)
     }
 
@@ -233,7 +231,6 @@ mod tests {
             HashMap::from([
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "71.195.30.42".to_string()),
-                ("operation_name".to_string(), "aws.lambda.url".to_string()),
                 ("request_id".to_string(), "ec4d58f8-2b8b-4ceb-a1d5-2be7bff58505".to_string()),
                 ("http.url".to_string(), "https://a8hyhsshac.lambda-url.eu-south-1.amazonaws.com/".to_string()),
                 ("http.method".to_string(), "GET".to_string()),

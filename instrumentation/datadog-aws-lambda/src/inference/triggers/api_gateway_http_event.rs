@@ -110,7 +110,7 @@ impl Trigger for APIGatewayHttpEvent {
 
         span.name = "aws.httpapi".to_string();
         span.service = service_name;
-        span.resource.clone_from(&resource);
+        span.resource = resource;
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(self.http_metadata().span_tags());
@@ -129,10 +129,9 @@ impl Trigger for APIGatewayHttpEvent {
             tags.insert(
                 "http.route".to_string(),
                 self.route_key
-                    .clone()
                     .split_whitespace()
                     .last()
-                    .unwrap_or(&self.route_key.clone())
+                    .unwrap_or(&self.route_key)
                     .to_string(),
             );
         }

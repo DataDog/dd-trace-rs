@@ -133,12 +133,11 @@ impl Trigger for SnsRecord {
         );
 
         span.name = "aws.sns".to_string();
-        span.service.clone_from(&service_name);
+        span.service = service_name;
         span.resource = resource_name.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend([
-            ("operation_name".to_string(), "aws.sns".to_string()),
             ("topicname".to_string(), resource_name.to_owned()),
             ("topic_arn".to_string(), self.sns.topic_arn.clone()),
             ("message_id".to_string(), self.sns.message_id.clone()),
@@ -264,7 +263,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.sns".to_string()),
                 ("topicname".to_string(), "serverlessTracingTopicPy".to_string()),
                 ("topic_arn".to_string(), "arn:aws:sns:sa-east-1:425362996713:serverlessTracingTopicPy".to_string()),
                 ("message_id".to_string(), "87056a47-f506-5d77-908b-303605d3b197".to_string()),

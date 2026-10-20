@@ -146,12 +146,11 @@ impl Trigger for SqsRecord {
         );
 
         span.name = "aws.sqs".to_string();
-        span.service.clone_from(&service_name);
+        span.service = service_name;
         span.resource = resource.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), "aws.sqs".to_string()),
+        span.meta.extend([
             ("receipt_handle".to_string(), self.receipt_handle.clone()),
             (
                 "retry_count".to_string(),
@@ -160,7 +159,7 @@ impl Trigger for SqsRecord {
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
-        ]));
+        ]);
         Some(span)
     }
 
@@ -379,7 +378,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.sqs".to_string()),
                 (
                     "receipt_handle".to_string(),
                     "MessageReceiptHandle".to_string(),

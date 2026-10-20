@@ -94,13 +94,12 @@ impl Trigger for S3Record {
         span.resource = bucket_name.to_owned();
         span.r#type = String::from("web");
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), String::from("aws.s3")),
+        span.meta.extend([
             ("event_name".to_string(), self.event_name.clone()),
             ("bucketname".to_string(), bucket_name.to_owned()),
             ("bucket_arn".to_string(), self.s3.bucket.arn.clone()),
             ("object_key".to_string(), self.s3.object.key.clone()),
-        ]));
+        ]);
         if let Some(size) = self.s3.object.size {
             span.meta.insert("object_size".into(), size.to_string());
         }

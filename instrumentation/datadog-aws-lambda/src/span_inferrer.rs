@@ -506,6 +506,13 @@ mod tests {
             let spans = finished_spans(&exporter);
             let inferred = &spans[0];
             let root = &spans[1];
+            let operation_names: Vec<_> = inferred
+                .attributes
+                .iter()
+                .filter(|attribute| attribute.key.as_str() == attr::OPERATION_NAME_CUSTOM)
+                .map(|attribute| &attribute.value)
+                .collect();
+            assert_eq!(operation_names, vec![&OtelValue::from(name)], "{fixture}");
             assert_eq!(
                 inferred.start_time,
                 inferred_span_start_time(result.span_data.as_ref().unwrap()).unwrap()

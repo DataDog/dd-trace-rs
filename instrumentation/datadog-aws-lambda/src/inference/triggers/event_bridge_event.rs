@@ -93,14 +93,12 @@ impl Trigger for EventBridgeEvent {
         );
 
         span.name = String::from("aws.eventbridge");
-        span.service.clone_from(&service_name);
+        span.service = service_name;
         span.resource = resource_name.to_owned();
         span.r#type = String::from("web");
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), "aws.eventbridge".to_string()),
-            ("detail_type".to_string(), self.detail_type.clone()),
-        ]));
+        span.meta
+            .extend([("detail_type".to_string(), self.detail_type.clone())]);
         Some(span)
     }
 

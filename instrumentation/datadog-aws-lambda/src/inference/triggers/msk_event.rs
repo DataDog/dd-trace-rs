@@ -165,7 +165,6 @@ impl Trigger for MSKEvent {
         span.resource.clone_from(&self.record.topic);
         span.start = (self.record.timestamp * MS_TO_NS) as i64;
         span.meta.extend([
-            ("operation_name".to_string(), String::from("aws.msk")),
             ("topic".to_string(), self.record.topic.clone()),
             ("partition".to_string(), self.record.partition.to_string()),
             ("event_source".to_string(), self.event_source.clone()),
@@ -305,7 +304,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.msk".to_string()),
                 ("topic".to_string(), "topic1".to_string()),
                 ("partition".to_string(), "0".to_string()),
                 ("event_source".to_string(), "aws:kafka".to_string()),

@@ -86,7 +86,7 @@ impl Trigger for APIGatewayWebSocketEvent {
         span.resource.clone_from(resource);
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
+        span.meta.extend([
             (
                 "endpoint".to_string(),
                 self.request_context.route_key.clone(),
@@ -114,7 +114,7 @@ impl Trigger for APIGatewayWebSocketEvent {
                 "message_direction".to_string(),
                 self.request_context.message_direction.clone(),
             ),
-        ]));
+        ]);
         Some(span)
     }
 

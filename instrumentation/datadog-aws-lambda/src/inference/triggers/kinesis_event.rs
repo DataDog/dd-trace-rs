@@ -90,7 +90,6 @@ impl Trigger for KinesisRecord {
         span.resource = stream_name.to_owned();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
-            ("operation_name".to_string(), "aws.kinesis".to_string()),
             ("stream_name".to_string(), stream_name.to_owned()),
             ("shard_id".to_string(), shard_id.to_string()),
             (
@@ -195,7 +194,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.kinesis".to_string()),
                 ("stream_name".to_string(), "kinesisStream".to_string()),
                 ("shard_id".to_string(), "shardId-000000000002".to_string()),
                 (

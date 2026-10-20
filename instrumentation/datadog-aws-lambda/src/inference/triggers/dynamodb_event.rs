@@ -74,7 +74,7 @@ impl Trigger for DynamoDbRecord {
         let mut span = Span::default();
         debug!("Enriching an Inferred Span for a DynamoDB event");
         let table_name = self.event_source_arn.split('/').nth(1).unwrap_or_default();
-        let resource = format!("{} {}", self.event_name.clone(), table_name);
+        let resource = format!("{} {}", self.event_name, table_name);
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
 
@@ -88,12 +88,11 @@ impl Trigger for DynamoDbRecord {
         );
 
         span.name = String::from("aws.dynamodb");
-        span.service.clone_from(&service_name);
+        span.service = service_name;
         span.resource = resource;
         span.r#type = String::from("web");
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), String::from("aws.dynamodb")),
+        span.meta.extend([
             ("event_id".to_string(), self.event_id.clone()),
             ("event_name".to_string(), self.event_name.clone()),
             ("event_version".to_string(), self.event_version.clone()),
@@ -110,7 +109,7 @@ impl Trigger for DynamoDbRecord {
                 self.dynamodb.stream_view_type.clone(),
             ),
             ("table_name".to_string(), table_name.to_owned()),
-        ]));
+        ]);
         Some(span)
     }
 
@@ -192,7 +191,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.dynamodb".to_string()),
                 ("event_id".to_string(), "c4ca4238a0b923820dcc509a6f75849b".to_string()),
                 ("event_name".to_string(), "INSERT".to_string()),
                 ("event_version".to_string(), "1.1".to_string()),
