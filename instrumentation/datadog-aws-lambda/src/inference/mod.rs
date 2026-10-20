@@ -73,11 +73,10 @@ impl SpanInferrer {
 
     pub fn infer_span(&self, payload: &str) -> serde_json::Result<InferenceResult> {
         let payload: Value = serde_json::from_str(payload)?;
-        let identified = IdentifiedTrigger::from_value(payload);
-        let Some(trigger) = identified.as_trigger() else {
+        let Some(identified) = IdentifiedTrigger::from_value(payload) else {
             return Ok(InferenceResult::default());
         };
-        let mut result = self.infer_trigger(trigger);
+        let mut result = self.infer_trigger(identified.as_trigger());
         result.generated_context = match &identified {
             IdentifiedTrigger::StepFunctionEvent(event) => {
                 Some(generated_context(event.get_span_context()))
