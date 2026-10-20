@@ -476,7 +476,6 @@ fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> S
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L217
 const DD_SEMANTICS_KEY_TO_META_KEY: &[(AttributeKey, &str)] = &[
-    (DATADOG_ENV, "env"),
     (DATADOG_VERSION, "version"),
     (DATADOG_HTTP_STATUS_CODE, "http.status_code"),
     (DATADOG_ERROR_MSG, "error.message"),
@@ -658,6 +657,13 @@ pub fn otel_span_to_dd_span<'a>(
     let is_top_level = false;
     otel_span_to_dd_span_minimal(dd_span, &span_extracted, is_top_level);
 
+    // Set first, so the `env` attributes below don't override it.
+    let env = get_otel_env(&span_extracted);
+    if !env.is_empty() {
+        dd_span
+            .meta
+            .insert(SpanStr::from_static_str("env"), SpanStr::from_str(env));
+    }
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {
         let value = span_extracted.get_attr_str(*dd_semantics_key);
         if !value.is_empty() {
@@ -713,14 +719,6 @@ pub fn otel_span_to_dd_span<'a>(
             _ => {
                 set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
             }
-        }
-    }
-
-    let env_key = SpanStr::from_static_str("env");
-    if !dd_span.meta.contains_key(&env_key) {
-        let env = get_otel_env(&span_extracted);
-        if !env.is_empty() {
-            dd_span.meta.insert(env_key, SpanStr::from_str(env));
         }
     }
 

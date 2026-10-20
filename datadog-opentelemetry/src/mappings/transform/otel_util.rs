@@ -353,12 +353,26 @@ pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
+/// The env of the span: `datadog.env` on the span, then a plain `env` attribute (on the resource,
+/// then on the span), then `datadog.env` and the `deployment.environment` attributes on the
+/// resource.
 pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
+    let datadog_env = span.get_attr_str(DATADOG_ENV);
     if !datadog_env.is_empty() {
         return datadog_env;
     }
-    get_res_attributes(span, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
+    let env = get_res_span_attributes(span, &[ENV]);
+    if !env.is_empty() {
+        return env;
+    }
+    get_res_attributes(
+        span,
+        &[
+            DATADOG_ENV,
+            DEPLOYMENT_ENVIRONMENT_NAME,
+            DEPLOYMENT_ENVIRONMENT,
+        ],
+    )
 }
 
 /// Service name used when the OpenTelemetry resource defines none.

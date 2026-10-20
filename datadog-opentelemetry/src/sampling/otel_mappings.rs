@@ -526,6 +526,42 @@ mod tests {
     }
 
     #[test]
+    fn test_env_precedence() {
+        // Same precedence as the exported span's `env` tag
+        type Attributes = &'static [(&'static str, &'static str)];
+        let cases: &[(Attributes, Attributes, &str)] = &[
+            // (span attributes, resource attributes, env)
+            (&[("env", "dev")], &[], "dev"),
+            (&[], &[("env", "staging")], "staging"),
+            (&[("env", "dev")], &[("env", "staging")], "staging"),
+            (&[("datadog.env", "dev")], &[("datadog.env", "prod")], "dev"),
+            (&[("env", "dev")], &[("datadog.env", "prod")], "dev"),
+            (
+                &[],
+                &[
+                    ("datadog.env", "prod"),
+                    ("deployment.environment.name", "qa"),
+                ],
+                "prod",
+            ),
+            (&[], &[("deployment.environment.name", "qa")], "qa"),
+        ];
+        for (span_attrs, resource_attrs, env) in cases {
+            let attrs: Vec<_> = span_attrs
+                .iter()
+                .map(|(k, v)| KeyValue::new(*k, *v))
+                .collect();
+            let resource = opentelemetry_sdk::Resource::builder_empty()
+                .with_attributes(resource_attrs.iter().map(|(k, v)| KeyValue::new(*k, *v)))
+                .build();
+            let alloc = Bump::new();
+            let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+
+            assert_eq!(span.env(), *env, "{span_attrs:?} {resource_attrs:?}");
+        }
+    }
+
+    #[test]
     fn test_env_empty_when_not_present() {
         let attrs = vec![];
         let resource = create_empty_resource();
