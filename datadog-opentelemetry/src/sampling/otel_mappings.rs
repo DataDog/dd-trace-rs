@@ -368,6 +368,34 @@ mod tests {
     }
 
     #[test]
+    fn test_datadog_service_attribute_overrides_service_name() {
+        // Same precedence as the exported span, so service sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.service", "sqlite"),
+            KeyValue::new("service.name", "otel-service"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("query", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.service(), "sqlite");
+    }
+
+    #[test]
+    fn test_datadog_name_attribute_overrides_operation_name() {
+        // Same precedence as the exported span, so name sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.name", "sqlite.query"),
+            KeyValue::new("operation.name", "db.query"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("query", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.operation_name(), "sqlite.query");
+    }
+
+    #[test]
     fn test_operation_name_http_client() {
         let attrs = vec![KeyValue::new(
             Key::from_static_str(HTTP_REQUEST_METHOD),
@@ -518,6 +546,23 @@ mod tests {
         let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.status_code(), Some(404));
+    }
+
+    #[test]
+    fn test_datadog_http_status_code_attribute_overrides_status_code() {
+        // Same precedence as the exported span, so status code sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.http_status_code", Value::I64(503)),
+            KeyValue::new(
+                Key::from_static_str(HTTP_RESPONSE_STATUS_CODE),
+                Value::I64(404),
+            ),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.status_code(), Some(503));
     }
 
     #[test]

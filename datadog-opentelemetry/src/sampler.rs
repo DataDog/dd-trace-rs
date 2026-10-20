@@ -440,6 +440,42 @@ mod tests {
     }
 
     #[test]
+    fn test_sampling_rule_matches_the_datadog_service_and_name() {
+        // Drops the traces whose root span has this service and operation name
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                    sample_rate: 0.0,
+                    service: Some("sqlite".to_string()),
+                    name: Some("sqlite.query".to_string()),
+                    resource: None,
+                    tags: HashMap::new(),
+                }])
+                .build(),
+        );
+        let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
+        let attributes = [
+            KeyValue::new("datadog.service", "sqlite"),
+            KeyValue::new("datadog.name", "sqlite.query"),
+        ];
+
+        let result = sampler.should_sample(
+            None,
+            TraceId::from_bytes([5; 16]),
+            "query",
+            &SpanKind::Client,
+            &attributes,
+            &[],
+        );
+        assert_eq!(result.decision, SamplingDecision::RecordOnly);
+    }
+
+    #[test]
     fn test_create_default_sampler() {
         // Create a default config (no rules, no specific rate limit)
         let config = Arc::new(Config::builder().build());

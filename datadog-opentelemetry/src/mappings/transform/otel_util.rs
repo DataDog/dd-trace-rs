@@ -84,9 +84,13 @@ pub(crate) fn fmt_in<'a>(alloc: &'a Bump, args: std::fmt::Arguments<'_>) -> &'a 
     s.into_bump_str()
 }
 
-/// Returns the datadog operation name from the otel span
+/// Returns the datadog operation name from the otel span: `datadog.name` if set, otherwise as
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
 pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let name = span.get_attr_str(DATADOG_NAME);
+    if !name.is_empty() {
+        return name;
+    }
     if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
         return name;
     }
@@ -226,9 +230,11 @@ pub fn get_otel_resource<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     span.name()
 }
 
-// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
+/// `datadog.http_status_code` if set, otherwise as
+/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
 pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<u32> {
-    span.get_attr_num(HTTP_RESPONSE_STATUS_CODE)
+    span.get_attr_num(DATADOG_HTTP_STATUS_CODE)
+        .or_else(|| span.get_attr_num(HTTP_RESPONSE_STATUS_CODE))
         .or_else(|| span.get_attr_num(HTTP_STATUS_CODE))
 }
 
@@ -360,7 +366,12 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    // First, try to extract service from the span's attributes.
+    let service = span.get_attr_str(DATADOG_SERVICE);
+    if !service.is_empty() {
+        return service;
+    }
+
+    // Then, try to extract service from the span's attributes.
     if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
         if !service.is_empty() {
             return service;
