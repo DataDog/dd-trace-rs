@@ -827,6 +827,49 @@ impl ExtraServicesTracker {
     }
 }
 
+/// DD_TRACE_API_VERSION
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TraceApiVersion {
+    /// `v0.4` (default) - span events and links are sent as native span fields.
+    #[default]
+    V04,
+    /// `v0.5` - string-interned payload. Span events and links are sent as the `events` and
+    /// `_dd.span_links` meta tags.
+    V05,
+}
+
+impl ConfigParser for TraceApiVersion {
+    type Parsed = Self;
+    type ParseError = String;
+
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
+        match s.trim().to_lowercase().as_str() {
+            "" => Ok(TraceApiVersion::default()),
+            "v0.4" => Ok(TraceApiVersion::V04),
+            "v0.5" => Ok(TraceApiVersion::V05),
+            _ => Err(format!("Unsupported trace API version: '{s}'")),
+        }
+    }
+}
+
+impl FromStr for TraceApiVersion {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl Display for TraceApiVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            TraceApiVersion::V04 => "v0.4",
+            TraceApiVersion::V05 => "v0.5",
+        })
+    }
+}
+
 /// DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum TracePropagationBehaviorExtract {
@@ -1163,7 +1206,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, TraceApiVersion, HttpErrorStatuses);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1306,6 +1349,9 @@ pub struct Config {
 
     /// Trace propagation behavior extract
     trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
+
+    /// Trace payload format sent to the agent
+    trace_api_version: ConfigItem<TraceApiVersion>,
 
     /// HTTP status codes that mark server and client spans as errors
     trace_http_server_error_statuses: ConfigItem<HttpErrorStatuses>,
@@ -1525,6 +1571,7 @@ impl Config {
             ),
             trace_propagation_behavior_extract: cisu
                 .update_parsed(default.trace_propagation_behavior_extract),
+            trace_api_version: cisu.update_parsed(default.trace_api_version),
             // OTEL_PROPAGATORS is an alias/fallback for DD_TRACE_PROPAGATION_STYLE. An empty
             // value on either key is treated as unset (consistent with the OTEL_SERVICE_NAME
             // fallback). A value that parses to no recognized styles (e.g. only unsupported
@@ -1643,6 +1690,7 @@ impl Config {
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
             &self.trace_propagation_behavior_extract,
+            &self.trace_api_version,
             &self.trace_http_server_error_statuses,
             &self.trace_http_client_error_statuses,
             &self.trace_propagation_style,
@@ -2041,6 +2089,11 @@ impl Config {
         *self.trace_propagation_behavior_extract.value()
     }
 
+    /// Returns the trace payload format sent to the agent.
+    pub fn trace_api_version(&self) -> TraceApiVersion {
+        *self.trace_api_version.value()
+    }
+
     /// Returns the configured trace propagation styles for both injection and extraction.
     pub fn trace_propagation_style(&self) -> Option<&[TracePropagationStyle]> {
         self.trace_propagation_style.value().as_deref()
@@ -2297,6 +2350,7 @@ impl std::fmt::Debug for Config {
                 "trace_propagation_behavior_extract",
                 &self.trace_propagation_behavior_extract,
             )
+            .field("trace_api_version", &self.trace_api_version)
             .field(
                 "trace_http_server_error_statuses",
                 &self.trace_http_server_error_statuses,
@@ -2463,6 +2517,10 @@ fn default_config() -> Config {
         trace_propagation_behavior_extract: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
             TracePropagationBehaviorExtract::default(),
+        ),
+        trace_api_version: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_API_VERSION,
+            TraceApiVersion::default(),
         ),
         trace_http_server_error_statuses: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_HTTP_SERVER_ERROR_STATUSES,
@@ -3037,6 +3095,16 @@ impl ConfigBuilder {
         self.config
             .trace_propagation_behavior_extract
             .set_code(behavior);
+        self
+    }
+
+    /// Set the trace payload format sent to the agent.
+    ///
+    /// **Default**: `V04`
+    ///
+    /// Env variable: `DD_TRACE_API_VERSION`
+    pub fn set_trace_api_version(&mut self, version: TraceApiVersion) -> &mut Self {
+        self.config.trace_api_version.set_code(version);
         self
     }
 
@@ -3798,6 +3866,29 @@ mod tests {
             config.trace_propagation_behavior_extract(),
             TracePropagationBehaviorExtract::Restart
         );
+    }
+
+    #[test]
+    fn test_trace_api_version_from_source() {
+        assert_eq!(
+            Config::builder().build().trace_api_version(),
+            TraceApiVersion::V04
+        );
+        // Unsupported versions, such as v0.7, keep the default
+        for (value, expected) in [
+            ("v0.5", TraceApiVersion::V05),
+            (" V0.5 ", TraceApiVersion::V05),
+            ("v0.4", TraceApiVersion::V04),
+            ("v0.7", TraceApiVersion::V04),
+        ] {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TRACE_API_VERSION", value)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+            assert_eq!(config.trace_api_version(), expected, "{value:?}");
+        }
     }
 
     #[test]
