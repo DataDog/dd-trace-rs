@@ -172,6 +172,14 @@
         "propertyKeys": ["trace_agent_url"]
       }
     ],
+    "DD_TRACE_API_VERSION": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "",
+        "propertyKeys": ["trace_api_version"]
+      }
+    ],
     "DD_TRACE_BAGGAGE_TAG_KEYS": [
       {
         "version": "A",

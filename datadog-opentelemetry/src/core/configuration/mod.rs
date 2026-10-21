@@ -26,8 +26,8 @@ mod sources;
 mod supported_configurations;
 
 pub use configuration::{
-    BaggageTagKeyFilter, Config, ConfigBuilder, OtlpProtocol, TracePropagationBehaviorExtract,
-    TracePropagationStyle,
+    BaggageTagKeyFilter, Config, ConfigBuilder, OtlpProtocol, TraceApiVersion,
+    TracePropagationBehaviorExtract, TracePropagationStyle,
 };
 pub(crate) use configuration::{
     ConfigParser, ConfigurationProvider, HttpErrorStatuses, RemoteConfigUpdate,
