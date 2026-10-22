@@ -1297,6 +1297,8 @@ pub struct Config {
     telemetry_enabled: ConfigItem<bool>,
     /// Disables telemetry log collection if false.
     telemetry_log_collection_enabled: ConfigItem<bool>,
+    /// Disables telemetry dependency collection if false.
+    telemetry_dependency_collection_enabled: ConfigItem<bool>,
     /// Interval by which telemetry events are flushed (seconds)
     telemetry_heartbeat_interval: ConfigItem<f64>,
 
@@ -1519,6 +1521,8 @@ impl Config {
             telemetry_enabled: cisu.update_bool(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
                 .update_bool(default.telemetry_log_collection_enabled),
+            telemetry_dependency_collection_enabled: cisu
+                .update_bool(default.telemetry_dependency_collection_enabled),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
@@ -1639,6 +1643,7 @@ impl Config {
             &self.trace_stats_additional_tags_cardinality_limit,
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
+            &self.telemetry_dependency_collection_enabled,
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
@@ -1923,6 +1928,11 @@ impl Config {
     /// Returns whether telemetry log collection is enabled.
     pub fn telemetry_log_collection_enabled(&self) -> bool {
         *self.telemetry_log_collection_enabled.value()
+    }
+
+    /// Returns whether telemetry dependency collection is enabled.
+    pub fn telemetry_dependency_collection_enabled(&self) -> bool {
+        *self.telemetry_dependency_collection_enabled.value()
     }
 
     /// Returns the telemetry heartbeat interval in seconds.
@@ -2448,6 +2458,10 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
             true,
         ),
+        telemetry_dependency_collection_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED,
+            true,
+        ),
         telemetry_heartbeat_interval: ConfigItem::new(
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
@@ -2736,6 +2750,23 @@ impl ConfigBuilder {
     pub fn set_telemetry_log_collection_enabled(&mut self, enabled: bool) -> &mut Self {
         self.config
             .telemetry_log_collection_enabled
+            .set_code(enabled);
+        self
+    }
+
+    /// Enable or disable dependency collection for telemetry.
+    ///
+    /// When enabled, the tracer reports the application's runtime dependencies via
+    /// telemetry. The list is recorded at build time by the `dependency-collection`
+    /// feature (enabled by default), which can also be skipped by setting the env
+    /// variable to `false` while building.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`
+    pub fn set_telemetry_dependency_collection_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config
+            .telemetry_dependency_collection_enabled
             .set_code(enabled);
         self
     }

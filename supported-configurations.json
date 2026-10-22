@@ -140,6 +140,14 @@
         "propertyKeys": ["global_tags"]
       }
     ],
+    "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["telemetry_dependency_collection_enabled"]
+      }
+    ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
       {
         "version": "B",
