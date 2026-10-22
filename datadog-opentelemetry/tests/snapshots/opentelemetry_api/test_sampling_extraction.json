@@ -10,6 +10,7 @@
     "meta": {
       "_dd.p.dm": "-3",
       "_dd.p.ksr": "1",
+      "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "69b9879600000000dce1993a9f43a1cb",

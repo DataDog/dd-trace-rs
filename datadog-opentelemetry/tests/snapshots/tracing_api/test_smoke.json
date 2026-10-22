@@ -11,6 +11,7 @@
       "_dd.p.dm": "-0",
       "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
       "code.module.name": "tests::integration_tests::tracing_api",
+      "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
       "otel.trace_id": "69b98796000000001f48aab59b6aa9a0",

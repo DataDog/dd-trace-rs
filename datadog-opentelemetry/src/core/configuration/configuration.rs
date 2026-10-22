@@ -3,14 +3,17 @@
 
 use libdd_telemetry::data::Configuration;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::Infallible;
 use std::fmt::Display;
-use std::ops::Deref;
+use std::ops::{Deref, RangeInclusive};
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use std::{borrow::Cow, sync::OnceLock};
 
+#[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
+use libdd_library_config::tracer_metadata::ThreadLocalMetadata;
 #[cfg(target_os = "linux")]
 use libdd_library_config::tracer_metadata::TracerMetadata;
 
@@ -18,12 +21,14 @@ use rustc_version_runtime::version;
 
 use super::{ParsedSamplingRules, SamplingRuleConfig};
 use crate::core::configuration::sources::{
-    CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
+    BooleanFlag, CompositeConfigSourceResult, CompositeSource, ConfigKey, ConfigSourceOrigin,
 };
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
 use crate::{dd_error, dd_warn};
+
+pub(crate) use crate::core::configuration::sources::ConfigParser;
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
@@ -239,10 +244,12 @@ trait ConfigurationValueProvider {
 /// (environment variables, programmatic code, remote configuration, etc.). This source
 /// tracking is essential for implementing proper configuration precedence rules and
 /// for telemetry reporting.
-trait ValueSourceUpdater<T> {
+trait ValueSourceUpdater {
+    type Value;
+
     fn name(&self) -> SupportedConfigurations;
     /// Updates the configuration value while recording its source origin.
-    fn set_value_source(&mut self, value: T, source: ConfigSourceOrigin);
+    fn set_value_source(&mut self, value: Self::Value, source: ConfigSourceOrigin);
 }
 
 /// Configuration item that tracks the value of a setting and where it came from
@@ -368,7 +375,9 @@ impl<T: Clone + ConfigurationValueProvider> ConfigurationProvider for ConfigItem
     }
 }
 
-impl<T: ConfigurationValueProvider> ValueSourceUpdater<T> for ConfigItem<T> {
+impl<T: ConfigurationValueProvider> ValueSourceUpdater for ConfigItem<T> {
+    type Value = T;
+
     fn name(&self) -> SupportedConfigurations {
         self.name
     }
@@ -530,9 +539,10 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
     }
 }
 
-impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater<T>
+impl<T: Clone + ConfigurationValueProvider + Deref> ValueSourceUpdater
     for ConfigItemWithOverride<T>
 {
+    type Value = T;
     fn name(&self) -> SupportedConfigurations {
         self.config_item.name()
     }
@@ -552,16 +562,15 @@ struct ConfigItemSourceUpdater<'a> {
 }
 
 impl ConfigItemSourceUpdater<'_> {
-    fn apply_result<ParsedConfig, RawConfig, ConfigItemType, F>(
+    fn apply_result<RawConfig, ConfigItemType>(
         &self,
         mut item: ConfigItemType,
         result: CompositeConfigSourceResult<RawConfig>,
-        transform: F,
+        transform: impl FnOnce(RawConfig) -> ConfigItemType::Value,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(RawConfig) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value: ConfigurationValueProvider,
     {
         if !result.errors.is_empty() {
             dd_error!(
@@ -578,13 +587,23 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value (no transformation)
-    fn update_parsed<ParsedConfig, ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
+    fn update_parsed<ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
     where
-        ParsedConfig: Clone + FromStr + ConfigurationValueProvider,
-        ParsedConfig::Err: std::fmt::Display,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value:
+            ConfigParser<Parsed = ConfigItemType::Value> + ConfigurationValueProvider,
     {
-        let result = self.sources.get_parse::<ParsedConfig>(default.name());
+        self.update_parse_custom::<ConfigItemType::Value, ConfigItemType>(default)
+    }
+
+    /// Updates a ConfigItem from sources with parsed value (no transformation)
+    fn update_parse_custom<Parser, ConfigItemType>(&self, default: ConfigItemType) -> ConfigItemType
+    where
+        Parser: ConfigParser,
+        ConfigItemType: ValueSourceUpdater<Value = Parser::Parsed>,
+        ConfigItemType::Value: ConfigurationValueProvider,
+    {
+        let result = self.sources.get_parse::<Parser>(default.name());
         self.apply_result(default, result, |value| value)
     }
 
@@ -595,24 +614,32 @@ impl ConfigItemSourceUpdater<'_> {
         transform: F,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
+        ParsedConfig: ConfigurationValueProvider,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
         F: FnOnce(String) -> ParsedConfig,
     {
         let result = self.sources.get(default.name());
         self.apply_result(default, result, transform)
     }
 
-    /// Updates a ConfigItem from non empty sources string with transformation
-    pub fn update_non_empty_string<ParsedConfig, ConfigItemType, F>(
+    /// Updates a ConfigItem from a boolean flag
+    pub fn update_bool<ConfigItemType: ValueSourceUpdater<Value = bool>>(
         &self,
         default: ConfigItemType,
-        transform: F,
+    ) -> ConfigItemType {
+        let result = self.sources.get_parse::<BooleanFlag>(default.name());
+        self.apply_result(default, result, |b| b)
+    }
+
+    /// Updates a ConfigItem from non empty sources string with transformation
+    pub fn update_non_empty_string<ParsedConfig, ConfigItemType>(
+        &self,
+        default: ConfigItemType,
+        transform: impl FnOnce(String) -> ParsedConfig,
     ) -> ConfigItemType
     where
         ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(String) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
     {
         let result = self.sources.get(default.name());
         match result.value {
@@ -626,16 +653,15 @@ impl ConfigItemSourceUpdater<'_> {
     /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
     /// value on either key is treated the same as the key being absent. If neither key has a
     /// non-empty value, the default is returned.
-    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType, F>(
+    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType>(
         &self,
         default: ConfigItemType,
         fallback: SupportedConfigurations,
-        transform: F,
+        transform: impl FnOnce(String) -> ParsedConfig,
     ) -> ConfigItemType
     where
         ParsedConfig: Clone + ConfigurationValueProvider,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(String) -> ParsedConfig,
+        ConfigItemType: ValueSourceUpdater<Value = ParsedConfig>,
     {
         // Use the primary key if it has a non-empty value; otherwise fall back to `fallback`.
         let result = self.sources.get(default.name());
@@ -652,19 +678,17 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
-    pub fn update_parsed_with_transform<ParsedConfig, RawConfig, ConfigItemType, F>(
+    pub fn update_parsed_with_transform<Parser, ConfigItemType>(
         &self,
         default: ConfigItemType,
-        transform: F,
+        transform: impl FnOnce(Parser::Parsed) -> ConfigItemType::Value,
     ) -> ConfigItemType
     where
-        ParsedConfig: Clone + ConfigurationValueProvider,
-        RawConfig: FromStr,
-        RawConfig::Err: std::fmt::Display,
-        ConfigItemType: ValueSourceUpdater<ParsedConfig>,
-        F: FnOnce(RawConfig) -> ParsedConfig,
+        Parser: ConfigParser,
+        ConfigItemType: ValueSourceUpdater,
+        ConfigItemType::Value: ConfigurationValueProvider,
     {
-        let result = self.sources.get_parse::<RawConfig>(default.name());
+        let result = self.sources.get_parse::<Parser>(default.name());
         self.apply_result(default, result, transform)
     }
 }
@@ -819,10 +843,11 @@ pub enum TracePropagationBehaviorExtract {
     Ignore,
 }
 
-impl FromStr for TracePropagationBehaviorExtract {
-    type Err = String;
+impl ConfigParser for TracePropagationBehaviorExtract {
+    type Parsed = Self;
+    type ParseError = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         match s.trim().to_lowercase().as_str() {
             "" => Ok(TracePropagationBehaviorExtract::default()),
             "continue" => Ok(TracePropagationBehaviorExtract::Continue),
@@ -830,6 +855,14 @@ impl FromStr for TracePropagationBehaviorExtract {
             "ignore" => Ok(TracePropagationBehaviorExtract::Ignore),
             _ => Err(format!("Unknown trace propagation behavior extract: '{s}'")),
         }
+    }
+}
+
+impl FromStr for TracePropagationBehaviorExtract {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -841,6 +874,70 @@ impl Display for TracePropagationBehaviorExtract {
             TracePropagationBehaviorExtract::Ignore => "ignore",
         };
         write!(f, "{behavior}")
+    }
+}
+
+/// DD_TRACE_HTTP_SERVER_ERROR_STATUSES / DD_TRACE_HTTP_CLIENT_ERROR_STATUSES
+///
+/// A comma-separated list of HTTP status codes and inclusive ranges, e.g. `500-599,404`.
+/// Range bounds may be given in either order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HttpErrorStatuses(Vec<RangeInclusive<u16>>);
+
+impl HttpErrorStatuses {
+    fn range(range: RangeInclusive<u16>) -> Self {
+        Self(vec![range])
+    }
+
+    /// Returns whether `status` is in one of the ranges.
+    pub(crate) fn contains(&self, status: u16) -> bool {
+        self.0.iter().any(|range| range.contains(&status))
+    }
+}
+
+impl ConfigParser for HttpErrorStatuses {
+    type Parsed = Self;
+    type ParseError = String;
+
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
+        let parse_code = |code: &str| {
+            code.trim()
+                .parse::<u16>()
+                .map_err(|_| format!("Invalid HTTP status code: '{code}'"))
+        };
+        let ranges = s
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| match part.split_once('-') {
+                Some((start, end)) => {
+                    let (start, end) = (parse_code(start)?, parse_code(end)?);
+                    // Accept reversed bounds, e.g. `599-500`
+                    Ok(start.min(end)..=start.max(end))
+                }
+                None => parse_code(part).map(|code| code..=code),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if ranges.is_empty() {
+            return Err(format!("No HTTP status codes in '{s}'"));
+        }
+        Ok(Self(ranges))
+    }
+}
+
+impl Display for HttpErrorStatuses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, range) in self.0.iter().enumerate() {
+            if i > 0 {
+                f.write_str(",")?;
+            }
+            if range.start() == range.end() {
+                write!(f, "{}", range.start())?;
+            } else {
+                write!(f, "{}-{}", range.start(), range.end())?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -957,10 +1054,11 @@ pub enum BaggageTagKeyFilter {
     Keys(Vec<String>),
 }
 
-impl std::str::FromStr for BaggageTagKeyFilter {
-    type Err = std::convert::Infallible;
+impl ConfigParser for BaggageTagKeyFilter {
+    type Parsed = Self;
+    type ParseError = std::convert::Infallible;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn parse(s: &str) -> Result<Self, Self::ParseError> {
         let trimmed = s.trim();
         if trimmed.is_empty() {
             Ok(BaggageTagKeyFilter::Disabled)
@@ -978,6 +1076,14 @@ impl std::str::FromStr for BaggageTagKeyFilter {
                 Ok(BaggageTagKeyFilter::Keys(keys))
             }
         }
+    }
+}
+
+impl FromStr for BaggageTagKeyFilter {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
     }
 }
 
@@ -1051,7 +1157,13 @@ impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporali
     }
 }
 
-impl_config_value_provider!(simple: Cow<'static, str>, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract);
+static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
+    hostname::get()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default()
+});
+
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1079,6 +1191,10 @@ pub struct Config {
     // # Service tagging
     service: ConfigItemWithOverride<ServiceName>,
     env: ConfigItem<Option<String>>,
+    /// Install signature set by the APM installer, reported in the app-started telemetry event.
+    instrumentation_install_id: ConfigItem<Option<String>>,
+    instrumentation_install_time: ConfigItem<Option<String>>,
+    instrumentation_install_type: ConfigItem<Option<String>>,
     version: ConfigItem<Option<String>>,
     /// Service name overrides, keyed by integration or resource name
     service_mapping: ConfigItem<Vec<(String, String)>>,
@@ -1132,6 +1248,26 @@ pub struct Config {
     /// Results in dropped spans not being sent to the agent
     trace_stats_computation_enabled: ConfigItem<bool>,
 
+    /// Maximum number of distinct client-side stats aggregation keys per flush period.
+    /// Aggregates beyond this limit are collapsed into an overflow bucket.
+    trace_stats_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the `resource` field in client-side stats per flush period.
+    /// Resources beyond this limit are collapsed into a blocked value.
+    trace_stats_resource_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the `http.url` (normalized endpoint) field in client-side stats
+    /// per flush period. Endpoints beyond this limit are collapsed into a blocked value.
+    trace_stats_http_endpoint_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the peer tags in client-side stats per flush period.
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value.
+    trace_stats_peer_tags_cardinality_limit: ConfigItem<usize>,
+
+    /// Maximum cardinality of the additional metric tags in client-side stats per flush period.
+    /// Additional tags beyond this limit are collapsed into a blocked value.
+    trace_stats_additional_tags_cardinality_limit: ConfigItem<usize>,
+
     /// Whether to enable stats obfuscation for the tracer (for internal testing)
     trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem<bool>,
 
@@ -1146,6 +1282,15 @@ pub struct Config {
     /// `trace_writer_synchronous_timeout` this applies to explicit flushes regardless of whether
     /// synchronous writes are enabled.
     trace_writer_force_flush_timeout: Duration,
+
+    /// When true, the data sent to datadog will report the hostname of the machine the
+    /// program runs on.
+    /// The reported hostname defaults to the system hostname and can be set explicitly through
+    /// the `DD_HOSTNAME` configuration or [`ConfigBuilder::set_hostname`].
+    trace_report_hostname: ConfigItem<bool>,
+
+    /// Hostname reported by the library
+    hostname: ConfigItem<String>,
 
     /// Configurations for testing. Not exposed to customer
     #[cfg(feature = "test-utils")]
@@ -1165,6 +1310,10 @@ pub struct Config {
 
     /// Trace propagation behavior extract
     trace_propagation_behavior_extract: ConfigItem<TracePropagationBehaviorExtract>,
+
+    /// HTTP status codes that mark server and client spans as errors
+    trace_http_server_error_statuses: ConfigItem<HttpErrorStatuses>,
+    trace_http_client_error_statuses: ConfigItem<HttpErrorStatuses>,
 
     /// Trace propagation configuration
     trace_propagation_style: ConfigItem<Option<Vec<TracePropagationStyle>>>,
@@ -1238,51 +1387,53 @@ impl Config {
         let default = default_config();
 
         /// Wrapper to parse "," separated string to vector
-        struct DdTags(Vec<String>);
+        struct DdTags;
 
-        impl FromStr for DdTags {
-            type Err = &'static str;
+        impl ConfigParser for DdTags {
+            type Parsed = Vec<String>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(DdTags(
-                    s.split(',').map(|s| s.to_string()).collect::<Vec<String>>(),
-                ))
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(s.split(',').map(|s| s.to_string()).collect::<Vec<String>>())
             }
         }
 
         /// Wrapper to parse "," separated key:value tags to vector<(key, value)>
         /// discarding tags without ":" delimiter
-        struct DdKeyValueTags(Vec<(String, String)>);
+        struct DdKeyValueTags;
 
-        impl FromStr for DdKeyValueTags {
-            type Err = &'static str;
+        impl ConfigParser for DdKeyValueTags {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(DdKeyValueTags(
-                    s.split(',')
-                        .filter_map(|s| {
-                            s.split_once(':')
-                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                        })
-                        .collect(),
-                ))
+            /// Tags are comma separated, or space separated if there is no comma. A tag
+            /// without a `:` gets an empty value, and tags with an empty key are skipped.
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                let separator = if s.contains(',') { ',' } else { ' ' };
+                Ok(s.split(separator)
+                    .filter_map(|tag| {
+                        let (k, v) = tag.split_once(':').unwrap_or((tag, ""));
+                        let k = k.trim();
+                        (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
+                    })
+                    .collect())
             }
         }
 
-        struct OtelResourceAttributes(Vec<(String, String)>);
+        struct OtelResourceAttributes;
 
-        impl FromStr for OtelResourceAttributes {
-            type Err = &'static str;
+        impl ConfigParser for OtelResourceAttributes {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(OtelResourceAttributes(
-                    s.split(',')
-                        .filter_map(|s| {
-                            s.split_once('=')
-                                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                        })
-                        .collect(),
-                ))
+            fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(cfg
+                    .split(',')
+                    .filter_map(|s| {
+                        s.split_once('=')
+                            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    })
+                    .collect())
             }
         }
 
@@ -1312,6 +1463,12 @@ impl Config {
                 ServiceName::Configured,
             ),
             env: cisu.update_string(default.env, Some),
+            instrumentation_install_id: cisu
+                .update_string(default.instrumentation_install_id, Some),
+            instrumentation_install_time: cisu
+                .update_string(default.instrumentation_install_time, Some),
+            instrumentation_install_type: cisu
+                .update_string(default.instrumentation_install_type, Some),
             version: cisu.update_string(default.version, Some),
             service_mapping: cisu.update_parsed_with_transform(
                 default.service_mapping,
@@ -1325,12 +1482,9 @@ impl Config {
             trace_aws_service_representation_enabled: cisu
                 .update_parsed(default.trace_aws_service_representation_enabled),
             // TODO(paullgdc): tags should be merged, not replaced
-            global_tags: cisu
-                .update_parsed_with_transform(default.global_tags, |DdKeyValueTags(tags)| tags),
-            otel_resource_attributes: cisu.update_parsed_with_transform(
-                default.otel_resource_attributes,
-                |OtelResourceAttributes(attrs)| attrs,
-            ),
+            global_tags: cisu.update_parse_custom::<DdKeyValueTags, _>(default.global_tags),
+            otel_resource_attributes: cisu
+                .update_parse_custom::<OtelResourceAttributes, _>(default.otel_resource_attributes),
             otel_metrics_exporter: cisu.update_string(default.otel_metrics_exporter, Cow::Owned),
             otel_metrics_temporality_preference: cisu.update_string(
                 default.otel_metrics_temporality_preference,
@@ -1344,29 +1498,43 @@ impl Config {
             dogstatsd_agent_url: cisu
                 .update_non_empty_string(default.dogstatsd_agent_url, Cow::Owned),
 
-            trace_partial_flush_enabled: cisu.update_parsed(default.trace_partial_flush_enabled),
+            trace_partial_flush_enabled: cisu.update_bool(default.trace_partial_flush_enabled),
             trace_partial_flush_min_spans: cisu
                 .update_parsed(default.trace_partial_flush_min_spans),
+            trace_http_server_error_statuses: cisu
+                .update_parsed(default.trace_http_server_error_statuses),
+            trace_http_client_error_statuses: cisu
+                .update_parsed(default.trace_http_client_error_statuses),
 
             // Use the initialized ConfigItem
             trace_sampling_rules: sampling_rules_item,
-            trace_sample_rate: cisu.update_parsed_with_transform(
+            trace_sample_rate: cisu.update_parsed_with_transform::<f64, _>(
                 default.trace_sample_rate,
                 validate_trace_sample_rate,
             ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
-            enabled: cisu.update_parsed(default.enabled),
+            enabled: cisu.update_bool(default.enabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
-                .update_parsed(default.trace_stats_computation_enabled),
-            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_parsed(
+                .update_bool(default.trace_stats_computation_enabled),
+            trace_stats_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_cardinality_limit),
+            trace_stats_resource_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_resource_cardinality_limit),
+            trace_stats_http_endpoint_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_http_endpoint_cardinality_limit),
+            trace_stats_peer_tags_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_peer_tags_cardinality_limit),
+            trace_stats_additional_tags_cardinality_limit: cisu
+                .update_parsed(default.trace_stats_additional_tags_cardinality_limit),
+            trace_stats_computation_experimental_client_obfuscation_enabled: cisu.update_bool(
                 default.trace_stats_computation_experimental_client_obfuscation_enabled,
             ),
-            telemetry_enabled: cisu.update_parsed(default.telemetry_enabled),
+            telemetry_enabled: cisu.update_bool(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
-                .update_parsed(default.telemetry_log_collection_enabled),
-            telemetry_heartbeat_interval: cisu.update_parsed_with_transform(
+                .update_bool(default.telemetry_log_collection_enabled),
+            telemetry_heartbeat_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
             ),
@@ -1382,43 +1550,48 @@ impl Config {
                 cisu.update_non_empty_string_with_fallback(
                     default.trace_propagation_style,
                     SupportedConfigurations::OTEL_PROPAGATORS,
-                    move |styles| match TracePropagationStyle::from_tags(Some(
-                        DdTags::from_str(&styles).unwrap().0,
-                    )) {
+                    move |styles| match TracePropagationStyle::from_tags(Some(match DdTags::parse(
+                        &styles,
+                    ) {
+                        Ok(tags) => tags,
+                        Err(e) => match e {},
+                    })) {
                         Some(styles) if styles.is_empty() => default_style,
                         other => other,
                     },
                 )
             },
-            trace_propagation_style_extract: cisu.update_parsed_with_transform(
+            trace_propagation_style_extract: cisu.update_parsed_with_transform::<DdTags, _>(
                 default.trace_propagation_style_extract,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |tags| TracePropagationStyle::from_tags(Some(tags)),
             ),
-            trace_propagation_style_inject: cisu.update_parsed_with_transform(
+            trace_propagation_style_inject: cisu.update_parsed_with_transform::<DdTags, _>(
                 default.trace_propagation_style_inject,
-                |DdTags(tags)| TracePropagationStyle::from_tags(Some(tags)),
+                |tags| TracePropagationStyle::from_tags(Some(tags)),
             ),
             trace_propagation_extract_first: cisu
-                .update_parsed(default.trace_propagation_extract_first),
+                .update_bool(default.trace_propagation_extract_first),
             trace_baggage_tag_keys: cisu.update_parsed(default.trace_baggage_tag_keys),
             trace_writer_synchronous_write: default.trace_writer_synchronous_write,
             trace_writer_synchronous_timeout: default.trace_writer_synchronous_timeout,
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             trace_writer_force_flush_timeout: default.trace_writer_force_flush_timeout,
+            trace_report_hostname: cisu.update_bool(default.trace_report_hostname),
+            hostname: cisu.update_non_empty_string(default.hostname, |s| s),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
             extra_services_tracker: ExtraServicesTracker::new(),
-            remote_config_enabled: cisu.update_parsed(default.remote_config_enabled),
-            remote_config_poll_interval: cisu.update_parsed_with_transform(
+            remote_config_enabled: cisu.update_bool(default.remote_config_enabled),
+            remote_config_poll_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.remote_config_poll_interval,
                 |interval: f64| interval.abs().min(RC_DEFAULT_POLL_INTERVAL),
             ),
             remote_config_callbacks: Arc::new(Mutex::new(RemoteConfigCallbacks::new())),
-            datadog_tags_max_length: cisu
-                .update_parsed_with_transform(default.datadog_tags_max_length, |max: usize| {
-                    max.min(DATADOG_TAGS_MAX_LENGTH)
-                }),
-            metrics_otel_enabled: cisu.update_parsed(default.metrics_otel_enabled),
+            datadog_tags_max_length: cisu.update_parsed_with_transform::<usize, _>(
+                default.datadog_tags_max_length,
+                |max: usize| max.min(DATADOG_TAGS_MAX_LENGTH),
+            ),
+            metrics_otel_enabled: cisu.update_bool(default.metrics_otel_enabled),
             otlp_metrics_endpoint: cisu.update_string(default.otlp_metrics_endpoint, Cow::Owned),
             otlp_endpoint: cisu.update_string(default.otlp_endpoint, Cow::Owned),
             otlp_headers: cisu.update_string(default.otlp_headers, Cow::Owned),
@@ -1430,7 +1603,7 @@ impl Config {
             otlp_timeout: cisu.update_parsed(default.otlp_timeout),
             metric_export_interval: cisu.update_parsed(default.metric_export_interval),
             metric_export_timeout: cisu.update_parsed(default.metric_export_timeout),
-            logs_otel_enabled: cisu.update_parsed(default.logs_otel_enabled),
+            logs_otel_enabled: cisu.update_bool(default.logs_otel_enabled),
             otel_logs_exporter: cisu.update_string(default.otel_logs_exporter, Cow::Owned),
             otlp_logs_endpoint: cisu.update_string(default.otlp_logs_endpoint, Cow::Owned),
             otlp_logs_headers: cisu.update_string(default.otlp_logs_headers, Cow::Owned),
@@ -1455,6 +1628,9 @@ impl Config {
         vec![
             &self.service,
             &self.env,
+            &self.instrumentation_install_id,
+            &self.instrumentation_install_time,
+            &self.instrumentation_install_type,
             &self.version,
             &self.service_mapping,
             &self.trace_aws_service_representation_enabled,
@@ -1471,12 +1647,21 @@ impl Config {
             &self.enabled,
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
+            &self.trace_report_hostname,
+            &self.hostname,
+            &self.trace_stats_cardinality_limit,
+            &self.trace_stats_resource_cardinality_limit,
+            &self.trace_stats_http_endpoint_cardinality_limit,
+            &self.trace_stats_peer_tags_cardinality_limit,
+            &self.trace_stats_additional_tags_cardinality_limit,
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
             &self.trace_propagation_behavior_extract,
+            &self.trace_http_server_error_statuses,
+            &self.trace_http_client_error_statuses,
             &self.trace_propagation_style,
             &self.trace_propagation_style_extract,
             &self.trace_propagation_style_inject,
@@ -1540,6 +1725,37 @@ impl Config {
     /// Returns the configured environment name (e.g., "production", "staging").
     pub fn env(&self) -> Option<&str> {
         self.env.value().as_deref()
+    }
+
+    /// Returns the install id set by the APM installer (`DD_INSTRUMENTATION_INSTALL_ID`).
+    pub fn instrumentation_install_id(&self) -> Option<&str> {
+        self.instrumentation_install_id.value().as_deref()
+    }
+
+    /// Returns the install time set by the APM installer (`DD_INSTRUMENTATION_INSTALL_TIME`).
+    pub fn instrumentation_install_time(&self) -> Option<&str> {
+        self.instrumentation_install_time.value().as_deref()
+    }
+
+    /// Returns the install type set by the APM installer (`DD_INSTRUMENTATION_INSTALL_TYPE`).
+    pub fn instrumentation_install_type(&self) -> Option<&str> {
+        self.instrumentation_install_type.value().as_deref()
+    }
+
+    /// Returns the install signature reported in the app-started telemetry event, or `None`
+    /// when the APM installer did not set any of its fields.
+    pub(crate) fn install_signature(&self) -> Option<libdd_telemetry::data::InstallSignature> {
+        let install_id = self.instrumentation_install_id().map(str::to_owned);
+        let install_time = self.instrumentation_install_time().map(str::to_owned);
+        let install_type = self.instrumentation_install_type().map(str::to_owned);
+        if install_id.is_none() && install_time.is_none() && install_type.is_none() {
+            return None;
+        }
+        Some(libdd_telemetry::data::InstallSignature {
+            install_id,
+            install_type,
+            install_time,
+        })
     }
 
     /// Returns the configured application version.
@@ -1654,6 +1870,51 @@ impl Config {
     /// Returns whether client-side trace stats computation is enabled.
     pub fn trace_stats_computation_enabled(&self) -> bool {
         *self.trace_stats_computation_enabled.value()
+    }
+
+    /// Returns whether the library reports the hostname to datadog
+    pub fn trace_report_hostname(&self) -> bool {
+        *self.trace_report_hostname.value()
+    }
+
+    /// The hostname reported to datadog if [`Config::trace_report_hostname`] is true
+    pub fn hostname(&self) -> &str {
+        self.hostname.value()
+    }
+
+    /// Returns the cardinality limit for client-side stats.
+    ///
+    /// Aggregates beyond this limit are collapsed into an overflow bucket per flush period.
+    pub fn trace_stats_cardinality_limit(&self) -> usize {
+        *self.trace_stats_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the `resource` field of client-side stats.
+    ///
+    /// Resource values beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_resource_cardinality_limit(&self) -> usize {
+        *self.trace_stats_resource_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the `http_endpoint` field of client-side stats.
+    ///
+    /// Endpoint values beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_http_endpoint_cardinality_limit(&self) -> usize {
+        *self.trace_stats_http_endpoint_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the peer tags of client-side stats.
+    ///
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_peer_tags_cardinality_limit(&self) -> usize {
+        *self.trace_stats_peer_tags_cardinality_limit.value()
+    }
+
+    /// Returns the per-field cardinality limit for the additional metric tags of client-side stats.
+    ///
+    /// Additional tags beyond this limit are collapsed into a blocked value per flush period.
+    pub fn trace_stats_additional_tags_cardinality_limit(&self) -> usize {
+        *self.trace_stats_additional_tags_cardinality_limit.value()
     }
 
     pub(crate) fn trace_writer_synchronous_write(&self) -> bool {
@@ -1793,6 +2054,16 @@ impl Config {
     /// Returns the minimum number of spans required to trigger a partial flush.
     pub fn trace_partial_flush_min_spans(&self) -> usize {
         *self.trace_partial_flush_min_spans.value()
+    }
+
+    /// Returns the HTTP status codes that mark server spans as errors.
+    pub(crate) fn trace_http_server_error_statuses(&self) -> &HttpErrorStatuses {
+        self.trace_http_server_error_statuses.value()
+    }
+
+    /// Returns the HTTP status codes that mark client spans as errors.
+    pub(crate) fn trace_http_client_error_statuses(&self) -> &HttpErrorStatuses {
+        self.trace_http_client_error_statuses.value()
     }
 
     /// Returns the trace propagation behavior when extracting trace context.
@@ -1998,36 +2269,21 @@ impl Config {
     /// Generate tracer metadata from this config.
     #[cfg(target_os = "linux")]
     pub(crate) fn to_tracer_metadata(&self) -> TracerMetadata {
-        fn hostname() -> String {
-            let mut buf = vec![0; 256];
-
-            unsafe {
-                // Safety: buf is valid for writes for at most buf.len().
-                if libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) == 0 {
-                    // Amusingly (so to speak), if the host name doesn't fit in `buf.len()`,
-                    // gethostname will put a truncated version in the buffer, which isn't
-                    // null-terminated. So the resulting buffer might or might not be a valid C
-                    // string...
-                    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-                    buf.truncate(len);
-                    // Note: use from_utf8_lossy_owned once it's stabilized
-                    String::from_utf8(buf)
-                        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
-                } else {
-                    String::new()
-                }
-            }
-        }
-
         TracerMetadata {
             runtime_id: Some(self.runtime_id.to_owned()),
             tracer_language: "rust".to_owned(),
             tracer_version: self.tracer_version.to_owned(),
-            hostname: hostname(),
+            hostname: self.hostname().to_owned(),
             service_name: Some(self.service().to_owned()),
             service_env: self.env().map(str::to_owned),
             service_version: self.version().map(str::to_owned),
             container_id: libdd_common::entity_id::get_container_id().map(str::to_owned),
+            // Advertise that this process publishes per-thread OTel context records. The default
+            // metadata leaves `attribute_keys` empty, so we only advertise the implicit index-0 key
+            // (`datadog.local_root_span_id`); add more here if `thread_ctx` starts encoding extra
+            // attributes.
+            #[cfg(feature = "otel-thread-ctx")]
+            threadlocal_metadata: Some(ThreadLocalMetadata::default()),
             // TODO: add the process tags. For now, we can't easily get them.
             ..Default::default()
         }
@@ -2042,6 +2298,18 @@ impl std::fmt::Debug for Config {
             .field("language_version", &self.language_version)
             .field("service", &self.service)
             .field("env", &self.env)
+            .field(
+                "instrumentation_install_id",
+                &self.instrumentation_install_id,
+            )
+            .field(
+                "instrumentation_install_time",
+                &self.instrumentation_install_time,
+            )
+            .field(
+                "instrumentation_install_type",
+                &self.instrumentation_install_type,
+            )
             .field("version", &self.version)
             .field("service_mapping", &self.service_mapping)
             .field(
@@ -2063,6 +2331,14 @@ impl std::fmt::Debug for Config {
             .field(
                 "trace_propagation_behavior_extract",
                 &self.trace_propagation_behavior_extract,
+            )
+            .field(
+                "trace_http_server_error_statuses",
+                &self.trace_http_server_error_statuses,
+            )
+            .field(
+                "trace_http_client_error_statuses",
+                &self.trace_http_client_error_statuses,
             )
             .field("trace_propagation_style", &self.trace_propagation_style)
             .field(
@@ -2093,6 +2369,18 @@ fn default_config() -> Config {
     Config {
         runtime_id: Config::process_runtime_id(),
         env: ConfigItem::new(SupportedConfigurations::DD_ENV, None),
+        instrumentation_install_id: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_ID,
+            None,
+        ),
+        instrumentation_install_time: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_TIME,
+            None,
+        ),
+        instrumentation_install_type: ConfigItem::new(
+            SupportedConfigurations::DD_INSTRUMENTATION_INSTALL_TYPE,
+            None,
+        ),
         // TODO(paullgdc): Default service naming detection, probably from arg0
         service: ConfigItemWithOverride::new_calculated(
             SupportedConfigurations::DD_SERVICE,
@@ -2154,6 +2442,26 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TRACE_STATS_COMPUTATION_ENABLED,
             true,
         ),
+        trace_stats_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_CARDINALITY_LIMIT,
+            7000,
+        ),
+        trace_stats_resource_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT,
+            1024,
+        ),
+        trace_stats_http_endpoint_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT,
+            512,
+        ),
+        trace_stats_peer_tags_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT,
+            512,
+        ),
+        trace_stats_additional_tags_cardinality_limit: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT,
+            100,
+        ),
         trace_stats_computation_experimental_client_obfuscation_enabled: ConfigItem::new(
             SupportedConfigurations::_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED,
             false,
@@ -2162,6 +2470,13 @@ fn default_config() -> Config {
         trace_writer_synchronous_timeout: Duration::from_secs(2),
         trace_writer_max_flush_interval: Duration::from_secs(1),
         trace_writer_force_flush_timeout: Duration::from_secs(5),
+
+        trace_report_hostname: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_REPORT_HOSTNAME,
+            false,
+        ),
+        hostname: ConfigItem::new(SupportedConfigurations::DD_HOSTNAME, String::new()),
+
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
 
@@ -2188,6 +2503,14 @@ fn default_config() -> Config {
         trace_propagation_behavior_extract: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_BEHAVIOR_EXTRACT,
             TracePropagationBehaviorExtract::default(),
+        ),
+        trace_http_server_error_statuses: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_HTTP_SERVER_ERROR_STATUSES,
+            HttpErrorStatuses::range(500..=599),
+        ),
+        trace_http_client_error_statuses: ConfigItem::new(
+            SupportedConfigurations::DD_TRACE_HTTP_CLIENT_ERROR_STATUSES,
+            HttpErrorStatuses::range(400..=499),
         ),
         trace_propagation_style: ConfigItem::new(
             SupportedConfigurations::DD_TRACE_PROPAGATION_STYLE,
@@ -2296,6 +2619,14 @@ fn default_config() -> Config {
     }
 }
 
+fn uri_host(host: &str) -> Cow<'_, str> {
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        Cow::Owned(format!("[{host}]"))
+    } else {
+        Cow::Borrowed(host)
+    }
+}
+
 /// Builder for constructing a [`Config`] instance.
 ///
 /// Use [`Config::builder()`] to create a new builder instance.
@@ -2325,7 +2656,7 @@ impl ConfigBuilder {
             } else {
                 let host = &config.agent_host.value();
                 let port = *config.trace_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.trace_agent_url.set_calculated(url);
         }
@@ -2346,9 +2677,20 @@ impl ConfigBuilder {
             } else {
                 let host = &config.dogstatsd_agent_host.value();
                 let port = *config.dogstatsd_agent_port.value();
-                Cow::Owned(format!("http://{host}:{port}"))
+                Cow::Owned(format!("http://{}:{port}", uri_host(host)))
             };
             config.dogstatsd_agent_url.set_calculated(url);
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        if config.hostname.value().is_empty() && *config.trace_report_hostname.value() {
+            config.hostname.default_value = HOSTNAME.clone();
+        }
+
+        #[cfg(target_os = "linux")]
+        if config.hostname.value().is_empty() {
+            // on linux, this is needed for the tracer metadata
+            config.hostname.default_value = HOSTNAME.clone();
         }
 
         config
@@ -2860,6 +3202,74 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets the cardinality limit for client-side stats computation.
+    ///
+    /// Aggregates beyond this limit are collapsed into an overflow bucket per flush period.
+    ///
+    /// **Default**: `7000`
+    ///
+    /// Env variable: `DD_TRACE_STATS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config.trace_stats_cardinality_limit.set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the `resource` field of client-side stats.
+    ///
+    /// Resource values beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `1024`
+    ///
+    /// Env variable: `DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_resource_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_resource_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the `http_endpoint` field of client-side stats.
+    ///
+    /// Endpoint values beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `512`
+    ///
+    /// Env variable: `DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_http_endpoint_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_http_endpoint_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the peer tags of client-side stats.
+    ///
+    /// Peer tag combinations beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `512`
+    ///
+    /// Env variable: `DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_peer_tags_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_peer_tags_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
+    /// Sets the per-field cardinality limit for the additional metric tags of client-side stats.
+    ///
+    /// Additional tags beyond this limit are collapsed into a blocked value per flush period.
+    ///
+    /// **Default**: `100`
+    ///
+    /// Env variable: `DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT`
+    pub fn set_trace_stats_additional_tags_cardinality_limit(&mut self, limit: usize) -> &mut Self {
+        self.config
+            .trace_stats_additional_tags_cardinality_limit
+            .set_code(limit);
+        self
+    }
+
     /// Enable or disable remote configuration.
     ///
     /// **Default**: `true`
@@ -2924,6 +3334,35 @@ impl ConfigBuilder {
         trace_writer_synchronous_timeout: Duration,
     ) -> &mut Self {
         self.config.trace_writer_synchronous_timeout = trace_writer_synchronous_timeout;
+        self
+    }
+
+    /// Sets whether the library reports the hostname to datadog.
+    ///
+    /// **Default**: `false`
+    ///
+    /// Env variable: `DD_TRACE_REPORT_HOSTNAME`
+    pub fn set_trace_report_hostname(&mut self, report_hostname: bool) -> &mut Self {
+        self.config.trace_report_hostname.set_code(report_hostname);
+        self
+    }
+
+    /// Sets hostname reported to datadog if [`Config::trace_report_hostname`] is true.
+    ///
+    /// **Default**: if [`Config::trace_report_hostname`] is true, defaults to the system hostname,
+    /// otherwise `""`
+    ///
+    /// This is fetched using:
+    /// * `gethostname` on unix like OS-es
+    /// * `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` on Windows
+    ///
+    /// Env variable: `DD_HOSTNAME`
+    pub fn set_hostname(&mut self, hostname: String) -> &mut Self {
+        // An empty hostname is treated as unset, mirroring an empty `DD_HOSTNAME` environment
+        // variable, so that `build()`'s system-hostname fallback still applies.
+        if !hostname.is_empty() {
+            self.config.hostname.set_code(hostname);
+        }
         self
     }
 
@@ -3144,6 +3583,69 @@ mod tests {
         assert_eq!(*config.log_level_filter(), super::LevelFilter::Warn);
     }
 
+    fn system_hostname() -> String {
+        hostname::get()
+            .map(|h| String::from_utf8_lossy(h.as_encoded_bytes()).to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn test_trace_report_hostname_env_enabled_uses_system_hostname() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_REPORT_HOSTNAME", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
+    }
+
+    #[test]
+    fn test_hostname_env_takes_precedence_over_system_hostname() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_REPORT_HOSTNAME", "true"),
+                ("DD_HOSTNAME", "custom-host"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), "custom-host");
+    }
+
+    #[test]
+    fn test_hostname_empty_env_falls_back_to_system_hostname() {
+        // An empty DD_HOSTNAME="" is treated as unset, so the system hostname fallback applies.
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_REPORT_HOSTNAME", "true"), ("DD_HOSTNAME", "")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
+    }
+
+    #[test]
+    fn test_hostname_empty_code_value_falls_back_to_system_hostname() {
+        // An explicitly empty hostname set through set_hostname is treated as unset, like an
+        // empty DD_HOSTNAME environment variable, so the system-hostname fallback applies.
+        let sources = CompositeSource::new();
+        let config = Config::builder_with_sources(&sources)
+            .set_trace_report_hostname(true)
+            .set_hostname(String::new())
+            .build();
+
+        assert!(config.trace_report_hostname());
+        assert_eq!(config.hostname(), system_hostname());
+    }
+
     #[test]
     fn test_propagation_config_from_source() {
         let mut sources = CompositeSource::new();
@@ -3359,6 +3861,55 @@ mod tests {
         assert_eq!(
             config.trace_propagation_behavior_extract(),
             TracePropagationBehaviorExtract::Restart
+        );
+    }
+
+    #[test]
+    fn test_http_error_statuses_parse() {
+        let statuses = HttpErrorStatuses::parse(" 200-201, 202,404 ").unwrap();
+        assert_eq!(statuses.to_string(), "200-201,202,404");
+        assert!(statuses.contains(201));
+        assert!(statuses.contains(404));
+        assert!(!statuses.contains(203));
+        assert_eq!(
+            HttpErrorStatuses::parse("250-200").unwrap().to_string(),
+            "200-250"
+        );
+
+        for invalid in ["", " , ", "abc", "500-", "-500", "70000"] {
+            assert!(HttpErrorStatuses::parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn test_http_error_statuses_from_source() {
+        let config = Config::builder().build();
+        assert_eq!(
+            config.trace_http_server_error_statuses().to_string(),
+            "500-599"
+        );
+        assert_eq!(
+            config.trace_http_client_error_statuses().to_string(),
+            "400-499"
+        );
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                ("DD_TRACE_HTTP_SERVER_ERROR_STATUSES", "200-201,202"),
+                ("DD_TRACE_HTTP_CLIENT_ERROR_STATUSES", "not-a-status"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(
+            config.trace_http_server_error_statuses().to_string(),
+            "200-201,202"
+        );
+        // An invalid value keeps the default
+        assert_eq!(
+            config.trace_http_client_error_statuses().to_string(),
+            "400-499"
         );
     }
 
@@ -3713,7 +4264,7 @@ mod tests {
         // The public SamplingRuleConfig should silently ignore a "provenance" field in JSON,
         // since serde skips unknown fields by default.
         let json = r#"[{"sample_rate":0.5,"service":"svc","provenance":"dynamic"}]"#;
-        let parsed: ParsedSamplingRules = json.parse().unwrap();
+        let parsed: ParsedSamplingRules = ParsedSamplingRules::parse(json).unwrap();
         assert_eq!(parsed.rules.len(), 1);
         assert_eq!(parsed.rules[0].sample_rate, 0.5);
         assert_eq!(parsed.rules[0].service, Some("svc".to_string()));
@@ -3997,8 +4548,84 @@ mod tests {
 
         let tags: Vec<(&str, &str)> = config.global_tags().collect();
 
-        assert_eq!(tags.len(), 2);
-        assert_eq!(tags, vec![("key1", "value1"), ("key2", "")]);
+        assert_eq!(tags, vec![("key1", "value1"), ("key2", ""), ("key3", "")]);
+    }
+
+    #[test]
+    fn test_dd_tags_separators() {
+        let cases: &[(&str, &[(&str, &str)])] = &[
+            (
+                "key1:value1,key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "key1:value1 key2:value2",
+                &[("key1", "value1"), ("key2", "value2")],
+            ),
+            (
+                "env:test aKey:aVal bKey:bVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal,bKey:bVal,cKey:",
+                &[
+                    ("env", "test"),
+                    ("aKey", "aVal"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:test,aKey:aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:test     bKey :bVal dKey: dVal cKey:",
+                &[
+                    ("env", "test"),
+                    ("bKey", ""),
+                    ("dKey", ""),
+                    ("dVal", ""),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env :test, aKey : aVal bKey:bVal cKey:",
+                &[("env", "test"), ("aKey", "aVal bKey:bVal cKey:")],
+            ),
+            (
+                "env:keyWithA:Semicolon bKey:bVal cKey",
+                &[
+                    ("env", "keyWithA:Semicolon"),
+                    ("bKey", "bVal"),
+                    ("cKey", ""),
+                ],
+            ),
+            (
+                "env:keyWith:  , ,   Lots:Of:Semicolons ",
+                &[("env", "keyWith:"), ("Lots", "Of:Semicolons")],
+            ),
+            ("a:b,c,d", &[("a", "b"), ("c", ""), ("d", "")]),
+            ("a,1", &[("a", ""), ("1", "")]),
+            ("a:b:c:d", &[("a", "b:c:d")]),
+        ];
+
+        for (dd_tags, expected) in cases {
+            let mut sources = CompositeSource::new();
+            sources.add_source(HashMapSource::from_iter(
+                [("DD_TAGS", *dd_tags)],
+                ConfigSourceOrigin::EnvVar,
+            ));
+            let config = Config::builder_with_sources(&sources).build();
+
+            let tags: Vec<(&str, &str)> = config.global_tags().collect();
+            assert_eq!(&tags, expected, "DD_TAGS={dd_tags:?}");
+        }
     }
 
     #[test]
@@ -4148,6 +4775,26 @@ mod tests {
     }
 
     #[test]
+    fn test_dd_agent_url_from_bracketed_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("[::1]".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[::1]:4242");
+    }
+
+    #[test]
+    fn test_dd_agent_url_from_ipv6_host_and_port_using_builder() {
+        let config = Config::builder()
+            .set_agent_host("2001:db8:1::3".into())
+            .set_trace_agent_port(4242)
+            .build();
+
+        assert_eq!(&*config.trace_agent_url(), "http://[2001:db8:1::3]:4242");
+    }
+
+    #[test]
     fn test_dogstatsd_agent_url_default() {
         let config = Config::builder().build();
 
@@ -4207,34 +4854,37 @@ mod tests {
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled = cisu.update_parsed(default.enabled);
+        let enabled = cisu.update_bool(default.enabled);
         assert!(enabled.default_value);
         assert_eq!(enabled.env_value, None);
         assert_eq!(enabled.code_value, None);
 
-        struct Tags(Vec<(String, String)>);
+        struct Tags;
 
-        impl FromStr for Tags {
-            type Err = &'static str;
+        impl ConfigParser for Tags {
+            type Parsed = Vec<(String, String)>;
+            type ParseError = Infallible;
 
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                Ok(Tags(
-                    s.split(',')
-                        .enumerate()
-                        .map(|(index, s)| (index.to_string(), s.to_string()))
-                        .collect(),
-                ))
+            fn parse(s: &str) -> Result<Self::Parsed, Self::ParseError> {
+                Ok(s.split(',')
+                    .enumerate()
+                    .map(|(index, s)| (index.to_string(), s.to_string()))
+                    .collect())
             }
         }
 
-        let tags = cisu.update_parsed_with_transform(default.global_tags, |Tags(tags)| tags);
+        let tags = cisu.update_parsed_with_transform::<Tags, _>(default.global_tags, |mut tags| {
+            tags.resize(3, ("hello".into(), "world".into()));
+            tags
+        });
         assert_eq!(tags.default_value, vec![]);
         assert_eq!(tags.env_value, None);
         assert_eq!(
             tags.code_value,
             Some(vec![
                 ("0".to_string(), "v1".to_string()),
-                ("1".to_string(), "v2".to_string())
+                ("1".to_string(), "v2".to_string()),
+                ("hello".to_string(), "world".to_string()),
             ])
         );
     }
@@ -4251,7 +4901,7 @@ mod tests {
         ));
         let config = Config::builder_with_sources(&sources).build();
 
-        let expected = ParsedSamplingRules::from_str(
+        let expected = ParsedSamplingRules::parse(
             r#"[{"sample_rate":0.5,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
         )
         .unwrap();
@@ -4264,12 +4914,12 @@ mod tests {
         // Converting configuration value to json helps with comparison as serialized properties may
         // differ from their original order
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
+            ParsedSamplingRules::parse(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected.clone()
         );
 
         // Update ConfigItemRc via RC
-        let expected_rc = ParsedSamplingRules::from_str(
+        let expected_rc = ParsedSamplingRules::parse(
             r#"[{"sample_rate":1,"service":"web-api","name":null,"resource":null,"tags":{}}]"#,
         )
         .unwrap();
@@ -4287,7 +4937,7 @@ mod tests {
             ConfigurationOrigin::RemoteConfig
         );
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration_after_rc.value.as_deref().unwrap())
+            ParsedSamplingRules::parse(active_configuration_after_rc.value.as_deref().unwrap())
                 .unwrap(),
             expected_rc
         );
@@ -4299,9 +4949,50 @@ mod tests {
         let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
         assert_eq!(active_configuration.origin, ConfigurationOrigin::EnvVar);
         assert_eq!(
-            ParsedSamplingRules::from_str(active_configuration.value.as_deref().unwrap()).unwrap(),
+            ParsedSamplingRules::parse(active_configuration.value.as_deref().unwrap()).unwrap(),
             expected
         );
+    }
+
+    #[test]
+    fn test_install_signature() {
+        assert!(Config::builder().build().install_signature().is_none());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [
+                (
+                    "DD_INSTRUMENTATION_INSTALL_ID",
+                    "68e75c48-57ca-4a12-adfc-575c4b05fcbe",
+                ),
+                ("DD_INSTRUMENTATION_INSTALL_TYPE", "k8s_single_step"),
+                ("DD_INSTRUMENTATION_INSTALL_TIME", "1703188212"),
+            ],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let signature = Config::builder_with_sources(&sources)
+            .build()
+            .install_signature()
+            .expect("install signature");
+        assert_eq!(
+            signature.install_id.as_deref(),
+            Some("68e75c48-57ca-4a12-adfc-575c4b05fcbe")
+        );
+        assert_eq!(signature.install_type.as_deref(), Some("k8s_single_step"));
+        assert_eq!(signature.install_time.as_deref(), Some("1703188212"));
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_INSTRUMENTATION_INSTALL_TYPE", "k8s_single_step")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let signature = Config::builder_with_sources(&sources)
+            .build()
+            .install_signature()
+            .expect("install signature");
+        assert_eq!(signature.install_id, None);
+        assert_eq!(signature.install_type.as_deref(), Some("k8s_single_step"));
+        assert_eq!(signature.install_time, None);
     }
 
     #[test]

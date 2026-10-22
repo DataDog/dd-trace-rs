@@ -10,6 +10,7 @@
       "type": "web",
       "meta": {
         "_dd.p.dm": "-0",
+        "language": "rust",
         "otel.scope.name": "test",
         "otel.status_code": "Unset",
         "otel.trace_id": "6a2aa1fc00000000d8864be77751666b",
@@ -30,7 +31,7 @@
             "context_headers": "datadog",
             "reason": "propagation_behavior_extract"
           },
-          "flags": 1
+          "flags": 2147483649
         }
       ],
       "duration": 34000,
