@@ -235,6 +235,14 @@ impl Trigger for SqsRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn span_context(&self) -> Option<SpanContext> {
+        extract_trace_context_from_aws_trace_header(self.attributes.aws_trace_header.as_deref())
+    }
+
+    fn wrapped_trigger(&self) -> Option<&dyn Trigger> {
+        self.wrapped_event().map(SqsWrappedEvent::as_trigger)
+    }
 }
 
 // extractTraceContextfromAWSTraceHeader extracts trace context from the

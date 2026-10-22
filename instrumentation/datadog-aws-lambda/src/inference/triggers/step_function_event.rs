@@ -127,6 +127,10 @@ impl Trigger for StepFunctionEvent {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn span_context(&self) -> Option<SpanContext> {
+        Some(self.get_span_context())
+    }
 }
 
 impl StepFunctionEvent {

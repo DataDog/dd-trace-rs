@@ -191,6 +191,10 @@ impl Trigger for SnsRecord {
     fn is_async(&self) -> bool {
         true
     }
+
+    fn wrapped_trigger(&self) -> Option<&dyn Trigger> {
+        self.wrapped_event().map(|event| event as &dyn Trigger)
+    }
 }
 
 #[cfg(test)]

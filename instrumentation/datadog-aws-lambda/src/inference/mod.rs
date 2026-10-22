@@ -13,10 +13,7 @@ use datadog_opentelemetry::propagation::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use triggers::{
-    sqs_event::extract_trace_context_from_aws_trace_header, IdentifiedTrigger, Trigger,
-    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
-};
+use triggers::{parse_trigger, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG};
 
 const MS_TO_NS: f64 = 1_000_000.0;
 const S_TO_NS: f64 = 1_000_000_000.0;
@@ -73,21 +70,13 @@ impl SpanInferrer {
 
     pub fn infer_span(&self, payload: &str) -> serde_json::Result<InferenceResult> {
         let payload: Value = serde_json::from_str(payload)?;
-        let Some(identified) = IdentifiedTrigger::from_value(payload) else {
+        let Some(trigger) = parse_trigger(payload) else {
             return Ok(InferenceResult::default());
         };
-        let mut result = self.infer_trigger(identified.as_trigger());
-        result.generated_context = match &identified {
-            IdentifiedTrigger::StepFunctionEvent(event) => {
-                Some(generated_context(event.get_span_context()))
-            }
-            IdentifiedTrigger::SqsRecord(event) => extract_trace_context_from_aws_trace_header(
-                event.attributes.aws_trace_header.as_deref(),
-            )
-            .map(generated_context),
-            _ => None,
-        };
-        if let Some(wrapped) = self.infer_wrapped_trigger(&identified) {
+        let mut result = self.infer_trigger(trigger.as_ref());
+        result.generated_context = trigger.span_context().map(generated_context);
+        if let Some(wrapped) = trigger.wrapped_trigger() {
+            let wrapped = self.infer_trigger(wrapped);
             if let Some(span_data) = &mut result.span_data {
                 for (key, value) in wrapped
                     .trigger_tags
@@ -131,18 +120,6 @@ impl SpanInferrer {
             trigger_tags,
             carrier: trigger.get_carrier(),
             ..Default::default()
-        }
-    }
-
-    fn infer_wrapped_trigger(&self, identified: &IdentifiedTrigger) -> Option<InferenceResult> {
-        match identified {
-            IdentifiedTrigger::SqsRecord(event) => event
-                .wrapped_event()
-                .map(|wrapped| self.infer_trigger(wrapped.as_trigger())),
-            IdentifiedTrigger::SnsRecord(event) => event
-                .wrapped_event()
-                .map(|wrapped| self.infer_trigger(wrapped)),
-            _ => None,
         }
     }
 }
@@ -311,6 +288,7 @@ mod tests {
             ("eventbridge_sns_event.json", "eventbridge"),
         ] {
             let result = infer_fixture(fixture);
+            assert!(result.wrapped_span.is_some(), "{fixture}");
             let meta = &result.span_data.as_ref().unwrap().meta;
             assert_eq!(
                 meta.get(triggers::FUNCTION_TRIGGER_EVENT_SOURCE_TAG)
