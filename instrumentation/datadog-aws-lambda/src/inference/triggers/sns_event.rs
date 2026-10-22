@@ -6,20 +6,20 @@ use std::collections::HashMap;
 
 use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::debug;
 
 use crate::inference::{
     base64_to_string,
     triggers::{
-        event_bridge_event::EventBridgeEvent, ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY,
+        event_bridge_event::EventBridgeEvent, resolve_service_name, Trigger, DATADOG_CARRIER_KEY,
         FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SnsRecord {
     #[serde(rename = "Sns")]
     pub sns: SnsEntity,
@@ -53,7 +53,7 @@ impl SnsRecord {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SnsEntity {
     #[serde(rename = "MessageId")]
     pub message_id: String,
@@ -71,7 +71,7 @@ pub struct SnsEntity {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct MessageAttribute {
     #[serde(rename = "Type")]
     pub r#type: String,
@@ -103,14 +103,19 @@ impl Trigger for SnsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an SNS Event");
-        let resource_name = self.get_specific_identifier();
+        let resource_name = self
+            .sns
+            .topic_arn
+            .split(':')
+            .next_back()
+            .unwrap_or_default();
 
         let start_time = self
             .sns
@@ -118,21 +123,22 @@ impl Trigger for SnsRecord {
             .timestamp_nanos_opt()
             .unwrap_or((self.sns.timestamp.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            resource_name,
+            "lambda_sns",
+            resource_name,
             "sns",
             aws_service_representation_enabled,
         );
 
         span.name = "aws.sns".to_string();
-        span.service.clone_from(&service_name);
-        span.resource.clone_from(&resource_name);
+        span.service = service_name;
+        span.resource = resource_name.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend([
-            ("operation_name".to_string(), "aws.sns".to_string()),
-            ("topicname".to_string(), resource_name),
+            ("topicname".to_string(), resource_name.to_owned()),
             ("topic_arn".to_string(), self.sns.topic_arn.clone()),
             ("message_id".to_string(), self.sns.message_id.clone()),
             ("type".to_string(), self.sns.r#type.clone()),
@@ -148,6 +154,7 @@ impl Trigger for SnsRecord {
                 event_subscription_arn.clone(),
             );
         }
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -184,27 +191,15 @@ impl Trigger for SnsRecord {
     fn is_async(&self) -> bool {
         true
     }
-}
 
-impl ServiceNameResolver for SnsRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.sns
-            .topic_arn
-            .split(':')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_sns"
+    fn wrapped_trigger(&self) -> Option<&dyn Trigger> {
+        self.wrapped_event().map(|event| event as &dyn Trigger)
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::inference::SpanData as Span;
 
     use super::*;
     use crate::inference::triggers::test_utils::read_json_file;
@@ -262,9 +257,8 @@ mod tests {
         let json = read_json_file("sns_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.sns");
         assert_eq!(span.service, "serverlessTracingTopicPy");
         assert_eq!(span.resource, "serverlessTracingTopicPy");
@@ -273,7 +267,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.sns".to_string()),
                 ("topicname".to_string(), "serverlessTracingTopicPy".to_string()),
                 ("topic_arn".to_string(), "arn:aws:sns:sa-east-1:425362996713:serverlessTracingTopicPy".to_string()),
                 ("message_id".to_string(), "87056a47-f506-5d77-908b-303605d3b197".to_string()),
@@ -380,107 +373,5 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("sns_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            (
-                "serverlessTracingTopicPy".to_string(),
-                "specific-service".to_string(),
-            ),
-            ("lambda_sns".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping =
-            HashMap::from([("lambda_sns".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name (topic name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                true // aws_service_representation_enabled
-            ),
-            event.get_specific_identifier() // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("sns_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            (
-                "serverlessTracingTopicPy".to_string(),
-                "specific-service".to_string(),
-            ),
-            ("lambda_sns".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping =
-            HashMap::from([("lambda_sns".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "sns",
-                false // aws_service_representation_enabled = false
-            ),
-            "sns" // fallback value
-        );
     }
 }

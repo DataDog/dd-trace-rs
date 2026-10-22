@@ -5,34 +5,26 @@ use crate::inference::SpanData as Span;
 use crate::{
     inference::get_aws_partition_by_region,
     inference::{
-        triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+        triggers::{lowercase_key, Trigger},
         MS_TO_NS,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-use super::ServiceNameResolver;
+use super::{http_trigger_tags, http_url, resolve_service_name};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct APIGatewayWebSocketEvent {
-    pub path: Option<String>,
     #[serde(deserialize_with = "lowercase_key", default)]
     pub headers: HashMap<String, String>,
-    #[serde(deserialize_with = "lowercase_key", default)]
-    pub multi_value_headers: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(rename = "multiValueQueryStringParameters")]
-    pub query_parameters: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub route_key: String,
@@ -40,20 +32,11 @@ pub struct RequestContext {
     #[serde(rename = "requestTimeEpoch")]
     pub time_epoch: i64,
     pub request_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub http_method: Option<String>,
     pub api_id: String,
     pub stage: String,
     pub connection_id: String,
     pub event_type: String,
     pub message_direction: String,
-    pub identity: Identity,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Identity {
-    pub source_ip: Option<String>,
 }
 
 impl Trigger for APIGatewayWebSocketEvent {
@@ -75,23 +58,24 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an API Gateway WebSocket Event");
         let resource = &self.request_context.route_key;
-        let http_url = format!(
-            "https://{domain_name}{route_key}",
-            domain_name = self.request_context.domain_name,
-            route_key = self.request_context.route_key
+        let http_url = http_url(
+            &self.request_context.domain_name,
+            &self.request_context.route_key,
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_api_gateway",
             &self.request_context.domain_name,
             "api_gateway_websocket",
             aws_service_representation_enabled,
@@ -102,7 +86,7 @@ impl Trigger for APIGatewayWebSocketEvent {
         span.resource.clone_from(resource);
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
+        span.meta.extend([
             (
                 "endpoint".to_string(),
                 self.request_context.route_key.clone(),
@@ -130,34 +114,17 @@ impl Trigger for APIGatewayWebSocketEvent {
                 "message_direction".to_string(),
                 self.request_context.message_direction.clone(),
             ),
-        ]));
+        ]);
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{route_key}",
-                    domain_name = self.request_context.domain_name,
-                    route_key = self.request_context.route_key
-                ),
-            ),
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.route_key.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "api-gateway".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
-
-        tags
+        http_trigger_tags(
+            &self.request_context.domain_name,
+            &self.request_context.route_key,
+            "api-gateway",
+            &self.headers,
+        )
     }
 
     fn get_arn(&self, region: &str, _function_name: &str) -> String {
@@ -181,16 +148,6 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 }
 
-impl ServiceNameResolver for APIGatewayWebSocketEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_api_gateway"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,25 +161,17 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "MESSAGE".to_string(),
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 
@@ -237,25 +186,17 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "MESSAGE".to_string(),
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 
@@ -270,26 +211,18 @@ mod tests {
             .expect("Failed to deserialize into APIGatewayWebSocketEvent");
 
         let expected = APIGatewayWebSocketEvent {
-            path: None,
             headers: HashMap::new(),
-            multi_value_headers: HashMap::new(),
-            query_parameters: HashMap::new(),
-            path_parameters: HashMap::new(),
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
-                http_method: None,
                 api_id: "85fj5nw29d".to_string(),
                 stage: "production".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
                 event_type: "DISCONNECT".to_string(), /* Note: The example payload shows MESSAGE
                                                        * event type, not DISCONNECT */
                 message_direction: "IN".to_string(),
-                identity: Identity {
-                    source_ip: Some("24.193.182.233".to_string()),
-                },
             },
         };
 
@@ -321,9 +254,8 @@ mod tests {
         let event = APIGatewayWebSocketEvent::new(payload)
             .expect("Failed to deserialize APIGatewayWebSocketEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(
@@ -384,116 +316,6 @@ mod tests {
         assert_eq!(
             event.get_arn("us-east-1", ""),
             "arn:aws:apigateway:us-east-1::/apis/85fj5nw29d/stages/dev"
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("api_gateway_websocket_connect_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = APIGatewayWebSocketEvent::new(payload)
-            .expect("Failed to deserialize APIGatewayWebSocketEvent");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("85fj5nw29d".to_string(), "specific-service".to_string()),
-            (
-                "lambda_api_gateway".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping = HashMap::from([(
-            "lambda_api_gateway".to_string(),
-            "generic-service".to_string(),
-        )]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name (domain_name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            event.request_context.domain_name // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("api_gateway_websocket_connect_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = APIGatewayWebSocketEvent::new(payload)
-            .expect("Failed to deserialize APIGatewayWebSocketEvent");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("85fj5nw29d".to_string(), "specific-service".to_string()),
-            (
-                "lambda_api_gateway".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping = HashMap::from([(
-            "lambda_api_gateway".to_string(),
-            "generic-service".to_string(),
-        )]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value (domain_name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            event.request_context.domain_name // fallback value
         );
     }
 }

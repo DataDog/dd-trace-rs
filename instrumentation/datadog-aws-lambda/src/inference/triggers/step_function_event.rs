@@ -4,11 +4,11 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::inference::triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
+use crate::inference::triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 use datadog_opentelemetry::propagation::{
     context::{Sampling, SpanContext},
     datadog::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
@@ -18,7 +18,7 @@ use super::DATADOG_CARRIER_KEY;
 
 pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct StepFunctionEvent {
     #[serde(rename = "Execution")]
     pub execution: Execution,
@@ -32,11 +32,9 @@ pub struct StepFunctionEvent {
     pub trace_tags: Option<String>,
     #[serde(rename = "RootExecutionId")]
     pub root_execution_id: Option<String>,
-    #[serde(rename = "serverless-version")]
-    pub serverless_version: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct Execution {
     #[serde(rename = "Id")]
     id: String,
@@ -44,7 +42,7 @@ pub struct Execution {
     redrive_count: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct State {
     #[serde(rename = "Name")]
     name: String,
@@ -54,7 +52,7 @@ pub struct State {
     retry_count: u16,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct StateMachine {
     #[serde(rename = "Id")]
     id: String,
@@ -107,14 +105,6 @@ impl Trigger for StepFunctionEvent {
         execution_id.is_some() && name.is_some() && entered_time.is_some()
     }
 
-    fn enrich_span(
-        &self,
-        _span: &mut crate::inference::SpanData,
-        _service_mapping: &HashMap<String, String>,
-        _aws_service_representation_enabled: bool,
-    ) {
-    }
-
     fn get_tags(&self) -> HashMap<String, String> {
         HashMap::from([(
             FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
@@ -136,6 +126,10 @@ impl Trigger for StepFunctionEvent {
 
     fn is_async(&self) -> bool {
         true
+    }
+
+    fn span_context(&self) -> Option<SpanContext> {
+        Some(self.get_span_context())
     }
 }
 
@@ -238,16 +232,6 @@ impl StepFunctionEvent {
     }
 }
 
-impl ServiceNameResolver for StepFunctionEvent {
-    fn get_specific_identifier(&self) -> String {
-        String::new()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_stepfunction"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,7 +267,6 @@ mod tests {
             trace_id: None,
             trace_tags: None,
             root_execution_id: None,
-            serverless_version: None,
         };
 
         for file in test_files {
@@ -322,7 +305,6 @@ mod tests {
             root_execution_id: Some(String::from(
                 "arn:aws:states:sa-east-1:425362996713:execution:invokeJavaLambda:4875aba4-ae31-4a4c-bf8a-63e9eee31dad",
             )),
-            serverless_version: Some(String::from("v1")),
         };
 
         for file in test_files {
@@ -359,7 +341,6 @@ mod tests {
             trace_id: Some(String::from("5821803790426892636")),
             trace_tags: Some(String::from("_dd.p.dm=-0,_dd.p.tid=672a7cb100000000")),
             root_execution_id: None,
-            serverless_version: Some(String::from("v1")),
         };
 
         for file in test_files {
@@ -629,77 +610,5 @@ mod tests {
         assert_eq!(hi_tid, 1_807_349_139_850_867_390);
 
         assert_eq!(hex_tid, "1914fe7789eb32be");
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
-
-        // Test 1: Generic mapping is used for Step Functions
-        let generic_service_mapping = HashMap::from([(
-            "lambda_stepfunction".to_string(),
-            "generic-service".to_string(),
-        )]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                "stepfunction",
-                "stepfunction",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 2: When no mapping exists, uses instance name
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                "stepfunction",
-                "stepfunction",
-                true // aws_service_representation_enabled
-            ),
-            "stepfunction" // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
-
-        // Test 1: With generic mapping - still respects mapping
-        let generic_service_mapping = HashMap::from([(
-            "lambda_stepfunction".to_string(),
-            "generic-service".to_string(),
-        )]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                "stepfunction",
-                "stepfunction",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 2: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                "stepfunction",
-                "stepfunction",
-                false // aws_service_representation_enabled = false
-            ),
-            "stepfunction" // fallback value
-        );
     }
 }

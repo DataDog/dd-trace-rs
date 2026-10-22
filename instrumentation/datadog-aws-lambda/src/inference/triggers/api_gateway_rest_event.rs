@@ -1,39 +1,27 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use super::{is_async_http, HttpMetadata};
 use crate::inference::get_aws_partition_by_region;
 use crate::inference::SpanData as Span;
 use crate::inference::{
-    triggers::{
-        lowercase_key, parameterize_api_resource, serde_utils::nullable_map, ServiceNameResolver,
-        Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
-    },
+    triggers::{lowercase_key, parameterize_api_resource, resolve_service_name, Trigger},
     MS_TO_NS,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct APIGatewayRestEvent {
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
-    #[serde(deserialize_with = "lowercase_key")]
-    pub multi_value_headers: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "nullable_map")]
-    #[serde(rename = "multiValueQueryStringParameters")]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub query_parameters: HashMap<String, Vec<String>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "nullable_map")]
-    pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub stage: String,
@@ -50,11 +38,25 @@ pub struct RequestContext {
     pub identity: Identity,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Identity {
     pub source_ip: String,
     pub user_agent: String,
+}
+
+impl APIGatewayRestEvent {
+    fn http_metadata(&self) -> HttpMetadata<'_> {
+        HttpMetadata {
+            domain: &self.request_context.domain_name,
+            path: &self.request_context.path,
+            method: &self.request_context.method,
+            protocol: &self.request_context.protocol,
+            source_ip: &self.request_context.identity.source_ip,
+            user_agent: &self.request_context.identity.user_agent,
+            request_id: &self.request_context.request_id,
+        }
+    }
 }
 
 impl Trigger for APIGatewayRestEvent {
@@ -76,27 +78,24 @@ impl Trigger for APIGatewayRestEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an API Gateway REST Event");
         let resource = format!(
             "{http_method} {path}",
             http_method = self.request_context.method,
             path = parameterize_api_resource(&self.request_context.path)
         );
-        let http_url = format!(
-            "https://{domain_name}{path}",
-            domain_name = self.request_context.domain_name,
-            path = self.request_context.path
-        );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_api_gateway",
             &self.request_context.domain_name,
             &self.request_context.domain_name,
             aws_service_representation_enabled,
@@ -107,71 +106,24 @@ impl Trigger for APIGatewayRestEvent {
         span.resource = resource;
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("endpoint".to_string(), self.request_context.path.clone()),
-            ("http.url".to_string(), http_url),
-            (
-                "http.method".to_string(),
-                self.request_context.method.clone(),
-            ),
-            (
-                "http.protocol".to_string(),
-                self.request_context.protocol.clone(),
-            ),
-            (
-                "http.source_ip".to_string(),
-                self.request_context.identity.source_ip.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.clone(),
-            ),
-            (
-                "request_id".to_string(),
-                self.request_context.request_id.clone(),
-            ),
-            (
-                "http.route".to_string(),
-                self.request_context.resource_path.clone(),
-            ),
-        ]));
+        span.meta.extend(self.http_metadata().span_tags());
+        span.meta.insert(
+            "http.route".into(),
+            self.request_context.resource_path.clone(),
+        );
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{path}",
-                    domain_name = self.request_context.domain_name,
-                    path = self.request_context.path
-                ),
-            ),
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.path.clone(),
-            ),
-            (
-                "http.method".to_string(),
-                self.request_context.method.clone(),
-            ),
-            (
-                "http.route".to_string(),
-                self.request_context.resource_path.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "api-gateway".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
+        let mut tags = self.http_metadata().trigger_tags(
+            "api-gateway",
+            &self.headers,
+            Some(&self.request_context.identity.user_agent),
+        );
+        tags.insert(
+            "http.route".into(),
+            self.request_context.resource_path.clone(),
+        );
 
         tags
     }
@@ -202,23 +154,11 @@ impl Trigger for APIGatewayRestEvent {
     }
 
     fn is_async(&self) -> bool {
-        self.headers
-            .get("x-amz-invocation-type")
-            .is_some_and(|v| v == "Event")
+        is_async_http(&self.headers)
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
         self.headers.clone()
-    }
-}
-
-impl ServiceNameResolver for APIGatewayRestEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_api_gateway"
     }
 }
 
@@ -271,21 +211,6 @@ mod tests {
                 ("header1".to_string(), "value1".to_string()),
                 ("header2".to_string(), "value2".to_string()),
             ]),
-            multi_value_headers: HashMap::from([
-                ("header1".to_string(), vec!["value1".to_string()]),
-                (
-                    "header2".to_string(),
-                    vec!["value1".to_string(), "value2".to_string()],
-                ),
-            ]),
-            query_parameters: HashMap::from([
-                (
-                    "parameter1".to_string(),
-                    vec!["value1".to_string(), "value2".to_string()],
-                ),
-                ("parameter2".to_string(), vec!["value".to_string()]),
-            ]),
-            path_parameters: HashMap::default(),
             request_context: RequestContext {
                 stage: "$default".to_string(),
                 request_id: "id=".to_string(),
@@ -329,9 +254,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
         assert_eq!(span.resource, "GET /my/path");
@@ -387,9 +311,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(
             span.service,
@@ -469,114 +392,6 @@ mod tests {
         assert_eq!(
             event.get_dd_resource_key("us-east-1"),
             Some("arn:aws:apigateway:us-east-1::/restapis/id".to_string())
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("api_gateway_rest_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("id".to_string(), "specific-service".to_string()),
-            (
-                "lambda_api_gateway".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping = HashMap::from([(
-            "lambda_api_gateway".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name (domain_name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                true // aws_service_representation_enabled
-            ),
-            event.request_context.domain_name // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("api_gateway_rest_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("id".to_string(), "specific-service".to_string()),
-            (
-                "lambda_api_gateway".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping = HashMap::from([(
-            "lambda_api_gateway".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value (domain_name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.domain_name,
-                &event.request_context.domain_name,
-                false // aws_service_representation_enabled = false
-            ),
-            event.request_context.domain_name // fallback value
         );
     }
 }

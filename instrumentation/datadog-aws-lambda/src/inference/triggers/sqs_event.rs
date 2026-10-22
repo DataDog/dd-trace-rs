@@ -7,31 +7,26 @@ use crate::inference::{
     base64_to_string,
     triggers::{
         event_bridge_event::EventBridgeEvent,
+        resolve_service_name,
         sns_event::{SnsEntity, SnsRecord},
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
 use datadog_opentelemetry::propagation::context::{Sampling, SpanContext};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct SqsRecord {
-    #[serde(rename = "messageId")]
-    pub message_id: String,
     #[serde(rename = "receiptHandle")]
     pub receipt_handle: String,
     pub attributes: Attributes,
     #[serde(rename = "messageAttributes")]
     pub message_attributes: HashMap<String, MessageAttribute>,
-    #[serde(rename = "md5OfBody")]
-    pub md5_of_body: String,
-    #[serde(rename = "eventSource")]
-    pub event_source: String,
     #[serde(rename = "eventSourceARN")]
     pub event_source_arn: String,
     #[serde(rename = "awsRegion")]
@@ -73,24 +68,18 @@ impl SqsRecord {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct MessageAttribute {
     #[serde(rename = "stringValue")]
     pub string_value: Option<String>,
     #[serde(rename = "binaryValue")]
     pub binary_value: Option<String>,
-    #[serde(rename = "stringListValues")]
-    pub string_list_values: Option<Vec<String>>,
-    #[serde(rename = "binaryListValues")]
-    pub binary_list_values: Option<Vec<String>>,
     #[serde(rename = "dataType")]
     pub data_type: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct Attributes {
-    #[serde(rename = "ApproximateFirstReceiveTimestamp")]
-    pub approximate_first_receive_timestamp: String,
     #[serde(rename = "ApproximateReceiveCount")]
     pub approximate_receive_count: String,
     #[serde(rename = "SentTimestamp")]
@@ -128,14 +117,18 @@ impl Trigger for SqsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         debug!("Enriching an Inferred Span for an SQS Event");
-        let resource = self.get_specific_identifier();
+        let resource = self
+            .event_source_arn
+            .split(':')
+            .next_back()
+            .unwrap_or_default();
         let start_time = (self
             .attributes
             .sent_timestamp
@@ -143,20 +136,21 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &self.get_specific_identifier(),
+            resource,
+            "lambda_sqs",
+            resource,
             "sqs",
             aws_service_representation_enabled,
         );
 
         span.name = "aws.sqs".to_string();
-        span.service.clone_from(&service_name);
-        span.resource = resource;
+        span.service = service_name;
+        span.resource = resource.to_owned();
         span.r#type = "web".to_string();
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), "aws.sqs".to_string()),
+        span.meta.extend([
             ("receipt_handle".to_string(), self.receipt_handle.clone()),
             (
                 "retry_count".to_string(),
@@ -165,7 +159,8 @@ impl Trigger for SqsRecord {
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
-        ]));
+        ]);
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -240,19 +235,13 @@ impl Trigger for SqsRecord {
     fn is_async(&self) -> bool {
         true
     }
-}
 
-impl ServiceNameResolver for SqsRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split(':')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
+    fn span_context(&self) -> Option<SpanContext> {
+        extract_trace_context_from_aws_trace_header(self.attributes.aws_trace_header.as_deref())
     }
 
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_sqs"
+    fn wrapped_trigger(&self) -> Option<&dyn Trigger> {
+        self.wrapped_event().map(SqsWrappedEvent::as_trigger)
     }
 }
 
@@ -345,25 +334,19 @@ mod tests {
             ("_datadog".to_string(), MessageAttribute {
                 string_value: Some("{\"x-datadog-trace-id\":\"2684756524522091840\",\"x-datadog-parent-id\":\"7431398482019833808\",\"x-datadog-sampling-priority\":\"1\"}".to_string()),
                 binary_value: None,
-                string_list_values: Some(vec![]),
-                binary_list_values: Some(vec![]),
                 data_type: "String".to_string(),
             })
         ]);
 
         let expected = SqsRecord {
-            message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
             receipt_handle: "MessageReceiptHandle".to_string(),
             attributes: Attributes {
-                approximate_first_receive_timestamp: "1523232000001".to_string(),
                 approximate_receive_count: "1".to_string(),
                 sent_timestamp: "1523232000000".to_string(),
                 sender_id: "123456789012".to_string(),
                 aws_trace_header: None,
             },
             message_attributes,
-            md5_of_body: "{{{md5_of_body}}}".to_string(),
-            event_source: "aws:sqs".to_string(),
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             aws_region: "us-east-1".to_string(),
             body: "Hello from SQS!".to_string(),
@@ -393,9 +376,8 @@ mod tests {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.sqs");
         assert_eq!(span.service, "MyQueue");
         assert_eq!(span.resource, "MyQueue");
@@ -404,7 +386,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.sqs".to_string()),
                 (
                     "receipt_handle".to_string(),
                     "MessageReceiptHandle".to_string(),
@@ -628,102 +609,6 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("sqs_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("MyQueue".to_string(), "specific-service".to_string()),
-            ("lambda_sqs".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping =
-            HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name (queue name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                true // aws_service_representation_enabled
-            ),
-            event.get_specific_identifier() // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("sqs_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("MyQueue".to_string(), "specific-service".to_string()),
-            ("lambda_sqs".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping =
-            HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "sqs",
-                false // aws_service_representation_enabled = false
-            ),
-            "sqs" // fallback value
-        );
     }
 
     #[test]

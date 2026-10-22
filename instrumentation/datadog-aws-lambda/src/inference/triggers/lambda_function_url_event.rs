@@ -3,28 +3,26 @@
 
 use std::collections::HashMap;
 
+use super::{is_async_http, HttpMetadata};
 use crate::inference::SpanData as Span;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::inference::{
     get_aws_partition_by_region,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{lowercase_key, resolve_service_name, Trigger},
     MS_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LambdaFunctionUrlEvent {
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
-    pub cookies: Option<Vec<String>>,
-    #[serde(default)]
-    pub query_string_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub http: Http,
@@ -35,7 +33,7 @@ pub struct RequestContext {
     pub api_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Http {
     pub method: String,
@@ -43,6 +41,20 @@ pub struct Http {
     pub protocol: String,
     pub source_ip: String,
     pub user_agent: String,
+}
+
+impl LambdaFunctionUrlEvent {
+    fn http_metadata(&self) -> HttpMetadata<'_> {
+        HttpMetadata {
+            domain: &self.request_context.domain_name,
+            path: &self.request_context.http.path,
+            method: &self.request_context.http.method,
+            protocol: &self.request_context.http.protocol,
+            source_ip: &self.request_context.http.source_ip,
+            user_agent: &self.request_context.http.user_agent,
+            request_id: &self.request_context.request_id,
+        }
+    }
 }
 
 impl Trigger for LambdaFunctionUrlEvent {
@@ -65,27 +77,23 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         let resource = format!(
             "{} {}",
             self.request_context.http.method, self.request_context.http.path
         );
 
-        let http_url = format!(
-            "https://{domain_name}{path}",
-            domain_name = self.request_context.domain_name.clone(),
-            path = self.request_context.http.path.clone()
-        );
-
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
+            &self.request_context.api_id,
+            "lambda_url",
             &self.request_context.domain_name,
             &self.request_context.domain_name,
             aws_service_representation_enabled,
@@ -96,71 +104,16 @@ impl Trigger for LambdaFunctionUrlEvent {
         span.resource = resource;
         span.r#type = String::from("http");
         span.start = start_time;
-        span.meta.extend([
-            (
-                "endpoint".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            ("http.url".to_string(), http_url),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.http.user_agent.clone(),
-            ),
-            (
-                "http.source_ip".to_string(),
-                self.request_context.http.source_ip.clone(),
-            ),
-            (
-                "http.protocol".to_string(),
-                self.request_context.http.protocol.clone(),
-            ),
-            ("operation_name".to_string(), "aws.lambda.url".to_string()),
-            (
-                "request_id".to_string(),
-                self.request_context.request_id.clone(),
-            ),
-        ]);
+        span.meta.extend(self.http_metadata().span_tags());
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let mut tags = HashMap::from([
-            (
-                "http.url".to_string(),
-                format!(
-                    "https://{domain_name}{path}",
-                    domain_name = self.request_context.domain_name.clone(),
-                    path = self.request_context.http.path.clone()
-                ),
-            ),
-            // path and URL are full
-            // /users/12345/profile
-            (
-                "http.url_details.path".to_string(),
-                self.request_context.http.path.clone(),
-            ),
-            (
-                "http.method".to_string(),
-                self.request_context.http.method.clone(),
-            ),
-            (
-                "http.user_agent".to_string(),
-                self.request_context.http.user_agent.clone(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "lambda-function-url".to_string(),
-            ),
-        ]);
-
-        if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.clone());
-        }
-
-        tags
+        self.http_metadata().trigger_tags(
+            "lambda-function-url",
+            &self.headers,
+            Some(&self.request_context.http.user_agent),
+        )
     }
 
     fn get_arn(&self, region: &str, function_name: &str) -> String {
@@ -176,19 +129,7 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     fn is_async(&self) -> bool {
-        self.headers
-            .get("x-amz-invocation-type")
-            .is_some_and(|v| v == "Event")
-    }
-}
-
-impl ServiceNameResolver for LambdaFunctionUrlEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.request_context.api_id.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_url"
+        is_async_http(&self.headers)
     }
 }
 
@@ -205,7 +146,6 @@ mod tests {
             .expect("Failed to deserialize into LambdaFunctionUrlEvent");
 
         let expected = LambdaFunctionUrlEvent {
-            query_string_parameters: HashMap::default(),
             headers: HashMap::from([
                 ("accept".to_string(), "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9".to_string()),
                 ("accept-language".to_string(), "en-US,en;q=0.9".to_string()),
@@ -235,7 +175,6 @@ mod tests {
                 ("host".to_string(), "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com".to_string()),
 
             ]),
-            cookies: None,
             request_context: RequestContext {
                 request_id: String::from("ec4d58f8-2b8b-4ceb-a1d5-2be7bff58505"),
                 time_epoch: 1_637_169_449_721,
@@ -278,9 +217,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.lambda.url");
         assert_eq!(
             span.service,
@@ -293,7 +231,6 @@ mod tests {
             HashMap::from([
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "71.195.30.42".to_string()),
-                ("operation_name".to_string(), "aws.lambda.url".to_string()),
                 ("request_id".to_string(), "ec4d58f8-2b8b-4ceb-a1d5-2be7bff58505".to_string()),
                 ("http.url".to_string(), "https://a8hyhsshac.lambda-url.eu-south-1.amazonaws.com/".to_string()),
                 ("http.method".to_string(), "GET".to_string()),
@@ -337,103 +274,5 @@ mod tests {
                 format!("arn:{partition}:lambda:{region}:601427279990:url:my-function")
             );
         }
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("lambda_function_url_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = LambdaFunctionUrlEvent::new(payload)
-            .expect("Failed to deserialize LambdaFunctionUrlEvent");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("a8hyhsshac".to_string(), "specific-service".to_string()),
-            ("lambda_url".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                "domain-name",
-                "lambda_url",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping =
-            HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                "domain-name",
-                "lambda_url",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                "domain-name",
-                "lambda_url",
-                true // aws_service_representation_enabled
-            ),
-            "domain-name" // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("lambda_function_url_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = LambdaFunctionUrlEvent::new(payload)
-            .expect("Failed to deserialize LambdaFunctionUrlEvent");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("a8hyhsshac".to_string(), "specific-service".to_string()),
-            ("lambda_url".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                "domain-name",
-                "lambda_url",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping =
-            HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                "domain-name",
-                "lambda_url",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                "domain-name",
-                "lambda_url",
-                false // aws_service_representation_enabled = false
-            ),
-            "lambda_url" // fallback value
-        );
     }
 }

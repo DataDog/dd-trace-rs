@@ -1,45 +1,32 @@
 // Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use super::ServiceNameResolver;
 use crate::inference::triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
-use crate::inference::SpanData as Span;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ALBEvent {
     pub request_context: RequestContext,
     pub http_method: String,
-    pub path: Option<String>,
 
     // Either one OR the other is present, not both
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub multi_value_headers: HashMap<String, Vec<String>>,
-
-    // Either one OR the other is present, not both
-    #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub query_parameters: HashMap<String, String>,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub multi_value_query_parameters: HashMap<String, Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct RequestContext {
     pub elb: Elb,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Elb {
     pub target_group_arn: String,
@@ -62,14 +49,6 @@ impl Trigger for ALBEvent {
             .and_then(|v| v.get("elb"))
             .and_then(|v| v.get("targetGroupArn"));
         target_group_arn.is_some()
-    }
-
-    fn enrich_span(
-        &self,
-        _span: &mut Span,
-        _service_mapping: &HashMap<String, String>,
-        _aws_service_representation_enabled: bool,
-    ) {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -105,20 +84,6 @@ impl Trigger for ALBEvent {
     }
 }
 
-impl ServiceNameResolver for ALBEvent {
-    fn get_specific_identifier(&self) -> String {
-        // arn is of format:
-        // arn:aws:elasticloadbalancing:<region>:<account-id>:targetgroup/<alb-name>/<some-uid>
-        let arn = &self.request_context.elb.target_group_arn;
-
-        arn.split('/').nth(1).unwrap_or_default().to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_application_load_balancer"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +103,6 @@ mod tests {
                 }
             },
             http_method: "GET".to_string(),
-            path: Some("/".to_string()),
             headers: HashMap::from([
                 ("accept".to_string(), "*/*".to_string()),
                 ("accept-encoding".to_string(), "gzip, deflate".to_string()),
@@ -159,8 +123,6 @@ mod tests {
                 ("x-forwarded-proto".to_string(), "http".to_string()),
             ]),
             multi_value_headers: HashMap::default(),
-            query_parameters: HashMap::default(),
-            multi_value_query_parameters: HashMap::default(),
         };
 
         assert_eq!(result, expected);
@@ -233,118 +195,6 @@ mod tests {
         assert_eq!(
             event.get_arn("sa-east-1", ""),
             "arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0"
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("application_load_balancer.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            (
-                "nhulston-alb-test".to_string(),
-                "specific-service".to_string(),
-            ),
-            (
-                "lambda_application_load_balancer".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping = HashMap::from([(
-            "lambda_application_load_balancer".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                true // aws_service_representation_enabled
-            ),
-            event.request_context.elb.target_group_arn // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("application_load_balancer.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            (
-                "nhulston-alb-test".to_string(),
-                "specific-service".to_string(),
-            ),
-            (
-                "lambda_application_load_balancer".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping = HashMap::from([(
-            "lambda_application_load_balancer".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer",
-                false // aws_service_representation_enabled = false
-            ),
-            "lambda_application_load_balancer" // fallback value
         );
     }
 

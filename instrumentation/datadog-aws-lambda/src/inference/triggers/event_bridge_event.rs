@@ -3,7 +3,7 @@
 
 use crate::inference::SpanData as Span;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::cell::OnceCell;
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use tracing::debug;
 
 use crate::inference::{
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        resolve_service_name, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     MS_TO_NS,
 };
@@ -19,20 +19,13 @@ use crate::inference::{
 const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
 const DATADOG_RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct EventBridgeEvent {
-    pub id: String,
-    pub version: String,
-    pub account: String,
     pub time: DateTime<Utc>,
-    pub region: String,
-    pub resources: Vec<String>,
     pub source: String,
     #[serde(rename = "detail-type")]
     pub detail_type: String,
     pub detail: Value,
-    #[serde(rename = "replay-name")]
-    pub replay_name: Option<String>,
     /// The Datadog carrier in `detail`, deserialized on first use.
     #[serde(skip)]
     carrier: OnceCell<HashMap<String, String>>,
@@ -69,39 +62,44 @@ impl Trigger for EventBridgeEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
+    ) -> Option<Span> {
+        let mut span = Span::default();
         // EventBridge events have a timestamp resolution in seconds. A time outside the
         // nanosecond range would also overflow in milliseconds, so it is left unknown.
         let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
 
-        let resource_name = self.get_specific_identifier();
+        let resource_name = self
+            .carrier()
+            .get(DATADOG_RESOURCE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or(&self.source);
         let start_time = self
             .carrier()
             .get(DATADOG_START_TIME_KEY)
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &resource_name,
+            resource_name,
+            "lambda_eventbridge",
+            resource_name,
             "eventbridge",
             aws_service_representation_enabled,
         );
 
         span.name = String::from("aws.eventbridge");
-        span.service.clone_from(&service_name);
-        span.resource = resource_name;
+        span.service = service_name;
+        span.resource = resource_name.to_owned();
         span.r#type = String::from("web");
         span.start = start_time;
-        span.meta.extend(HashMap::from([
-            ("operation_name".to_string(), "aws.eventbridge".to_string()),
-            ("detail_type".to_string(), self.detail_type.clone()),
-        ]));
+        span.meta
+            .extend([("detail_type".to_string(), self.detail_type.clone())]);
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -124,19 +122,6 @@ impl Trigger for EventBridgeEvent {
     }
 }
 
-impl ServiceNameResolver for EventBridgeEvent {
-    fn get_specific_identifier(&self) -> String {
-        self.carrier()
-            .get(DATADOG_RESOURCE_NAME_KEY)
-            .unwrap_or(&self.source)
-            .clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_eventbridge"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,14 +135,9 @@ mod tests {
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
         let expected = EventBridgeEvent {
-            id: "bd3c8258-8d30-007c-2562-64715b2d0ea8".to_string(),
-            version: "0".to_string(),
-            account: "601427279990".to_string(),
             time: DateTime::parse_from_rfc3339("2024-11-09T08:22:15Z")
                 .expect("Failed to parse time")
                 .with_timezone(&Utc),
-            region: "eu-west-1".to_string(),
-            resources: vec![],
             source: "my.event".to_string(),
             detail_type: "UserSignUp".to_string(),
             detail: serde_json::json!({
@@ -171,7 +151,6 @@ mod tests {
                     "x-datadog-start-time": "1731183820135"
                 }
             }),
-            replay_name: None,
             carrier: OnceCell::new(),
         };
 
@@ -200,9 +179,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         let expected = serde_json::from_str(&read_json_file("eventbridge_span.json"))
             .expect("Failed to deserialize into Span");
@@ -216,9 +194,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         assert_eq!(span.resource, "my.event");
     }
@@ -230,9 +207,8 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
 
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
@@ -248,8 +224,7 @@ mod tests {
         let event =
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
-        let mut span = Span::default();
-        event.enrich_span(&mut span, &HashMap::new(), true);
+        let span = event.span_data(&HashMap::new(), true).unwrap();
 
         assert_eq!(span.start, 0);
     }
@@ -289,111 +264,5 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("eventbridge_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("testBus".to_string(), "specific-service".to_string()),
-            (
-                "lambda_eventbridge".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping = HashMap::from([(
-            "lambda_eventbridge".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                true // aws_service_representation_enabled
-            ),
-            event.get_specific_identifier() // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("eventbridge_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("testBus".to_string(), "specific-service".to_string()),
-            (
-                "lambda_eventbridge".to_string(),
-                "generic-service".to_string(),
-            ),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping = HashMap::from([(
-            "lambda_eventbridge".to_string(),
-            "generic-service".to_string(),
-        )]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "eventbridge",
-                false // aws_service_representation_enabled = false
-            ),
-            "eventbridge" // fallback value
-        );
     }
 }

@@ -5,19 +5,19 @@
 use crate::inference::SpanData as Span;
 use base64::engine::general_purpose;
 use base64::Engine;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{from_slice, Value};
 use std::collections::HashMap;
 use tracing::debug;
 
 use crate::inference::{
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        resolve_service_name, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     S_TO_NS,
 };
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct KinesisRecord {
     #[serde(rename = "eventID")]
     pub event_id: String,
@@ -30,7 +30,7 @@ pub struct KinesisRecord {
     pub kinesis: KinesisEntity,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq)]
 pub struct KinesisEntity {
     #[serde(rename = "approximateArrivalTimestamp")]
     pub approximate_arrival_timestamp: f64,
@@ -63,17 +63,23 @@ impl Trigger for KinesisRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
         service_mapping: &HashMap<String, String>,
         aws_service_representation_enabled: bool,
-    ) {
-        let stream_name = self.get_specific_identifier();
+    ) -> Option<Span> {
+        let mut span = Span::default();
+        let stream_name = self
+            .event_source_arn
+            .split('/')
+            .next_back()
+            .unwrap_or_default();
         let shard_id = self.event_id.split(':').next().unwrap_or_default();
-        let service_name = self.resolve_service_name(
+        let service_name = resolve_service_name(
             service_mapping,
-            &stream_name,
+            stream_name,
+            "lambda_kinesis",
+            stream_name,
             "kinesis",
             aws_service_representation_enabled,
         );
@@ -81,11 +87,10 @@ impl Trigger for KinesisRecord {
         span.name = String::from("aws.kinesis");
         span.service = service_name;
         span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
-        span.resource.clone_from(&stream_name);
+        span.resource = stream_name.to_owned();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
-            ("operation_name".to_string(), "aws.kinesis".to_string()),
-            ("stream_name".to_string(), stream_name.clone()),
+            ("stream_name".to_string(), stream_name.to_owned()),
             ("shard_id".to_string(), shard_id.to_string()),
             (
                 "event_source_arn".to_string(),
@@ -99,6 +104,7 @@ impl Trigger for KinesisRecord {
                 self.kinesis.partition_key.clone(),
             ),
         ]);
+        Some(span)
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
@@ -126,20 +132,6 @@ impl Trigger for KinesisRecord {
 
     fn is_async(&self) -> bool {
         true
-    }
-}
-
-impl ServiceNameResolver for KinesisRecord {
-    fn get_specific_identifier(&self) -> String {
-        self.event_source_arn
-            .split('/')
-            .next_back()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_kinesis"
     }
 }
 
@@ -192,9 +184,8 @@ mod tests {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = KinesisRecord::new(payload).expect("Failed to deserialize S3Record");
-        let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping, true);
+        let span = event.span_data(&service_mapping, true).unwrap();
         assert_eq!(span.name, "aws.kinesis");
         assert_eq!(span.service, "kinesisStream");
         assert_eq!(span.resource, "kinesisStream");
@@ -203,7 +194,6 @@ mod tests {
         assert_eq!(
             span.meta,
             HashMap::from([
-                ("operation_name".to_string(), "aws.kinesis".to_string()),
                 ("stream_name".to_string(), "kinesisStream".to_string()),
                 ("shard_id".to_string(), "shardId-000000000002".to_string()),
                 (
@@ -268,101 +258,5 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_enabled() {
-        let json = read_json_file("kinesis_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
-
-        // Test 1: Specific mapping takes priority
-        let specific_service_mapping = HashMap::from([
-            ("kinesisStream".to_string(), "specific-service".to_string()),
-            ("lambda_kinesis".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                true // aws_service_representation_enabled
-            ),
-            "specific-service"
-        );
-
-        // Test 2: Generic mapping is used when specific not found
-        let generic_service_mapping =
-            HashMap::from([("lambda_kinesis".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                true // aws_service_representation_enabled
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses instance name (stream name)
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                true // aws_service_representation_enabled
-            ),
-            event.get_specific_identifier() // instance name
-        );
-    }
-
-    #[test]
-    fn test_resolve_service_name_with_representation_disabled() {
-        let json = read_json_file("kinesis_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
-
-        // Test 1: With specific mapping - still respects mapping
-        let specific_service_mapping = HashMap::from([
-            ("kinesisStream".to_string(), "specific-service".to_string()),
-            ("lambda_kinesis".to_string(), "generic-service".to_string()),
-        ]);
-
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                false // aws_service_representation_enabled = false
-            ),
-            "specific-service"
-        );
-
-        // Test 2: With generic mapping - still respects mapping
-        let generic_service_mapping =
-            HashMap::from([("lambda_kinesis".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                false // aws_service_representation_enabled = false
-            ),
-            "generic-service"
-        );
-
-        // Test 3: When no mapping exists, uses fallback value
-        let empty_mapping = HashMap::new();
-        assert_eq!(
-            event.resolve_service_name(
-                &empty_mapping,
-                &event.get_specific_identifier(),
-                "kinesis",
-                false // aws_service_representation_enabled = false
-            ),
-            "kinesis" // fallback value
-        );
     }
 }

@@ -13,10 +13,7 @@ use datadog_opentelemetry::propagation::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use triggers::{
-    sqs_event::extract_trace_context_from_aws_trace_header, IdentifiedTrigger, Trigger,
-    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
-};
+use triggers::{parse_trigger, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG};
 
 const MS_TO_NS: f64 = 1_000_000.0;
 const S_TO_NS: f64 = 1_000_000_000.0;
@@ -54,18 +51,12 @@ impl Default for InferConfig {
 
 #[derive(Default)]
 pub(crate) struct InferenceResult {
-    pub span_data: SpanData,
+    pub span_data: Option<SpanData>,
     pub is_async: bool,
     pub trigger_tags: HashMap<String, String>,
     pub carrier: HashMap<String, String>,
     pub generated_context: Option<SpanContext>,
-    pub wrapped_span: Option<Box<InferenceResult>>,
-}
-
-impl InferenceResult {
-    pub fn should_create_inferred_span(&self) -> bool {
-        !self.span_data.name.is_empty()
-    }
+    pub wrapped_span: Option<SpanData>,
 }
 
 pub(crate) struct SpanInferrer {
@@ -79,51 +70,34 @@ impl SpanInferrer {
 
     pub fn infer_span(&self, payload: &str) -> serde_json::Result<InferenceResult> {
         let payload: Value = serde_json::from_str(payload)?;
-        let identified = IdentifiedTrigger::from_value(payload);
-        let Some(trigger) = identified.as_trigger() else {
+        let Some(trigger) = parse_trigger(payload) else {
             return Ok(InferenceResult::default());
         };
-        let mut result = self.infer_trigger(trigger);
-        result.generated_context = match &identified {
-            IdentifiedTrigger::StepFunctionEvent(event) => {
-                Some(generated_context(event.get_span_context()))
+        let mut result = self.infer_trigger(trigger.as_ref());
+        result.generated_context = trigger.span_context().map(generated_context);
+        if let Some(wrapped) = trigger.wrapped_trigger() {
+            let wrapped = self.infer_trigger(wrapped);
+            if let Some(span_data) = &mut result.span_data {
+                for (key, value) in wrapped
+                    .trigger_tags
+                    .into_iter()
+                    .filter(|(key, _)| key != FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG)
+                {
+                    span_data.meta.entry(key).or_insert(value);
+                }
             }
-            IdentifiedTrigger::SqsRecord(event) => extract_trace_context_from_aws_trace_header(
-                event.attributes.aws_trace_header.as_deref(),
-            )
-            .map(generated_context),
-            _ => None,
-        };
-        result.wrapped_span = self.infer_wrapped_trigger(&identified).map(Box::new);
-        if let Some(wrapped) = &result.wrapped_span {
-            // Bottlecap merges the wrapped trigger's tags before enriching the inner span,
-            // so inner span tags take precedence. The wrapped event source ARN is not merged.
-            wrapped
-                .trigger_tags
-                .iter()
-                .filter(|(key, _)| key.as_str() != FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG)
-                .for_each(|(key, value)| {
-                    result
-                        .span_data
-                        .meta
-                        .entry(key.clone())
-                        .or_insert_with(|| value.clone());
-                });
+            result.wrapped_span = wrapped.span_data;
         }
         Ok(result)
     }
 
     fn infer_trigger(&self, trigger: &dyn Trigger) -> InferenceResult {
-        let mut span_data = SpanData::default();
-        // ALB and Step Functions intentionally leave span_data empty: they propagate
-        // context and trigger tags but do not create an additional service span.
-        trigger.enrich_span(
-            &mut span_data,
+        let is_async = trigger.is_async();
+        let mut span_data = trigger.span_data(
             &self.config.service_mapping,
             self.config.aws_service_representation_enabled,
         );
-        let is_async = trigger.is_async();
-        if !span_data.name.is_empty() {
+        if let Some(span_data) = &mut span_data {
             span_data
                 .meta
                 .insert("_inferred_span.tag_source".into(), "self".into());
@@ -146,18 +120,6 @@ impl SpanInferrer {
             trigger_tags,
             carrier: trigger.get_carrier(),
             ..Default::default()
-        }
-    }
-
-    fn infer_wrapped_trigger(&self, identified: &IdentifiedTrigger) -> Option<InferenceResult> {
-        match identified {
-            IdentifiedTrigger::SqsRecord(event) => event
-                .wrapped_event()
-                .map(|wrapped| self.infer_trigger(wrapped.as_trigger())),
-            IdentifiedTrigger::SnsRecord(event) => event
-                .wrapped_event()
-                .map(|wrapped| self.infer_trigger(wrapped)),
-            _ => None,
         }
     }
 }
@@ -225,6 +187,67 @@ mod tests {
     }
 
     #[test]
+    fn irrelevant_fields_do_not_affect_inference() {
+        let inferrer = SpanInferrer::new(InferConfig::default());
+        for (fixture, object_path, fields) in [
+            (
+                "api_gateway_http_event.json",
+                "",
+                &["cookies", "pathParameters", "queryStringParameters"][..],
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "",
+                &[
+                    "multiValueHeaders",
+                    "multiValueQueryStringParameters",
+                    "pathParameters",
+                ][..],
+            ),
+            (
+                "sqs_event.json",
+                "/Records/0",
+                &["messageId", "md5OfBody"][..],
+            ),
+            ("dynamodb_event.json", "/Records/0/dynamodb", &["Keys"][..]),
+            (
+                "eventbridge_event.json",
+                "",
+                &[
+                    "id",
+                    "version",
+                    "account",
+                    "region",
+                    "resources",
+                    "replay-name",
+                ][..],
+            ),
+        ] {
+            let original = read_json_file(fixture);
+            let expected = inferrer.infer_span(&original).unwrap();
+            for malformed in [false, true] {
+                let mut payload: Value = serde_json::from_str(&original).unwrap();
+                let object = payload
+                    .pointer_mut(object_path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap();
+                for field in fields {
+                    if malformed {
+                        object.insert((*field).into(), serde_json::json!({"irrelevant": true}));
+                    } else {
+                        object.remove(*field);
+                    }
+                }
+                let result = inferrer.infer_span(&payload.to_string()).unwrap();
+                assert_eq!(result.span_data, expected.span_data, "{fixture}");
+                assert_eq!(result.trigger_tags, expected.trigger_tags, "{fixture}");
+                assert_eq!(result.carrier, expected.carrier, "{fixture}");
+            }
+        }
+    }
+
+    #[test]
     fn partition_matches_aws_partition_prefixes() {
         for (region, partition) in [
             ("us-east-1", "aws"),
@@ -265,7 +288,8 @@ mod tests {
             ("eventbridge_sns_event.json", "eventbridge"),
         ] {
             let result = infer_fixture(fixture);
-            let meta = &result.span_data.meta;
+            assert!(result.wrapped_span.is_some(), "{fixture}");
+            let meta = &result.span_data.as_ref().unwrap().meta;
             assert_eq!(
                 meta.get(triggers::FUNCTION_TRIGGER_EVENT_SOURCE_TAG)
                     .map(String::as_str),

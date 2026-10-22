@@ -8,7 +8,6 @@
   "start": 1731183820135000064,
   "duration": 0,
   "meta": {
-    "operation_name": "aws.eventbridge",
     "detail_type": "UserSignUp"
   },
   "metrics": {},

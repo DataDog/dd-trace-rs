@@ -5,11 +5,10 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use crate::inference::SpanData as Span;
+use datadog_opentelemetry::propagation::context::SpanContext;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-
-mod serde_utils;
 
 pub mod alb_event;
 pub mod api_gateway_http_event;
@@ -47,15 +46,69 @@ static ULID_UUID_GUID: LazyLock<Option<Regex>> = LazyLock::new(|| {
     .ok()
 });
 
-/// Resolves the service name for a given trigger depending on
-/// service mapping configuration.
-pub trait ServiceNameResolver {
-    /// Get the specific service name for this trigger type, it will
-    /// be used as a key to resolve the service name
-    fn get_specific_identifier(&self) -> String;
+struct HttpMetadata<'a> {
+    domain: &'a str,
+    path: &'a str,
+    method: &'a str,
+    protocol: &'a str,
+    source_ip: &'a str,
+    user_agent: &'a str,
+    request_id: &'a str,
+}
 
-    /// Get the generic service mapping key for the trigger
-    fn get_generic_identifier(&self) -> &'static str;
+impl HttpMetadata<'_> {
+    fn span_tags(&self) -> HashMap<String, String> {
+        HashMap::from([
+            ("endpoint".into(), self.path.into()),
+            ("http.url".into(), http_url(self.domain, self.path)),
+            ("http.method".into(), self.method.into()),
+            ("http.protocol".into(), self.protocol.into()),
+            ("http.source_ip".into(), self.source_ip.into()),
+            ("http.user_agent".into(), self.user_agent.into()),
+            ("request_id".into(), self.request_id.into()),
+        ])
+    }
+
+    fn trigger_tags(
+        &self,
+        source: &str,
+        headers: &HashMap<String, String>,
+        user_agent: Option<&str>,
+    ) -> HashMap<String, String> {
+        let mut tags = http_trigger_tags(self.domain, self.path, source, headers);
+        tags.insert("http.method".into(), self.method.into());
+        if let Some(user_agent) = user_agent {
+            tags.insert("http.user_agent".into(), user_agent.into());
+        }
+        tags
+    }
+}
+
+fn http_url(domain: &str, path: &str) -> String {
+    format!("https://{domain}{path}")
+}
+
+fn http_trigger_tags(
+    domain: &str,
+    path: &str,
+    source: &str,
+    headers: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut tags = HashMap::from([
+        ("http.url".into(), http_url(domain, path)),
+        ("http.url_details.path".into(), path.into()),
+        (FUNCTION_TRIGGER_EVENT_SOURCE_TAG.into(), source.into()),
+    ]);
+    if let Some(referer) = headers.get("referer") {
+        tags.insert("http.referer".into(), referer.clone());
+    }
+    tags
+}
+
+fn is_async_http(headers: &HashMap<String, String>) -> bool {
+    headers
+        .get("x-amz-invocation-type")
+        .is_some_and(|value| value == "Event")
 }
 
 #[must_use]
@@ -105,32 +158,41 @@ pub fn parameterize_api_resource(resource: &str) -> String {
     result.join("/")
 }
 
-#[must_use]
-pub fn get_default_service_name(
+fn resolve_service_name(
+    service_mapping: &HashMap<String, String>,
+    specific_identifier: &str,
+    generic_identifier: &str,
     instance_name: &str,
     fallback: &str,
     aws_service_representation_enabled: bool,
 ) -> String {
-    if !aws_service_representation_enabled {
-        return fallback.to_string();
-    }
-
-    instance_name.to_string()
+    let default = if aws_service_representation_enabled {
+        instance_name
+    } else {
+        fallback
+    };
+    service_mapping
+        .get(specific_identifier)
+        .or_else(|| service_mapping.get(generic_identifier))
+        .map(String::as_str)
+        .unwrap_or(default)
+        .to_owned()
 }
 
-pub trait Trigger: ServiceNameResolver {
+pub trait Trigger {
     fn new(payload: Value) -> Option<Self>
     where
         Self: Sized;
     fn is_match(payload: &Value) -> bool
     where
         Self: Sized;
-    fn enrich_span(
+    fn span_data(
         &self,
-        span: &mut Span,
-        service_mapping: &HashMap<String, String>,
-        aws_service_representation_enabled: bool,
-    );
+        _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
+    ) -> Option<Span> {
+        None
+    }
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str, function_name: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
@@ -140,91 +202,59 @@ pub trait Trigger: ServiceNameResolver {
         None
     }
 
-    /// Default implementation for service name resolution
-    fn resolve_service_name(
-        &self,
-        service_mapping: &HashMap<String, String>,
-        instance_name: &str,
-        fallback: &str,
-        aws_service_representation_enabled: bool,
-    ) -> String {
-        service_mapping
-            .get(&self.get_specific_identifier())
-            .or_else(|| service_mapping.get(self.get_generic_identifier()))
-            .cloned()
-            .unwrap_or_else(|| {
-                get_default_service_name(
-                    instance_name,
-                    fallback,
-                    aws_service_representation_enabled,
-                )
-            })
+    /// Extracts trace context supplied or derived by this event source.
+    fn span_context(&self) -> Option<SpanContext> {
+        None
+    }
+
+    /// Borrows the event delivered inside this trigger, if present.
+    fn wrapped_trigger(&self) -> Option<&dyn Trigger> {
+        None
     }
 }
 
-/// A macro do define an enum for all the know trigger types.
+/// Parses the first matching event source in the order below.
 ///
-/// It generates an enum with one variant for each named type.
-/// The variants are specified as `<data-type> => <variant-name>`.
-///
-/// It also creates a `from_value` method that use the
-/// [`Trigger::is_match`] and [`Trigger::new`] methods to try and parse a
-/// payload; cases are matched in the order they are declared.
-macro_rules! identified_triggers {
-    (
-        $vis:vis enum $name:ident {
-            $($type:ty => $case:ident),+,
-            else => $default:ident,
-        }
-    ) => {
-        #[derive(Debug, Default)]
-        #[must_use]
-        #[non_exhaustive]
-        $vis enum $name {
-            $($case($type),)+
-            #[default]
-            $default,
-        }
-        impl $name {
-            $vis fn from_value(payload: Value) -> Self {
-                $(
-                if <$type>::is_match(&payload) {
-                    return <$type>::new(payload).map_or(Self::$default, Self::$case);
-                }
-                )+
-                Self::$default
-            }
-
-
-
-            $vis fn as_trigger(&self) -> Option<&dyn Trigger> {
-                match self {
-                    $(Self::$case(trigger) => Some(trigger),)+
-                    Self::$default => None,
-                }
-            }
-        }
-    };
+/// Returns `None` if no source matches or the first matching source fails to parse,
+/// without trying later sources.
+#[must_use]
+pub fn parse_trigger(payload: Value) -> Option<Box<dyn Trigger>> {
+    let trigger: Box<dyn Trigger> =
+        if api_gateway_http_event::APIGatewayHttpEvent::is_match(&payload) {
+            Box::new(api_gateway_http_event::APIGatewayHttpEvent::new(payload)?)
+        } else if api_gateway_rest_event::APIGatewayRestEvent::is_match(&payload) {
+            Box::new(api_gateway_rest_event::APIGatewayRestEvent::new(payload)?)
+        } else if api_gateway_websocket_event::APIGatewayWebSocketEvent::is_match(&payload) {
+            Box::new(api_gateway_websocket_event::APIGatewayWebSocketEvent::new(
+                payload,
+            )?)
+        } else if alb_event::ALBEvent::is_match(&payload) {
+            Box::new(alb_event::ALBEvent::new(payload)?)
+        } else if lambda_function_url_event::LambdaFunctionUrlEvent::is_match(&payload) {
+            Box::new(lambda_function_url_event::LambdaFunctionUrlEvent::new(
+                payload,
+            )?)
+        } else if msk_event::MSKEvent::is_match(&payload) {
+            Box::new(msk_event::MSKEvent::new(payload)?)
+        } else if sqs_event::SqsRecord::is_match(&payload) {
+            Box::new(sqs_event::SqsRecord::new(payload)?)
+        } else if sns_event::SnsRecord::is_match(&payload) {
+            Box::new(sns_event::SnsRecord::new(payload)?)
+        } else if dynamodb_event::DynamoDbRecord::is_match(&payload) {
+            Box::new(dynamodb_event::DynamoDbRecord::new(payload)?)
+        } else if s3_event::S3Record::is_match(&payload) {
+            Box::new(s3_event::S3Record::new(payload)?)
+        } else if event_bridge_event::EventBridgeEvent::is_match(&payload) {
+            Box::new(event_bridge_event::EventBridgeEvent::new(payload)?)
+        } else if kinesis_event::KinesisRecord::is_match(&payload) {
+            Box::new(kinesis_event::KinesisRecord::new(payload)?)
+        } else if step_function_event::StepFunctionEvent::is_match(&payload) {
+            Box::new(step_function_event::StepFunctionEvent::new(payload)?)
+        } else {
+            return None;
+        };
+    Some(trigger)
 }
-
-identified_triggers!(
-    pub enum IdentifiedTrigger {
-        api_gateway_http_event::APIGatewayHttpEvent => APIGatewayHttpEvent,
-        api_gateway_rest_event::APIGatewayRestEvent => APIGatewayRestEvent,
-        api_gateway_websocket_event::APIGatewayWebSocketEvent => APIGatewayWebSocketEvent,
-        alb_event::ALBEvent => ALBEvent,
-        lambda_function_url_event::LambdaFunctionUrlEvent => LambdaFunctionUrlEvent,
-        msk_event::MSKEvent => MSKEvent,
-        sqs_event::SqsRecord => SqsRecord,
-        sns_event::SnsRecord => SnsRecord,
-        dynamodb_event::DynamoDbRecord => DynamoDbRecord,
-        s3_event::S3Record => S3Record,
-        event_bridge_event::EventBridgeEvent => EventBridgeEvent,
-        kinesis_event::KinesisRecord => KinesisRecord,
-        step_function_event::StepFunctionEvent => StepFunctionEvent,
-        else => Unknown,
-    }
-);
 
 /// Moves the first record of a `Records` batch out of the payload instead of copying it.
 fn take_first_record(payload: &mut Value) -> Option<Value> {
@@ -259,5 +289,222 @@ pub mod test_utils {
         path.push("tests/payloads");
         path.push(file_name);
         fs::read_to_string(path).expect("Failed to read file")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_utils::read_json_file;
+    use super::*;
+
+    #[test]
+    fn overlapping_triggers_select_the_first_match() {
+        let mut payload: Value =
+            serde_json::from_str(&read_json_file("api_gateway_rest_event.json")).unwrap();
+        payload["requestContext"]["elb"] = serde_json::json!({
+            "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/test"
+        });
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::is_match(
+            &payload
+        ));
+        assert!(alb_event::ALBEvent::is_match(&payload));
+        assert!(alb_event::ALBEvent::new(payload.clone()).is_some());
+
+        let trigger = parse_trigger(payload).unwrap();
+        assert_eq!(
+            trigger.get_tags()[FUNCTION_TRIGGER_EVENT_SOURCE_TAG],
+            "api-gateway"
+        );
+    }
+
+    #[test]
+    fn malformed_first_match_does_not_fall_back_to_a_later_trigger() {
+        let mut payload: Value =
+            serde_json::from_str(&read_json_file("api_gateway_rest_event.json")).unwrap();
+        payload["requestContext"]["elb"] = serde_json::json!({
+            "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/test"
+        });
+        payload["requestContext"]["identity"] = Value::Null;
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::is_match(
+            &payload
+        ));
+        assert!(api_gateway_rest_event::APIGatewayRestEvent::new(payload.clone()).is_none());
+        assert!(alb_event::ALBEvent::is_match(&payload));
+        assert!(alb_event::ALBEvent::new(payload.clone()).is_some());
+
+        assert!(parse_trigger(payload).is_none());
+    }
+
+    #[test]
+    fn unmatched_payloads_have_no_trigger() {
+        for payload in [
+            Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"Records": []}),
+        ] {
+            assert!(parse_trigger(payload).is_none());
+        }
+    }
+
+    #[test]
+    fn http_triggers_preserve_user_agent_sources_and_invocation_type() {
+        for (fixture, user_agent_path, expected_agent) in [
+            (
+                "api_gateway_http_event.json",
+                "/requestContext/http/userAgent",
+                "header-agent",
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "/requestContext/identity/userAgent",
+                "context-agent",
+            ),
+            (
+                "lambda_function_url_event.json",
+                "/requestContext/http/userAgent",
+                "context-agent",
+            ),
+        ] {
+            for (invocation_type, expected_async) in [("Event", true), ("RequestResponse", false)] {
+                let mut payload: Value = serde_json::from_str(&read_json_file(fixture)).unwrap();
+                *payload.pointer_mut(user_agent_path).unwrap() = "context-agent".into();
+                payload["headers"]["User-Agent"] = "header-agent".into();
+                payload["headers"]["Referer"] = "https://example.com".into();
+                payload["headers"]["X-Amz-Invocation-Type"] = invocation_type.into();
+                let trigger = parse_trigger(payload).unwrap();
+                let span = trigger.span_data(&HashMap::new(), true).unwrap();
+                assert_eq!(span.meta["http.user_agent"], "context-agent", "{fixture}");
+                let tags = trigger.get_tags();
+                assert_eq!(tags["http.user_agent"], expected_agent, "{fixture}");
+                assert_eq!(tags["http.referer"], "https://example.com", "{fixture}");
+                assert_eq!(trigger.is_async(), expected_async, "{fixture}");
+            }
+        }
+    }
+
+    #[test]
+    fn service_names_follow_mapping_precedence_and_representation() {
+        for (fixture, specific, generic, instance, fallback) in [
+            (
+                "api_gateway_http_event.json",
+                "x02yirxc7a",
+                "lambda_api_gateway",
+                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+            ),
+            (
+                "api_gateway_rest_event.json",
+                "id",
+                "lambda_api_gateway",
+                "id.execute-api.us-east-1.amazonaws.com",
+                "id.execute-api.us-east-1.amazonaws.com",
+            ),
+            (
+                "api_gateway_websocket_connect_event.json",
+                "85fj5nw29d",
+                "lambda_api_gateway",
+                "85fj5nw29d.execute-api.eu-west-1.amazonaws.com",
+                "api_gateway_websocket",
+            ),
+            (
+                "lambda_function_url_event.json",
+                "a8hyhsshac",
+                "lambda_url",
+                "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com",
+                "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com",
+            ),
+            (
+                "msk_event.json",
+                "demo-cluster",
+                "lambda_msk",
+                "demo-cluster",
+                "msk",
+            ),
+            ("sqs_event.json", "MyQueue", "lambda_sqs", "MyQueue", "sqs"),
+            (
+                "sns_event.json",
+                "serverlessTracingTopicPy",
+                "lambda_sns",
+                "serverlessTracingTopicPy",
+                "sns",
+            ),
+            (
+                "dynamodb_event.json",
+                "ExampleTableWithStream",
+                "lambda_dynamodb",
+                "ExampleTableWithStream",
+                "dynamodb",
+            ),
+            (
+                "s3_event.json",
+                "example-bucket",
+                "lambda_s3",
+                "example-bucket",
+                "s3",
+            ),
+            (
+                "eventbridge_event.json",
+                "testBus",
+                "lambda_eventbridge",
+                "testBus",
+                "eventbridge",
+            ),
+            (
+                "kinesis_event.json",
+                "kinesisStream",
+                "lambda_kinesis",
+                "kinesisStream",
+                "kinesis",
+            ),
+        ] {
+            assert_service_names(fixture, specific, generic, instance, fallback);
+        }
+    }
+
+    fn assert_service_names(
+        fixture: &str,
+        specific: &str,
+        generic: &str,
+        instance: &str,
+        fallback: &str,
+    ) {
+        let trigger =
+            parse_trigger(serde_json::from_str(&read_json_file(fixture)).unwrap()).unwrap();
+        for enabled in [false, true] {
+            for (entries, expected) in [
+                (
+                    vec![(specific, "specific"), (generic, "generic")],
+                    "specific",
+                ),
+                (vec![(generic, "generic")], "generic"),
+                (
+                    vec![("unrelated", "other")],
+                    if enabled { instance } else { fallback },
+                ),
+                (vec![], if enabled { instance } else { fallback }),
+            ] {
+                let mapping = entries
+                    .into_iter()
+                    .map(|(key, value)| (key.into(), value.into()))
+                    .collect();
+                let span = trigger.span_data(&mapping, enabled).unwrap();
+                assert_eq!(span.service, expected, "{fixture}, enabled={enabled}");
+            }
+        }
+    }
+
+    #[test]
+    fn context_only_triggers_do_not_resolve_services() {
+        for fixture in ["application_load_balancer.json", "step_function_event.json"] {
+            let trigger =
+                parse_trigger(serde_json::from_str(&read_json_file(fixture)).unwrap()).unwrap();
+            let mapping = HashMap::from([
+                ("lambda_application_load_balancer".into(), "alb".into()),
+                ("lambda_stepfunction".into(), "states".into()),
+            ]);
+            for enabled in [false, true] {
+                assert!(trigger.span_data(&mapping, enabled).is_none(), "{fixture}");
+            }
+        }
     }
 }
