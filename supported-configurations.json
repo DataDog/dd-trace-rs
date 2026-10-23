@@ -10,6 +10,14 @@
         "propertyKeys": ["agent_host"]
       }
     ],
+    "DD_APPSEC_SCA_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": null,
+        "propertyKeys": ["appsec_sca_enabled"]
+      }
+    ],
     "DD_DOGSTATSD_HOST": [
       {
         "version": "A",

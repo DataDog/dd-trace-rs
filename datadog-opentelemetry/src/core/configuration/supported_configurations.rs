@@ -9,6 +9,7 @@
 #[non_exhaustive]
 pub(crate) enum SupportedConfigurations {
     DD_AGENT_HOST,
+    DD_APPSEC_SCA_ENABLED,
     DD_DOGSTATSD_HOST,
     DD_DOGSTATSD_PORT,
     DD_DOGSTATSD_URL,
@@ -94,6 +95,7 @@ impl SupportedConfigurations {
     pub fn as_str(&self) -> &'static str {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => "DD_AGENT_HOST",
+            SupportedConfigurations::DD_APPSEC_SCA_ENABLED => "DD_APPSEC_SCA_ENABLED",
             SupportedConfigurations::DD_DOGSTATSD_HOST => "DD_DOGSTATSD_HOST",
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",

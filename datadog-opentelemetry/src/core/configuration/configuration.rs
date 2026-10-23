@@ -1164,7 +1164,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
 });
 
 impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
-impl_config_value_provider!(option: String, f64);
+impl_config_value_provider!(option: String, f64, bool);
 
 #[derive(Clone)]
 /// Configuration for the Datadog Tracer
@@ -1299,6 +1299,9 @@ pub struct Config {
     telemetry_log_collection_enabled: ConfigItem<bool>,
     /// Disables telemetry dependency collection if false.
     telemetry_dependency_collection_enabled: ConfigItem<bool>,
+    /// Whether Software Composition Analysis is enabled. Unset unless configured; only
+    /// reported through telemetry, where the backend reads it to analyze the dependencies.
+    appsec_sca_enabled: ConfigItem<Option<bool>>,
     /// Interval by which telemetry events are flushed (seconds)
     telemetry_heartbeat_interval: ConfigItem<f64>,
 
@@ -1523,6 +1526,8 @@ impl Config {
                 .update_bool(default.telemetry_log_collection_enabled),
             telemetry_dependency_collection_enabled: cisu
                 .update_bool(default.telemetry_dependency_collection_enabled),
+            appsec_sca_enabled: cisu
+                .update_parsed_with_transform::<BooleanFlag, _>(default.appsec_sca_enabled, Some),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
@@ -1644,6 +1649,7 @@ impl Config {
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
             &self.telemetry_dependency_collection_enabled,
+            &self.appsec_sca_enabled,
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
@@ -1933,6 +1939,11 @@ impl Config {
     /// Returns whether telemetry dependency collection is enabled.
     pub fn telemetry_dependency_collection_enabled(&self) -> bool {
         *self.telemetry_dependency_collection_enabled.value()
+    }
+
+    /// Returns whether Software Composition Analysis is enabled, or `None` if unset.
+    pub fn appsec_sca_enabled(&self) -> Option<bool> {
+        *self.appsec_sca_enabled.value()
     }
 
     /// Returns the telemetry heartbeat interval in seconds.
@@ -2462,6 +2473,7 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED,
             true,
         ),
+        appsec_sca_enabled: ConfigItem::new(SupportedConfigurations::DD_APPSEC_SCA_ENABLED, None),
         telemetry_heartbeat_interval: ConfigItem::new(
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
@@ -2768,6 +2780,19 @@ impl ConfigBuilder {
         self.config
             .telemetry_dependency_collection_enabled
             .set_code(enabled);
+        self
+    }
+
+    /// Enable or disable Software Composition Analysis.
+    ///
+    /// The tracer only reports this setting through telemetry: the backend reads it to decide
+    /// whether to analyze the dependencies reported by the tracer for vulnerabilities.
+    ///
+    /// **Default**: unset
+    ///
+    /// Env variable: `DD_APPSEC_SCA_ENABLED`
+    pub fn set_appsec_sca_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.appsec_sca_enabled.set_code(Some(enabled));
         self
     }
 
@@ -5046,6 +5071,46 @@ mod tests {
             .into_iter()
             .flat_map(|provider| provider.get_all_configurations())
             .collect()
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled() {
+        assert_eq!(Config::builder().build().appsec_sca_enabled(), None);
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_APPSEC_SCA_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.appsec_sca_enabled(), Some(true));
+
+        let mut builder = Config::builder_with_sources(&sources);
+        builder.set_appsec_sca_enabled(false);
+        assert_eq!(builder.build().appsec_sca_enabled(), Some(false));
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled_reported_in_telemetry() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_APPSEC_SCA_ENABLED", "1")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let reported: Vec<_> = collect_telemetry_configurations(&config)
+            .into_iter()
+            .filter(|configuration| configuration.name == "DD_APPSEC_SCA_ENABLED")
+            .map(|configuration| (configuration.value, configuration.origin))
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                (Some(String::new()), ConfigurationOrigin::Default),
+                (Some("true".to_owned()), ConfigurationOrigin::EnvVar),
+            ]
+        );
     }
 
     #[test]
