@@ -768,7 +768,7 @@ mod tests {
 
         hashmap_diff(&output.attributes, &expected.attributes);
         assert!(
-            output.attributes.slow_compare(&expected.attributes),
+            output.attributes == expected.attributes,
             "Test {name} failed: attributes differ"
         );
 
@@ -784,7 +784,7 @@ mod tests {
                 "Test {name} failed: span event differs"
             );
             assert!(
-                o.attributes.slow_compare(&e.attributes),
+                o.attributes == e.attributes,
                 "Test {name} failed: span event attributes differ: {:?} != {:?}",
                 o.attributes,
                 e.attributes
@@ -803,7 +803,7 @@ mod tests {
                 "Test {name} failed: span link differs"
             );
             assert!(
-                o.attributes.slow_compare(&e.attributes),
+                o.attributes == e.attributes,
                 "Test {name} failed: span link attributes differ: {:?} != {:?}",
                 o.attributes,
                 e.attributes
@@ -909,7 +909,7 @@ mod tests {
                 }
             }
         }
-        if !output.slow_compare(expected) {
+        if output != expected {
             eprintln!("Hashmaps are not equal :\n{message}");
         }
     }

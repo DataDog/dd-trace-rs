@@ -13,7 +13,7 @@ use crate::{
     },
 };
 use bumpalo::Bump;
-use libdd_trace_utils::span::{v1::chunk_pool::TracePool, SpanText};
+use libdd_trace_utils::span::{v1::span_pool::SpanPoolV1, SpanText};
 use opentelemetry::Key;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
@@ -48,23 +48,23 @@ fn otel_sampling_to_dd_sampling(
     }
 }
 
-/// Pool recycling the allocations of exported spans and chunks across exports.
-pub type DdTracePool = TracePool<CowStr<'static>>;
+/// Pool recycling the allocations of exported spans across exports.
+pub type DdTracePool = SpanPoolV1<CowStr<'static>>;
 
 /// Shortens the text lifetime of a [`DdTracePool`] to the lifetime of the spans of one export.
 ///
 /// The pool is `'static` since it outlives every export, while the spans of an export borrow from
-/// the `SpanData` and `Resource` of that export.
-pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a TracePool<CowStr<'a>> {
-    // SAFETY: `TracePool` resets every span and chunk (all text fields set back to the empty
-    // `'static` default, collections cleared) before storing them, both in its queues and in its
-    // thread-local caches. Spans and chunks handed back to the pool thus never keep a `CowStr<'a>`
-    // borrowing data past the call returning them, and the pool only ever stores values that are
-    // valid for `'static`. Both types only differ by the lifetime of `CowStr`, so they have the
-    // same layout.
+/// the `SpanData`, `Resource` and arena of that export.
+pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<CowStr<'a>> {
+    // SAFETY: `SpanPoolV1` resets every span (all text fields set back to the empty `'static`
+    // default, collections cleared) before storing it, both in its queue and in its thread-local
+    // caches, and drops the chunk shells instead of storing them. Spans and chunks handed back to
+    // the pool thus never keep a `CowStr<'a>` borrowing data past the call returning them, and the
+    // pool only ever stores values that are valid for `'static`. Both types only differ by the
+    // lifetime of `CowStr`, so they have the same layout.
     //
     // This invariant is tested by `tests_trace_pool_recycling_frees_text_data`.
-    unsafe { &*std::ptr::from_ref(pool).cast::<TracePool<CowStr<'a>>>() }
+    unsafe { &*std::ptr::from_ref(pool).cast::<SpanPoolV1<CowStr<'a>>>() }
 }
 
 // Transform a vector of opentelemetry span data into a datadog v1 trace chunk
@@ -75,12 +75,12 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     span_data: I,
     otel_resource: &'a Resource,
     alloc: &'a Bump,
-    pool: Option<&TracePool<CowStr<'a>>>,
+    pool: Option<&SpanPoolV1<CowStr<'a>>>,
 ) -> DdTraceChunk<'a>
 where
     I: IntoIterator<Item = &'a SpanData>,
 {
-    let mut chunk = pool.map_or_else(DdTraceChunk::default, TracePool::get_chunk);
+    let mut chunk = pool.map_or_else(DdTraceChunk::default, SpanPoolV1::get_chunk);
     let mut trace_id = [0; 16];
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
@@ -88,7 +88,7 @@ where
         trace_id = s.span_context.trace_id().to_bytes();
         let trace_flags = s.span_context.trace_flags();
         let sdk_span = SdkSpan::from_sdk_span_data(s);
-        let dd_span = pool.map_or_else(DdSpan::default, TracePool::get_span);
+        let dd_span = pool.map_or_else(DdSpan::default, SpanPoolV1::get_span);
         let mut dd_span = otel_span_to_dd_span_into(dd_span, &sdk_span, otel_resource, alloc);
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
@@ -333,11 +333,11 @@ mod tests {
 
 #[cfg(test)]
 /// Verifies the invariant [`trace_pool_for`] relies on: text data never survives a span or a chunk
-/// being returned to a [`TracePool`].
+/// being returned to a [`SpanPoolV1`].
 ///
 /// The test uses a text type counting how many owned strings are alive. After filling every text
 /// field of a chunk and of its span and returning the chunk to the pool, it checks that
-/// 1. the chunk or its span went back to the pool
+/// 1. the span went back to the pool (chunk shells are dropped, only their spans are recycled)
 /// 2. all of the string data has been freed
 ///
 /// Spans, chunks, links and events are filled through pattern destructuring, so that a field added
@@ -352,7 +352,9 @@ mod tests_trace_pool_recycling_frees_text_data {
         SpanText, TraceData,
     };
 
-    use super::TracePool;
+    use libdd_trace_model::{TraceText, ValueTypes};
+
+    use super::SpanPoolV1;
 
     static LIVE_OWNED_STRINGS: AtomicUsize = AtomicUsize::new(0);
 
@@ -409,10 +411,26 @@ mod tests_trace_pool_recycling_frees_text_data {
         }
     }
 
-    impl TraceData for CountingStr {
+    impl From<String> for CountingStr {
+        fn from(value: String) -> Self {
+            Self::from_owned(value)
+        }
+    }
+
+    impl TraceText for CountingStr {
+        fn from_static(value: &'static str) -> Self {
+            Self(Cow::Borrowed(value))
+        }
+    }
+
+    impl ValueTypes for CountingStr {
         type Text = CountingStr;
         type Bytes = &'static [u8];
+        type Array = Vec<AttributeValue<Self>>;
+        type Map = VecMap<CountingStr, AttributeValue<Self>>;
     }
+
+    impl TraceData for CountingStr {}
 
     fn owned(s: &str) -> CountingStr {
         CountingStr::from_owned(s.to_owned())
@@ -427,11 +445,11 @@ mod tests_trace_pool_recycling_frees_text_data {
             ),
             (
                 owned(&format!("{prefix}.list")),
-                AttributeValue::List(vec![AttributeValue::String(owned("item"))]),
+                AttributeValue::Array(vec![AttributeValue::String(owned("item"))]),
             ),
             (
                 owned(&format!("{prefix}.kv")),
-                AttributeValue::KeyValue(VecMap::from_iter([(
+                AttributeValue::KeyValueList(VecMap::from_iter([(
                     owned("nested.key"),
                     AttributeValue::String(owned("nested.value")),
                 )])),
@@ -501,11 +519,11 @@ mod tests_trace_pool_recycling_frees_text_data {
 
     #[test]
     fn owned_strings_are_released_when_chunks_are_returned_to_the_pool() {
-        let pool = TracePool::<CountingStr>::with_capacity(100);
+        let pool = SpanPoolV1::<CountingStr>::with_capacity(100);
         assert_eq!(live_owned_strings(), 0, "test precondition");
 
-        // The pool's drop policy discards ~10% of returned spans and chunks, so retry until both
-        // a span and a chunk actually make it back into the pool.
+        // The pool's drop policy discards ~10% of returned spans, so retry until a span actually
+        // makes it back into the pool.
         for _ in 0..1000 {
             let mut chunk = pool.get_chunk();
             let mut span = pool.get_span();
@@ -525,10 +543,10 @@ mod tests_trace_pool_recycling_frees_text_data {
                 0,
                 "all strings must be released when chunks are returned to the pool"
             );
-            if pool.pooled_spans() > 0 && pool.pooled_chunks() > 0 {
+            if pool.pooled_spans() > 0 {
                 return;
             }
         }
-        panic!("no span and chunk were ever recycled into the pool");
+        panic!("no span was ever recycled into the pool");
     }
 }

@@ -24,22 +24,23 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies
-libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", features = [
+libdd-data-pipeline = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-common = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-library-config = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-sampling = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
-libdd-remote-config = { git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false, features = [
+libdd-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-capabilities-impl = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-telemetry = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-common = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-trace-model = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45" }
+libdd-tinybytes = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-library-config = { version = "4.2.0", default-features = false }
+libdd-sampling = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-shared-runtime = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false }
+libdd-remote-config = { git = "https://github.com/DataDog/libdatadog", rev = "1967b8144736556a245d4f4b55eba41372752f45", default-features = false, features = [
     "client",
 ] }
-libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", git = "https://github.com/DataDog/libdatadog", branch = "anais/replace-v04-by-v1-internally", default-features = false }
+libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.2.0", default-features = false }
 # The opentelemetry versions are pinned temporarily, because 0.33.1 introduces
 # an issue that breaks our system tests. This can be relaxed once
 # https://github.com/open-telemetry/opentelemetry-rust/issues/3789 is fixed.

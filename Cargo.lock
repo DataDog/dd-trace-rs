@@ -652,6 +652,7 @@ dependencies = [
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-tinybytes",
+ "libdd-trace-model",
  "libdd-trace-utils",
  "log",
  "lru",
@@ -1506,8 +1507,8 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libdd-capabilities"
-version = "4.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "4.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1519,8 +1520,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-capabilities-impl"
-version = "6.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "7.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1533,8 +1534,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-common"
-version = "7.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "8.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1566,8 +1567,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline"
-version = "11.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "12.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1590,7 +1591,7 @@ dependencies = [
  "libdd-telemetry",
  "libdd-tinybytes",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
  "libdd-trace-stats",
  "libdd-trace-utils",
  "prost",
@@ -1609,8 +1610,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-data-pipeline-core"
-version = "2.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "3.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "http",
@@ -1625,16 +1626,16 @@ dependencies = [
 
 [[package]]
 name = "libdd-ddsketch"
-version = "1.1.2"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "1.1.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "prost",
 ]
 
 [[package]]
 name = "libdd-dogstatsd-client"
-version = "7.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "8.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1649,12 +1650,13 @@ dependencies = [
 
 [[package]]
 name = "libdd-library-config"
-version = "4.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c20b3ac53eb105f9d01f7d79e30795db71141002ee29e62b394c317a10f8897e"
 dependencies = [
  "anyhow",
  "libc",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "memfd",
  "prost",
  "rand 0.8.7",
@@ -1671,16 +1673,18 @@ checksum = "f652c913051a2d8be95ed9e213502e6c1ee2b08d90e4587334fdf8824442d280"
 
 [[package]]
 name = "libdd-profiling-heap-allocator"
-version = "1.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "596970a6daeeecd1e7b4034e443eea5249a07681490bfb2d6488ad71d98ee714"
 dependencies = [
  "libdd-profiling-heap-sampler",
 ]
 
 [[package]]
 name = "libdd-profiling-heap-sampler"
-version = "1.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8faacabf9d7568527593ad6b3adf94d6c93dc951e0e7d9dfaa1c83a6797850d"
 dependencies = [
  "bindgen",
  "cc",
@@ -1688,8 +1692,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-remote-config"
-version = "6.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "7.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "base64",
@@ -1703,7 +1707,7 @@ dependencies = [
  "libdd-capabilities",
  "libdd-capabilities-impl",
  "libdd-common",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
  "manual_future",
  "serde",
  "serde_json",
@@ -1720,8 +1724,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-sampling"
-version = "7.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "8.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "libdd-common",
  "lru",
@@ -1731,8 +1735,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-shared-runtime"
-version = "5.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "6.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "async-trait",
  "futures",
@@ -1748,8 +1752,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-telemetry"
-version = "9.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1778,30 +1782,36 @@ dependencies = [
 
 [[package]]
 name = "libdd-tinybytes"
-version = "1.1.4"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "1.1.5"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
+ "libdd-trace-model",
  "serde",
 ]
 
 [[package]]
+name = "libdd-trace-model"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
+
+[[package]]
 name = "libdd-trace-normalization"
-version = "4.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "4.2.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
 ]
 
 [[package]]
 name = "libdd-trace-obfuscation"
-version = "9.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "fluent-uri",
  "libdd-common",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
  "libdd-trace-utils",
  "log",
  "percent-encoding",
@@ -1812,8 +1822,19 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-protobuf"
-version = "5.0.1"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df1d89060df0b6ad5dac493d43468de2550121d177c6334868c646038a5ffca0"
+dependencies = [
+ "prost",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "libdd-trace-protobuf"
+version = "5.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "prost",
  "serde",
@@ -1822,8 +1843,8 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-stats"
-version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "11.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1839,7 +1860,7 @@ dependencies = [
  "libdd-shared-runtime",
  "libdd-telemetry",
  "libdd-trace-obfuscation",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
  "libdd-trace-utils",
  "rmp-serde",
  "serde",
@@ -1850,9 +1871,10 @@ dependencies = [
 
 [[package]]
 name = "libdd-trace-utils"
-version = "13.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=anais%2Freplace-v04-by-v1-internally#8737395871efc0f4e14e5d3d19d00f18a11fc5af"
+version = "14.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45#1967b8144736556a245d4f4b55eba41372752f45"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "base64",
  "bytes",
@@ -1861,6 +1883,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "getrandom 0.2.17",
+ "hashbrown 0.17.1",
  "hex",
  "http",
  "http-body",
@@ -1873,8 +1896,9 @@ dependencies = [
  "libdd-capabilities-impl",
  "libdd-common",
  "libdd-tinybytes",
+ "libdd-trace-model",
  "libdd-trace-normalization",
- "libdd-trace-protobuf",
+ "libdd-trace-protobuf 5.1.0 (git+https://github.com/DataDog/libdatadog?rev=1967b8144736556a245d4f4b55eba41372752f45)",
  "prost",
  "rand 0.8.7",
  "rmp",

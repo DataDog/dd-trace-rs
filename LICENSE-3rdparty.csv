@@ -149,6 +149,7 @@ libdd-sampling,https://github.com/DataDog/libdatadog/tree/main/libdd-sampling,Ap
 libdd-shared-runtime,https://github.com/DataDog/libdatadog/tree/main/libdd-shared-runtime,Apache-2.0,The libdd-shared-runtime Authors
 libdd-telemetry,https://github.com/DataDog/libdatadog/tree/main/libdd-telemetry,Apache-2.0,The libdd-telemetry Authors
 libdd-tinybytes,https://github.com/DataDog/libdatadog/tree/main/libdd-tinybytes,Apache-2.0,The libdd-tinybytes Authors
+libdd-trace-model,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-model,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 libdd-trace-normalization,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-normalization,Apache-2.0,David Lee <david.lee@datadoghq.com>
 libdd-trace-obfuscation,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-obfuscation,Apache-2.0,Datadog Inc. <info@datadoghq.com>
 libdd-trace-protobuf,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-protobuf,Apache-2.0,The libdd-trace-protobuf Authors

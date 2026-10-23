@@ -379,7 +379,7 @@ fn otel_value_to_dd_attribute<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttrib
         v: impl IntoIterator<Item = T>,
         constructor: fn(T) -> DdAttributeValue<'a>,
     ) -> DdAttributeValue<'a> {
-        AttributeValue::List(v.into_iter().map(constructor).collect::<Vec<_>>())
+        AttributeValue::Array(v.into_iter().map(constructor).collect::<Vec<_>>())
     }
     match value {
         opentelemetry::Value::I64(i) => AttributeValue::Int(*i),
@@ -409,7 +409,7 @@ fn dd_value_to_string<'a>(value: &DdAttributeValue<'a>, alloc: &'a Bump) -> Span
             AttributeValue::Int(i) => write!(w, "{i}"),
             AttributeValue::Float(d) => write!(w, "{d}"),
             AttributeValue::Bool(b) => write!(w, "{b}"),
-            AttributeValue::List(values) => {
+            AttributeValue::Array(values) => {
                 w.push('[');
                 for (i, v) in values.iter().enumerate() {
                     if i != 0 {
@@ -421,7 +421,7 @@ fn dd_value_to_string<'a>(value: &DdAttributeValue<'a>, alloc: &'a Bump) -> Span
                 Ok(())
             }
             // Never produced by the otel -> dd mapping.
-            AttributeValue::Bytes(_) | AttributeValue::KeyValue(_) => Ok(()),
+            AttributeValue::Bytes(_) | AttributeValue::KeyValueList(_) => Ok(()),
         };
     }
     if let AttributeValue::String(s) = value {
@@ -585,11 +585,20 @@ impl SpanText for CowStr<'_> {
     }
 }
 
-impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {
-    type Text = CowStr<'a>;
-
-    type Bytes = libdd_tinybytes::Bytes;
+impl libdd_trace_model::TraceText for CowStr<'_> {
+    fn from_static(s: &'static str) -> Self {
+        CowStr(Cow::Borrowed(s))
+    }
 }
+
+impl<'a> libdd_trace_model::ValueTypes for CowStr<'a> {
+    type Text = CowStr<'a>;
+    type Bytes = libdd_tinybytes::Bytes;
+    type Array = Vec<DdAttributeValue<'a>>;
+    type Map = VecMap<CowStr<'a>, DdAttributeValue<'a>>;
+}
+
+impl libdd_trace_utils::span::TraceData for CowStr<'_> {}
 
 /// Converts an OpenTelemetry span to a new Datadog span, see [`otel_span_to_dd_span_into`].
 #[cfg(any(test, feature = "test-utils"))]
@@ -613,7 +622,7 @@ pub fn otel_span_to_dd_span<'a>(
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
 ///
 /// `dd_span` is filled instead of allocating a new span. It is expected to be empty, typically a
-/// span recycled from a [`TracePool`](libdd_trace_utils::span::v1::chunk_pool::TracePool): its
+/// span recycled from a [`SpanPoolV1`](libdd_trace_utils::span::v1::span_pool::SpanPoolV1): its
 /// collections keep their capacity, which avoids reallocating them.
 ///
 /// `alloc` is the arena backing every string formatted during the conversion; it must
