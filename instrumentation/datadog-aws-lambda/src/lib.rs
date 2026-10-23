@@ -12,7 +12,8 @@
 //! # What it instruments
 //!
 //! [`TracedService`] wraps a Lambda Tower service and creates one `aws.lambda` server span for each
-//! Lambda invocation. The invocation span is a child of the current OpenTelemetry context and is
+//! Lambda invocation. Supported events create inferred parent spans and extract upstream trace
+//! context. Other events use the current OpenTelemetry context. The invocation span is
 //! made active while the user handler future runs, so spans created by the handler and supported
 //! AWS SDK client calls are parented to the invocation.
 //!
@@ -38,9 +39,13 @@
 //! # }
 //! ```
 mod attribute_keys;
+mod inference;
 mod invocation;
+mod span_inferrer;
 
+use crate::inference::SpanInferrer;
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
+use datadog_opentelemetry::propagation::DatadogPropagator;
 use invocation::{Invocation, TRACER_NAME};
 use lambda_runtime::tower::Service;
 use lambda_runtime::LambdaEvent;
@@ -140,6 +145,9 @@ impl From<serde_json::Error> for TracedServiceError {
 pub struct TracedService<S, E, R> {
     inner: S,
     tracer: SdkTracer,
+    /// Also installed globally; extraction uses this handle so it survives global replacement.
+    propagator: DatadogPropagator,
+    inferrer: SpanInferrer,
     cold_start: bool,
     _phantom: PhantomData<fn(E) -> R>,
 }
@@ -168,7 +176,7 @@ impl<S, E, R> TracedService<S, E, R> {
     where
         S: Service<LambdaEvent<E>, Response = R>,
     {
-        let provider = {
+        let config = {
             let mut config = config;
             // Stats are computed server-side by the extension; client-side computation is
             // redundant.
@@ -177,14 +185,18 @@ impl<S, E, R> TracedService<S, E, R> {
             // to flush when the root span ends, which helps reduce span loss when the Lambda
             // process freezes after the handler returns.
             config.set_trace_writer_synchronous_write(true);
-            datadog_opentelemetry::tracing()
-                .with_config(config.build())
-                .init()
+            config.build()
         };
+        let inferrer = span_inferrer::build_inferrer(&config);
+        let (provider, propagator) = datadog_opentelemetry::tracing()
+            .with_config(config)
+            .init_with_propagator();
         let tracer = TracerProvider::tracer(&provider, TRACER_NAME);
         Self {
             inner,
             tracer,
+            propagator,
+            inferrer,
             cold_start: true,
             _phantom: PhantomData,
         }
@@ -215,7 +227,14 @@ where
 
     fn call(&mut self, event: LambdaEvent<Box<RawValue>>) -> Self::Future {
         let cold_start = self.take_cold_start();
-        let invocation = Invocation::start(&self.tracer, &event.context, cold_start);
+        let invocation = Invocation::start(
+            &self.tracer,
+            &self.propagator,
+            &self.inferrer,
+            event.payload.get(),
+            &event.context,
+            cold_start,
+        );
         let typed_payload = match serde_json::from_str::<E>(event.payload.get()) {
             Ok(payload) => payload,
             Err(err) => {
@@ -261,6 +280,8 @@ mod tests {
         TracedService {
             inner: ReadyService,
             tracer,
+            propagator: datadog_opentelemetry::tracing().init_local().1,
+            inferrer: span_inferrer::default_inferrer(),
             cold_start: true,
             _phantom: PhantomData,
         }
