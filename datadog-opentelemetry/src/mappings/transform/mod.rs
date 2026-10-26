@@ -633,11 +633,24 @@ impl SpanText for CowStr<'_> {
     }
 }
 
-impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {
+impl libdd_trace_model::TraceText for CowStr<'_> {
+    fn from_static(s: &'static str) -> Self {
+        CowStr(Cow::Borrowed(s))
+    }
+}
+
+impl<'a> libdd_trace_model::ValueTypes for CowStr<'a> {
     type Text = CowStr<'a>;
 
     type Bytes = libdd_tinybytes::Bytes;
+
+    type Array = Vec<libdd_trace_model::AttributeValue<Self>>;
+
+    type Map =
+        libdd_trace_utils::span::v04::VecMap<CowStr<'a>, libdd_trace_model::AttributeValue<Self>>;
 }
+
+impl<'a> libdd_trace_utils::span::TraceData for CowStr<'a> {}
 
 /// Converts an OpenTelemetry span to a Datadog span.
 /// https://github.com/DataDog/datadog-agent/blob/d91c1b47da4f5f24559f49be284e547cc847d5e2/pkg/trace/transform/transform.go#L236

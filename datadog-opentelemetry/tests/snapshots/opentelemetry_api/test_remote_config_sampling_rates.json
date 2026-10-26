@@ -10,6 +10,7 @@
     "meta": {
       "_dd.p.dm": "-11",
       "_dd.p.ksr": "1",
+      "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",
