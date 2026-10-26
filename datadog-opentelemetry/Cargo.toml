@@ -57,6 +57,7 @@ criterion = { version = "0.5.1", optional = true }
 libdd-data-pipeline = { workspace = true }
 libdd-capabilities-impl = { workspace = true }
 libdd-trace-utils = { workspace = true }
+libdd-trace-model = { workspace = true }
 libdd-telemetry = { workspace = true }
 libdd-common = { workspace = true }
 libdd-tinybytes = { workspace = true }
@@ -69,7 +70,7 @@ hostname = "0.4.2"
 
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true, features = ["otel-thread-ctx"] }
-libdd-otel-thread-ctx = { version = "2.0.0", optional = true, default-features = false, features = ["shared-context"] }
+libdd-otel-thread-ctx = { workspace = true, optional = true, features = ["shared-context"] }
 
 [dev-dependencies]
 assert_unordered = "0.3"

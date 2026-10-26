@@ -606,6 +606,7 @@ mod tests {
 /// to make sure we don't miss new fields
 mod tests_span_pool_recycling_frees_string_data {
     use super::*;
+    use libdd_trace_model::{AttributeValue, TraceText, ValueTypes};
     use libdd_trace_utils::span::{
         v04::{AttributeAnyValue, AttributeArrayValue, Span as DdV04Span, SpanEvent, SpanLink},
         SpanText, TraceData,
@@ -669,10 +670,26 @@ mod tests_span_pool_recycling_frees_string_data {
         }
     }
 
-    impl TraceData for CountingStr {
+    impl TraceText for CountingStr {
+        fn from_static(s: &'static str) -> Self {
+            Self(Cow::Borrowed(s))
+        }
+    }
+
+    impl From<String> for CountingStr {
+        fn from(value: String) -> Self {
+            CountingStr::from_owned(value)
+        }
+    }
+
+    impl ValueTypes for CountingStr {
         type Text = CountingStr;
         type Bytes = &'static [u8];
+        type Array = Vec<AttributeValue<Self>>;
+        type Map = libdd_trace_utils::span::v04::VecMap<CountingStr, AttributeValue<Self>>;
     }
+
+    impl TraceData for CountingStr {}
 
     fn fill_span_with_owned_strings(span: &mut DdV04Span<CountingStr>) {
         let DdV04Span {
