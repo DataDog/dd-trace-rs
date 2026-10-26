@@ -35,6 +35,7 @@ libdd-telemetry = { version = "11.0.0", default-features = false }
 libdd-common = { version = "9.0.0", default-features = false }
 libdd-tinybytes = { version = "1.2.0", default-features = false }
 libdd-library-config = { version = "5.0.0", default-features = false }
+libdd-otel-thread-ctx = { version = "2.0.0", default-features = false }
 libdd-sampling = { version = "9.0.0", default-features = false }
 libdd-shared-runtime = { version = "7.0.0", default-features = false }
 libdd-remote-config = { version = "8.0.0", default-features = false, features = [
