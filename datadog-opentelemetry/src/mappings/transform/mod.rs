@@ -69,12 +69,23 @@ use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 
 use super::sdk_span::SdkSpan;
 
+/// String type used in Datadog spans produced by the OTel→Datadog conversion.
+/// Borrows from the source OpenTelemetry span whenever possible, and owns
+/// an allocation otherwise.
 pub type SpanStr<'a> = CowStr<'a>;
+/// A Datadog span produced by converting an OpenTelemetry span, see
+/// [`otel_span_to_dd_span_into`].
 pub type DdSpan<'a> = libdd_trace_utils::span::v1::Span<CowStr<'a>>;
+/// A Datadog trace chunk, grouping the [`DdSpan`]s of a trace.
 pub type DdTraceChunk<'a> = libdd_trace_utils::span::v1::TraceChunk<CowStr<'a>>;
 type DdSpanEvent<'a> = libdd_trace_utils::span::v1::SpanEvent<CowStr<'a>>;
 type DdSpanLink<'a> = libdd_trace_utils::span::v1::SpanLink<CowStr<'a>>;
+/// Value of a [`DdSpan`] attribute.
 pub type DdAttributeValue<'a> = AttributeValue<CowStr<'a>>;
+
+/// Bit 31 of a span link's `flags` tells the backend the W3C trace flags are set.
+/// OpenTelemetry links always carry trace flags, so it is always set.
+const SPAN_LINK_FLAGS_SET: u32 = 1 << 31;
 
 /// Inserts a string tag (a v0.4 `meta` entry) on the span.
 ///
@@ -224,14 +235,8 @@ fn otel_span_to_dd_span_minimal<'a>(
     dd_span.start = start;
     // duration should not be negative
     dd_span.duration = end.checked_sub(start).unwrap_or(0).max(0);
-    // We will likely put _sampling_priority, maybe _dd.measured, top level
-    // And by default tracing tags by code.line.number, thread.id and busy_ns/idle_ns
-    //
-    // Why 6? This seems like a good number to prevent small reallocations while not
-    // using too much memory. A recycled span keeps the capacity it grew to.
-    if dd_span.attributes.capacity() == 0 {
-        dd_span.attributes = VecMap::with_capacity(span.attr_len() + span.res_len() + 6);
-    }
+    // `VecMap` has no `reserve`: a span recycled from the pool already carries a warm capacity,
+    // so inserts just grow the existing buffers amortized.
     if let Some(error) = span.get_attr_num::<i32>(DATADOG_ERROR) {
         dd_span.error = error != 0;
     } else if matches!(span.span.status, opentelemetry::trace::Status::Error { .. }) {
@@ -402,6 +407,50 @@ fn otel_value_to_dd_attribute<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttrib
     }
 }
 
+/// Span link attributes are string-only, so arrays are flattened to `key.0`, `key.1`, …
+fn insert_link_attribute<'a>(
+    attributes: &mut VecMap<SpanStr<'a>, DdAttributeValue<'a>>,
+    key: &'a str,
+    value: &'a Value,
+    alloc: &'a Bump,
+) {
+    let mut insert = |key: &'a str, v: &'a str| {
+        attributes.insert(
+            SpanStr::from_str(key),
+            AttributeValue::String(SpanStr::from_str(v)),
+        );
+    };
+    let Value::Array(array) = value else {
+        insert(key, otel_value_string_repr(value, alloc));
+        return;
+    };
+    let mut insert_at = |i: usize, v: &'a str| insert(fmt_in(alloc, format_args!("{key}.{i}")), v);
+    match array {
+        opentelemetry::Array::Bool(v) => {
+            for (i, b) in v.iter().enumerate() {
+                insert_at(i, if *b { "true" } else { "false" });
+            }
+        }
+        opentelemetry::Array::I64(v) => {
+            for (i, n) in v.iter().enumerate() {
+                insert_at(i, fmt_in(alloc, format_args!("{n}")));
+            }
+        }
+        opentelemetry::Array::F64(v) => {
+            for (i, f) in v.iter().enumerate() {
+                insert_at(i, fmt_in(alloc, format_args!("{f}")));
+            }
+        }
+        opentelemetry::Array::String(v) => {
+            for (i, s) in v.iter().enumerate() {
+                insert_at(i, s.as_str());
+            }
+        }
+        // Array is #[non_exhaustive]
+        _ => insert(key, otel_value_string_repr(value, alloc)),
+    }
+}
+
 fn dd_value_to_string<'a>(value: &DdAttributeValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
     fn write_value(value: &DdAttributeValue, w: &mut bumpalo::collections::String<'_>) {
         let _ = match value {
@@ -505,19 +554,13 @@ impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
         T::try_from(i).ok()
     }
 
-    fn attr_len(&self) -> usize {
-        self.span.attributes.len()
-    }
-
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value> {
         self.resource.get_ref(&Key::from_static_str(attr_key.key()))
     }
-
-    fn res_len(&self) -> usize {
-        self.resource.len()
-    }
 }
 
+/// Formats an [`opentelemetry::Value`] as its string representation, formatting into
+/// `alloc` when the repr doesn't already exist in the value.
 pub fn otel_value_string_repr<'a>(v: &'a Value, alloc: &'a Bump) -> &'a str {
     match v {
         Value::Bool(true) => "true",
@@ -535,6 +578,7 @@ pub fn otel_value_string_repr<'a>(v: &'a Value, alloc: &'a Bump) -> &'a str {
     }
 }
 
+/// Text of the Datadog spans, see [`SpanStr`].
 #[derive(Clone, Default, PartialEq, Eq, Hash, serde::Serialize, Debug)]
 pub struct CowStr<'a>(Cow<'a, str>);
 
@@ -543,10 +587,12 @@ impl<'a> CowStr<'a> {
         Self(c)
     }
 
+    /// Owns `s`.
     pub fn from_string(s: String) -> Self {
         Self(Cow::Owned(s))
     }
 
+    /// Borrows `s`.
     pub fn from_str(s: &'a str) -> Self {
         Self(Cow::Borrowed(s))
     }
@@ -558,6 +604,7 @@ impl<'a> CowStr<'a> {
         Self(Cow::Borrowed(alloc.alloc_str(s)))
     }
 
+    /// The text, as a `&str`.
     pub fn as_str(&self) -> &str {
         self.0.as_ref()
     }
@@ -721,15 +768,10 @@ pub fn otel_span_to_dd_span_into<'a>(
              attributes: otel_attributes,
              ..
          }| {
-            let attributes = otel_attributes
-                .iter()
-                .map(|KeyValue { key, value, .. }| {
-                    (
-                        SpanStr::from_str(key.as_str()),
-                        otel_value_to_dd_attribute(value, alloc),
-                    )
-                })
-                .collect();
+            let mut attributes = VecMap::with_capacity(otel_attributes.len());
+            for KeyValue { key, value, .. } in otel_attributes {
+                insert_link_attribute(&mut attributes, key.as_str(), value, alloc);
+            }
             // TraceState has no borrowed serialization API, so build the header
             // String and copy it into the arena
             let mut tracestate = bumpalo::collections::String::new_in(alloc);
@@ -744,7 +786,7 @@ pub fn otel_span_to_dd_span_into<'a>(
                 span_id: otel_span_id_to_dd_id(span_context.span_id()),
                 attributes,
                 tracestate: SpanStr::from_str(tracestate.into_bump_str()),
-                flags: span_context.trace_flags().to_u8() as u32,
+                flags: span_context.trace_flags().to_u8() as u32 | SPAN_LINK_FLAGS_SET,
             }
         },
     ));

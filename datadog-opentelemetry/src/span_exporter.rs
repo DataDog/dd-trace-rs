@@ -47,8 +47,9 @@ const ATTRIBUTE_ENTRY_OVERHEAD: usize = 24;
 const EVENT_OVERHEAD: usize = 16;
 const LINK_OVERHEAD: usize = 32;
 
-/// Maximum number of spans, and of chunks, kept by the pool recycling exported spans.
-const TRACE_POOL_CAPACITY: usize = 4096;
+/// Maximum number of spans kept by the pool recycling exported spans. We assume a single span is
+/// ~500 bytes, and the trace buffer buffers at most 5MB, which is 10 000 spans.
+const TRACE_POOL_CAPACITY: usize = 10_000;
 
 fn attr_value_bytes(v: &opentelemetry::Value) -> usize {
     use opentelemetry::{Array, Value};
@@ -321,7 +322,9 @@ fn build_on_dedicated_thread(
     let buffer_config = TraceBufferConfig::default()
         .synchronous_export(config.trace_writer_synchronous_write())
         .synchronous_export_timeout(Some(config.trace_writer_synchronous_timeout()))
-        .max_flush_interval(config.trace_writer_max_flush_interval());
+        .max_flush_interval(config.trace_writer_max_flush_interval())
+        .max_buffered_bytes(5_000_000)
+        .flush_threshold_bytes(2_500_000);
 
     let otel_resource = Arc::new(ArcSwap::new(Arc::new(Resource::builder_empty().build())));
 
@@ -363,6 +366,7 @@ fn build_trace_exporter(
         .set_tracer_version(config.tracer_version())
         .set_language(config.language())
         .set_language_version(config.language_version())
+        .set_language_interpreter("rustc")
         .set_service(&config.service())
         .set_output_format(TraceExporterOutputFormat::V1)
         .enable_health_metrics()

@@ -51,6 +51,30 @@
         "sensitive": true
       }
     ],
+    "DD_INSTRUMENTATION_INSTALL_ID": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_id"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TIME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_time"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TYPE": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_type"]
+      }
+    ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
       {
         "version": "A",
@@ -162,6 +186,22 @@
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["enabled"]
+      }
+    ],
+    "DD_TRACE_HTTP_CLIENT_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "400-499",
+        "propertyKeys": ["trace_http_client_error_statuses"]
+      }
+    ],
+    "DD_TRACE_HTTP_SERVER_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "500-599",
+        "propertyKeys": ["trace_http_server_error_statuses"]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_ENABLED": [

@@ -10,10 +10,12 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
       "_dd.span_events.has_exception": "true",
       "code.file.path": "datadog-opentelemetry/tests/integration_tests/tracing_api.rs",
       "code.module.name": "tests::integration_tests::tracing_api",
       "error.message": "this is an error",
+      "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Error",
       "otel.status_description": "this is an error",

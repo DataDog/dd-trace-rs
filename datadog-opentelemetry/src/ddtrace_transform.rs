@@ -13,12 +13,17 @@ use crate::{
     },
 };
 use bumpalo::Bump;
-use libdd_trace_utils::span::{v1::span_pool::SpanPoolV1, SpanText};
-use opentelemetry::Key;
+use libdd_trace_utils::span::{
+    v1::{span_pool::SpanPoolV1, SpanKind as DdSpanKind},
+    SpanText,
+};
+use opentelemetry::{trace::SpanId, Key, Value};
 use opentelemetry_sdk::{trace::SpanData, Resource};
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 static SERVICE_NAME_KEY: Key = Key::from_static_str(SERVICE_NAME);
+
+const BASE_SERVICE_KEY: &str = "_dd.base_service";
 
 const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 const ORIGIN_KEY: &str = "_dd.origin";
@@ -93,6 +98,9 @@ where
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
         add_config_metadata(&mut dd_span, cached_config, otel_resource);
+        if s.parent_span_id == SpanId::INVALID || s.parent_span_is_remote {
+            add_local_root_metadata(&mut dd_span, cached_config);
+        }
 
         dd_span
     }));
@@ -127,6 +135,18 @@ fn local_root<'s, 'a>(spans: &'s [DdSpan<'a>]) -> Option<&'s DdSpan<'a>> {
         .or_else(|| spans.first())
 }
 
+/// The resolved application service. The cached config is built before the resource is set,
+/// so it doesn't know about a `service.name` coming from the OpenTelemetry resource.
+fn application_service<'a>(
+    cached_config: &'a CachedConfig,
+    otel_resource: &'a Resource,
+) -> &'a str {
+    match otel_resource.get_ref(&SERVICE_NAME_KEY) {
+        Some(Value::String(service)) if !service.as_str().is_empty() => service.as_str(),
+        _ => &cached_config.service,
+    }
+}
+
 fn add_config_metadata<'a>(
     dd_span: &mut DdSpan<'a>,
     cached_config: &'a CachedConfig,
@@ -147,6 +167,16 @@ fn add_config_metadata<'a>(
         dd_span.service = SpanStr::from_str(&cached_config.service);
     }
 
+    // Spans whose service was overridden keep a reference to the application service
+    let base_service = application_service(cached_config, otel_resource);
+    if !dd_span.service.as_str().is_empty() && dd_span.service.as_str() != base_service {
+        meta_insert(
+            dd_span,
+            SpanStr::from_static_str(BASE_SERVICE_KEY),
+            SpanStr::from_str(base_service),
+        );
+    }
+
     for (key, value) in &cached_config.global_tags {
         meta_insert(dd_span, SpanStr::from_str(key), SpanStr::from_str(value));
     }
@@ -162,6 +192,52 @@ fn add_config_metadata<'a>(
             }
         }
     }
+
+    apply_http_error_statuses(dd_span, cached_config);
+}
+
+/// Server and client spans with an HTTP status code are errors if, and only if, the code is
+/// in `DD_TRACE_HTTP_SERVER_ERROR_STATUSES` or `DD_TRACE_HTTP_CLIENT_ERROR_STATUSES`. This
+/// overrides the OpenTelemetry span status, as in the other Datadog SDKs.
+fn apply_http_error_statuses(dd_span: &mut DdSpan, cached_config: &CachedConfig) {
+    let error_statuses = match dd_span.span_kind {
+        DdSpanKind::Server => &cached_config.http_server_error_statuses,
+        DdSpanKind::Client => &cached_config.http_client_error_statuses,
+        _ => return,
+    };
+    let Some(status_code) =
+        meta_get(dd_span, "http.status_code").and_then(|code| code.as_str().parse::<u16>().ok())
+    else {
+        return;
+    };
+    let was_error = dd_span.error;
+    dd_span.error = error_statuses.contains(status_code);
+    if was_error && !dd_span.error {
+        // The error tags describe the error that was just cleared. Any exception details are
+        // still in the span events.
+        for key in ["error.message", "error.type", "error.stack"] {
+            dd_span.attributes.remove_slow(key);
+        }
+    }
+}
+
+/// Tags that the Datadog SDKs set on the local root span of each trace chunk.
+fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a CachedConfig) {
+    meta_insert(
+        dd_span,
+        SpanStr::from_static_str("language"),
+        SpanStr::from_str(&cached_config.language),
+    );
+    meta_insert(
+        dd_span,
+        SpanStr::from_static_str("runtime-id"),
+        SpanStr::from_str(&cached_config.runtime_id),
+    );
+    metric_insert(
+        dd_span,
+        SpanStr::from_static_str("process_id"),
+        cached_config.process_id,
+    );
 }
 
 /// Entry points into the span conversion used by benchmarks.
@@ -246,8 +322,8 @@ mod tests {
         Resource,
     };
 
-    use super::{otel_trace_chunk_to_dd_trace_chunk, Bump};
-    use crate::{configuration::Config, mappings::CachedConfig};
+    use super::*;
+    use crate::configuration::Config;
 
     const TRACE_ID: [u8; 16] = [
         0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22, 0x22,
@@ -328,6 +404,207 @@ mod tests {
         assert_eq!(chunk.priority, Some(1));
         assert_eq!(chunk.origin.as_str(), "");
         assert_eq!(chunk.sampling_mechanism, None);
+    }
+
+    fn base_service_with(
+        dd_service: Option<&str>,
+        resource_service: Option<&'static str>,
+        span_service: &'static str,
+    ) -> Option<String> {
+        let mut config = Config::builder();
+        if let Some(service) = dd_service {
+            config.set_service(service.to_string());
+        }
+        let cached_config = CachedConfig::new(&config.build());
+        let mut otel_resource = Resource::builder_empty();
+        if let Some(service) = resource_service {
+            otel_resource = otel_resource.with_service_name(service);
+        }
+        let otel_resource = otel_resource.build();
+
+        let mut span = DdSpan {
+            service: SpanStr::from_static_str(span_service),
+            ..Default::default()
+        };
+        add_config_metadata(&mut span, &cached_config, &otel_resource);
+        meta_get(&span, BASE_SERVICE_KEY).map(|v| v.as_str().to_string())
+    }
+
+    fn base_service(span_service: &'static str) -> Option<String> {
+        base_service_with(Some("global-service"), None, span_service)
+    }
+
+    #[test]
+    fn test_base_service() {
+        assert_eq!(
+            base_service("other-service").as_deref(),
+            Some("global-service")
+        );
+        assert_eq!(base_service("global-service"), None);
+        // Replaced by the global service
+        assert_eq!(base_service(DEFAULT_OTLP_SERVICE_NAME), None);
+    }
+
+    #[test]
+    fn test_base_service_from_resource() {
+        // DD_SERVICE unset: the resource's service.name is the application service
+        assert_eq!(
+            base_service_with(None, Some("otel-service"), "otel-service"),
+            None
+        );
+        assert_eq!(
+            base_service_with(None, Some("otel-service"), "other-service").as_deref(),
+            Some("otel-service")
+        );
+    }
+
+    fn span_data_with_parent(
+        span_id: u64,
+        parent_span_id: u64,
+        parent_span_is_remote: bool,
+    ) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from(1),
+                SpanId::from(span_id),
+                TraceFlags::SAMPLED,
+                false,
+                Default::default(),
+            ),
+            parent_span_id: SpanId::from(parent_span_id),
+            parent_span_is_remote,
+            ..span_data(1, 0, vec![])
+        }
+    }
+
+    #[test]
+    fn test_local_root_metadata() {
+        let config = Config::builder().build();
+        let cached_config = CachedConfig::new(&config);
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let span_data = [
+            span_data_with_parent(1, 0, false), // local root of a new trace
+            span_data_with_parent(2, 1, false), // its child
+            span_data_with_parent(3, 99, true), // local root continuing a remote trace
+        ];
+
+        let chunk =
+            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &span_data, &resource, &alloc, None);
+
+        assert_eq!(chunk.spans.len(), 3);
+        let process_id = f64::from(std::process::id());
+        for (span, is_local_root) in chunk.spans.iter().zip([true, false, true]) {
+            let meta = |key| meta_get(span, key).map(SpanStr::as_str);
+            let process_id_metric = match span.attributes.get("process_id") {
+                Some(DdAttributeValue::Float(f)) => Some(*f),
+                _ => None,
+            };
+            if is_local_root {
+                assert_eq!(meta("language"), Some("rust"), "span {}", span.span_id);
+                assert_eq!(meta("runtime-id"), Some(config.runtime_id()));
+                assert_eq!(process_id_metric, Some(process_id));
+            } else {
+                assert_eq!(meta("language"), None, "span {}", span.span_id);
+                assert_eq!(meta("runtime-id"), None);
+                assert_eq!(process_id_metric, None);
+            }
+        }
+    }
+
+    fn span(kind: DdSpanKind, status_code: Option<&'static str>, error: bool) -> DdSpan<'static> {
+        let mut span = DdSpan {
+            error,
+            span_kind: kind,
+            ..Default::default()
+        };
+        if let Some(code) = status_code {
+            meta_insert(
+                &mut span,
+                SpanStr::from_static_str("http.status_code"),
+                SpanStr::from_static_str(code),
+            );
+        }
+        span
+    }
+
+    fn error_after(cached_config: &CachedConfig, mut span: DdSpan) -> bool {
+        apply_http_error_statuses(&mut span, cached_config);
+        span.error
+    }
+
+    #[test]
+    fn test_default_http_error_statuses() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+
+        assert!(error_after(
+            &cached_config,
+            span(DdSpanKind::Server, Some("500"), false)
+        ));
+        assert!(!error_after(
+            &cached_config,
+            span(DdSpanKind::Server, Some("404"), true)
+        ));
+        assert!(error_after(
+            &cached_config,
+            span(DdSpanKind::Client, Some("404"), false)
+        ));
+        assert!(!error_after(
+            &cached_config,
+            span(DdSpanKind::Client, Some("500"), true)
+        ));
+    }
+
+    #[test]
+    fn test_http_error_statuses_clear_error_tags() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+        let error_tags = ["error.message", "error.type", "error.stack"];
+        let with_error_tags = |code| {
+            let mut span = span(DdSpanKind::Server, Some(code), true);
+            for key in error_tags {
+                meta_insert(
+                    &mut span,
+                    SpanStr::from_static_str(key),
+                    SpanStr::from_static_str("boom"),
+                );
+            }
+            span
+        };
+
+        // Cleared error: the tags go with it
+        let mut cleared = with_error_tags("404");
+        apply_http_error_statuses(&mut cleared, &cached_config);
+        assert!(!cleared.error);
+        for key in error_tags {
+            assert!(meta_get(&cleared, key).is_none(), "{key} should be removed");
+        }
+
+        // Kept error: the tags stay
+        let mut kept = with_error_tags("500");
+        apply_http_error_statuses(&mut kept, &cached_config);
+        assert!(kept.error);
+        for key in error_tags {
+            assert!(meta_get(&kept, key).is_some(), "{key} should be kept");
+        }
+    }
+
+    #[test]
+    fn test_http_error_statuses_leave_other_spans_alone() {
+        let cached_config = CachedConfig::new(&Config::builder().build());
+
+        // No status code, e.g. a failed connection
+        assert!(error_after(
+            &cached_config,
+            span(DdSpanKind::Client, None, true)
+        ));
+        assert!(!error_after(
+            &cached_config,
+            span(DdSpanKind::Internal, Some("500"), false)
+        ));
+        assert!(error_after(
+            &cached_config,
+            span(DdSpanKind::Producer, Some("200"), true)
+        ));
     }
 }
 

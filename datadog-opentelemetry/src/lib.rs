@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.5.2" }
+//! datadog-opentelemetry = { version = "0.5.3" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
@@ -984,3 +984,5 @@ pub fn logs() -> DatadogLogsBuilder {
         resource: None,
     }
 }
+
+pub mod build;

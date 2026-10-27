@@ -17,12 +17,17 @@ pub(super) use transform::otel_util::{
     get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
     get_otel_service, get_otel_status_code,
 };
-pub(super) use transform::{
+// Re-exported `pub` so they are reachable from benches/tests under the test-utils feature
+// (the mappings module itself is only public in that configuration); in normal builds
+// the module is `pub(crate)`, so this stays crate-visible only.
+pub(crate) use transform::otel_util::OtelSpan;
+pub use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
-    meta_get, meta_insert, metric_contains, metric_insert,
-    otel_util::{OtelSpan, DEFAULT_OTLP_SERVICE_NAME},
-    otel_value_string_repr, CowStr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
+    otel_util::DEFAULT_OTLP_SERVICE_NAME,
+    otel_value_string_repr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
 };
+
+pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert, CowStr};
 
 #[cfg(feature = "test-utils")]
 pub use transform::{semconv_shim, transform_tests};

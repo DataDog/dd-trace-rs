@@ -21,7 +21,7 @@ use opentelemetry::{
 
 use super::{
     super::sdk_span::SdkSpan,
-    super::transform::{CowStr, DdAttributeValue, DdSpanEvent, DdSpanLink},
+    super::transform::{CowStr, DdAttributeValue, DdSpanEvent, DdSpanLink, SPAN_LINK_FLAGS_SET},
     DdSpan,
 };
 
@@ -122,7 +122,20 @@ fn make_test_span_links() -> (Vec<Link>, ThinVec<DdSpanLink<'static>>) {
                     false,
                     TraceState::default(),
                 ),
-                vec![],
+                vec![
+                    KeyValue::new(
+                        "array",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "bools",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("nested", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("floats", opentelemetry::Value::Array(vec![1.5].into())),
+                ],
                 2,
             ),
             Link::new(
@@ -148,7 +161,24 @@ fn make_test_span_links() -> (Vec<Link>, ThinVec<DdSpanLink<'static>>) {
                     ("a2".into(), string("v2")),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
+            },
+            DdSpanLink {
+                trace_id: TraceId::from_hex("abcdef0123456789abcdef0123456789")
+                    .unwrap()
+                    .to_bytes(),
+                span_id: 18364758544493064720,
+                attributes: VecMap::from_iter([
+                    ("array.0".into(), string("a")),
+                    ("array.1".into(), string("b")),
+                    ("bools.0".into(), string("true")),
+                    ("bools.1".into(), string("false")),
+                    ("nested.0".into(), string("1")),
+                    ("nested.1".into(), string("2")),
+                    ("floats.0".into(), string("1.5")),
+                ]),
+                tracestate: "".into(),
+                flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
                 trace_id: TraceId::from_hex("abcdef0123456789abcdef0123456789")
@@ -157,16 +187,7 @@ fn make_test_span_links() -> (Vec<Link>, ThinVec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: VecMap::new(),
                 tracestate: "".into(),
-                flags: 0,
-            },
-            DdSpanLink {
-                trace_id: TraceId::from_hex("abcdef0123456789abcdef0123456789")
-                    .unwrap()
-                    .to_bytes(),
-                span_id: 18364758544493064720,
-                attributes: VecMap::new(),
-                tracestate: "".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
         ]),
     )
