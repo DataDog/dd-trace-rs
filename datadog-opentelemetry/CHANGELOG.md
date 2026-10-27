@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4 (Oct 27, 2026)
+
+- Depend on opentelemetry 0.32 again (instead of 0.33) and remove the otel thread-level context sharing feature introduced in 0.5.3, in https://github.com/DataDog/dd-trace-rs/pull/343
+
 ## 0.5.3 (Oct 26, 2026)
 
 - Handle repeated traceparent and tracestate headers in https://github.com/DataDog/dd-trace-rs/pull/325
