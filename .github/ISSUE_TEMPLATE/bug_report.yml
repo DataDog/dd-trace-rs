@@ -7,7 +7,7 @@ body:
     attributes:
       label: Tracer Version(s)
       description: "Version(s) of the tracer affected by this bug"
-      placeholder: "0.5.3"
+      placeholder: "0.5.4"
     validations:
       required: true
 
