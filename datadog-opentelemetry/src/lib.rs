@@ -265,6 +265,10 @@ pub mod memory_profiling;
 )]
 pub use memory_profiling::memory_profiling;
 
+use libdd_sampling::mechanism;
+use libdd_sampling::priority;
+use libdd_sampling::SamplingDecision;
+
 #[cfg(feature = "test-utils")]
 #[allow(missing_docs)]
 pub mod core_pub_hack {
@@ -339,6 +343,63 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
+#[allow(missing_docs)]
+pub struct DatadogTelemetry {
+    registry: TraceRegistry,
+}
+
+impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
+    fn set_sampling_decision(
+        &self,
+        span: opentelemetry::trace::SpanContext,
+        decision: datadog_telemetry_api::SamplingDecision,
+    ) {
+        self.registry.set_sampling_decision(
+            span.trace_id().to_bytes(),
+            match decision {
+                datadog_telemetry_api::SamplingDecision::Keep => SamplingDecision {
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::MANUAL),
+                },
+                datadog_telemetry_api::SamplingDecision::Drop => SamplingDecision {
+                    priority: Some(priority::USER_REJECT),
+                    mechanism: Some(mechanism::MANUAL),
+                },
+            },
+        );
+    }
+}
+
+#[allow(missing_docs)]
+#[non_exhaustive]
+/// Interact with tracing through these types
+///
+/// * `tracer_provider` is an [`opentelemetry_sdk::trace::SdkTracerProvider`]
+/// * `propagator` implements [`opentelemetry::propagation::TextMapPropagator`]
+/// * `datadog_telemetry` implements [`datadog_telemetry_api::DatadogTelemetryApi`]
+///
+/// # Setting global context
+///
+/// In order not to have to propagate these components you can set them as globals
+///
+/// ```rust ,no_run
+/// let TracingComponents {
+///   tracer_provider,
+///   propagator,
+///   datadog_telemetry,
+///   ..
+/// } = datadog_opentelemetry::tracing().init_local();
+/// opentelemetry::global::set_text_map_propagator(propagator);
+/// opentelemetry::global::set_tracer_provider(tracer_provider);
+/// datadog_telemetry_api::set_global(datadog_telemetry);
+/// ```
+///
+pub struct TracingComponents {
+    pub tracer_provider: SdkTracerProvider,
+    pub propagator: DatadogPropagator,
+    pub datadog_telemetry: DatadogTelemetry,
+}
+
 /// Builder for configuring and initializing Datadog tracing with OpenTelemetry.
 pub struct DatadogTracingBuilder {
     config: Option<Config>,
@@ -383,8 +444,11 @@ impl DatadogTracingBuilder {
             dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
         }
 
-        let (tracer_provider, propagator) =
-            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
+        let TracingComponents {
+            tracer_provider,
+            propagator,
+            datadog_telemetry,
+        } = make_tracer(Arc::new(config), self.tracer_provider, self.resource);
         // Enable publishing the active span context to a specific TLS slot so out-of-process
         // readers (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
         #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
@@ -393,6 +457,7 @@ impl DatadogTracingBuilder {
         }
         opentelemetry::global::set_text_map_propagator(propagator);
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+        datadog_telemetry_api::set_global(datadog_telemetry);
 
         tracer_provider
     }
@@ -413,12 +478,18 @@ impl DatadogTracingBuilder {
     /// # Example
     ///
     /// ```rust
-    /// let (tracer_provider, propagator) = datadog_opentelemetry::tracing().init_local();
+    /// let TracingComponents {
+    ///   tracer_provider,
+    ///   propagator,
+    ///   datadog_telemetry,
+    ///   ..
+    /// } = datadog_opentelemetry::tracing().init_local();
     ///
     /// opentelemetry::global::set_text_map_propagator(propagator);
     /// opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+    /// datadog_telemetry_api::set_global(datadog_telemetry);
     /// ```
-    pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator) {
+    pub fn init_local(self) -> TracingComponents {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
         make_tracer(Arc::new(config), self.tracer_provider, self.resource)
     }
@@ -553,7 +624,7 @@ fn make_tracer(
     config: Arc<Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
-) -> (SdkTracerProvider, DatadogPropagator) {
+) -> TracingComponents {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
 
@@ -606,16 +677,23 @@ fn make_tracer(
             }
         }
         let tracer_provider = tracer_provider_builder.build();
+        let datadog_telemetry = DatadogTelemetry { registry };
 
-        (tracer_provider, propagator)
+        TracingComponents {
+            tracer_provider,
+            propagator,
+            datadog_telemetry,
+        }
     })) {
         Ok(result) => result,
         Err(_) => {
+            let registry = TraceRegistry::new(config.clone());
             crate::dd_error!("Failed to initialize Datadog tracer provider. A no-op tracer provider will be used instead. Traces will not be exported.");
-            (
-                SdkTracerProvider::builder().build(),
-                DatadogPropagator::new(config.clone(), TraceRegistry::new(config)),
-            )
+            TracingComponents {
+                tracer_provider: SdkTracerProvider::builder().build(),
+                propagator: DatadogPropagator::new(config, registry.clone()),
+                datadog_telemetry: DatadogTelemetry { registry },
+            }
         }
     }
 }
@@ -697,7 +775,7 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
 }
 
 #[cfg(feature = "test-utils")]
-pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, DatadogPropagator) {
+pub fn make_test_tracer(shared_config: Arc<Config>) -> TracingComponents {
     #![allow(missing_docs)]
     make_tracer(
         shared_config,

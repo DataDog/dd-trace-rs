@@ -77,7 +77,7 @@ async fn test_local_tracer_telemetry_shutdown_completes() {
     const SESSION_NAME: &str = "telemetry_shutdown/local";
     let (cfg, _agent) = config_for(SESSION_NAME).await;
 
-    let (tracer_provider, _propagator) = make_test_tracer(cfg);
+    let tracer_provider = make_test_tracer(cfg).tracer_provider;
     tracer_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op", |_| {});
@@ -111,8 +111,8 @@ async fn test_telemetry_shutdown_refcount_across_providers() {
     const SESSION_NAME: &str = "telemetry_shutdown/refcount";
     let (cfg, _agent) = config_for(SESSION_NAME).await;
 
-    let (provider1, _) = make_test_tracer(cfg.clone());
-    let (provider2, _) = make_test_tracer(cfg.clone());
+    let provider1 = make_test_tracer(cfg.clone()).tracer_provider;
+    let provider2 = make_test_tracer(cfg.clone()).tracer_provider;
 
     provider1
         .tracer("telemetry_shutdown_test")
@@ -142,7 +142,7 @@ async fn test_reuse_telemetry_lifecycle_after_shutdown_is_safe() {
     let (cfg, _agent) = config_for(SESSION_NAME).await;
 
     // First tracer: starts the global telemetry worker, stops it on shutdown.
-    let (first_provider, _) = make_test_tracer(cfg.clone());
+    let first_provider = make_test_tracer(cfg.clone()).tracer_provider;
     first_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op_before_shutdown", |_| {});
@@ -151,7 +151,7 @@ async fn test_reuse_telemetry_lifecycle_after_shutdown_is_safe() {
     // Second tracer, built after the global worker was already stopped: registers
     // a telemetry user again and drives telemetry through span activity. Must stay
     // safe and shut down cleanly even though the underlying worker is not revived.
-    let (second_provider, _) = make_test_tracer(cfg.clone());
+    let second_provider = make_test_tracer(cfg.clone()).tracer_provider;
     second_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op_after_shutdown", |_| {});
@@ -174,7 +174,7 @@ async fn test_post_shutdown_telemetry_use_is_panic_free_under_stress() {
     let (cfg, _agent) = config_for(SESSION_NAME).await;
 
     for iteration in 0..ITERATIONS {
-        let (provider, _) = make_test_tracer(cfg.clone());
+        let provider = make_test_tracer(cfg.clone()).tracer_provider;
         let tracer = provider.tracer("telemetry_shutdown_test");
         for span in 0..SPANS_PER_ITERATION {
             tracer.in_span(format!("iter{iteration}_span{span}"), |_| {});
@@ -200,7 +200,7 @@ async fn test_scoped_provider_drop_without_shutdown_releases_telemetry() {
     // The temporary tracer from `.tracer(...)` is dropped at the end of the
     // statement, so `first_provider` is the sole remaining reference and its drop
     // triggers the SDK shutdown that releases the telemetry user.
-    let (first_provider, _) = make_test_tracer(cfg.clone());
+    let first_provider = make_test_tracer(cfg.clone()).tracer_provider;
     first_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op_before_drop", |_| {});
@@ -209,7 +209,7 @@ async fn test_scoped_provider_drop_without_shutdown_releases_telemetry() {
     // A second scoped provider registers a telemetry user again and drives
     // telemetry; dropping it must likewise stay safe and complete cleanly even
     // though the underlying worker was already stopped.
-    let (second_provider, _) = make_test_tracer(cfg.clone());
+    let second_provider = make_test_tracer(cfg.clone()).tracer_provider;
     second_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op_after_drop", |_| {});
@@ -232,7 +232,7 @@ async fn test_shutdown_with_telemetry_disabled_completes() {
         "this test must run with telemetry disabled"
     );
 
-    let (tracer_provider, _propagator) = make_test_tracer(cfg);
+    let tracer_provider = make_test_tracer(cfg).tracer_provider;
     tracer_provider
         .tracer("telemetry_shutdown_test")
         .in_span("op", |_| {});
@@ -252,7 +252,7 @@ async fn test_concurrent_shutdown_of_multiple_providers() {
 
     let mut providers = Vec::with_capacity(PROVIDERS);
     for _ in 0..PROVIDERS {
-        let (provider, _) = make_test_tracer(cfg.clone());
+        let provider = make_test_tracer(cfg.clone()).tracer_provider;
         provider
             .tracer("telemetry_shutdown_test")
             .in_span("op", |_| {});
@@ -286,7 +286,7 @@ async fn test_repeated_shutdown_on_same_provider_is_idempotent() {
     const SESSION_NAME: &str = "telemetry_shutdown/repeated";
     let (cfg, _agent) = config_for(SESSION_NAME).await;
 
-    let (provider, _) = make_test_tracer(cfg);
+    let provider = make_test_tracer(cfg).tracer_provider;
     provider
         .tracer("telemetry_shutdown_test")
         .in_span("op", |_| {});
