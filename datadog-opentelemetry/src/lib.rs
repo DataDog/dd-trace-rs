@@ -148,6 +148,69 @@
 //!
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
 //!
+//! ### Overriding the sampling decisions
+//!
+//! Whenever a new trace is started, the sampler decides whether this trace will be sent to the
+//! intake or not. This is called a sampling decision.
+//! This sampling decision is usually immutable from there and applies to all spans in the trace.
+//!
+//! Using the [`datadog_telemetry_api::set_sampling_decision`] API it is possible to override
+//! sampling decisions while the span is active, usually because some rare or unexpected event
+//! has happened and you want to be sure to record and send it to storage.
+//!
+//! The sampling decision set for the trace takes effect immediately, and all active spans
+//! belonging to the same trace will inherit it, even if they were started before the call.
+//!
+//! The global `set_sampling_decision` method is callable from anywhere, as long as an instance
+//! of [`DatadogTelemetry`] has been installed, either with [`DatadogTracingBuilder::init()`],
+//! or by calling [`datadog_telemetry_api::set_global`].
+//!
+//! #### Limitations
+//!
+//! Setting [`datadog_telemetry_api::SamplingDecision::Keep`] does not guarantee that all spans
+//! of the trace will be sampled: only the currently active spans, and the spans started after
+//! the call, are guaranteed. Spans closed before the call might carry the original sampling
+//! decision.
+//!
+//! `set_sampling_decision` should be called only with spans started by an
+//! [`opentelemetry_sdk::trace::SdkTracerProvider`] installed by the same
+//! [`DatadogTracingBuilder::init()`] call, or returned by the same
+//! [`DatadogTracingBuilder::init_local()`] call.
+//!
+//! * Global API
+//!
+//! ```rust ,no_run
+//! use opentelemetry::global;
+//! use opentelemetry::trace::{TraceContextExt, Tracer};
+//!
+//! global::tracer("my-service").in_span("my-operation", |cx| {
+//!     datadog_telemetry_api::set_sampling_decision(
+//!         cx.span().span_context().clone(),
+//!         datadog_telemetry_api::SamplingDecision::Keep,
+//!     );
+//! });
+//! ```
+//!
+//! * Local API
+//!
+//! ```rust ,no_run
+//! use datadog_telemetry_api::DatadogTelemetryApi;
+//! use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+//!
+//! let datadog_opentelemetry::TracingComponents {
+//!     tracer_provider,
+//!     datadog_telemetry,
+//!     ..
+//! } = datadog_opentelemetry::tracing().init_local();
+//!
+//! tracer_provider.tracer("my-service").in_span("my-operation", |cx| {
+//!     datadog_telemetry.set_sampling_decision(
+//!         cx.span().span_context().clone(),
+//!         datadog_telemetry_api::SamplingDecision::Keep,
+//!     );
+//! });
+//! ```
+//!
 //! ### Configuration
 //!
 //! Configuration can be passed either:
@@ -343,7 +406,12 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
-#[allow(missing_docs)]
+/// Datadog tracing telemetry handle
+///
+/// It gives access to the sampling decisions of the live traces managed by a tracer provider,
+/// through the [`datadog_telemetry_api::DatadogTelemetryApi`] trait implemented by this type. The
+/// handle is part of the [`TracingComponents`] returned by [`DatadogTracingBuilder::init_local`],
+/// and installed as the process-global telemetry by [`DatadogTracingBuilder::init`].
 pub struct DatadogTelemetry {
     registry: TraceRegistry,
 }
@@ -370,7 +438,6 @@ impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
     }
 }
 
-#[allow(missing_docs)]
 #[non_exhaustive]
 /// Interact with tracing through these types
 ///
@@ -383,7 +450,7 @@ impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
 /// In order not to have to propagate these components you can set them as globals
 ///
 /// ```rust ,no_run
-/// let TracingComponents {
+/// let datadog_opentelemetry::TracingComponents {
 ///   tracer_provider,
 ///   propagator,
 ///   datadog_telemetry,
@@ -395,8 +462,11 @@ impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
 /// ```
 ///
 pub struct TracingComponents {
+    /// The tracer provider producing the spans
     pub tracer_provider: SdkTracerProvider,
+    /// The propagator injecting and extracting the trace context
     pub propagator: DatadogPropagator,
+    /// The Datadog tracing telemetry handle
     pub datadog_telemetry: DatadogTelemetry,
 }
 
@@ -478,7 +548,7 @@ impl DatadogTracingBuilder {
     /// # Example
     ///
     /// ```rust
-    /// let TracingComponents {
+    /// let datadog_opentelemetry::TracingComponents {
     ///   tracer_provider,
     ///   propagator,
     ///   datadog_telemetry,

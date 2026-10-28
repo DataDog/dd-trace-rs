@@ -413,7 +413,8 @@ impl TraceRegistry {
         stats
     }
 
-    #[allow(missing_docs)]
+    /// Sets the sampling decision of the trace with the given trace ID.
+    /// If the trace isn't registered, the decision is ignored.
     pub fn set_sampling_decision(&self, trace_id: [u8; 16], decision: SamplingDecision) {
         let mut inner = self
             .get_shard(trace_id)

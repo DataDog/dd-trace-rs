@@ -9,6 +9,10 @@ readme.workspace = true
 description.workspace = true
 authors.workspace = true
 
+[package.metadata.docs.rs]
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
+
 [dependencies]
 arc-swap = "1.9.3"
 opentelemetry = "0.33"
