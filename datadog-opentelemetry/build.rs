@@ -137,6 +137,7 @@ mod dependencies {
                 .current_dir(&self.workspace)
                 // Don't recurse into rustc wrappers such as `cargo auditable`.
                 .env_remove("RUSTC_WORKSPACE_WRAPPER")
+                .env("CARGO_TERM_COLOR", "never")
                 .output()
                 .map_err(|err| {
                     (
