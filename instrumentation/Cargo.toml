@@ -29,9 +29,10 @@ base64 = "0.22.1"
 lambda_runtime = "0.13"
 serde = "1.0.194"
 serde_json = "1.0.140"
-opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"], default-features = false }
-opentelemetry_sdk = { version = "0.32.1", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
+# Keep these versions aligned with the root workspace's OpenTelemetry pins.
+opentelemetry = { version = "=0.33.0", features = ["trace", "metrics", "logs"], default-features = false }
+opentelemetry_sdk = { version = "=0.33.0", default-features = false }
+opentelemetry-semantic-conventions = { version = "=0.33.0", features = ["semconv_experimental"] }
 tracing = { version = "0.1", default-features = false }
 tokio = { version = "1.44.1" }
 wiremock = "0.6"
