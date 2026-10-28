@@ -1491,16 +1491,20 @@ pub(crate) mod tests {
 
             if let Some(carrier_value) = &hm2.get(&k) {
                 match k.as_str() {
-                    "x-datadog-tags" => assert_eq_unordered!(
-                        carrier_value.split(',').collect::<Vec<&str>>(),
-                        expected_value.split(',').collect::<Vec<&str>>(),
-                        "wrong x-datadog-tags"
-                    ),
-                    "tracestate" => assert_eq_unordered!(
-                        carrier_value.split(';').collect::<Vec<&str>>(),
-                        expected_value.split(';').collect::<Vec<&str>>(),
-                        "wrong tracestate"
-                    ),
+                    "x-datadog-tags" => {
+                        assert_eq_unordered!(
+                            carrier_value.split(',').collect::<Vec<&str>>(),
+                            expected_value.split(',').collect::<Vec<&str>>(),
+                            "wrong x-datadog-tags"
+                        );
+                    }
+                    "tracestate" => {
+                        assert_eq_unordered!(
+                            carrier_value.split(';').collect::<Vec<&str>>(),
+                            expected_value.split(';').collect::<Vec<&str>>(),
+                            "wrong tracestate"
+                        );
+                    }
                     _ => assert_eq!(**carrier_value, expected_value),
                 }
             }
