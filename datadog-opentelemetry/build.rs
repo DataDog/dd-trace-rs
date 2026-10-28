@@ -262,10 +262,14 @@ mod dependencies {
             workspace,
             target: env::var("TARGET").map_err(|_| unavailable("TARGET is not set"))?,
         };
-        println!(
-            "cargo::rerun-if-changed={}",
-            cargo.workspace.join("Cargo.lock").display()
-        );
+        // The root manifest isn't a package manifest in a virtual workspace, but its
+        // `[workspace.dependencies]` can still enable features of the members' dependencies.
+        for file in ["Cargo.lock", "Cargo.toml"] {
+            println!(
+                "cargo::rerun-if-changed={}",
+                cargo.workspace.join(file).display()
+            );
+        }
 
         let packages = workspace_packages(&cargo)?;
         let mut builder = GraphBuilder::default();
