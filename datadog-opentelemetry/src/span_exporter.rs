@@ -24,7 +24,7 @@ use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
 use crate::{
-    configuration::Config,
+    configuration::{Config, TraceApiVersion},
     core::telemetry_session,
     ddtrace_transform,
     mappings::{CachedConfig, SpanStr},
@@ -367,7 +367,10 @@ fn build_trace_exporter(
         .set_language_version(config.language_version())
         .set_language_interpreter("rustc")
         .set_service(&config.service())
-        .set_output_format(TraceExporterOutputFormat::V04)
+        .set_output_format(match config.trace_api_version() {
+            TraceApiVersion::V04 => TraceExporterOutputFormat::V04,
+            TraceApiVersion::V05 => TraceExporterOutputFormat::V05,
+        })
         .enable_health_metrics()
         .enable_agent_rates_payload_version();
 
