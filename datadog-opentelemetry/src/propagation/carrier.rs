@@ -25,6 +25,12 @@ pub trait Extractor {
     /// Get a value from the carrier by key.
     fn get(&self, key: &str) -> Option<&str>;
 
+    /// Get all values for a key from the carrier, for carriers that can hold
+    /// the same key more than once (e.g. HTTP headers).
+    fn get_all(&self, key: &str) -> Option<Vec<&str>> {
+        self.get(key).map(|value| vec![value])
+    }
+
     /// Get all keys from the carrier.
     #[allow(unused)]
     fn keys(&self) -> Vec<&str>;
@@ -52,6 +58,10 @@ impl<S: std::hash::BuildHasher> Extractor for HashMap<String, String, S> {
 impl Extractor for &dyn opentelemetry::propagation::Extractor {
     fn get(&self, key: &str) -> Option<&str> {
         opentelemetry::propagation::Extractor::get(*self, key)
+    }
+
+    fn get_all(&self, key: &str) -> Option<Vec<&str>> {
+        opentelemetry::propagation::Extractor::get_all(*self, key)
     }
 
     fn keys(&self) -> Vec<&str> {

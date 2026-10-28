@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3 (Oct 26, 2026)
+
+- Handle repeated traceparent and tracestate headers in https://github.com/DataDog/dd-trace-rs/pull/325
+- Support DD_TRACE_HTTP_{SERVER,CLIENT}_ERROR_STATUSES in https://github.com/DataDog/dd-trace-rs/pull/328
+- Set _dd.base_service on spans with an overridden service in https://github.com/DataDog/dd-trace-rs/pull/331
+- Parse ipv6 agent host values correctly in https://github.com/DataDog/dd-trace-rs/pull/321
+- Support space-separated DD_TAGS and tags without a value in https://github.com/DataDog/dd-trace-rs/pull/322
+- Otel thread-level context sharing in https://github.com/DataDog/dd-trace-rs/pull/269
+- Enable hostname reporting on trace exporter in https://github.com/DataDog/dd-trace-rs/pull/308
+- Add stats cardinality limits configurations in https://github.com/DataDog/dd-trace-rs/pull/309
+- Route the tracer's own diagnostics through tracing in https://github.com/DataDog/dd-trace-rs/pull/281
+- Accept 0/1 as boolean flags in configuration in https://github.com/DataDog/dd-trace-rs/pull/305
+
 ## 0.5.2 (Aug 28, 2026)
 
 - Preserve unchanged `ot` member order in W3C tracestate in https://github.com/DataDog/dd-trace-rs/pull/296

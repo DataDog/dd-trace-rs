@@ -13,13 +13,11 @@
 [apache-badge]: https://img.shields.io/badge/license-Apache-blue.svg
 [apache-url]: LICENSE
 
-
 # dd-trace-rs
 
 This library powers [Distributed Tracing](https://docs.datadoghq.com/tracing/), metrics and logging.
 It provides OpenTelemetry API and SDK compatibility with Datadog-specific features and
 optimizations.
-
 
 ## Usage
 
@@ -31,7 +29,7 @@ opentelemetry-sdk.
 Add to you Cargo.toml
 
 ```toml
-datadog-opentelemetry = { version = "0.5.2" }
+datadog-opentelemetry = { version = "0.5.3" }
 ```
 
 ### Creating traces, metrics and logs
@@ -39,14 +37,14 @@ datadog-opentelemetry = { version = "0.5.2" }
 #### Tracing
 
 To trace functions, you can either use the `opentelemetry` crate's
-[API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/trace/index.html) or the `tracing` crate
+[API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/trace/index.html) or the `tracing` crate
 [API](https://docs.rs/tracing/0.1.44/tracing/) with the `tracing-opentelemetry`
 [bridge](https://docs.rs/tracing-opentelemetry/latest/tracing_opentelemetry/).
 
 #### Metrics
 
 To collect metrics, use the `opentelemetry` crate's
-[Metrics API](https://docs.rs/opentelemetry/0.32.0/opentelemetry/metrics/index.html). For more
+[Metrics API](https://docs.rs/opentelemetry/0.33.0/opentelemetry/metrics/index.html). For more
 details, see the
 [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/dd_sdks/api_support/?platform=metrics&prog_lang=rust).
 
@@ -69,7 +67,7 @@ metrics
 Requires
 
 * [`tracing-subscriber`](https://docs.rs/tracing-subscriber/0.3.22/tracing_subscriber/)
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
 * [`tracing`](https://docs.rs/tracing/0.1.44/tracing/)
 
 ```rust ,no_run
@@ -96,7 +94,7 @@ tracer_provider
 
 Requires
 
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `trace` feature
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `trace` feature
   enabled
 
 ```rust ,no_run
@@ -125,7 +123,7 @@ tracer_provider
 Requires
 
 * the `metrics` feature of this crate to be enabled
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) with the `metrics` feature
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) with the `metrics` feature
   enabled
 * [`tokio`](https://docs.rs/tokio)
 
@@ -154,7 +152,7 @@ Requires
 
 * the `logs` feature of this crate to be enabled
 * [`log`](https://docs.rs/log/0.4.29/log/)
-* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
+* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
 * [`tokio`](https://docs.rs/tokio)
 
 The logger provider MUST be initialized within a tokio context
@@ -172,6 +170,64 @@ logger_provider.shutdown();
 
 For more details, see the
 [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
+
+### Thread context sharing
+
+This tracer supports sharing the active context with an external
+(out-of-process) reader, typically the Full Host Profiler, correlating CPU
+profiles with spans. The implementation follows the [OTel
+specification][otep-4947], making the context visible to other compatible eBPF
+profilers or any OTel-compliant external reader.
+
+The thread-level context sharing is **Linux-only**, as per the current
+standard.
+
+To enable thread-level context sharing on Linux:
+
+1. Enable the `otel-thread-ctx` feature on your `datadog-opentelemetry` dependency.
+2. Depending on the type of your crate:
+
+   * If you're building an executable, add `datadog-opentelemetry` to your
+     `[build-dependencies]` as well (do not enable the `otel-thread-ctx`
+     feature for the build dependency):
+
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.3" }
+     ```
+
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_build_instructions();
+     ```
+
+   * If you're building a Rust library (`(r)lib`), you'll have to ensure the
+     instructions above are applied to _every downstream executable that uses
+     your library_.
+   * If you're building a shared dynamic library (`(c)dylib`), please note that
+     **while the following instructions should work in most environments,
+     building a dynamic library with thread context support is currently
+     experimental at best**. In particular, a crate with both a binary target
+     and a (c)dylib target won't compile with the instructions below.
+
+     Add `datadog-opentelemetry` to your `[build-dependencies]` as well (do not
+     enable the `otel-thread-ctx` feature for the build dependency):
+
+     ```toml
+     [build-dependencies]
+     datadog-opentelemetry = { version = "0.5.3" }
+     ```
+
+     Finally, add the following line to your `build.rs` main function (create one
+     if needed):
+
+     ```rust
+     datadog_opentelemetry::build::emit_otel_thread_ctx_dylib_build_instructions();
+     ```
+
+We are working on lifting the need for a custom build script in the future.
 
 ### Configuration
 
@@ -203,7 +259,7 @@ let logging_provider = datadog_opentelemetry::logs()
 
 For advanced usage and configuration information, check out [`DatadogTracingBuilder`],
 [`configuration::ConfigBuilder`] and the
-[library documentation](https://docs.rs/datadog-opentelemetry/0.5.2/datadog_opentelemetry/).
+[library documentation](https://docs.rs/datadog-opentelemetry/0.5.3/datadog_opentelemetry/).
 
 * Through env variables
 
@@ -227,15 +283,42 @@ datadog_opentelemetry::tracing()
     .init();
 ```
 
+### Tracer diagnostics
+
+The tracer reports on itself - configuration problems, transport failures, dropped spans. Where
+those diagnostics go depends on the application: if it has installed a `tracing` subscriber, they
+are emitted to it under the target `datadog_opentelemetry`; if it has not, they are printed to
+stdout and stderr, so a bare binary still sees them.
+
+With a subscriber installed, two independent settings apply, and a diagnostic has to pass **both**:
+
+| Setting | Decides | Default |
+| --- | --- | --- |
+| `DD_LOG_LEVEL`, or `ConfigBuilder::set_log_level_filter` | how verbose the tracer is: which diagnostics it produces at all | `ERROR` |
+| the subscriber's own filter, typically `RUST_LOG` | which of those it keeps, and where they go | `ERROR`, for `EnvFilter` with `RUST_LOG` unset |
+
+Neither overrides the other: the more restrictive of the two wins, so raising one alone leaves the
+other in force. Both have to be raised to see anything below `ERROR`.
+
+```bash
+# Errors only: the tracer produces nothing below ERROR for the filter to admit.
+RUST_LOG=datadog_opentelemetry=debug cargo run
+
+# Errors only: the tracer produces DEBUG diagnostics, and the subscriber discards them.
+DD_LOG_LEVEL=debug RUST_LOG=error cargo run
+
+# DEBUG diagnostics reach the subscriber, which decides where they end up.
+DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
+```
+
 ## Support
 
 * MSRV: 1.87
-
-* [`opentelemetry`](https://docs.rs/opentelemetry/0.32.0/opentelemetry/) version: 0.32
-* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.33.0/tracing_opentelemetry/)
-  version: 0.33
-* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.32.0/opentelemetry_appender_log/)
-  version 0.32
+* [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
+* [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
+  version: 0.34
+* [`opentelemetry-appender-log`](https://docs.rs/opentelemetry-appender-log/0.33.0/opentelemetry_appender_log/)
+  version 0.33
 * [`log`](https://docs.rs/log/0.4.29/log/) version 0.4
 
 ## Features
@@ -246,3 +329,10 @@ datadog_opentelemetry::tracing()
 * `logs` enabled the log provider
 * `logs-grpc` enabled the log provider, with GRPC OTLP export
 * `logs-http` enabled the log provider, with HTTP OTLP export
+* `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
+  subscriber is available
+* `otel-thread-ctx` enables [sharing contexts with external readers][otep-4947] (typically
+  an eBPF profiler). Executables additionally require a `build.rs` calling the build helper:
+  see the dedicated section above.
+
+[otep-4947]: https://github.com/open-telemetry/opentelemetry-specification/blob/main/oteps/profiles/4947-thread-ctx.md

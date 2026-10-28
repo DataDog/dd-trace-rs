@@ -14,7 +14,9 @@ use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue
 use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText as _;
 
-use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
+use crate::{
+    core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY, mappings::transform::SPAN_LINK_FLAGS_SET,
+};
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -115,7 +117,20 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     false,
                     TraceState::default(),
                 ),
-                vec![],
+                vec![
+                    KeyValue::new(
+                        "array",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "bools",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("nested", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("floats", opentelemetry::Value::Array(vec![1.5].into())),
+                ],
                 2,
             ),
             Link::new(
@@ -140,7 +155,23 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     ("a2".into(), "v2".into()),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
+            },
+            DdSpanLink {
+                trace_id: 12379813738877118345,
+                trace_id_high: 12379813738877118345,
+                span_id: 18364758544493064720,
+                attributes: HashMap::from_iter([
+                    ("array.0".into(), "a".into()),
+                    ("array.1".into(), "b".into()),
+                    ("bools.0".into(), "true".into()),
+                    ("bools.1".into(), "false".into()),
+                    ("nested.0".into(), "1".into()),
+                    ("nested.1".into(), "2".into()),
+                    ("floats.0".into(), "1.5".into()),
+                ]),
+                tracestate: "".into(),
+                flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -148,15 +179,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: HashMap::new(),
                 tracestate: "".into(),
-                flags: 0,
-            },
-            DdSpanLink {
-                trace_id: 12379813738877118345,
-                trace_id_high: 12379813738877118345,
-                span_id: 18364758544493064720,
-                attributes: HashMap::new(),
-                tracestate: "".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
         ],
     )
@@ -734,6 +757,8 @@ mod tests {
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
 
+    use bumpalo::Bump;
+
     use crate::mappings::{
         transform::{otel_span_to_dd_span, CowStr},
         DdSpan,
@@ -756,8 +781,14 @@ mod tests {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 )
                 .build();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            let alloc = Bump::new();
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
+                &test_span_to_sdk_span(&test.input_span),
+                &input_resource,
+                &alloc,
+            );
             hashmap_diff(&output.meta, &test.expected_out.meta);
             hashmap_diff(&output.metrics, &test.expected_out.metrics);
             assert_eq!(

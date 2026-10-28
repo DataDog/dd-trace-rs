@@ -202,6 +202,11 @@ impl FromStr for Tracestate {
             }
 
             if key == "dd" {
+                if dd.is_some() {
+                    dd_debug!("Tracestate: ignoring duplicate dd member: {v}");
+                    continue;
+                }
+
                 dd = Some(
                     value
                         .trim()
@@ -600,7 +605,16 @@ pub fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
 /// Same as [`extract`], but returns the error instead of logging it. The composite
 /// propagator uses this so it can log once, after checking if another format recovered.
 pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext, Error>> {
-    let tp = carrier.get(TRACEPARENT_KEY)?.trim();
+    let tp = match carrier.get_all(TRACEPARENT_KEY)?.as_slice() {
+        [tp] => tp.trim(),
+        [] => return None,
+        _ => {
+            return Some(Err(Error::extract(
+                "multiple traceparent headers",
+                "traceparent",
+            )))
+        }
+    };
 
     match extract_traceparent(tp) {
         Ok(traceparent) => {
@@ -613,12 +627,12 @@ pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext,
             let mut sampling_priority = traceparent.sampling_priority;
             let mut mechanism = None;
             let tracestate: Option<Tracestate> = if let Some(raw_tracestate) =
-                carrier.get(TRACESTATE_KEY)
+                extract_raw_tracestate(carrier)
             {
-                if let Ok(tracestate) = Tracestate::from_str(raw_tracestate) {
+                if let Ok(tracestate) = Tracestate::from_str(&raw_tracestate) {
                     dd_debug!("Propagator (tracecontext): tracestate header parsed successfully");
 
-                    tags.insert(TRACESTATE_KEY.to_string(), raw_tracestate.to_string());
+                    tags.insert(TRACESTATE_KEY.to_string(), raw_tracestate.clone());
 
                     // Convert from `t.` to `_dd.p.`
                     if let Some(propagation_tags) = &tracestate.propagation_tags {
@@ -674,6 +688,19 @@ pub(crate) fn try_extract(carrier: &dyn Extractor) -> Option<Result<SpanContext,
         }
         Err(e) => Some(Err(e)),
     }
+}
+
+/// Joins every non-empty `tracestate` header into one list, keeping their order,
+/// as W3C Trace Context requires when the header is sent more than once.
+fn extract_raw_tracestate(carrier: &dyn Extractor) -> Option<String> {
+    let values = carrier.get_all(TRACESTATE_KEY)?;
+    let joined = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(TRACESTATE_VALUES_SEPARATOR);
+    (!joined.is_empty()).then_some(joined)
 }
 
 fn define_sampling_priority(
@@ -849,6 +876,122 @@ mod test {
     };
 
     use super::*;
+
+    /// A carrier that keeps repeated keys, like HTTP headers.
+    struct MultiValueCarrier(Vec<(&'static str, &'static str)>);
+
+    impl Extractor for MultiValueCarrier {
+        fn get(&self, key: &str) -> Option<&str> {
+            self.get_all(key)?.first().copied()
+        }
+
+        fn get_all(&self, key: &str) -> Option<Vec<&str>> {
+            let values: Vec<&str> = self
+                .0
+                .iter()
+                .filter(|(k, _)| *k == key)
+                .map(|(_, v)| *v)
+                .collect();
+            (!values.is_empty()).then_some(values)
+        }
+
+        fn keys(&self) -> Vec<&str> {
+            self.0.iter().map(|(k, _)| *k).collect()
+        }
+    }
+
+    const VALID_TRACEPARENT: &str = "00-12345678901234567890123456789012-1234567890123456-00";
+
+    #[test]
+    fn test_extract_rejects_duplicated_traceparent() {
+        let carrier = MultiValueCarrier(vec![
+            (
+                TRACEPARENT_KEY,
+                "00-12345678901234567890123456789011-1234567890123456-01",
+            ),
+            (
+                TRACEPARENT_KEY,
+                "00-12345678901234567890123456789012-1234567890123456-01",
+            ),
+        ]);
+
+        assert!(matches!(try_extract(&carrier), Some(Err(_))));
+    }
+
+    #[test]
+    fn test_extract_joins_multiple_tracestate_headers() {
+        let carrier = MultiValueCarrier(vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (TRACESTATE_KEY, "foo=1,bar=2"),
+            (TRACESTATE_KEY, "rojo=1,congo=2"),
+            (TRACESTATE_KEY, "baz=3"),
+        ]);
+
+        let context = try_extract(&carrier).unwrap().unwrap();
+
+        assert_eq!(
+            context.tags.get(TRACESTATE_KEY).unwrap(),
+            "foo=1,bar=2,rojo=1,congo=2,baz=3"
+        );
+    }
+
+    #[test]
+    fn test_extract_tracestate_keeps_first_dd_member() {
+        let single_header = vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (
+                TRACESTATE_KEY,
+                "dd=s:2;o:new,foo=1,dd=s:-1;o:old,foo=2,bar=3",
+            ),
+        ];
+        let split_headers = vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (TRACESTATE_KEY, "dd=s:2;o:new,foo=1"),
+            (TRACESTATE_KEY, "dd=s:-1;o:old,foo=2,bar=3"),
+        ];
+
+        for headers in [single_header, split_headers] {
+            let tracestate = try_extract(&MultiValueCarrier(headers))
+                .unwrap()
+                .unwrap()
+                .tracestate
+                .unwrap();
+
+            assert_eq!(
+                tracestate.sampling.unwrap().priority.unwrap(),
+                priority::USER_KEEP
+            );
+            assert_eq!(tracestate.origin.as_deref(), Some("new"));
+            assert_eq!(
+                tracestate.additional_values.unwrap(),
+                vec![
+                    ("foo".to_string(), "1".to_string()),
+                    ("foo".to_string(), "2".to_string()),
+                    ("bar".to_string(), "3".to_string()),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_skips_empty_tracestate_headers() {
+        for values in [vec!["", "foo=1"], vec!["foo=1", ""]] {
+            let mut headers = vec![(TRACEPARENT_KEY, VALID_TRACEPARENT)];
+            headers.extend(values.into_iter().map(|v| (TRACESTATE_KEY, v)));
+
+            let context = try_extract(&MultiValueCarrier(headers)).unwrap().unwrap();
+
+            assert_eq!(context.tags.get(TRACESTATE_KEY).unwrap(), "foo=1");
+        }
+
+        let carrier = MultiValueCarrier(vec![
+            (TRACEPARENT_KEY, VALID_TRACEPARENT),
+            (TRACESTATE_KEY, ""),
+        ]);
+        let context = try_extract(&carrier).unwrap().unwrap();
+        assert!(context.tracestate.is_none());
+        assert!(!context.tags.contains_key(TRACESTATE_KEY));
+    }
 
     #[test]
     fn test_extract_traceparent_propagator() {

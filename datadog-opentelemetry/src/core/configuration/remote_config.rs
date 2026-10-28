@@ -14,6 +14,7 @@ use crate::core::configuration::Config;
 
 use async_trait::async_trait;
 use core::fmt;
+use libdd_capabilities_impl::NativeCapabilities;
 use libdd_common::Endpoint;
 use libdd_remote_config::fetch::{
     ConfigApplyState, ConfigInvariants, ConfigOptions, SingleChangesFetcher,
@@ -306,7 +307,7 @@ impl fmt::Display for RemoteConfigClientError {
 /// worker is paused.
 pub struct RemoteConfigClientWorker {
     config: Arc<Config>,
-    fetcher: SingleChangesFetcher<ParsedFileStorage>,
+    fetcher: SingleChangesFetcher<ParsedFileStorage, NativeCapabilities>,
     poll_period: Duration,
     /// Built lazily on the first [`Worker::trigger`] because `tokio::time::interval`
     /// must be constructed inside a runtime context, and `start` runs on the
@@ -341,6 +342,7 @@ impl RemoteConfigClientWorker {
                 language: config.language().to_string(),
                 tracer_version: config.tracer_version().to_string(),
                 endpoint,
+                agentless: None,
             },
             products: vec![RemoteConfigProduct::ApmTracing],
             capabilities: vec![
@@ -349,7 +351,13 @@ impl RemoteConfigClientWorker {
             ],
         };
 
-        let fetcher = SingleChangesFetcher::new(storage, target, runtime_id, options);
+        let fetcher = SingleChangesFetcher::new_no_agentless(
+            storage,
+            target,
+            runtime_id,
+            options,
+            NativeCapabilities::new(),
+        );
         let poll_period = Duration::from_secs_f64(config.remote_config_poll_interval());
 
         let worker = Self {
@@ -428,7 +436,7 @@ type StoredApmFile =
 fn apply_changes(
     changes: Vec<Change<Arc<StoredApmFile>, anyhow::Result<Option<RemoteConfigParsed>>>>,
     config: &Arc<Config>,
-    fetcher: &SingleChangesFetcher<ParsedFileStorage>,
+    fetcher: &SingleChangesFetcher<ParsedFileStorage, NativeCapabilities>,
 ) {
     for change in changes {
         match change {
@@ -443,7 +451,7 @@ fn apply_changes(
 fn apply_add_or_update(
     file: &Arc<StoredApmFile>,
     config: &Arc<Config>,
-    fetcher: &SingleChangesFetcher<ParsedFileStorage>,
+    fetcher: &SingleChangesFetcher<ParsedFileStorage, NativeCapabilities>,
 ) {
     let contents = file.contents();
     let state = match &*contents {
@@ -470,7 +478,7 @@ fn apply_add_or_update(
 }
 
 fn apply_remove(file: &Arc<StoredApmFile>, config: &Arc<Config>) {
-    let config_id = file.path().config_id.clone();
+    let config_id = file.path().config_id().to_string();
     crate::dd_debug!(
         "RemoteConfigClient: removing APM_TRACING config {}",
         config_id
