@@ -12,7 +12,7 @@ use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
 };
 use datadog_opentelemetry::mappings::transform_tests::test_span_to_sdk_span;
 use datadog_opentelemetry::mappings::SpanStr;
-use libdd_trace_utils::span::span_pool::SpanPool;
+use libdd_trace_utils::span::v1::span_pool::SpanPoolV1;
 
 #[global_allocator]
 static GLOBAL: ReportingAllocator<std::alloc::System> = ReportingAllocator::new(std::alloc::System);
@@ -32,7 +32,7 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
             )
             .build();
 
-        let pool: SpanPool<SpanStr<'static>> = SpanPool::with_capacity(1_000);
+        let pool: SpanPoolV1<SpanStr<'static>> = SpanPoolV1::with_capacity(1_000);
         // Reuse a single arena across iterations, resetting it between spans.
         // This mirrors the exporter, which creates one arena per flush batch and
         // amortizes it over all spans in the batch, instead of paying a fresh arena
@@ -52,19 +52,18 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
                         // resets them (dropping those borrows) before the borrow sources
                         // can go away. This mirrors the lifetime erasure done in the span
                         // exporter.
-                        let pool: &SpanPool<SpanStr> = unsafe { std::mem::transmute(&pool) };
-                        let mut dd_span = pool.get_span();
-                        datadog_opentelemetry::mappings::otel_span_to_dd_span(
-                            &mut dd_span,
+                        let pool: &SpanPoolV1<SpanStr> = unsafe { std::mem::transmute(&pool) };
+                        let dd_span = datadog_opentelemetry::mappings::otel_span_to_dd_span_into(
+                            pool.get_span(),
                             &input_span,
                             &input_resource,
                             &arena,
                         );
                         black_box(&dd_span);
                         // Return the span to the pool, as dropping the exporter's
-                        // PooledChunks does, going through a recycled chunk buffer.
-                        let mut chunk = pool.pull_empty_chunk();
-                        chunk.push(dd_span);
+                        // PooledTraceChunks does, going through a recycled chunk buffer.
+                        let mut chunk = pool.get_chunk();
+                        chunk.spans.push(dd_span);
                         pool.add_chunks(std::iter::once(chunk));
                     },
                     criterion::BatchSize::LargeInput,

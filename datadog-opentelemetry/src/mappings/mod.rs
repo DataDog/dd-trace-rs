@@ -10,7 +10,9 @@ mod transform;
 pub(super) use cached_config::CachedConfig;
 pub(super) use cached_config::VERSION_KEY;
 pub(super) use sdk_span::SdkSpan;
+#[cfg(any(test, feature = "test-utils"))]
 pub use transform::otel_span_to_dd_span;
+pub use transform::otel_span_to_dd_span_into;
 pub(super) use transform::otel_util::{
     get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
     get_otel_service, get_otel_status_code,
@@ -22,8 +24,10 @@ pub(crate) use transform::otel_util::OtelSpan;
 pub use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
     otel_util::DEFAULT_OTLP_SERVICE_NAME,
-    otel_value_string_repr, DdSpan, SpanStr,
+    otel_value_string_repr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
 };
+
+pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert, CowStr};
 
 #[cfg(feature = "test-utils")]
 pub use transform::{semconv_shim, transform_tests};
