@@ -167,6 +167,51 @@ fn set_metric_otlp_with_semconv_mappings<'a>(
     }
 }
 
+/// Flattens an array attribute to `key.0`, `key.1`, …: numbers go to metrics, and strings
+/// and booleans go to meta.
+fn set_array_otlp_with_semconv_mappings<'a>(
+    k: &'a str,
+    value: &'a opentelemetry::Value,
+    array: &'a opentelemetry::Array,
+    dd_span: &mut DdSpan<'a>,
+    alloc: &'a Bump,
+) {
+    let mapped_key = get_dd_key_for_otlp_attribute_in(k, alloc);
+    if mapped_key.is_empty() {
+        return;
+    }
+    let indexed_key = |i: usize| SpanStr::from_str(fmt_in(alloc, format_args!("{mapped_key}.{i}")));
+    match array {
+        opentelemetry::Array::Bool(v) => {
+            for (i, b) in v.iter().enumerate() {
+                let b = if *b { "true" } else { "false" };
+                dd_span
+                    .meta
+                    .insert(indexed_key(i), SpanStr::from_static_str(b));
+            }
+        }
+        opentelemetry::Array::I64(v) => {
+            for (i, n) in v.iter().enumerate() {
+                dd_span.metrics.insert(indexed_key(i), *n as f64);
+            }
+        }
+        opentelemetry::Array::F64(v) => {
+            for (i, f) in v.iter().enumerate() {
+                dd_span.metrics.insert(indexed_key(i), *f);
+            }
+        }
+        opentelemetry::Array::String(v) => {
+            for (i, s) in v.iter().enumerate() {
+                dd_span
+                    .meta
+                    .insert(indexed_key(i), SpanStr::from_str(s.as_str()));
+            }
+        }
+        // Array is #[non_exhaustive]
+        _ => set_meta_otlp_with_semconv_mappings(k, value, dd_span, alloc),
+    }
+}
+
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L69
 fn otel_span_to_dd_span_minimal<'a>(
     dd_span: &mut DdSpan<'a>,
@@ -736,6 +781,9 @@ pub fn otel_span_to_dd_span<'a>(
             }
             opentelemetry::Value::F64(v) => {
                 set_metric_otlp_with_semconv_mappings(key, *v, dd_span, alloc);
+            }
+            opentelemetry::Value::Array(array) => {
+                set_array_otlp_with_semconv_mappings(key, value, array, dd_span, alloc);
             }
             _ => {
                 set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
