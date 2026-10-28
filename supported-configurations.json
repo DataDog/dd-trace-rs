@@ -15,7 +15,8 @@
         "version": "B",
         "type": "boolean",
         "default": null,
-        "propertyKeys": ["appsec_sca_enabled"]
+        "propertyKeys": ["appsec_sca_enabled"],
+        "namespace": "appsec"
       }
     ],
     "DD_DOGSTATSD_HOST": [
