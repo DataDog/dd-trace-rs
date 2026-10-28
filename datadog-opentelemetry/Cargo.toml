@@ -101,11 +101,7 @@ opentelemetry-appender-log = { version = "0.33.0" }
 criterion = "0.5.1"
 
 [features]
-default = ["dependency-collection"]
-# Records the application's runtime dependencies at build time (see `build.rs`) and
-# reports them through telemetry. Disable with `default-features = false`, or set
-# `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false` when building or running.
-dependency-collection = []
+default = []
 metrics = ["metrics-grpc"]
 metrics-grpc = ["opentelemetry-otlp", "opentelemetry-otlp/grpc-tonic"]
 metrics-http = [

@@ -1,13 +1,15 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Records the runtime dependencies of the application being built.
+//! Records the dependencies of the application being built.
 //!
-//! With the `dependency-collection` feature, this script locates the workspace being built
+//! This script locates the workspace being built
 //! (the application's, not this crate's), lists its binary targets with
-//! `cargo metadata --no-deps` and resolves the runtime dependencies of each workspace package
-//! that depends on this crate with `cargo tree`. The result is written to
-//! `$OUT_DIR/dependencies.rs` and reported through telemetry at runtime.
+//! `cargo metadata --no-deps` and resolves the dependency tree of each workspace package
+//! that depends on this crate with `cargo tree`, twice when it has dev-dependencies: as its
+//! binaries are built, and as its tests are. The trees are merged into one graph, written to
+//! `$OUT_DIR/build_time_dependencies.rs` as a Rust expression the tracer includes, and from
+//! which it picks the running executable's dependencies at runtime.
 //!
 //! Collection is best-effort: any failure yields an empty list and never fails the build.
 //! Instead, the failure is recorded as a fixed code that the tracer reports as a telemetry
@@ -15,16 +17,18 @@
 //! collection, and is not reported as a failure.
 
 fn main() {
-    #[cfg(feature = "dependency-collection")]
     dependencies::generate();
 }
 
-#[cfg(feature = "dependency-collection")]
+// The types of the recorded graph, shared with the tracer.
+#[path = "src/core/telemetry/dependencies/graph.rs"]
+mod graph;
+
 // allow: cargo configures build scripts through the environment
 #[allow(clippy::disallowed_methods)]
 mod dependencies {
     use std::{
-        collections::BTreeSet,
+        collections::{BTreeMap, BTreeSet, HashMap},
         env,
         ffi::OsString,
         fs,
@@ -34,16 +38,64 @@ mod dependencies {
 
     use serde_json::Value;
 
+    use super::graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
+
     const ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
     const WORKSPACE_DIR_ENV: &str = "CARGO_WORKSPACE_DIR";
+    /// Set when the graph was written; must match the tracer's.
+    const RECORDED_CFG: &str = "dd_build_time_dependencies";
+    /// Carries the failure code to the tracer when the graph couldn't be written; must match the
+    /// tracer's.
+    const FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
+    const WRITE_FAILED: &str = "write_failed";
 
-    /// A `(name, version)` pair.
-    type Package = (String, String);
+    #[derive(Default)]
+    struct GraphBuilder {
+        graph: Graph,
+        index: HashMap<Package, usize>,
+    }
 
-    /// A binary target of the application's workspace and its runtime dependencies.
-    struct Binary {
-        name: String,
-        dependencies: BTreeSet<Package>,
+    impl GraphBuilder {
+        fn node(&mut self, package: &Package) -> usize {
+            if let Some(&index) = self.index.get(package) {
+                return index;
+            }
+            let graph = &mut self.graph;
+            graph.packages.push(package.clone());
+            graph.dependencies.push(BTreeMap::new());
+            self.index.insert(package.clone(), graph.packages.len() - 1);
+            graph.packages.len() - 1
+        }
+
+        /// Adds the non-dev edges of `tree`, seen in `builds`, and returns its root.
+        fn add_tree(&mut self, tree: &Tree, builds: Builds) -> usize {
+            for (parent, child, _) in tree.edges.iter().filter(|(_, _, dev)| !dev) {
+                let (parent, child) = (self.node(parent), self.node(child));
+                self.graph.dependencies[parent]
+                    .entry(child)
+                    .and_modify(|seen| *seen = seen.merge(builds))
+                    .or_insert(builds);
+            }
+            self.node(&tree.root)
+        }
+    }
+
+    struct Tree {
+        root: Package,
+        edges: Vec<(Package, Package, bool)>,
+    }
+
+    impl Tree {
+        fn contains(&self, name: &str) -> bool {
+            self.root.name == name || self.edges.iter().any(|(_, child, _)| child.name == name)
+        }
+
+        fn dev_dependencies(&self) -> impl Iterator<Item = &Package> {
+            self.edges
+                .iter()
+                .filter(|(parent, _, dev)| *dev && *parent == self.root)
+                .map(|(_, child, _)| child)
+        }
     }
 
     /// Why collection produced no list. Reported through telemetry as a fixed code, since the
@@ -105,21 +157,90 @@ mod dependencies {
         println!("cargo::rerun-if-env-changed={ENABLED_ENV}");
         println!("cargo::rerun-if-env-changed={WORKSPACE_DIR_ENV}");
 
-        let result = if collection_enabled() {
-            collect()
-        } else {
-            Ok(Vec::new())
+        let recorded = match collection_enabled().then(collect) {
+            None => Recorded::default(),
+            Some(Ok(graph)) => Recorded::with(graph),
+            Some(Err((failure, details))) => {
+                println!(
+                    "cargo::warning=dependency collection failed ({}): {details}",
+                    failure.code()
+                );
+                Recorded::with_error(failure.code())
+            }
         };
-        if let Err((failure, details)) = &result {
-            println!(
-                "cargo::warning=dependency collection failed ({}): {details}",
-                failure.code()
-            );
-        }
 
         let out_dir = env::var_os("OUT_DIR").expect("cargo sets OUT_DIR for build scripts");
-        fs::write(Path::new(&out_dir).join("dependencies.rs"), render(&result))
-            .expect("failed to write the dependency list to OUT_DIR");
+        let written = fs::write(
+            Path::new(&out_dir).join("build_time_dependencies.rs"),
+            render(&recorded),
+        );
+        // The tracer only includes the file when this cfg is set, and builds that don't run this
+        // script don't set it, so a missing file never fails the build.
+        println!("cargo::rustc-check-cfg=cfg({RECORDED_CFG})");
+        match written {
+            Ok(()) => println!("cargo::rustc-cfg={RECORDED_CFG}"),
+            Err(err) => {
+                println!("cargo::warning=dependency collection failed ({WRITE_FAILED}): {err}");
+                println!("cargo::rustc-env={FAILURE_ENV}={WRITE_FAILED}");
+            }
+        }
+    }
+
+    /// Renders `recorded` as a Rust expression of type `Recorded`.
+    fn render(Recorded { graph, failure }: &Recorded) -> String {
+        if let Some(failure) = failure {
+            return format!("Recorded::with_error({failure:?})\n");
+        }
+        let packages: String = graph
+            .packages
+            .iter()
+            .map(|Package { name, version }| {
+                format!("Package {{ name: {name:?}.into(), version: {version:?}.into() }},\n")
+            })
+            .collect();
+        let dependencies: String = graph
+            .dependencies
+            .iter()
+            .map(|edges| {
+                let edges: String = edges
+                    .iter()
+                    .map(|(package, builds)| format!("({package}, Builds::{builds:?}), "))
+                    .collect();
+                format!("std::collections::BTreeMap::from([{edges}]),\n")
+            })
+            .collect();
+        let members: String = graph
+            .members
+            .iter()
+            .map(|member| {
+                let dev_dependencies = match &member.dev_dependencies {
+                    Some(dev) => {
+                        let dev: Vec<String> = dev.iter().map(usize::to_string).collect();
+                        format!("Some(vec![{}])", dev.join(", "))
+                    }
+                    None => "None".to_owned(),
+                };
+                let targets: String = member
+                    .targets
+                    .iter()
+                    .map(|Target { name, kind }| {
+                        format!("Target {{ name: {name:?}.into(), kind: TargetKind::{kind:?} }}, ")
+                    })
+                    .collect();
+                format!(
+                    "Member {{ package: {}, dev_dependencies: {dev_dependencies}, \
+                     targets: vec![{targets}] }},\n",
+                    member.package
+                )
+            })
+            .collect();
+        format!(
+            "Recorded::with(Graph {{\n\
+             packages: vec![\n{packages}],\n\
+             dependencies: vec![\n{dependencies}],\n\
+             members: vec![\n{members}],\n\
+             }})\n"
+        )
     }
 
     /// Mirrors the runtime parsing of the flag: only `false` and `0` disable collection.
@@ -127,7 +248,7 @@ mod dependencies {
         !matches!(env::var(ENABLED_ENV).as_deref(), Ok("false" | "0"))
     }
 
-    fn collect() -> Result<Vec<Binary>, Error> {
+    fn collect() -> Result<Graph, Error> {
         let unavailable = |details: &str| (Failure::CargoUnavailable, details.to_owned());
         let workspace = workspace_dir().ok_or_else(|| {
             let details = format!(
@@ -146,28 +267,25 @@ mod dependencies {
         );
 
         let packages = workspace_packages(&cargo)?;
-        let mut binaries = Vec::new();
+        let mut builder = GraphBuilder::default();
         let mut tree_error = None;
         for package in &packages {
-            match package_binaries(&cargo, package) {
-                Ok(found) => binaries.extend(found),
-                Err(err) => tree_error = Some(err),
+            if let Err(err) = add_member(&cargo, &mut builder, package) {
+                tree_error = Some(err);
             }
         }
-        // Some packages failing is expected when building a single package of a workspace:
-        // the dependencies of the others may never have been downloaded.
-        if !binaries.is_empty() {
-            return Ok(binaries);
+
+        if !builder.graph.members.is_empty() {
+            return Ok(builder.graph);
         }
         if let Some(err) = tree_error {
             return Err(err);
         }
-        // Not a failure: e.g. a `cdylib` application has no binary target.
-        println!("cargo::warning=no binary target of the workspace depends on this crate");
-        Ok(binaries)
+        println!("cargo::warning=no package of the workspace depends on this crate");
+        Ok(builder.graph)
     }
 
-    /// The root of the workspace being built, as `esp-idf-sys` (`embuild`) locates it:
+    /// The root of the workspace being built:
     /// `CARGO_WORKSPACE_DIR` if set, otherwise the parent of the target directory holding
     /// `OUT_DIR`, which is the workspace root unless the target directory was moved
     /// (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`). Rather than guessing, this
@@ -211,50 +329,108 @@ mod dependencies {
         }
     }
 
-    /// The binary targets of a workspace `package`, or none if it doesn't depend on this crate.
-    fn package_binaries(cargo: &Cargo, package: &Value) -> Result<Vec<Binary>, Error> {
+    /// Adds a workspace `package` to the graph if it depends on this crate, normally or
+    /// through its dev-dependencies.
+    fn add_member(cargo: &Cargo, builder: &mut GraphBuilder, package: &Value) -> Result<(), Error> {
         if let Some(manifest) = package["manifest_path"].as_str() {
             println!("cargo::rerun-if-changed={manifest}");
         }
-        let names: Vec<&str> = package["targets"]
+        let Some(id) = package["id"].as_str() else {
+            return Ok(());
+        };
+        let tree = dependency_tree(cargo, id, "normal")
+            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
+        let has_dev_dependencies = package["dependencies"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|target| is_bin(target))
-            .filter_map(|target| target["name"].as_str())
-            .collect();
-        let Some(id) = package["id"].as_str().filter(|_| !names.is_empty()) else {
-            return Ok(Vec::new());
-        };
-        let Some(dependencies) = runtime_dependencies(cargo, id)? else {
-            return Ok(Vec::new());
-        };
-        Ok(names
-            .into_iter()
-            .map(|name| Binary {
-                name: name.to_owned(),
-                dependencies: dependencies.clone(),
+            .any(|dependency| dependency["kind"] == "dev");
+        // Unlike `cargo build`, `cargo test` downloads the dev-dependencies, so they may be
+        // missing: their tests then report the normal dependencies only.
+        let dev_tree = has_dev_dependencies
+            .then(|| {
+                dependency_tree(cargo, id, "normal,dev")
+                    .inspect_err(|(_, details)| {
+                        println!("cargo::warning=dev-dependencies of {id} not recorded: {details}")
+                    })
+                    .ok()
             })
-            .collect())
-    }
+            .flatten();
+        let this_crate = env!("CARGO_PKG_NAME");
+        if !tree.contains(this_crate)
+            && !dev_tree
+                .as_ref()
+                .is_some_and(|dev| dev.contains(this_crate))
+        {
+            return Ok(());
+        }
 
-    fn is_bin(target: &Value) -> bool {
-        target["kind"]
+        // Without dev-dependencies, tests resolve like the binaries.
+        let builds = if has_dev_dependencies {
+            Builds::Bin
+        } else {
+            Builds::Both
+        };
+        let root = builder.add_tree(&tree, builds);
+        let dev_dependencies = if has_dev_dependencies {
+            dev_tree.map(|dev_tree| {
+                builder.add_tree(&dev_tree, Builds::Test);
+                let dev: BTreeSet<usize> = dev_tree
+                    .dev_dependencies()
+                    .map(|package| builder.node(package))
+                    .collect();
+                dev.into_iter().collect()
+            })
+        } else {
+            Some(Vec::new())
+        };
+        let targets = package["targets"]
             .as_array()
-            .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+            .into_iter()
+            .flatten()
+            .filter_map(target)
+            .collect();
+        builder.graph.members.push(Member {
+            package: root,
+            dev_dependencies,
+            targets,
+        });
+        Ok(())
     }
 
-    /// The runtime dependencies of the package `id` for the current target: normal edges
-    /// only, proc-macros excluded. `None` if they don't include this crate.
-    fn runtime_dependencies(cargo: &Cargo, id: &str) -> Result<Option<BTreeSet<Package>>, Error> {
+    /// A package target, or `None` for a build script.
+    fn target(target: &Value) -> Option<Target> {
+        let name = target["name"].as_str()?;
+        let kinds = target["kind"].as_array()?;
+        let is = |kind: &str| kinds.iter().any(|k| k == kind);
+        let kind = if is("custom-build") {
+            return None;
+        } else if is("bin") {
+            TargetKind::Bin
+        } else if is("example") {
+            TargetKind::Example
+        } else {
+            TargetKind::Other
+        };
+        Some(Target {
+            name: name.to_owned(),
+            kind,
+        })
+    }
+
+    /// The dependency tree of the package `id` for the current target, following `edges`.
+    /// Proc-macros and what they depend on are included, build dependencies aren't.
+    fn dependency_tree(cargo: &Cargo, id: &str, edges: &str) -> Result<Tree, Error> {
         let args = [
             "tree",
             "--offline",
             "--locked",
             "--edges",
-            "normal,no-proc-macro",
+            edges,
             "--prefix",
-            "none",
+            "indent",
+            "--charset",
+            "ascii",
             "--format",
             "{p}",
             "--target",
@@ -262,46 +438,53 @@ mod dependencies {
             "--package",
             id,
         ];
-        let tree = cargo
-            .run(&args, Failure::CargoTreeFailed)
-            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
-        // The first line is the package itself.
-        let dependencies: BTreeSet<Package> =
-            tree.lines().skip(1).filter_map(parse_tree_line).collect();
-        Ok(dependencies
-            .iter()
-            .any(|(name, _)| name == env!("CARGO_PKG_NAME"))
-            .then_some(dependencies))
+        let output = cargo.run(&args, Failure::CargoTreeFailed)?;
+        parse_tree(&output).ok_or_else(|| {
+            let details = "unexpected `cargo tree` output".to_owned();
+            (Failure::CargoTreeFailed, details)
+        })
     }
 
-    /// Parses a `cargo tree --format {p}` line: `name vX.Y.Z [(source)] [(*)]`.
-    fn parse_tree_line(line: &str) -> Option<Package> {
-        let mut fields = line.split_whitespace();
+    /// Parses `cargo tree --prefix indent --charset ascii --format {p}` output. Each level is
+    /// indented by four characters, and a `[dev-dependencies]` line, indented like the
+    /// package it belongs to, starts that package's dev section.
+    fn parse_tree(output: &str) -> Option<Tree> {
+        let mut lines = output.lines();
+        let root = parse_package(lines.next()?)?;
+        // The packages on the path to the current line, and whether their children seen
+        // next are dev-dependencies.
+        let mut path = vec![(root.clone(), false)];
+        let mut edges = Vec::new();
+        for line in lines {
+            let text = line.trim_start_matches(['|', '`', '-', ' ']);
+            let depth = (line.len() - text.len()) / 4;
+            if text.starts_with('[') {
+                if let Some((_, dev)) = path.get_mut(depth) {
+                    *dev = text == "[dev-dependencies]";
+                }
+                continue;
+            }
+            let Some(package) = parse_package(text) else {
+                continue;
+            };
+            path.truncate(depth);
+            let Some((parent, dev)) = path.last() else {
+                continue;
+            };
+            edges.push((parent.clone(), package.clone(), *dev));
+            path.push((package, false));
+        }
+        Some(Tree { root, edges })
+    }
+
+    /// Parses a `cargo tree --format {p}` entry: `name vX.Y.Z [(source)] [(proc-macro)] [(*)]`.
+    fn parse_package(text: &str) -> Option<Package> {
+        let mut fields = text.split_whitespace();
         let name = fields.next()?;
         let version = fields.next()?.strip_prefix('v')?;
-        Some((name.to_owned(), version.to_owned()))
-    }
-
-    /// Renders the `BINARIES` and `FAILURE` statics read by `core/telemetry/dependencies.rs`.
-    fn render(result: &Result<Vec<Binary>, Error>) -> String {
-        let (binaries, failure) = match result {
-            Ok(binaries) => (binaries.as_slice(), "None".to_owned()),
-            Err((failure, _)) => ([].as_slice(), format!("Some({:?})", failure.code())),
-        };
-        let entries: String = binaries
-            .iter()
-            .map(|binary| {
-                let packages: String = binary
-                    .dependencies
-                    .iter()
-                    .map(|(name, version)| format!("({name:?}, {version:?}), "))
-                    .collect();
-                format!("    ({:?}, &[{packages}]),\n", binary.name)
-            })
-            .collect();
-        format!(
-            "static BINARIES: &[Binary] = &[\n{entries}];\n\
-             static FAILURE: Option<&str> = {failure};\n"
-        )
+        Some(Package {
+            name: name.to_owned(),
+            version: version.to_owned(),
+        })
     }
 }

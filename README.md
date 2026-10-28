@@ -285,11 +285,13 @@ datadog_opentelemetry::tracing()
 
 ### Dependency reporting
 
-The tracer reports the application's runtime dependencies (crate names and versions) through
-telemetry, for Datadog Software Composition Analysis. The list is recorded at build time by the
-`dependency-collection` feature, enabled by default: the crate's build script runs `cargo metadata`
-and `cargo tree` against the workspace being built. Build-time and proc-macro dependencies are
-excluded. The build script never fails the build; when collection isn't possible, no
+The tracer reports the application's dependencies (crate names and versions) through telemetry,
+for Datadog Software Composition Analysis. The dependency graph is recorded at build time: the
+crate's build script runs `cargo metadata` and `cargo tree` against the workspace being built. At runtime, the tracer reports the
+dependencies of the target the running executable was built from: a binary reports its normal
+dependencies, and a test, bench or example also reports its dev-dependencies, when they were
+downloaded at build time. Proc-macros and their dependencies are included; build dependencies
+are excluded. The build script never fails the build; when collection isn't possible, no
 dependencies are reported, and the reason is sent through telemetry.
 
 The workspace is located from the build output directory, which works with the default
@@ -301,11 +303,17 @@ workspace in `.cargo/config.toml`:
 CARGO_WORKSPACE_DIR = { value = "", relative = true }
 ```
 
-To disable it:
+To disable it, set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false`:
 
-* at build time, depend on the crate with `default-features = false`, or set
-  `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false` while building;
-* at runtime, set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false`.
+* while building, to skip collection, for instance for every build of a repository in its
+  `.cargo/config.toml`:
+
+  ```toml
+  [env]
+  DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED = "false"
+  ```
+
+* at runtime, to skip reporting.
 
 ### Tracer diagnostics
 
@@ -355,8 +363,6 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 * `logs-http` enabled the log provider, with HTTP OTLP export
 * `log-compat` routes the tracer's internal diagnostics through the `log` facade when no `tracing`
   subscriber is available
-* `dependency-collection` (default) records the application's runtime dependencies at build time
-  and reports them through telemetry: see [Dependency reporting](#dependency-reporting)
 * `otel-thread-ctx` enables [sharing contexts with external readers][otep-4947] (typically
   an eBPF profiler). Executables additionally require a `build.rs` calling the build helper:
   see the dedicated section above.

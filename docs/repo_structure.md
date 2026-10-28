@@ -34,8 +34,6 @@ are always public.
 
 - `metrics-grpc` / `metrics-http` — OTLP transport for metrics (default: grpc)
 - `logs-grpc` / `logs-http` — OTLP transport for logs (default: grpc)
-- `dependency-collection` (default) — `build.rs` records the application's runtime dependencies,
-  reported through telemetry (`core/telemetry/dependencies.rs`)
 - `test-utils` — exposes internal helpers and pulls in test dependencies; never enable in production
   builds
 
