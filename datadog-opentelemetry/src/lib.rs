@@ -203,12 +203,14 @@
 //!     ..
 //! } = datadog_opentelemetry::tracing().init_local();
 //!
-//! tracer_provider.tracer("my-service").in_span("my-operation", |cx| {
-//!     datadog_telemetry.set_sampling_decision(
-//!         cx.span().span_context().clone(),
-//!         datadog_telemetry_api::SamplingDecision::Keep,
-//!     );
-//! });
+//! tracer_provider
+//!     .tracer("my-service")
+//!     .in_span("my-operation", |cx| {
+//!         datadog_telemetry.set_sampling_decision(
+//!             cx.span().span_context().clone(),
+//!             datadog_telemetry_api::SamplingDecision::Keep,
+//!         );
+//!     });
 //! ```
 //!
 //! ### Configuration
@@ -451,16 +453,15 @@ impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
 ///
 /// ```rust ,no_run
 /// let datadog_opentelemetry::TracingComponents {
-///   tracer_provider,
-///   propagator,
-///   datadog_telemetry,
-///   ..
+///     tracer_provider,
+///     propagator,
+///     datadog_telemetry,
+///     ..
 /// } = datadog_opentelemetry::tracing().init_local();
 /// opentelemetry::global::set_text_map_propagator(propagator);
 /// opentelemetry::global::set_tracer_provider(tracer_provider);
 /// datadog_telemetry_api::set_global(datadog_telemetry);
 /// ```
-///
 pub struct TracingComponents {
     /// The tracer provider producing the spans
     pub tracer_provider: SdkTracerProvider,
@@ -549,10 +550,10 @@ impl DatadogTracingBuilder {
     ///
     /// ```rust
     /// let datadog_opentelemetry::TracingComponents {
-    ///   tracer_provider,
-    ///   propagator,
-    ///   datadog_telemetry,
-    ///   ..
+    ///     tracer_provider,
+    ///     propagator,
+    ///     datadog_telemetry,
+    ///     ..
     /// } = datadog_opentelemetry::tracing().init_local();
     ///
     /// opentelemetry::global::set_text_map_propagator(propagator);
