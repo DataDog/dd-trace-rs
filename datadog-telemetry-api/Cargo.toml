@@ -2,11 +2,11 @@
 name = "datadog-telemetry-api"
 rust-version.workspace = true
 edition.workspace = true
-version.workspace = true
+version = "0.0.0"
 license.workspace = true
 repository.workspace = true
-readme.workspace = true
-description.workspace = true
+# readme.workspace = true
+# description.workspace = true
 authors.workspace = true
 
 [package.metadata.docs.rs]
@@ -14,5 +14,3 @@ authors.workspace = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-arc-swap = "1.9.3"
-opentelemetry = "0.33"
