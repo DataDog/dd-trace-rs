@@ -1029,6 +1029,24 @@ impl ServiceName {
     }
 }
 
+/// DD_TRACE_ENABLED, which remote config can override
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TracingEnabled(bool);
+
+impl std::ops::Deref for TracingEnabled {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for TracingEnabled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl std::ops::Deref for ServiceName {
     type Target = str;
 
@@ -1163,7 +1181,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, TracingEnabled, HttpErrorStatuses);
 impl_config_value_provider!(option: String, f64, bool);
 
 #[derive(Clone)]
@@ -1236,7 +1254,7 @@ pub struct Config {
     trace_rate_limit: ConfigItem<i32>,
 
     /// Disables the library if this is false
-    enabled: ConfigItem<bool>,
+    enabled: ConfigItemWithOverride<TracingEnabled>,
     /// The log level filter for the tracer
     log_level_filter: ConfigItem<LevelFilter>,
 
@@ -1504,7 +1522,8 @@ impl Config {
             ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
-            enabled: cisu.update_bool(default.enabled),
+            enabled: cisu
+                .update_parsed_with_transform::<BooleanFlag, _>(default.enabled, TracingEnabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
                 .update_bool(default.trace_stats_computation_enabled),
@@ -2182,6 +2201,18 @@ impl Config {
         rules
     }
 
+    /// Enables or disables tracing from remote config. Remote config never enables tracing
+    /// that was disabled locally.
+    pub(crate) fn set_tracing_enabled_from_remote(&self, enabled: bool, config_id: Option<String>) {
+        if enabled && !*self.enabled.local_value() {
+            return;
+        }
+        self.enabled
+            .set_override_value(TracingEnabled(enabled), ConfigSourceOrigin::RemoteConfig);
+        self.enabled.set_config_id(config_id);
+        telemetry::notify_configuration_update(&self.enabled);
+    }
+
     pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
         self.trace_sampling_rules.unset_override_value();
         self.trace_sampling_rules.set_config_id(config_id);
@@ -2411,7 +2442,10 @@ fn default_config() -> Config {
         ),
         trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, None),
         trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
-        enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
+        enabled: ConfigItemWithOverride::new_rc(
+            SupportedConfigurations::DD_TRACE_ENABLED,
+            TracingEnabled(true),
+        ),
         log_level_filter: ConfigItem::new(
             SupportedConfigurations::DD_LOG_LEVEL,
             LevelFilter::default(),
@@ -3164,7 +3198,7 @@ impl ConfigBuilder {
     ///
     /// Env variable: `DD_TRACE_ENABLED`
     pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.enabled.set_code(enabled);
+        self.config.enabled.set_code(TracingEnabled(enabled));
         self
     }
 
@@ -4792,10 +4826,10 @@ mod tests {
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled = cisu.update_bool(default.enabled);
-        assert!(enabled.default_value);
-        assert_eq!(enabled.env_value, None);
-        assert_eq!(enabled.code_value, None);
+        let telemetry_enabled = cisu.update_bool(default.telemetry_enabled);
+        assert!(telemetry_enabled.default_value);
+        assert_eq!(telemetry_enabled.env_value, None);
+        assert_eq!(telemetry_enabled.code_value, None);
 
         struct Tags;
 
@@ -4825,6 +4859,75 @@ mod tests {
                 ("hello".to_string(), "world".to_string()),
             ])
         );
+    }
+
+    #[test]
+    fn test_set_tracing_enabled_from_remote() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.enabled());
+
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable".to_string()));
+        assert!(!config.enabled());
+
+        let configurations = config.enabled.get_all_configurations();
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.name, "DD_TRACE_ENABLED");
+        assert_eq!(active_configuration.value.as_deref(), Some("false"));
+        assert_eq!(
+            active_configuration.origin,
+            ConfigurationOrigin::RemoteConfig
+        );
+        assert_eq!(
+            active_configuration.config_id.as_deref(),
+            Some("rc-disable")
+        );
+
+        // A new config id is reported even if the value is unchanged
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable-2".to_string()));
+        assert_eq!(
+            remote_tracing_enabled_configuration(&config)
+                .config_id
+                .as_deref(),
+            Some("rc-disable-2")
+        );
+
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(config.enabled());
+    }
+
+    fn remote_tracing_enabled_configuration(config: &Config) -> Configuration {
+        let configurations = config.enabled.get_all_configurations();
+        configurations.into_iter().max_by_key(|c| c.seq_id).unwrap()
+    }
+
+    #[test]
+    fn test_remote_tracing_enabled_reports_remote_origin_when_unchanged() {
+        let config = Config::builder().build();
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(config.enabled());
+
+        let active_configuration = remote_tracing_enabled_configuration(&config);
+        assert_eq!(active_configuration.value.as_deref(), Some("true"));
+        assert_eq!(
+            active_configuration.origin,
+            ConfigurationOrigin::RemoteConfig
+        );
+        assert_eq!(active_configuration.config_id.as_deref(), Some("rc-enable"));
+    }
+
+    #[test]
+    fn test_remote_config_does_not_enable_locally_disabled_tracing() {
+        let mut builder = Config::builder();
+        builder.set_enabled(false);
+        let config = builder.build();
+
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(!config.enabled());
     }
 
     #[test]

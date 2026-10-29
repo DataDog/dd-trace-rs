@@ -12,6 +12,7 @@
       "_dd.p.dm": "-4",
       "_dd.p.usr.id": "baz64",
       "_dd.parent_id": "00f067aa0ba902b7",
+      "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "test",
       "otel.status_code": "Unset",

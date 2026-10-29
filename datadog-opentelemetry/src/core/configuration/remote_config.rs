@@ -93,6 +93,11 @@ struct LibConfig {
         rename = "tracing_sampling_rate"
     )]
     tracing_sampling_rate: Option<serde_json::Value>,
+
+    /// `Some(false)` disables tracing and `Some(true)` enables it again. An absent or null
+    /// field leaves it unchanged.
+    #[serde(default)]
+    tracing_enabled: Option<bool>,
 }
 
 impl RemoteConfigContent for ApmTracingConfig {
@@ -258,9 +263,9 @@ fn apply_apm_tracing(
                     "RemoteConfigClient: APM tracing config received with null sampling fields, clearing remote override"
                 );
                 config.clear_remote_sampling_rules(Some(tracing_config.id.clone()));
-            } else {
+            } else if lib.tracing_enabled.is_none() {
                 crate::dd_debug!(
-                    "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules or tracing_sampling_rate present"
+                    "RemoteConfigClient: APM tracing config received but no tracing_sampling_rules, tracing_sampling_rate or tracing_enabled present"
                 );
             }
         }
@@ -276,6 +281,12 @@ fn apply_apm_tracing(
                 })?;
             crate::dd_debug!("RemoteConfigClient: Applied sampling rules from remote config");
         }
+    }
+
+    // Applied last, so a config rejected for its sampling fields changes nothing
+    if let Some(enabled) = lib.tracing_enabled {
+        config.set_tracing_enabled_from_remote(enabled, Some(tracing_config.id.clone()));
+        crate::dd_debug!("RemoteConfigClient: Set tracing enabled to {enabled} from remote config");
     }
 
     Ok(())
@@ -348,6 +359,7 @@ impl RemoteConfigClientWorker {
             capabilities: vec![
                 RemoteConfigCapabilities::ApmTracingSampleRate,
                 RemoteConfigCapabilities::ApmTracingSampleRules,
+                RemoteConfigCapabilities::ApmTracingEnabled,
             ],
         };
 
@@ -483,6 +495,8 @@ fn apply_remove(file: &Arc<StoredApmFile>, config: &Arc<Config>) {
         "RemoteConfigClient: removing APM_TRACING config {}",
         config_id
     );
+    // Removing a config clears its sampling rules but not a remote `tracing_enabled: false`:
+    // tracing is only re-enabled by an explicit `tracing_enabled: true`
     config.clear_remote_sampling_rules(Some(config_id));
 }
 
@@ -740,6 +754,93 @@ mod tests {
         assert_eq!(rules[1].sample_rate, 0.1);
         assert!(rules[1].service.is_none());
         assert!(rules[1].tags.is_empty());
+    }
+
+    #[test]
+    fn test_handler_disables_and_enables_tracing() {
+        let config = build_config_for_handler();
+        assert!(config.enabled());
+
+        let disable = br#"{"id": "rc-disable", "lib_config": {"tracing_enabled": false}}"#;
+        apply_payload(disable, &config).unwrap();
+        assert!(!config.enabled());
+
+        // A config without the field leaves tracing disabled
+        let empty = br#"{"id": "rc-empty", "lib_config": {}}"#;
+        apply_payload(empty, &config).unwrap();
+        assert!(!config.enabled());
+
+        let enable = br#"{"id": "rc-enable", "lib_config": {"tracing_enabled": true}}"#;
+        apply_payload(enable, &config).unwrap();
+        assert!(config.enabled());
+    }
+
+    #[test]
+    fn test_handler_invalid_sampling_fields_keep_tracing_enabled() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-invalid",
+            "lib_config": {"tracing_enabled": false, "tracing_sampling_rate": 2.0}
+        }"#;
+        assert!(apply_payload(payload, &config).is_err());
+        assert!(config.enabled());
+    }
+
+    #[test]
+    fn test_handler_non_bool_tracing_enabled_rejects_update() {
+        let config = build_config_for_handler();
+        let payload = br#"{
+            "id": "rc-invalid",
+            "lib_config": {"tracing_enabled": "false", "tracing_sampling_rate": 0.5}
+        }"#;
+        assert!(apply_payload(payload, &config).is_err());
+        assert!(config.enabled());
+        assert_eq!(config.trace_sampling_rules().len(), 0);
+    }
+
+    #[test]
+    fn test_handler_null_tracing_enabled_keeps_tracing_disabled() {
+        let config = build_config_for_handler();
+        let disable = br#"{"id": "rc-disable", "lib_config": {"tracing_enabled": false}}"#;
+        apply_payload(disable, &config).unwrap();
+
+        let null = br#"{"id": "rc-null", "lib_config": {"tracing_enabled": null}}"#;
+        apply_payload(null, &config).unwrap();
+        assert!(!config.enabled());
+    }
+
+    #[test]
+    fn test_remove_keeps_tracing_disabled() {
+        use libdd_remote_config::{fetch::FileStorage, RemoteConfigPath};
+
+        let config = build_config_for_handler();
+        let path = "datadog/2/APM_TRACING/rc-disable/config";
+        let payload = br#"{"id": "rc-disable", "lib_config": {"tracing_enabled": false}}"#;
+        let registry = ParserRegistry::new().with::<ApmTracingConfig>().unwrap();
+        let file = ParsedFileStorage::with_registry(Arc::new(registry))
+            .store(
+                1,
+                Arc::new(RemoteConfigPath::try_parse(path).unwrap().into()),
+                payload.to_vec(),
+            )
+            .unwrap();
+        apply_payload(payload, &config).unwrap();
+        assert!(!config.enabled());
+
+        apply_remove(&file, &config);
+        assert!(!config.enabled());
+    }
+
+    #[test]
+    fn test_handler_ignores_tracing_enabled_for_another_service() {
+        let config = build_config_for_handler_with_target("my-service", "prod");
+        let disable = br#"{
+            "id": "rc-disable",
+            "lib_config": {"tracing_enabled": false},
+            "service_target": {"service": "other-service", "env": "prod"}
+        }"#;
+        apply_payload(disable, &config).unwrap();
+        assert!(config.enabled());
     }
 
     #[test]
