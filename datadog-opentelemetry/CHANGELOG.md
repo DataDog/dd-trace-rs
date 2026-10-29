@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 (Oct 29, 2026)
+
+- Apply tracing_enabled from APM_TRACING in https://github.com/DataDog/dd-trace-rs/pull/340
+- Flatten array span attributes to key.N in https://github.com/DataDog/dd-trace-rs/pull/338
+
 ## 0.5.3 (Oct 26, 2026)
 
 - Handle repeated traceparent and tracestate headers in https://github.com/DataDog/dd-trace-rs/pull/325
