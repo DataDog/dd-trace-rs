@@ -3,8 +3,3 @@
 
 [resolver]
 incompatible-rust-versions = "fallback"
-
-# Lets the build script find this workspace when the target directory is outside it, as under
-# `cross`, which mounts it separately.
-[env]
-CARGO_WORKSPACE_DIR = { value = "", relative = true }
