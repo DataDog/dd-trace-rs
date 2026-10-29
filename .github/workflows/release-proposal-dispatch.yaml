@@ -29,8 +29,7 @@ jobs:
       id-token: write # Enable OIDC
       contents: read
     env:
-      # Deliberately above the crate's `rust-version` (1.87.0): cargo-release 1.1.2 needs >= 1.91
-      RUST_VERSION: 1.92.0
+      RUST_VERSION: 1.91.1
     steps:
       - name: "Validate base-branch requires reviewed pull requests"
         env:
