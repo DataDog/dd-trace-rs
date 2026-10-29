@@ -188,7 +188,7 @@ impl<T: Deref> Deref for ConfigItemRef<'_, T> {
 }
 
 impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef<'_, T> {
-    fn get_configuration_value(&self) -> String {
+    fn get_configuration_value(&self) -> Option<String> {
         match self {
             ConfigItemRef::Ref(t) => t.get_configuration_value(),
             ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap().get_configuration_value(),
@@ -230,11 +230,12 @@ pub trait ConfigurationProvider {
 /// to serialize their current values for telemetry reporting, regardless of the value's source
 /// (default, environment variable, programmatic setting, or remote configuration).
 trait ConfigurationValueProvider {
-    /// Returns the string representation of this configuration value for telemetry reporting.
+    /// Returns the string representation of this configuration value for telemetry reporting,
+    /// where `None` is reported as `null`.
     ///
     /// This method should produce a concise, human-readable string that represents
     /// the current value in a format suitable for debugging and telemetry analysis.
-    fn get_configuration_value(&self) -> String;
+    fn get_configuration_value(&self) -> Option<String>;
 }
 
 /// A trait for updating configuration values while tracking their origin source.
@@ -321,12 +322,12 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         self.name.is_sensitive()
     }
 
-    fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
+    fn build_configurations_list(&self, calculated_value: Option<&T>) -> Vec<Configuration> {
         let mut configurations = Vec::new();
         // Always include the default value
         configurations.push(Configuration {
             name: self.name.as_str().to_string(),
-            value: Some(self.default_value.get_configuration_value()),
+            value: self.default_value.get_configuration_value(),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
             seq_id: Some(ConfigSourceOrigin::Default as u64),
@@ -334,7 +335,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(calculated_value) = calculated_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(calculated_value),
+                value: calculated_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::Calculated.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Calculated as u64),
@@ -343,7 +344,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref env_value) = self.env_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(env_value.get_configuration_value()),
+                value: env_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
@@ -352,7 +353,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref code_value) = self.code_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(code_value.get_configuration_value()),
+                value: code_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Code as u64),
@@ -518,7 +519,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
-            Some(override_value.as_ref().unwrap().get_configuration_value())
+            override_value.as_deref()
         } else {
             None
         };
@@ -529,7 +530,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
             configurations.push(Configuration {
                 name: self.config_item.name.as_str().to_string(),
-                value: Some(self.value().get_configuration_value()),
+                value: self.value().get_configuration_value(),
                 origin: self.source().into(),
                 config_id,
                 seq_id: Some(self.source() as u64),
@@ -695,15 +696,12 @@ impl ConfigItemSourceUpdater<'_> {
 
 /// Macro to implement ConfigurationValueProvider trait for types that implement Display
 macro_rules! impl_config_value_provider {
-  // Handle Option<T> specially
+  // Handle Option<T> specially: an unset value is reported as `null`
   (option: $($type:ty),* $(,)?) => {
       $(
           impl ConfigurationValueProvider for Option<$type> {
-              fn get_configuration_value(&self) -> String {
-                  match self {
-                      Some(value) => value.to_string(),
-                      None => String::new(),
-                  }
+              fn get_configuration_value(&self) -> Option<String> {
+                  self.as_ref().map(|value| value.to_string())
               }
           }
       )*
@@ -713,8 +711,8 @@ macro_rules! impl_config_value_provider {
   (simple: $($type:ty),* $(,)?) => {
       $(
           impl ConfigurationValueProvider for $type {
-              fn get_configuration_value(&self) -> String {
-                  self.to_string()
+              fn get_configuration_value(&self) -> Option<String> {
+                  Some(self.to_string())
               }
           }
       )*
@@ -1106,72 +1104,76 @@ impl FromStr for BaggageTagKeyFilter {
 }
 
 impl ConfigurationValueProvider for BaggageTagKeyFilter {
-    fn get_configuration_value(&self) -> String {
-        match self {
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(match self {
             BaggageTagKeyFilter::Disabled => String::new(),
             BaggageTagKeyFilter::All => "*".to_string(),
             BaggageTagKeyFilter::Keys(keys) => keys.join(","),
-        }
+        })
     }
 }
 
 impl ConfigurationValueProvider for Vec<(String, String)> {
-    fn get_configuration_value(&self) -> String {
-        self.iter()
-            .map(|(key, value)| format!("{key}:{value}"))
-            .collect::<Vec<_>>()
-            .join(",")
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            self.iter()
+                .map(|(key, value)| format!("{key}:{value}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
-    fn get_configuration_value(&self) -> String {
-        match &self {
-            Some(styles) => styles
+    fn get_configuration_value(&self) -> Option<String> {
+        self.as_ref().map(|styles| {
+            styles
                 .iter()
                 .map(|style| style.to_string())
                 .collect::<Vec<_>>()
-                .join(","),
-            None => "".to_string(),
-        }
+                .join(",")
+        })
     }
 }
 
 impl ConfigurationValueProvider for OtlpProtocol {
-    fn get_configuration_value(&self) -> String {
-        match self {
-            OtlpProtocol::Grpc => "grpc",
-            OtlpProtocol::HttpProtobuf => "http/protobuf",
-            OtlpProtocol::HttpJson => "http/json",
-        }
-        .to_string()
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            match self {
+                OtlpProtocol::Grpc => "grpc",
+                OtlpProtocol::HttpProtobuf => "http/protobuf",
+                OtlpProtocol::HttpJson => "http/json",
+            }
+            .to_string(),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<OtlpProtocol> {
-    fn get_configuration_value(&self) -> String {
-        self.as_ref()
-            .map(|p| p.get_configuration_value())
-            .unwrap_or_default()
+    fn get_configuration_value(&self) -> Option<String> {
+        self.as_ref().and_then(|p| p.get_configuration_value())
     }
 }
 
 impl ConfigurationValueProvider for opentelemetry_sdk::metrics::Temporality {
-    fn get_configuration_value(&self) -> String {
-        match self {
-            opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
-            opentelemetry_sdk::metrics::Temporality::Delta => "delta",
-            _ => "delta",
-        }
-        .to_string()
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            match self {
+                opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
+                opentelemetry_sdk::metrics::Temporality::Delta => "delta",
+                _ => "delta",
+            }
+            .to_string(),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporality> {
-    fn get_configuration_value(&self) -> String {
-        self.as_ref()
-            .map(|t| t.get_configuration_value())
-            .unwrap_or_else(|| "delta".to_string())
+    fn get_configuration_value(&self) -> Option<String> {
+        match self {
+            Some(temporality) => temporality.get_configuration_value(),
+            None => Some("delta".to_string()),
+        }
     }
 }
 
@@ -5209,10 +5211,47 @@ mod tests {
         assert_eq!(
             reported,
             [
-                (Some(String::new()), ConfigurationOrigin::Default),
+                (None, ConfigurationOrigin::Default),
                 (Some("true".to_owned()), ConfigurationOrigin::EnvVar),
             ]
         );
+    }
+
+    #[test]
+    fn test_unset_optional_configs_reported_as_null() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_ENV", "prod")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let reported = collect_telemetry_configurations(&config);
+        let values = |name: &str| -> Vec<_> {
+            reported
+                .iter()
+                .filter(|configuration| configuration.name == name)
+                .map(|configuration| (configuration.value.as_deref(), configuration.origin))
+                .collect()
+        };
+        assert_eq!(
+            values("DD_ENV"),
+            [
+                (None, ConfigurationOrigin::Default),
+                (Some("prod"), ConfigurationOrigin::EnvVar),
+            ]
+        );
+        for name in [
+            "DD_VERSION",
+            "DD_TRACE_SAMPLE_RATE",
+            "DD_APPSEC_SCA_ENABLED",
+        ] {
+            assert_eq!(
+                values(name),
+                [(None, ConfigurationOrigin::Default)],
+                "{name}"
+            );
+        }
     }
 
     #[test]
