@@ -18,7 +18,7 @@ use crate::{
         sampling::SamplingDecision,
         telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
-    create_dd_resource, dd_debug, dd_error,
+    create_dd_resource, dd_debug, dd_error, resolve_service_name,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
     spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
@@ -31,7 +31,6 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::{error::OTelSdkError, trace::SpanData};
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 #[derive(Debug)]
 struct Trace {
@@ -749,17 +748,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         *self.resource.write().unwrap() = dd_resource.clone();
 
         // update config's service name and init telemetry once service name has been resolved
-        let service_name = dd_resource
-            .get(&Key::from_static_str(SERVICE_NAME))
-            .map(|service_name| service_name.as_str().to_string());
-        // Only set calculated service name if DD_SERVICE is default
-        // and otel service name is not default
-        if self.config.service_is_default()
-            && service_name.is_some()
-            && service_name.as_ref().unwrap().as_str() != self.config.service().to_string()
-        {
-            self.config.set_calculated_service_name(service_name);
-        }
+        resolve_service_name(&self.config, &dd_resource);
         init_telemetry(&self.config);
     }
 }
