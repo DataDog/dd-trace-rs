@@ -219,7 +219,7 @@
 //!
 //! ## Support
 //!
-//! * MSRV: 1.87
+//! * MSRV: 1.91.1
 //!
 //! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)

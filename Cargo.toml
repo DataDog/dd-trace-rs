@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.87.0"
+rust-version = "1.91.1"
 edition = "2021"
 version = "0.6.0"
 license = "Apache-2.0"
@@ -24,21 +24,21 @@ authors = ["Datadog Inc. <info@datadoghq.com>"]
 
 [workspace.dependencies]
 # Libdatadog dependencies
-libdd-data-pipeline = { version = "13.0.0", features = [
+libdd-data-pipeline = { version = "14.0.0", features = [
     "stats-obfuscation",
     "telemetry",
 ], default-features = false }
-libdd-trace-utils = { version = "15.0.0", default-features = false }
+libdd-trace-utils = { version = "16.0.0", default-features = false }
 libdd-trace-model = { version = "1.0.0", default-features = false }
-libdd-capabilities-impl = { version = "8.0.0", default-features = false }
-libdd-telemetry = { version = "11.0.0", default-features = false }
-libdd-common = { version = "9.0.0", default-features = false }
+libdd-capabilities-impl = { version = "9.0.0", default-features = false }
+libdd-telemetry = { version = "12.0.0", default-features = false }
+libdd-common = { version = "10.0.0", default-features = false }
 libdd-tinybytes = { version = "1.2.0", default-features = false }
-libdd-library-config = { version = "5.0.0", default-features = false }
-libdd-otel-thread-ctx = { version = "2.0.0", default-features = false }
-libdd-sampling = { version = "9.0.0", default-features = false }
-libdd-shared-runtime = { version = "7.0.0", default-features = false }
-libdd-remote-config = { version = "8.0.0", default-features = false, features = [
+libdd-library-config = { version = "5.0.1", default-features = false }
+libdd-otel-thread-ctx = { version = "2.0.1", default-features = false }
+libdd-sampling = { version = "10.0.0", default-features = false }
+libdd-shared-runtime = { version = "8.0.0", default-features = false }
+libdd-remote-config = { version = "9.0.0", default-features = false, features = [
     "client",
 ] }
 libdd-heap-allocator = { package = "libdd-profiling-heap-allocator", version = "1.2.0", default-features = false }
