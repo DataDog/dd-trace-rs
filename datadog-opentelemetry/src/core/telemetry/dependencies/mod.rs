@@ -200,42 +200,52 @@ mod tests {
         }
     }
 
-    /// `app` depends on this crate and `tokio`, which enables `signal-hook` in tests, and has
-    /// `criterion` as a dev-dependency; `worker`'s dev-dependencies weren't downloaded.
-    fn fixture() -> Graph {
-        let packages = [
-            ("app", "0.1.0"),
-            ("datadog-opentelemetry", "0.5.0"),
-            ("tokio", "1.0.0"),
-            ("serde_derive", "1.0.0"),
-            ("criterion", "0.5.0"),
-            ("signal-hook", "0.3.0"),
-            ("worker", "0.1.0"),
-            ("itoa", "1.0.0"),
-        ];
-        let dependencies: [&[(usize, Builds)]; 8] = [
-            &[(1, Builds::Both), (2, Builds::Both)],
-            &[(3, Builds::Both)],
-            &[(5, Builds::Test)],
-            &[],
-            &[(7, Builds::Test)],
-            &[],
-            &[(1, Builds::Bin), (7, Builds::Bin)],
-            &[],
-        ];
+    fn graph(
+        packages: &[(&str, &str)],
+        dependencies: &[&[(usize, Builds)]],
+        members: Vec<Member>,
+    ) -> Graph {
         Graph {
             packages: packages
-                .into_iter()
+                .iter()
                 .map(|(name, version)| Package {
-                    name: name.to_owned(),
-                    version: version.to_owned(),
+                    name: (*name).to_owned(),
+                    version: (*version).to_owned(),
                 })
                 .collect(),
             dependencies: dependencies
-                .into_iter()
+                .iter()
                 .map(|edges| edges.iter().copied().collect())
                 .collect(),
-            members: vec![
+            members,
+        }
+    }
+
+    /// `app` depends on this crate and `tokio`, which enables `signal-hook` in tests, and has
+    /// `criterion` as a dev-dependency; `worker`'s dev-dependencies weren't downloaded.
+    fn fixture() -> Graph {
+        graph(
+            &[
+                ("app", "0.1.0"),
+                ("datadog-opentelemetry", "0.5.0"),
+                ("tokio", "1.0.0"),
+                ("serde_derive", "1.0.0"),
+                ("criterion", "0.5.0"),
+                ("signal-hook", "0.3.0"),
+                ("worker", "0.1.0"),
+                ("itoa", "1.0.0"),
+            ],
+            &[
+                &[(1, Builds::Both), (2, Builds::Both)],
+                &[(3, Builds::Both)],
+                &[(5, Builds::Test)],
+                &[],
+                &[(7, Builds::Test)],
+                &[],
+                &[(1, Builds::Bin), (7, Builds::Bin)],
+                &[],
+            ],
+            vec![
                 Member {
                     package: APP,
                     dev_dependencies: Some(vec![0, 4]),
@@ -252,7 +262,7 @@ mod tests {
                     targets: vec![target("worker-bin", TargetKind::Bin)],
                 },
             ],
-        }
+        )
     }
 
     fn names(graph: &Graph, exe: Option<&Executable>) -> BTreeSet<String> {
@@ -340,6 +350,65 @@ mod tests {
         let expected = set(&["datadog-opentelemetry", "itoa", "serde_derive", "tokio"]);
         assert_eq!(resolve("/usr/local/bin/renamed"), expected);
         assert_eq!(names(&fixture(), None), expected);
+    }
+
+    /// `app` doesn't depend on this crate itself, but on the workspace library `lib-a`, which
+    /// does, so both are members: `app` for its binary, `lib-a` for its tests.
+    #[test]
+    fn test_resolve_through_workspace_library() {
+        let graph = graph(
+            &[
+                ("app", "0.1.0"),
+                ("lib-a", "0.1.0"),
+                ("datadog-opentelemetry", "0.5.0"),
+                ("serde_derive", "1.0.0"),
+                ("anyhow", "1.0.0"),
+                ("proptest", "1.0.0"),
+                ("clap", "4.0.0"),
+            ],
+            &[
+                &[(1, Builds::Both), (6, Builds::Both)],
+                &[(2, Builds::Both), (4, Builds::Both), (5, Builds::Test)],
+                &[(3, Builds::Both)],
+                &[],
+                &[],
+                &[],
+                &[],
+            ],
+            vec![
+                Member {
+                    package: 0,
+                    dev_dependencies: Some(Vec::new()),
+                    targets: vec![target("app", TargetKind::Bin)],
+                },
+                Member {
+                    package: 1,
+                    dev_dependencies: Some(vec![5]),
+                    targets: vec![target("lib-a", TargetKind::Other)],
+                },
+            ],
+        );
+        let names = |exe| names(&graph, Some(&exe));
+
+        assert_eq!(
+            names(Executable::Bin("app".into())),
+            set(&[
+                "anyhow",
+                "clap",
+                "datadog-opentelemetry",
+                "lib-a",
+                "serde_derive"
+            ])
+        );
+        assert_eq!(
+            names(Executable::Test("lib_a".into())),
+            set(&[
+                "anyhow",
+                "datadog-opentelemetry",
+                "proptest",
+                "serde_derive"
+            ])
+        );
     }
 
     #[test]
