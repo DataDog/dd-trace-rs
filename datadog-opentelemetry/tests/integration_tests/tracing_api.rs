@@ -18,7 +18,7 @@ async fn test_smoke() {
     const SESSION_NAME: &str = "tracing_api/test_smoke";
     let mut cfg = Config::builder();
     cfg.set_log_level_filter(LevelFilter::Debug);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
         let _guard = subscriber.set_default();
@@ -40,7 +40,7 @@ async fn test_smoke() {
 async fn test_remote_span_extraction_propagation() {
     const SESSION_NAME: &str = "tracing_api/test_remote_span_extraction_propagation";
     let cfg = Config::builder();
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer())
             .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));
@@ -91,7 +91,7 @@ async fn test_remote_span_extraction_propagation() {
 async fn test_instrument_error_reporting() {
     const SESSION_NAME: &str = "tracing_api/test_instrument_error_reporting";
     let cfg = Config::builder();
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _, _| {
         let subscriber = tracing_subscriber::registry()
             .with(tracing_subscriber::fmt::layer())
             .with(tracing_opentelemetry::layer().with_tracer(tracer_provider.tracer("test")));

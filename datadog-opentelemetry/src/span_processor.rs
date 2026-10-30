@@ -412,6 +412,23 @@ impl TraceRegistry {
         }
         stats
     }
+
+    /// Sets the sampling decision of the trace with the given trace ID.
+    /// If the trace isn't registered, the decision is ignored.
+    pub fn set_sampling_decision(&self, trace_id: [u8; 16], decision: SamplingDecision) {
+        let mut inner = self
+            .get_shard(trace_id)
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        let Some(trace) = inner.registry.get_mut(&trace_id) else {
+            dd_debug!(
+                "TraceRegistry.set_sampling_decision: trace with trace_id={:?} isn't registered. The sampling decision will be ignored.",
+                u128::from_be_bytes(trace_id)
+            );
+            return;
+        };
+        trace.propagation_data.sampling_decision = decision;
+    }
 }
 
 /// Metrics collected by the trace registry.

@@ -53,6 +53,8 @@ log = { version = "0.4.21", optional = true }
 # core Test utils
 criterion = { version = "0.5.1", optional = true }
 
+datadog-telemetry-api = { path = "../datadog-telemetry-api" }
+
 # Libdatadog dependencies
 libdd-data-pipeline = { workspace = true }
 libdd-capabilities-impl = { workspace = true }
@@ -85,6 +87,9 @@ libdd-trace-utils = { workspace = true, features = ["test-utils"] }
 
 # Depend on ourselves to have APIs exposed only during tests
 datadog-opentelemetry = { path = ".", features = ["test-utils"] }
+
+# Testing the datadog telemetry API
+datadog-telemetry-api = { path = "../datadog-telemetry-api" }
 
 # Testing the tracing API
 tracing = { version = "0.1.4" }

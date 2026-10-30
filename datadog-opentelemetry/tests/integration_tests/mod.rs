@@ -10,12 +10,13 @@ use std::{
 
 use datadog_opentelemetry::{
     configuration::{Config, ConfigBuilder},
-    make_test_tracer,
+    make_test_tracer, DatadogTelemetry,
 };
 use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::propagation::{Extractor, TextMapPropagator};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
+mod datadog_telemetry_api;
 mod logs;
 mod metrics;
 mod opentelemetry_api;
@@ -26,19 +27,29 @@ mod tracing_api;
 pub async fn with_test_agent_session(
     session_name: &'static str,
     mut cfg: ConfigBuilder,
-    f: impl FnOnce(&mut DatadogTestAgent, SdkTracerProvider, Box<dyn TextMapPropagator>, Arc<Config>),
+    f: impl FnOnce(
+        &mut DatadogTestAgent,
+        SdkTracerProvider,
+        Box<dyn TextMapPropagator>,
+        &DatadogTelemetry,
+        Arc<Config>,
+    ),
 ) {
     let mut test_agent = make_test_agent(session_name).await;
     cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string());
     let cfg = Arc::new(cfg.build());
-    let (tracer_provider, propagator) = make_test_tracer(cfg.clone());
+    let components = make_test_tracer(cfg.clone());
     f(
         &mut test_agent,
-        tracer_provider.clone(),
-        Box::new(propagator),
+        components.tracer_provider.clone(),
+        Box::new(components.propagator),
+        &components.datadog_telemetry,
         cfg,
     );
-    tracer_provider.shutdown().expect("failed to shutdown");
+    components
+        .tracer_provider
+        .shutdown()
+        .expect("failed to shutdown");
     test_agent.assert_snapshot(session_name).await;
 }
 
