@@ -20,7 +20,6 @@ fn main() {
     dependencies::generate();
 }
 
-// The types of the recorded graph, shared with the tracer.
 #[path = "src/core/telemetry/dependencies/graph.rs"]
 mod graph;
 
@@ -40,13 +39,13 @@ mod dependencies {
 
     use super::graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
 
-    const ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
+    const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
     const WORKSPACE_DIR_ENV: &str = "CARGO_WORKSPACE_DIR";
-    /// Set when the graph was written; must match the tracer's.
-    const RECORDED_CFG: &str = "dd_build_time_dependencies";
     /// Carries the failure code to the tracer when the graph couldn't be written; must match the
-    /// tracer's.
-    const FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
+    /// tracer's. See `dependencies/mod.rs` recorded() function.
+    const DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
+    /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
+    const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
     const WRITE_FAILED: &str = "write_failed";
 
     #[derive(Default)]
@@ -120,9 +119,8 @@ mod dependencies {
     }
 
     /// A failure and its details, which are only shown in the build output.
-    type Error = (Failure, String);
+    type CargoError = (Failure, String);
 
-    /// Runs cargo against the application's workspace.
     struct Cargo {
         path: OsString,
         workspace: PathBuf,
@@ -130,8 +128,7 @@ mod dependencies {
     }
 
     impl Cargo {
-        /// Runs cargo with `args`, attributing a non-zero exit to `failure`.
-        fn run(&self, args: &[&str], failure: Failure) -> Result<String, Error> {
+        fn run(&self, args: &[&str], failure: Failure) -> Result<String, CargoError> {
             let output = Command::new(&self.path)
                 .args(args)
                 .current_dir(&self.workspace)
@@ -155,7 +152,7 @@ mod dependencies {
     }
 
     pub(super) fn generate() {
-        println!("cargo::rerun-if-env-changed={ENABLED_ENV}");
+        println!("cargo::rerun-if-env-changed={DEPENDENCY_COLLECTION_ENABLED_ENV}");
         println!("cargo::rerun-if-env-changed={WORKSPACE_DIR_ENV}");
 
         let recorded = match collection_enabled().then(collect) {
@@ -177,17 +174,18 @@ mod dependencies {
         );
         // The tracer only includes the file when this cfg is set, and builds that don't run this
         // script don't set it, so a missing file never fails the build.
-        println!("cargo::rustc-check-cfg=cfg({RECORDED_CFG})");
+        println!("cargo::rustc-check-cfg=cfg({DD_BUILD_TIME_DEPENDENCIES_CFG})");
         match written {
-            Ok(()) => println!("cargo::rustc-cfg={RECORDED_CFG}"),
+            Ok(()) => println!("cargo::rustc-cfg={DD_BUILD_TIME_DEPENDENCIES_CFG}"),
             Err(err) => {
                 println!("cargo::warning=dependency collection failed ({WRITE_FAILED}): {err}");
-                println!("cargo::rustc-env={FAILURE_ENV}={WRITE_FAILED}");
+                println!(
+                    "cargo::rustc-env={DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV}={WRITE_FAILED}"
+                );
             }
         }
     }
 
-    /// Renders `recorded` as a Rust expression of type `Recorded`.
     fn render(Recorded { graph, failure }: &Recorded) -> String {
         if let Some(failure) = failure {
             return format!("Recorded::with_error({failure:?})\n");
@@ -244,12 +242,14 @@ mod dependencies {
         )
     }
 
-    /// Mirrors the runtime parsing of the flag: only `false` and `0` disable collection.
     fn collection_enabled() -> bool {
-        !matches!(env::var(ENABLED_ENV).as_deref(), Ok("false" | "0"))
+        !matches!(
+            env::var(DEPENDENCY_COLLECTION_ENABLED_ENV).as_deref(),
+            Ok("false" | "0")
+        )
     }
 
-    fn collect() -> Result<Graph, Error> {
+    fn collect() -> Result<Graph, CargoError> {
         let unavailable = |details: &str| (Failure::CargoUnavailable, details.to_owned());
         let workspace = workspace_dir().ok_or_else(|| {
             let details = format!(
@@ -313,7 +313,7 @@ mod dependencies {
     /// The workspace packages, from `cargo metadata --no-deps`, which only reads workspace
     /// manifests and so works offline even when the dependencies of packages that aren't
     /// being built were never downloaded.
-    fn workspace_packages(cargo: &Cargo) -> Result<Vec<Value>, Error> {
+    fn workspace_packages(cargo: &Cargo) -> Result<Vec<Value>, CargoError> {
         let args = [
             "metadata",
             "--format-version",
@@ -336,7 +336,11 @@ mod dependencies {
 
     /// Adds a workspace `package` to the graph if it depends on this crate, normally or
     /// through its dev-dependencies.
-    fn add_member(cargo: &Cargo, builder: &mut GraphBuilder, package: &Value) -> Result<(), Error> {
+    fn add_member(
+        cargo: &Cargo,
+        builder: &mut GraphBuilder,
+        package: &Value,
+    ) -> Result<(), CargoError> {
         if let Some(manifest) = package["manifest_path"].as_str() {
             println!("cargo::rerun-if-changed={manifest}");
         }
@@ -425,7 +429,7 @@ mod dependencies {
 
     /// The dependency tree of the package `id` for the current target, following `edges`.
     /// Proc-macros and what they depend on are included, build dependencies aren't.
-    fn dependency_tree(cargo: &Cargo, id: &str, edges: &str) -> Result<Tree, Error> {
+    fn dependency_tree(cargo: &Cargo, id: &str, edges: &str) -> Result<Tree, CargoError> {
         let args = [
             "tree",
             "--offline",
