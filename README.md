@@ -283,6 +283,39 @@ datadog_opentelemetry::tracing()
     .init();
 ```
 
+### Dependency reporting
+
+The tracer reports the application's dependencies (crate names and versions) through telemetry,
+for Datadog Software Composition Analysis. The dependency graph is recorded at build time: the
+crate's build script runs `cargo metadata` and `cargo tree` against the workspace being built.
+At runtime, the tracer reports the dependencies of the target the running executable was built
+from: a binary reports its normal dependencies, and a test, bench or example also reports its
+dev-dependencies, when they were downloaded at build time. Proc-macros and their dependencies
+are included; build dependencies are excluded. The build script never fails the build; when
+collection isn't possible, no dependencies are reported, and the reason is sent through
+telemetry.
+
+The workspace is located from the build output directory, which works with the default
+`target/` directory. When the target directory is elsewhere, point the build script at the
+workspace in `.cargo/config.toml`:
+
+```toml
+[env]
+CARGO_WORKSPACE_DIR = { value = "", relative = true }
+```
+
+To disable it, set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false`:
+
+* while building, to skip collection, for instance for every build of a repository in its
+  `.cargo/config.toml`:
+
+  ```toml
+  [env]
+  DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED = "false"
+  ```
+
+* at runtime, to skip reporting.
+
 ### Tracer diagnostics
 
 The tracer reports on itself - configuration problems, transport failures, dropped spans. Where

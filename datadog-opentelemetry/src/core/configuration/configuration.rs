@@ -188,7 +188,7 @@ impl<T: Deref> Deref for ConfigItemRef<'_, T> {
 }
 
 impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef<'_, T> {
-    fn get_configuration_value(&self) -> String {
+    fn get_configuration_value(&self) -> Option<String> {
         match self {
             ConfigItemRef::Ref(t) => t.get_configuration_value(),
             ConfigItemRef::ArcRef(guard) => guard.as_ref().unwrap().get_configuration_value(),
@@ -230,11 +230,12 @@ pub trait ConfigurationProvider {
 /// to serialize their current values for telemetry reporting, regardless of the value's source
 /// (default, environment variable, programmatic setting, or remote configuration).
 trait ConfigurationValueProvider {
-    /// Returns the string representation of this configuration value for telemetry reporting.
+    /// Returns the string representation of this configuration value for telemetry reporting,
+    /// where `None` is reported as `null`.
     ///
     /// This method should produce a concise, human-readable string that represents
     /// the current value in a format suitable for debugging and telemetry analysis.
-    fn get_configuration_value(&self) -> String;
+    fn get_configuration_value(&self) -> Option<String>;
 }
 
 /// A trait for updating configuration values while tracking their origin source.
@@ -321,12 +322,12 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         self.name.is_sensitive()
     }
 
-    fn build_configurations_list(&self, calculated_value: Option<String>) -> Vec<Configuration> {
+    fn build_configurations_list(&self, calculated_value: Option<&T>) -> Vec<Configuration> {
         let mut configurations = Vec::new();
         // Always include the default value
         configurations.push(Configuration {
             name: self.name.as_str().to_string(),
-            value: Some(self.default_value.get_configuration_value()),
+            value: self.default_value.get_configuration_value(),
             origin: ConfigSourceOrigin::Default.into(),
             config_id: self.config_id.clone(),
             seq_id: Some(ConfigSourceOrigin::Default as u64),
@@ -334,7 +335,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(calculated_value) = calculated_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(calculated_value),
+                value: calculated_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::Calculated.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Calculated as u64),
@@ -343,7 +344,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref env_value) = self.env_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(env_value.get_configuration_value()),
+                value: env_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::EnvVar.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::EnvVar as u64),
@@ -352,7 +353,7 @@ impl<T: Clone + ConfigurationValueProvider> ConfigItem<T> {
         if let Some(ref code_value) = self.code_value {
             configurations.push(Configuration {
                 name: self.name.as_str().to_string(),
-                value: Some(code_value.get_configuration_value()),
+                value: code_value.get_configuration_value(),
                 origin: ConfigSourceOrigin::Code.into(),
                 config_id: self.config_id.clone(),
                 seq_id: Some(ConfigSourceOrigin::Code as u64),
@@ -518,7 +519,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
         // Also add override value if set
         let override_value = self.override_value.load();
         let calculated_option = if self.source() == ConfigSourceOrigin::Calculated {
-            Some(override_value.as_ref().unwrap().get_configuration_value())
+            override_value.as_deref()
         } else {
             None
         };
@@ -529,7 +530,7 @@ impl<T: Clone + ConfigurationValueProvider + Deref> ConfigurationProvider
             let config_id = self.config_id.load().as_ref().map(|id| (**id).clone());
             configurations.push(Configuration {
                 name: self.config_item.name.as_str().to_string(),
-                value: Some(self.value().get_configuration_value()),
+                value: self.value().get_configuration_value(),
                 origin: self.source().into(),
                 config_id,
                 seq_id: Some(self.source() as u64),
@@ -695,15 +696,12 @@ impl ConfigItemSourceUpdater<'_> {
 
 /// Macro to implement ConfigurationValueProvider trait for types that implement Display
 macro_rules! impl_config_value_provider {
-  // Handle Option<T> specially
+  // Handle Option<T> specially: an unset value is reported as `null`
   (option: $($type:ty),* $(,)?) => {
       $(
           impl ConfigurationValueProvider for Option<$type> {
-              fn get_configuration_value(&self) -> String {
-                  match self {
-                      Some(value) => value.to_string(),
-                      None => String::new(),
-                  }
+              fn get_configuration_value(&self) -> Option<String> {
+                  self.as_ref().map(|value| value.to_string())
               }
           }
       )*
@@ -713,8 +711,8 @@ macro_rules! impl_config_value_provider {
   (simple: $($type:ty),* $(,)?) => {
       $(
           impl ConfigurationValueProvider for $type {
-              fn get_configuration_value(&self) -> String {
-                  self.to_string()
+              fn get_configuration_value(&self) -> Option<String> {
+                  Some(self.to_string())
               }
           }
       )*
@@ -1106,72 +1104,76 @@ impl FromStr for BaggageTagKeyFilter {
 }
 
 impl ConfigurationValueProvider for BaggageTagKeyFilter {
-    fn get_configuration_value(&self) -> String {
-        match self {
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(match self {
             BaggageTagKeyFilter::Disabled => String::new(),
             BaggageTagKeyFilter::All => "*".to_string(),
             BaggageTagKeyFilter::Keys(keys) => keys.join(","),
-        }
+        })
     }
 }
 
 impl ConfigurationValueProvider for Vec<(String, String)> {
-    fn get_configuration_value(&self) -> String {
-        self.iter()
-            .map(|(key, value)| format!("{key}:{value}"))
-            .collect::<Vec<_>>()
-            .join(",")
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            self.iter()
+                .map(|(key, value)| format!("{key}:{value}"))
+                .collect::<Vec<_>>()
+                .join(","),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<Vec<TracePropagationStyle>> {
-    fn get_configuration_value(&self) -> String {
-        match &self {
-            Some(styles) => styles
+    fn get_configuration_value(&self) -> Option<String> {
+        self.as_ref().map(|styles| {
+            styles
                 .iter()
                 .map(|style| style.to_string())
                 .collect::<Vec<_>>()
-                .join(","),
-            None => "".to_string(),
-        }
+                .join(",")
+        })
     }
 }
 
 impl ConfigurationValueProvider for OtlpProtocol {
-    fn get_configuration_value(&self) -> String {
-        match self {
-            OtlpProtocol::Grpc => "grpc",
-            OtlpProtocol::HttpProtobuf => "http/protobuf",
-            OtlpProtocol::HttpJson => "http/json",
-        }
-        .to_string()
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            match self {
+                OtlpProtocol::Grpc => "grpc",
+                OtlpProtocol::HttpProtobuf => "http/protobuf",
+                OtlpProtocol::HttpJson => "http/json",
+            }
+            .to_string(),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<OtlpProtocol> {
-    fn get_configuration_value(&self) -> String {
-        self.as_ref()
-            .map(|p| p.get_configuration_value())
-            .unwrap_or_default()
+    fn get_configuration_value(&self) -> Option<String> {
+        self.as_ref().and_then(|p| p.get_configuration_value())
     }
 }
 
 impl ConfigurationValueProvider for opentelemetry_sdk::metrics::Temporality {
-    fn get_configuration_value(&self) -> String {
-        match self {
-            opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
-            opentelemetry_sdk::metrics::Temporality::Delta => "delta",
-            _ => "delta",
-        }
-        .to_string()
+    fn get_configuration_value(&self) -> Option<String> {
+        Some(
+            match self {
+                opentelemetry_sdk::metrics::Temporality::Cumulative => "cumulative",
+                opentelemetry_sdk::metrics::Temporality::Delta => "delta",
+                _ => "delta",
+            }
+            .to_string(),
+        )
     }
 }
 
 impl ConfigurationValueProvider for Option<opentelemetry_sdk::metrics::Temporality> {
-    fn get_configuration_value(&self) -> String {
-        self.as_ref()
-            .map(|t| t.get_configuration_value())
-            .unwrap_or_else(|| "delta".to_string())
+    fn get_configuration_value(&self) -> Option<String> {
+        match self {
+            Some(temporality) => temporality.get_configuration_value(),
+            None => Some("delta".to_string()),
+        }
     }
 }
 
@@ -1182,7 +1184,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
 });
 
 impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, TracingEnabled, HttpErrorStatuses);
-impl_config_value_provider!(option: String, f64);
+impl_config_value_provider!(option: String, f64, bool);
 
 #[derive(Clone)]
 /// Configuration for the Datadog Tracer
@@ -1315,6 +1317,11 @@ pub struct Config {
     telemetry_enabled: ConfigItem<bool>,
     /// Disables telemetry log collection if false.
     telemetry_log_collection_enabled: ConfigItem<bool>,
+    /// Disables telemetry dependency collection if false.
+    telemetry_dependency_collection_enabled: ConfigItem<bool>,
+    /// Whether Software Composition Analysis is enabled. Unset unless configured; only
+    /// reported through telemetry, where the backend reads it to analyze the dependencies.
+    appsec_sca_enabled: ConfigItem<Option<bool>>,
     /// Interval by which telemetry events are flushed (seconds)
     telemetry_heartbeat_interval: ConfigItem<f64>,
 
@@ -1538,6 +1545,10 @@ impl Config {
             telemetry_enabled: cisu.update_bool(default.telemetry_enabled),
             telemetry_log_collection_enabled: cisu
                 .update_bool(default.telemetry_log_collection_enabled),
+            telemetry_dependency_collection_enabled: cisu
+                .update_bool(default.telemetry_dependency_collection_enabled),
+            appsec_sca_enabled: cisu
+                .update_parsed_with_transform::<BooleanFlag, _>(default.appsec_sca_enabled, Some),
             telemetry_heartbeat_interval: cisu.update_parsed_with_transform::<f64, _>(
                 default.telemetry_heartbeat_interval,
                 |interval: f64| interval.abs(),
@@ -1658,6 +1669,8 @@ impl Config {
             &self.trace_stats_additional_tags_cardinality_limit,
             &self.telemetry_enabled,
             &self.telemetry_log_collection_enabled,
+            &self.telemetry_dependency_collection_enabled,
+            &self.appsec_sca_enabled,
             &self.telemetry_heartbeat_interval,
             &self.trace_partial_flush_enabled,
             &self.trace_partial_flush_min_spans,
@@ -1942,6 +1955,16 @@ impl Config {
     /// Returns whether telemetry log collection is enabled.
     pub fn telemetry_log_collection_enabled(&self) -> bool {
         *self.telemetry_log_collection_enabled.value()
+    }
+
+    /// Returns whether telemetry dependency collection is enabled.
+    pub fn telemetry_dependency_collection_enabled(&self) -> bool {
+        *self.telemetry_dependency_collection_enabled.value()
+    }
+
+    /// Returns whether Software Composition Analysis is enabled, or `None` if unset.
+    pub fn appsec_sca_enabled(&self) -> Option<bool> {
+        *self.appsec_sca_enabled.value()
     }
 
     /// Returns the telemetry heartbeat interval in seconds.
@@ -2482,6 +2505,11 @@ fn default_config() -> Config {
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED,
             true,
         ),
+        telemetry_dependency_collection_enabled: ConfigItem::new(
+            SupportedConfigurations::DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED,
+            true,
+        ),
+        appsec_sca_enabled: ConfigItem::new(SupportedConfigurations::DD_APPSEC_SCA_ENABLED, None),
         telemetry_heartbeat_interval: ConfigItem::new(
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL,
             60.0,
@@ -2771,6 +2799,35 @@ impl ConfigBuilder {
         self.config
             .telemetry_log_collection_enabled
             .set_code(enabled);
+        self
+    }
+
+    /// Enable or disable dependency collection for telemetry.
+    ///
+    /// When enabled, the tracer reports the application's dependencies via telemetry. They
+    /// are recorded at build time by the crate's build script, which skips collection when
+    /// the env variable is set to `false` while building.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`
+    pub fn set_telemetry_dependency_collection_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config
+            .telemetry_dependency_collection_enabled
+            .set_code(enabled);
+        self
+    }
+
+    /// Enable or disable Software Composition Analysis.
+    ///
+    /// The tracer only reports this setting through telemetry: the backend reads it to decide
+    /// whether to analyze the dependencies reported by the tracer for vulnerabilities.
+    ///
+    /// **Default**: unset
+    ///
+    /// Env variable: `DD_APPSEC_SCA_ENABLED`
+    pub fn set_appsec_sca_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.config.appsec_sca_enabled.set_code(Some(enabled));
         self
     }
 
@@ -5118,6 +5175,83 @@ mod tests {
             .into_iter()
             .flat_map(|provider| provider.get_all_configurations())
             .collect()
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled() {
+        assert_eq!(Config::builder().build().appsec_sca_enabled(), None);
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_APPSEC_SCA_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert_eq!(config.appsec_sca_enabled(), Some(true));
+
+        let mut builder = Config::builder_with_sources(&sources);
+        builder.set_appsec_sca_enabled(false);
+        assert_eq!(builder.build().appsec_sca_enabled(), Some(false));
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled_reported_in_telemetry() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_APPSEC_SCA_ENABLED", "1")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let reported: Vec<_> = collect_telemetry_configurations(&config)
+            .into_iter()
+            .filter(|configuration| configuration.name == "DD_APPSEC_SCA_ENABLED")
+            .map(|configuration| (configuration.value, configuration.origin))
+            .collect();
+        assert_eq!(
+            reported,
+            [
+                (None, ConfigurationOrigin::Default),
+                (Some("true".to_owned()), ConfigurationOrigin::EnvVar),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_unset_optional_configs_reported_as_null() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_ENV", "prod")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+
+        let reported = collect_telemetry_configurations(&config);
+        let values = |name: &str| -> Vec<_> {
+            reported
+                .iter()
+                .filter(|configuration| configuration.name == name)
+                .map(|configuration| (configuration.value.as_deref(), configuration.origin))
+                .collect()
+        };
+        assert_eq!(
+            values("DD_ENV"),
+            [
+                (None, ConfigurationOrigin::Default),
+                (Some("prod"), ConfigurationOrigin::EnvVar),
+            ]
+        );
+        for name in [
+            "DD_VERSION",
+            "DD_TRACE_SAMPLE_RATE",
+            "DD_APPSEC_SCA_ENABLED",
+        ] {
+            assert_eq!(
+                values(name),
+                [(None, ConfigurationOrigin::Default)],
+                "{name}"
+            );
+        }
     }
 
     #[test]

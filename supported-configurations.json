@@ -10,6 +10,15 @@
         "propertyKeys": ["agent_host"]
       }
     ],
+    "DD_APPSEC_SCA_ENABLED": [
+      {
+        "version": "B",
+        "type": "boolean",
+        "default": null,
+        "propertyKeys": ["appsec_sca_enabled"],
+        "namespace": "appsec"
+      }
+    ],
     "DD_DOGSTATSD_HOST": [
       {
         "version": "A",
@@ -138,6 +147,14 @@
         "type": "map",
         "default": "",
         "propertyKeys": ["global_tags"]
+      }
+    ],
+    "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["telemetry_dependency_collection_enabled"]
       }
     ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [

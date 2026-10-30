@@ -9,6 +9,7 @@
 #[non_exhaustive]
 pub(crate) enum SupportedConfigurations {
     DD_AGENT_HOST,
+    DD_APPSEC_SCA_ENABLED,
     DD_DOGSTATSD_HOST,
     DD_DOGSTATSD_PORT,
     DD_DOGSTATSD_URL,
@@ -25,6 +26,7 @@ pub(crate) enum SupportedConfigurations {
     DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS,
     DD_SERVICE,
     DD_TAGS,
+    DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED,
     DD_TELEMETRY_HEARTBEAT_INTERVAL,
     DD_TELEMETRY_LOG_COLLECTION_ENABLED,
     DD_TRACE_AGENT_PORT,
@@ -93,6 +95,7 @@ impl SupportedConfigurations {
     pub fn as_str(&self) -> &'static str {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => "DD_AGENT_HOST",
+            SupportedConfigurations::DD_APPSEC_SCA_ENABLED => "DD_APPSEC_SCA_ENABLED",
             SupportedConfigurations::DD_DOGSTATSD_HOST => "DD_DOGSTATSD_HOST",
             SupportedConfigurations::DD_DOGSTATSD_PORT => "DD_DOGSTATSD_PORT",
             SupportedConfigurations::DD_DOGSTATSD_URL => "DD_DOGSTATSD_URL",
@@ -109,6 +112,7 @@ impl SupportedConfigurations {
             SupportedConfigurations::DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS => "DD_REMOTE_CONFIG_POLL_INTERVAL_SECONDS",
             SupportedConfigurations::DD_SERVICE => "DD_SERVICE",
             SupportedConfigurations::DD_TAGS => "DD_TAGS",
+            SupportedConfigurations::DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED => "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED",
             SupportedConfigurations::DD_TELEMETRY_HEARTBEAT_INTERVAL => "DD_TELEMETRY_HEARTBEAT_INTERVAL",
             SupportedConfigurations::DD_TELEMETRY_LOG_COLLECTION_ENABLED => "DD_TELEMETRY_LOG_COLLECTION_ENABLED",
             SupportedConfigurations::DD_TRACE_AGENT_PORT => "DD_TRACE_AGENT_PORT",

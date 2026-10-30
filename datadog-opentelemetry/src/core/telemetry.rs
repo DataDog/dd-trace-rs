@@ -23,6 +23,8 @@ use super::configuration::{Config, ConfigurationProvider};
 use super::telemetry_session;
 use crate::{dd_debug, dd_error, dd_warn};
 
+mod dependencies;
+
 static TELEMETRY: TelemetryCell = OnceLock::new();
 static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 
@@ -180,6 +182,11 @@ trait TelemetryHandle: Sync + Send + 'static + Any {
         configurations: Vec<Configuration>,
     ) -> Result<(), anyhow::Error>;
 
+    fn add_dependencies(
+        &mut self,
+        dependencies: Vec<data::Dependency>,
+    ) -> Result<(), anyhow::Error>;
+
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error>;
 
     fn send_stop(&self) -> Result<(), anyhow::Error>;
@@ -226,6 +233,16 @@ impl TelemetryHandle for TelemetryHandleWrapper {
                 .ok();
         });
         Ok(())
+    }
+
+    fn add_dependencies(
+        &mut self,
+        dependencies: Vec<data::Dependency>,
+    ) -> Result<(), anyhow::Error> {
+        dependencies.into_iter().try_for_each(|dependency| {
+            self.handle
+                .add_dependency(dependency.name, dependency.version, dependency.metadata)
+        })
     }
 
     fn send_start(&self, config: Option<&Config>) -> Result<(), anyhow::Error> {
@@ -283,8 +300,15 @@ fn init_telemetry_inner(
     telemetry_cell: &TelemetryCell,
 ) {
     telemetry_cell.get_or_init(|| match make_telemetry_worker(config, custom_handle) {
-        Ok(handle) => {
+        Ok(mut handle) => {
             handle.send_start(Some(config)).ok();
+            report_dependencies(
+                handle.as_mut(),
+                config,
+                dependencies::collect(),
+                dependencies::build_failure(),
+            );
+
             Mutex::new(Telemetry {
                 handle: Some(handle),
                 enabled: config.telemetry_enabled(),
@@ -420,6 +444,26 @@ fn notify_configuration_update_inner(
     });
 }
 
+fn report_dependencies(
+    handle: &mut dyn TelemetryHandle,
+    config: &Config,
+    dependencies: Vec<data::Dependency>,
+    failure: Option<String>,
+) {
+    if !config.telemetry_dependency_collection_enabled() {
+        return;
+    }
+
+    handle.add_dependencies(dependencies).ok();
+
+    let Some(message) = failure else {
+        return;
+    };
+    if config.telemetry_log_collection_enabled() {
+        handle.add_error_log(message, None).ok();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use anyhow::Ok;
@@ -429,7 +473,8 @@ mod tests {
         core::{
             configuration::{Config, ConfigurationProvider},
             telemetry::{
-                add_log_error_inner, init_telemetry_inner, notify_configuration_update_inner,
+                add_log_error_inner, dependencies, init_telemetry_inner,
+                notify_configuration_update_inner, report_dependencies,
                 wait_telemetry_stopped_inner, TelemetryHandle, TelemetryMetric, TelemetryUser,
                 TELEMETRY,
             },
@@ -453,6 +498,7 @@ mod tests {
         /// When set, `wait_for_shutdown_deadline` reports a timeout instead of
         /// completing, simulating a worker that fails to stop before the deadline.
         pub shutdown_times_out: bool,
+        pub dependencies: Vec<data::Dependency>,
     }
 
     impl TestTelemetryHandle {
@@ -462,6 +508,7 @@ mod tests {
                 configurations: vec![],
                 stop_calls: Arc::new(AtomicUsize::new(0)),
                 shutdown_times_out: false,
+                dependencies: vec![],
             }
         }
     }
@@ -485,6 +532,14 @@ mod tests {
             configurations: Vec<data::Configuration>,
         ) -> Result<(), anyhow::Error> {
             self.configurations.extend(configurations);
+            Ok(())
+        }
+
+        fn add_dependencies(
+            &mut self,
+            dependencies: Vec<data::Dependency>,
+        ) -> Result<(), anyhow::Error> {
+            self.dependencies.extend(dependencies);
             Ok(())
         }
 
@@ -881,5 +936,75 @@ mod tests {
 
         // Should not panic when no telemetry is initialized
         notify_configuration_update_inner(&test_provider, &telemetry_cell);
+    }
+
+    fn test_dependencies_reported_at_init(config: &Config) -> Vec<data::Dependency> {
+        let telemetry_cell = OnceLock::new();
+        init_telemetry_inner(
+            config,
+            Some(Box::new(TestTelemetryHandle::new())),
+            &telemetry_cell,
+        );
+        let t = telemetry_cell.get().unwrap().lock().unwrap();
+        t.handle
+            .as_ref()
+            .unwrap()
+            .as_any()
+            .downcast_ref::<TestTelemetryHandle>()
+            .expect("Handle should be TestTelemetryHandle")
+            .dependencies
+            .clone()
+    }
+
+    #[test]
+    fn test_init_reports_dependencies() {
+        let config = Config::builder().build();
+        assert_eq!(
+            test_dependencies_reported_at_init(&config),
+            dependencies::collect()
+        );
+    }
+
+    #[test]
+    fn test_init_dependency_collection_disabled() {
+        let config = Config::builder()
+            .set_telemetry_dependency_collection_enabled(false)
+            .build();
+        assert!(test_dependencies_reported_at_init(&config).is_empty());
+    }
+
+    fn test_report_dependencies(config: &Config) -> TestTelemetryHandle {
+        let mut handle = TestTelemetryHandle::new();
+        report_dependencies(
+            &mut handle,
+            config,
+            vec![data::Dependency {
+                name: "serde".to_string(),
+                version: Some("1.0.0".to_string()),
+                ..Default::default()
+            }],
+            Some("collection failed".to_string()),
+        );
+        handle
+    }
+
+    #[test]
+    fn test_report_dependencies_logs_build_failure() {
+        let handle = test_report_dependencies(&Config::builder().build());
+        assert_eq!(handle.dependencies.len(), 1);
+        assert_eq!(
+            handle.logs,
+            vec![("collection failed".to_string(), data::LogLevel::Error, None)]
+        );
+    }
+
+    #[test]
+    fn test_report_dependencies_log_collection_disabled() {
+        let config = Config::builder()
+            .set_telemetry_log_collection_enabled(false)
+            .build();
+        let handle = test_report_dependencies(&config);
+        assert_eq!(handle.dependencies.len(), 1);
+        assert!(handle.logs.is_empty());
     }
 }
