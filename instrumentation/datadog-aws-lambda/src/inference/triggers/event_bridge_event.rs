@@ -1,0 +1,268 @@
+// Copyright 2026-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+use crate::inference::SpanData as Span;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::Value;
+use std::cell::OnceCell;
+use std::collections::HashMap;
+use tracing::debug;
+
+use crate::inference::{
+    triggers::{
+        resolve_service_name, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
+    MS_TO_NS,
+};
+
+const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
+const DATADOG_RESOURCE_NAME_KEY: &str = "x-datadog-resource-name";
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct EventBridgeEvent {
+    pub time: DateTime<Utc>,
+    pub source: String,
+    #[serde(rename = "detail-type")]
+    pub detail_type: String,
+    pub detail: Value,
+    /// The Datadog carrier in `detail`, deserialized on first use.
+    #[serde(skip)]
+    carrier: OnceCell<HashMap<String, String>>,
+}
+
+impl EventBridgeEvent {
+    fn carrier(&self) -> &HashMap<String, String> {
+        self.carrier.get_or_init(|| {
+            self.detail
+                .get(DATADOG_CARRIER_KEY)
+                .and_then(|carrier| HashMap::deserialize(carrier).ok())
+                .unwrap_or_default()
+        })
+    }
+}
+
+impl Trigger for EventBridgeEvent {
+    fn new(payload: Value) -> Option<Self> {
+        match serde_json::from_value(payload) {
+            Ok(event) => Some(event),
+            Err(e) => {
+                debug!("Failed to deserialize EventBridge Event: {}", e);
+                None
+            }
+        }
+    }
+
+    fn is_match(payload: &Value) -> bool {
+        payload.get("detail-type").is_some()
+            && payload
+                .get("source")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s != "aws.events")
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn span_data(
+        &self,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) -> Option<Span> {
+        let mut span = Span::default();
+        // EventBridge events have a timestamp resolution in seconds. A time outside the
+        // nanosecond range would also overflow in milliseconds, so it is left unknown.
+        let start_time_seconds = self.time.timestamp_nanos_opt().unwrap_or_default();
+
+        let resource_name = self
+            .carrier()
+            .get(DATADOG_RESOURCE_NAME_KEY)
+            .map(String::as_str)
+            .unwrap_or(&self.source);
+        let start_time = self
+            .carrier()
+            .get(DATADOG_START_TIME_KEY)
+            .and_then(|s| s.parse::<f64>().ok())
+            .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
+
+        let service_name = resolve_service_name(
+            service_mapping,
+            resource_name,
+            "lambda_eventbridge",
+            resource_name,
+            "eventbridge",
+            aws_service_representation_enabled,
+        );
+
+        span.name = String::from("aws.eventbridge");
+        span.service = service_name;
+        span.resource = resource_name.to_owned();
+        span.r#type = String::from("web");
+        span.start = start_time;
+        span.meta
+            .extend([("detail_type".to_string(), self.detail_type.clone())]);
+        Some(span)
+    }
+
+    fn get_tags(&self) -> HashMap<String, String> {
+        HashMap::from([(
+            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+            "eventbridge".to_string(),
+        )])
+    }
+
+    fn get_arn(&self, _region: &str, _function_name: &str) -> String {
+        self.source.clone()
+    }
+
+    fn get_carrier(&self) -> HashMap<String, String> {
+        self.carrier().clone()
+    }
+
+    fn is_async(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::triggers::test_utils::read_json_file;
+
+    #[test]
+    fn test_new() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let expected = EventBridgeEvent {
+            time: DateTime::parse_from_rfc3339("2024-11-09T08:22:15Z")
+                .expect("Failed to parse time")
+                .with_timezone(&Utc),
+            source: "my.event".to_string(),
+            detail_type: "UserSignUp".to_string(),
+            detail: serde_json::json!({
+                "hello": "there",
+                "_datadog": {
+                    "x-datadog-trace-id": "5827606813695714842",
+                    "x-datadog-parent-id": "4726693487091824375",
+                    "x-datadog-sampled": "1",
+                    "x-datadog-sampling-priority": "1",
+                    "x-datadog-resource-name": "testBus",
+                    "x-datadog-start-time": "1731183820135"
+                }
+            }),
+            carrier: OnceCell::new(),
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_is_match() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize EventBridgeEvent");
+
+        assert!(EventBridgeEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_is_not_match() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize EventBridgeEvent");
+        assert!(!EventBridgeEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_enrich_span() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let service_mapping = HashMap::new();
+        let span = event.span_data(&service_mapping, true).unwrap();
+
+        let expected = serde_json::from_str(&read_json_file("eventbridge_span.json"))
+            .expect("Failed to deserialize into Span");
+        assert_eq!(span, expected);
+    }
+
+    #[test]
+    fn test_enrich_span_no_resource_name() {
+        let json = read_json_file("eventbridge_no_resource_name_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let service_mapping = HashMap::new();
+        let span = event.span_data(&service_mapping, true).unwrap();
+
+        assert_eq!(span.resource, "my.event");
+    }
+
+    #[test]
+    fn test_enrich_span_no_timestamp() {
+        let json = read_json_file("eventbridge_no_timestamp_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let service_mapping = HashMap::new();
+        let span = event.span_data(&service_mapping, true).unwrap();
+
+        assert_eq!(span.resource, "testBus");
+        // Seconds resolution
+        assert_eq!(span.start, 1_731_140_535_000_000_000);
+    }
+
+    #[test]
+    fn test_enrich_span_out_of_range_timestamp_is_unknown() {
+        let json = read_json_file("eventbridge_no_timestamp_event.json");
+        let mut payload: Value =
+            serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        payload["time"] = Value::from("2300-01-01T00:00:00Z");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
+
+        let span = event.span_data(&HashMap::new(), true).unwrap();
+
+        assert_eq!(span.start, 0);
+    }
+
+    #[test]
+    fn test_get_arn() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
+        assert_eq!(event.get_arn("us-east-1", ""), "my.event");
+    }
+
+    #[test]
+    fn test_get_carrier() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridge Event");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "5827606813695714842".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "4726693487091824375".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-sampled".to_string(), "1".to_string()),
+            ("x-datadog-resource-name".to_string(), "testBus".to_string()),
+            (
+                "x-datadog-start-time".to_string(),
+                "1731183820135".to_string(),
+            ),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+}
