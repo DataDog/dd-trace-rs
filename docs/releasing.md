@@ -149,7 +149,10 @@ git push origin $TAG
 ```
 
 8. Once the tag has been pushed, the publish job will need to be approved by another member of the
-   apm-rust github group
+   apm-rust github group. Publishing uses
+   [crates.io trusted publishing](https://crates.io/docs/trusted-publishing): the job exchanges its
+   GitHub OIDC identity for a short-lived crates.io token, so no token is stored in the repository
+   or its environments.
 
 9. Make a github release, from the previous release to the new tag. You can auto-generate the
    release notes. <https://github.com/DataDog/dd-trace-rs/releases/new>
