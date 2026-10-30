@@ -84,9 +84,13 @@ pub(crate) fn fmt_in<'a>(alloc: &'a Bump, args: std::fmt::Arguments<'_>) -> &'a 
     s.into_bump_str()
 }
 
-/// Returns the datadog operation name from the otel span
+/// Returns the datadog operation name from the otel span: `datadog.name` if set, otherwise as
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
 pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let name = span.get_attr_str(DATADOG_NAME);
+    if !name.is_empty() {
+        return name;
+    }
     if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
         return name;
     }
@@ -210,82 +214,27 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     }
 }
 
-/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
-pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    let m = get_res_span_attributes(span, &[RESOURCE_NAME]);
-    if !m.is_empty() {
-        return m;
+/// The resource of a span created through the OpenTelemetry API: `datadog.resource` or
+/// `resource.name` if set, otherwise the span name, as in the other Datadog SDKs. Unlike the
+/// Agent's mapping for OTLP spans, the resource isn't derived from the HTTP, messaging or RPC
+/// attributes; those already shape the operation name.
+pub fn get_otel_resource<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let resource = span.get_attr_str(DATADOG_RESOURCE);
+    if !resource.is_empty() {
+        return resource;
     }
-
-    let mut m = get_res_span_attributes(span, &[HTTP_REQUEST_METHOD, HTTP_METHOD]);
-    if !m.is_empty() {
-        if m == "_OTHER" {
-            m = "HTTP";
-        }
-        if matches!(span.span_kind(), SpanKind::Server) {
-            let route = get_res_span_attributes(span, &[HTTP_ROUTE]);
-            if !route.is_empty() {
-                return fmt_in(span.alloc(), format_args!("{m} {route}"));
-            }
-        }
-        return m;
-    }
-
-    let messaging_operation =
-        get_res_span_attributes(span, &[MESSAGING_OPERATION_TYPE, MESSAGING_OPERATION]);
-    if !messaging_operation.is_empty() {
-        let mut res_name = messaging_operation;
-        let messaging_destination =
-            get_res_span_attributes(span, &[MESSAGING_DESTINATION, MESSAGING_DESTINATION_NAME]);
-        if !messaging_destination.is_empty() {
-            res_name = fmt_in(
-                span.alloc(),
-                format_args!("{res_name} {messaging_destination}"),
-            );
-        }
-        return res_name;
-    }
-
-    let rpc_method = get_res_span_attributes(span, &[RPC_METHOD]);
-    if !rpc_method.is_empty() {
-        let mut res_name = rpc_method;
-        let rpc_service = get_res_span_attributes(span, &[RPC_SERVICE]);
-        if !rpc_service.is_empty() {
-            res_name = fmt_in(span.alloc(), format_args!("{res_name} {rpc_service}"));
-        }
-        return res_name;
-    }
-
-    let graphql_operation_type = get_res_span_attributes(span, &[GRAPHQL_OPERATION_TYPE]);
-    if !graphql_operation_type.is_empty() {
-        let mut res_name = graphql_operation_type;
-        let graphql_operation_name = get_res_span_attributes(span, &[GRAPHQL_OPERATION_NAME]);
-        if !graphql_operation_name.is_empty() {
-            res_name = fmt_in(
-                span.alloc(),
-                format_args!("{res_name} {graphql_operation_name}"),
-            );
-        }
-        return res_name;
-    }
-
-    let db_system = get_res_span_attributes(span, &[DB_SYSTEM_NAME, DB_SYSTEM]);
-    if !db_system.is_empty() {
-        let db_statement = get_res_span_attributes(span, &[DB_STATEMENT]);
-        if !db_statement.is_empty() {
-            return db_statement;
-        }
-        let db_query = get_res_span_attributes(span, &[DB_QUERY_TEXT]);
-        if !db_query.is_empty() {
-            return db_query;
-        }
+    let resource = get_res_span_attributes(span, &[RESOURCE_NAME]);
+    if !resource.is_empty() {
+        return resource;
     }
     span.name()
 }
 
-// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
+/// `datadog.http_status_code` if set, otherwise as
+/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
 pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<u32> {
-    span.get_attr_num(HTTP_RESPONSE_STATUS_CODE)
+    span.get_attr_num(DATADOG_HTTP_STATUS_CODE)
+        .or_else(|| span.get_attr_num(HTTP_RESPONSE_STATUS_CODE))
         .or_else(|| span.get_attr_num(HTTP_STATUS_CODE))
 }
 
@@ -404,12 +353,26 @@ pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
+/// The env of the span: `datadog.env` on the span, then a plain `env` attribute (on the resource,
+/// then on the span), then `datadog.env` and the `deployment.environment` attributes on the
+/// resource.
 pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
+    let datadog_env = span.get_attr_str(DATADOG_ENV);
     if !datadog_env.is_empty() {
         return datadog_env;
     }
-    get_res_attributes(span, &[DEPLOYMENT_ENVIRONMENT_NAME, DEPLOYMENT_ENVIRONMENT])
+    let env = get_res_span_attributes(span, &[ENV]);
+    if !env.is_empty() {
+        return env;
+    }
+    get_res_attributes(
+        span,
+        &[
+            DATADOG_ENV,
+            DEPLOYMENT_ENVIRONMENT_NAME,
+            DEPLOYMENT_ENVIRONMENT,
+        ],
+    )
 }
 
 /// Service name used when the OpenTelemetry resource defines none.
@@ -417,7 +380,12 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    // First, try to extract service from the span's attributes.
+    let service = span.get_attr_str(DATADOG_SERVICE);
+    if !service.is_empty() {
+        return service;
+    }
+
+    // Then, try to extract service from the span's attributes.
     if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
         if !service.is_empty() {
             return service;

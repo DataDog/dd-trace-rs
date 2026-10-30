@@ -234,9 +234,10 @@ fn otel_span_to_dd_span_minimal<'a>(
     // Note: the original agent code pre-reserved `attr_len + res_len` entries for meta
     // and 6 for metrics; `VecMap` has no `reserve`, and pooled spans already carry a
     // warm capacity, so inserts just grow the existing buffers amortized.
-    dd_span.service = SpanStr::from_str(span.get_attr_str(DATADOG_SERVICE));
-    dd_span.name = SpanStr::from_str(span.get_attr_str(DATADOG_NAME));
-    dd_span.resource = SpanStr::from_str(span.get_attr_str(DATADOG_RESOURCE));
+    // The sampler resolves service, name and resource with the same functions
+    dd_span.service = SpanStr::from_str(get_otel_service(span));
+    dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
+    dd_span.resource = SpanStr::from_str(get_otel_resource(span));
     dd_span.r#type = SpanStr::from_str(span.get_attr_str(DATADOG_TYPE));
     dd_span.trace_id = trace_id_lower_half.into();
     dd_span.span_id = span_id;
@@ -274,25 +275,10 @@ fn otel_span_to_dd_span_minimal<'a>(
         );
     }
 
-    if dd_span.service.as_str().is_empty() {
-        dd_span.service = SpanStr::from_str(get_otel_service(span));
-    }
-
-    if dd_span.name.as_str().is_empty() {
-        dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
-    }
-
-    if dd_span.resource.as_str().is_empty() {
-        dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
-    }
     if dd_span.r#type.as_str().is_empty() {
         dd_span.r#type = SpanStr::from_str(get_otel_span_type(span));
     }
-    let code: u32 = if let Some(http_status_code) = span.get_attr_num(DATADOG_HTTP_STATUS_CODE) {
-        http_status_code
-    } else {
-        get_otel_status_code(span).unwrap_or(0)
-    };
+    let code: u32 = get_otel_status_code(span).unwrap_or(0);
     if code != 0 {
         dd_span.meta.insert(
             SpanStr::from_static_str("http.status_code"),
@@ -535,7 +521,6 @@ fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> S
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L217
 const DD_SEMANTICS_KEY_TO_META_KEY: &[(AttributeKey, &str)] = &[
-    (DATADOG_ENV, "env"),
     (DATADOG_VERSION, "version"),
     (DATADOG_HTTP_STATUS_CODE, "http.status_code"),
     (DATADOG_ERROR_MSG, "error.message"),
@@ -730,6 +715,13 @@ pub fn otel_span_to_dd_span<'a>(
     let is_top_level = false;
     otel_span_to_dd_span_minimal(dd_span, &span_extracted, is_top_level);
 
+    // Set first, so the `env` attributes below don't override it.
+    let env = get_otel_env(&span_extracted);
+    if !env.is_empty() {
+        dd_span
+            .meta
+            .insert(SpanStr::from_static_str("env"), SpanStr::from_str(env));
+    }
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {
         let value = span_extracted.get_attr_str(*dd_semantics_key);
         if !value.is_empty() {
@@ -788,14 +780,6 @@ pub fn otel_span_to_dd_span<'a>(
             _ => {
                 set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
             }
-        }
-    }
-
-    let env_key = SpanStr::from_static_str("env");
-    if !dd_span.meta.contains_key(&env_key) {
-        let env = get_otel_env(&span_extracted);
-        if !env.is_empty() {
-            dd_span.meta.insert(env_key, SpanStr::from_str(env));
         }
     }
 
