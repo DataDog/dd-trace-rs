@@ -23,7 +23,7 @@
 //! // `datadog_opentelemetry::tracing().init()` installs the global telemetry automatically
 //! global::tracer("my-service").in_span("my-operation", |cx| {
 //!     datadog_telemetry_api::set_sampling_decision(
-//!         cx.span().span_context().clone(),
+//!         cx.span().span_context(),
 //!         datadog_telemetry_api::SamplingDecision::Keep,
 //!     );
 //! });
@@ -58,7 +58,7 @@ pub trait DatadogTelemetryApi {
     /// If the trace isn't known to the tracer, the decision is ignored.
     fn set_sampling_decision(
         &self,
-        span: opentelemetry::trace::SpanContext,
+        span: &opentelemetry::trace::SpanContext,
         decision: SamplingDecision,
     );
 }
@@ -78,7 +78,7 @@ pub fn set_global<T: DatadogTelemetryApi + Sync + Send + 'static>(global: T) {
 /// process-global implementation of [`DatadogTelemetryApi`] installed by [`set_global`]
 ///
 /// Does nothing while no implementation has been installed.
-pub fn set_sampling_decision(span: opentelemetry::trace::SpanContext, decision: SamplingDecision) {
+pub fn set_sampling_decision(span: &opentelemetry::trace::SpanContext, decision: SamplingDecision) {
     let setter = DATADOG_TELEMETRY.load();
     let Some(setter) = setter.as_deref() else {
         return;

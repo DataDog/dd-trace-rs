@@ -185,7 +185,7 @@
 //!
 //! global::tracer("my-service").in_span("my-operation", |cx| {
 //!     datadog_telemetry_api::set_sampling_decision(
-//!         cx.span().span_context().clone(),
+//!         cx.span().span_context(),
 //!         datadog_telemetry_api::SamplingDecision::Keep,
 //!     );
 //! });
@@ -207,7 +207,7 @@
 //!     .tracer("my-service")
 //!     .in_span("my-operation", |cx| {
 //!         datadog_telemetry.set_sampling_decision(
-//!             cx.span().span_context().clone(),
+//!             cx.span().span_context(),
 //!             datadog_telemetry_api::SamplingDecision::Keep,
 //!         );
 //!     });
@@ -421,7 +421,7 @@ pub struct DatadogTelemetry {
 impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
     fn set_sampling_decision(
         &self,
-        span: opentelemetry::trace::SpanContext,
+        span: &opentelemetry::trace::SpanContext,
         decision: datadog_telemetry_api::SamplingDecision,
     ) {
         self.registry.set_sampling_decision(

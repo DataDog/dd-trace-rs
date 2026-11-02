@@ -1,12 +1,12 @@
 [package]
 name = "datadog-telemetry-api"
+description = "Datadog tracing API to interact with the Datadog tracer at runtime"
 rust-version.workspace = true
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme.workspace = true
-description.workspace = true
 authors.workspace = true
 
 [package.metadata.docs.rs]

@@ -1,0 +1,50 @@
+[
+  {
+    "Start": 0,
+    "Duration": 10000000000,
+    "Stats": [
+      {
+        "Name": "internal",
+        "Resource": "manual_keep",
+        "Service": "unnamed-rust-service",
+        "Type": "custom",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 7000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "internal",
+        "Resource": "sampler_kept",
+        "Service": "unnamed-rust-service",
+        "Type": "custom",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 57000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "internal",
+        "Resource": "sampler_rejected",
+        "Service": "unnamed-rust-service",
+        "Type": "custom",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 4000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      }
+    ]
+  }
+]
