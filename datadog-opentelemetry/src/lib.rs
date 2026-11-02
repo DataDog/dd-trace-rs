@@ -152,14 +152,18 @@
 //!
 //! Whenever a new trace is started, the sampler decides whether this trace will be sent to the
 //! intake or not. This is called a sampling decision.
-//! This sampling decision is usually immutable from there and applies to all spans in the trace.
+//! This sampling decision is usually immutable from there and propagates to all spans in the trace.
 //!
 //! Using the [`datadog_telemetry_api::set_sampling_decision`] API it is possible to override
 //! sampling decisions while the span is active, usually because some rare or unexpected event
-//! has happened and you want to be sure to record and send it to storage.
+//! has happened and the span has to be recorded and sent to storage, regardless of sampling
+//! policies.
 //!
-//! The sampling decision set for the trace takes effect immediately, and all active spans
-//! belonging to the same trace will inherit it, even if they were started before the call.
+//! This API is provided by the `datadog-telemetry-api` crate, which must be added to your
+//! dependencies, with the same major version as `datadog-opentelemetry`.
+//!
+//! The sampling decision set on the trace takes effect immediately, and all active spans
+//! in the trace will inherit it, even if they were started before the call.
 //!
 //! The global `set_sampling_decision` method is callable from anywhere, as long as an instance
 //! of [`DatadogTelemetry`] has been installed, either with [`DatadogTracingBuilder::init()`],
@@ -171,6 +175,15 @@
 //! of the trace will be sampled: only the currently active spans, and the spans started after
 //! the call, are guaranteed. Spans closed before the call might carry the original sampling
 //! decision.
+//!
+//! The manual decision is applied to the spans exported by the Datadog span processor and to the
+//! headers injected by the Datadog propagator. It does not change the OpenTelemetry sampled flag
+//! ([`opentelemetry::trace::SpanContext::is_sampled`]) of the spans already started, nor of the
+//! spans started from a local parent, which inherit the flag of their parent.
+//! After a manual `Keep` on a trace rejected by the sampler, these spans keep `is_sampled() ==
+//! false`, and after a manual `Drop` on a trace kept by the sampler, they keep `is_sampled() ==
+//! true`. Other span processors or exporters added to the tracer provider only see this original
+//! flag.
 //!
 //! `set_sampling_decision` should be called only with spans started by an
 //! [`opentelemetry_sdk::trace::SdkTracerProvider`] installed by the same

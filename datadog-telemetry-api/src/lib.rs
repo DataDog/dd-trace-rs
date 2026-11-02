@@ -4,7 +4,7 @@
 //! # Datadog Telemetry API
 //!
 //! This library provides the API to interact with the
-//! [datadog-opentelemetry](https://docs.rs/datadog-opentelemetry/0.5.3/datadog_opentelemetry/)
+//! [datadog-opentelemetry](https://docs.rs/datadog-opentelemetry/latest/datadog_opentelemetry/)
 //! library at runtime, without depending on the full crate and the SDK implementation.
 //!
 //! This library is made to work in tandem with the [`opentelemetry`] crate, extending the API
@@ -49,7 +49,7 @@ pub enum SamplingDecision {
 /// Runtime interaction with the Datadog tracing libraries
 ///
 /// It is implemented by
-/// [datadog_opentelemetry](https://docs.rs/datadog-opentelemetry/0.5.3/datadog_opentelemetry/)
+/// [datadog_opentelemetry](https://docs.rs/datadog-opentelemetry/latest/datadog_opentelemetry/)
 /// and gives access to tracing features, such as the
 /// sampling decisions of the live traces, without a reference to the tracer.
 pub trait DatadogTelemetryApi {
@@ -84,4 +84,71 @@ pub fn set_sampling_decision(span: &opentelemetry::trace::SpanContext, decision:
         return;
     };
     setter.set_sampling_decision(span, decision);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState};
+
+    use super::*;
+
+    /// Records the trace id and whether the decision was a keep, for every call it receives
+    struct RecordingTelemetry {
+        calls: Arc<Mutex<Vec<(TraceId, bool)>>>,
+    }
+
+    impl DatadogTelemetryApi for RecordingTelemetry {
+        fn set_sampling_decision(&self, span: &SpanContext, decision: SamplingDecision) {
+            let is_keep = matches!(decision, SamplingDecision::Keep);
+            self.calls.lock().unwrap().push((span.trace_id(), is_keep));
+        }
+    }
+
+    fn span_context(trace_id: u128) -> SpanContext {
+        SpanContext::new(
+            TraceId::from(trace_id),
+            SpanId::from(1),
+            TraceFlags::SAMPLED,
+            false,
+            TraceState::NONE,
+        )
+    }
+
+    /// The global is process-wide and `cargo test` runs tests in parallel threads of the same
+    /// process, so every step touching it lives in this single test.
+    #[test]
+    fn test_set_sampling_decision_routes_to_the_last_global() {
+        // Without a global installed, the decision is ignored
+        set_sampling_decision(&span_context(1), SamplingDecision::Keep);
+
+        let first_calls = Arc::new(Mutex::new(Vec::new()));
+        set_global(RecordingTelemetry {
+            calls: Arc::clone(&first_calls),
+        });
+        set_sampling_decision(&span_context(2), SamplingDecision::Keep);
+        set_sampling_decision(&span_context(3), SamplingDecision::Drop);
+        assert_eq!(
+            *first_calls.lock().unwrap(),
+            vec![(TraceId::from(2), true), (TraceId::from(3), false)],
+            "the installed global must receive the decisions, and only the ones made after it was installed"
+        );
+
+        let second_calls = Arc::new(Mutex::new(Vec::new()));
+        set_global(RecordingTelemetry {
+            calls: Arc::clone(&second_calls),
+        });
+        set_sampling_decision(&span_context(4), SamplingDecision::Keep);
+        assert_eq!(
+            *second_calls.lock().unwrap(),
+            vec![(TraceId::from(4), true)],
+            "the replacing global must receive the decisions made after it was installed"
+        );
+        assert_eq!(
+            first_calls.lock().unwrap().len(),
+            2,
+            "the replaced global must not receive any decision anymore"
+        );
+    }
 }

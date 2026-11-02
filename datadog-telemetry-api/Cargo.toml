@@ -15,4 +15,4 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 arc-swap = "1.9.3"
-opentelemetry = "0.33"
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
