@@ -87,17 +87,43 @@ pub type DdAttributeValue<'a> = AttributeValue<CowStr<'a>>;
 /// OpenTelemetry links always carry trace flags, so it is always set.
 const SPAN_LINK_FLAGS_SET: u32 = 1 << 31;
 
+/// Keys that carry a numeric flag read by libdatadog (e.g. `_dd.measured` by `is_measured`,
+/// numeric-only in libdd-trace-utils 16.0.0 span/trace_utils_v1.rs). A string attribute inserted
+/// after the flag would shadow it, since [`VecMap::get`] is last-wins; the string insert is
+/// skipped instead. The reverse order is safe: a numeric insert after a string still ends up
+/// last-wins.
+const RESERVED_METRIC_KEYS: &[&str] = &[
+    "_dd.measured",
+    "_top_level",
+    "_sampling_priority_v1",
+    "process_id",
+    // Inserted via `metric_insert` in the `analytics.event` arm of `set_meta_otlp` and read
+    // numerically by libdatadog (`SAMPLING_ANALYTICS_RATE_KEY`).
+    SAMPLING_RATE_EVENT_EXTRACTION_KEY,
+];
+
 /// Inserts a string tag (a v0.4 `meta` entry) on the span.
 ///
 /// `env`, `version`, `component` and `span.kind` are dedicated span fields in v1, every other
-/// key is stored as a string attribute.
+/// key is stored as a string attribute, except the [`RESERVED_METRIC_KEYS`] flags, which a
+/// string attribute must not shadow.
 pub(crate) fn meta_insert<'a>(dd_span: &mut DdSpan<'a>, k: SpanStr<'a>, v: SpanStr<'a>) {
     match k.as_str() {
         "env" => dd_span.env = v,
         "version" => dd_span.version = v,
         "component" => dd_span.component = v,
         "span.kind" => dd_span.span_kind = DdSpanKind::from_meta(v.as_str()),
-        _ => dd_span.attributes.insert(k, AttributeValue::String(v)),
+        _ => {
+            if RESERVED_METRIC_KEYS.contains(&k.as_str())
+                && matches!(
+                    dd_span.attributes.get(k.as_str()),
+                    Some(AttributeValue::Float(_))
+                )
+            {
+                return;
+            }
+            dd_span.attributes.insert(k, AttributeValue::String(v));
+        }
     }
 }
 
@@ -127,10 +153,9 @@ pub(crate) fn metric_insert<'a>(dd_span: &mut DdSpan<'a>, k: SpanStr<'a>, v: f64
 }
 
 pub(crate) fn metric_contains(dd_span: &DdSpan, k: &str) -> bool {
-    dd_span
-        .attributes
-        .iter()
-        .any(|(key, v)| key.as_str() == k && matches!(v, AttributeValue::Float(_)))
+    // VecMap::get is last-wins: only the effective value matters, a Float shadowed by a
+    // string attribute is not a metric anymore, with or without dedup().
+    matches!(dd_span.attributes.get(k), Some(AttributeValue::Float(_)))
 }
 
 fn set_meta_otlp<'a>(k: SpanStr<'a>, v: SpanStr<'a>, dd_span: &mut DdSpan<'a>) {
@@ -935,9 +960,10 @@ mod tests {
     use std::borrow::Cow;
 
     use bumpalo::Bump;
-    use libdd_trace_utils::span::v1::SpanKind as DdSpanKind;
+    use libdd_trace_utils::span::v1::{AttributeValue, SpanKind as DdSpanKind};
+    use libdd_trace_utils::span::SpanText;
     use opentelemetry::{
-        trace::{SpanContext, SpanId, TraceFlags, TraceId},
+        trace::{SpanContext, SpanId, SpanKind, TraceFlags, TraceId},
         KeyValue,
     };
     use opentelemetry_sdk::{
@@ -945,7 +971,10 @@ mod tests {
         Resource,
     };
 
-    use super::{otel_span_id_to_dd_id, otel_span_to_dd_span};
+    use super::{
+        meta_insert, metric_contains, metric_insert, otel_span_id_to_dd_id, otel_span_to_dd_span,
+        DdSpan, SpanStr,
+    };
     use crate::mappings::SdkSpan;
 
     #[test]
@@ -991,5 +1020,90 @@ mod tests {
         assert_eq!(span_kind_of("server"), DdSpanKind::Server);
         assert_eq!(span_kind_of("Server"), DdSpanKind::Internal);
         assert_eq!(span_kind_of("gateway"), DdSpanKind::Internal);
+    }
+
+    /// Builds a Client span and returns the effective `_dd.measured` attribute as a float if
+    /// it is numeric, `None` otherwise: the conversion synthesizes the numeric flag in
+    /// `otel_span_to_dd_span_minimal` for Client spans, and the result borrows from the arena
+    /// local to the helper. This is a copy of [`span_kind_attribute_matches_libdatadog_case`]'s
+    /// span setup, with a Client span kind.
+    fn client_span_measured_value(attributes: Vec<KeyValue>, resource: Resource) -> Option<f64> {
+        let span_data = SpanData {
+            span_context: SpanContext::new(
+                TraceId::from(1),
+                SpanId::from(1),
+                TraceFlags::SAMPLED,
+                false,
+                Default::default(),
+            ),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: Cow::Borrowed("test_span"),
+            start_time: std::time::SystemTime::UNIX_EPOCH,
+            end_time: std::time::SystemTime::UNIX_EPOCH,
+            attributes,
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: opentelemetry::trace::Status::Unset,
+            instrumentation_scope: Default::default(),
+            parent_span_is_remote: false,
+        };
+        let alloc = Bump::new();
+        let sdk_span = SdkSpan::from_sdk_span_data(&span_data);
+        let dd_span = otel_span_to_dd_span(&sdk_span, &resource, &alloc);
+        match dd_span.attributes.get("_dd.measured") {
+            Some(AttributeValue::Float(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// A resource attribute stringified under `_dd.measured` must not shadow the numeric flag
+    /// synthesized for Client spans: on v0.4 the string went into `meta` and the flag stayed in
+    /// `metrics`, so shadowing it is a v1 regression that would drop the measured flag
+    /// (libdatadog reads `_dd.measured` as numeric-only).
+    #[test]
+    fn resource_attribute_does_not_shadow_measured_metric_flag() {
+        let resource = Resource::builder_empty()
+            .with_attributes([KeyValue::new("_dd.measured", 1)])
+            .build();
+        assert_eq!(client_span_measured_value(vec![], resource), Some(1.0));
+    }
+
+    /// Same as [`resource_attribute_does_not_shadow_measured_metric_flag`], with a string span
+    /// attribute under `_dd.measured`.
+    #[test]
+    fn string_attribute_does_not_shadow_measured_metric_flag() {
+        let resource = Resource::builder_empty().build();
+        assert_eq!(
+            client_span_measured_value(vec![KeyValue::new("_dd.measured", "1")], resource),
+            Some(1.0)
+        );
+    }
+
+    /// `metric_contains` reports the effective (last-wins) value: a Float shadowed by a
+    /// string attribute is not a metric, before and after `dedup()`. A Float appended after a
+    /// string attribute is the effective value, so it is a metric.
+    #[test]
+    fn metric_contains_reports_the_effective_value() {
+        let mut dd_span = DdSpan::default();
+        metric_insert(&mut dd_span, SpanStr::from_static_str("custom.key"), 1.0);
+        meta_insert(
+            &mut dd_span,
+            SpanStr::from_static_str("custom.key"),
+            SpanStr::from_static_str("1"),
+        );
+        assert!(!metric_contains(&dd_span, "custom.key"));
+        dd_span.attributes.dedup();
+        assert!(!metric_contains(&dd_span, "custom.key"));
+
+        let mut dd_span = DdSpan::default();
+        meta_insert(
+            &mut dd_span,
+            SpanStr::from_static_str("custom.key"),
+            SpanStr::from_static_str("1"),
+        );
+        metric_insert(&mut dd_span, SpanStr::from_static_str("custom.key"), 1.0);
+        assert!(metric_contains(&dd_span, "custom.key"));
     }
 }

@@ -18,11 +18,23 @@ pub mod benchmarks {
 
     pub trait MeasurementName {
         fn name() -> &'static str;
+
+        /// Whether `Throughput::Elements` is a meaningful throughput unit for this measurement:
+        /// wall time reports elements/s, while the allocation measurement reports bytes per
+        /// iteration, where an elements throughput would be misleading (more allocation would
+        /// look like more throughput).
+        fn reports_elements_throughput() -> bool {
+            false
+        }
     }
 
     impl MeasurementName for criterion::measurement::WallTime {
         fn name() -> &'static str {
             "wall_time"
+        }
+
+        fn reports_elements_throughput() -> bool {
+            true
         }
     }
 

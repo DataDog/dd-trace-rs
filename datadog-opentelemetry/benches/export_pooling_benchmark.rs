@@ -131,7 +131,11 @@ fn bench_export_conversion<M: criterion::measurement::Measurement + MeasurementN
     let mut group = c.benchmark_group(format!("export_conversion/{}", M::name()));
     for &(num_chunks, spans_per_chunk) in CONFIGS {
         let chunks = input_chunks(num_chunks, spans_per_chunk);
-        group.throughput(Throughput::Elements((num_chunks * spans_per_chunk) as u64));
+        // Only the wall-time measurement is a count of processed spans: the allocation
+        // measurement reports bytes per iteration, without an elements throughput.
+        if M::reports_elements_throughput() {
+            group.throughput(Throughput::Elements((num_chunks * spans_per_chunk) as u64));
+        }
         for (name, recycling) in [
             ("allocating", Recycling::None),
             ("pooled", Recycling::Returned),
