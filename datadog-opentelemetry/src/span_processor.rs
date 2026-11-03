@@ -608,7 +608,11 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) {
-        if !self.config.enabled() || !span.is_recording() || !span.span_context().is_valid() {
+        // Don't check `config.enabled()` here: remote config can disable tracing after the sampler
+        // made this span recording. Its `on_end` still finishes it in the registry, so registering
+        // it keeps the trace's open span count balanced. Spans started while tracing is disabled
+        // are dropped by the sampler and never recording.
+        if !span.is_recording() || !span.span_context().is_valid() {
             return;
         }
 
@@ -1047,6 +1051,40 @@ mod tests {
         bench_trace_registry(&mut criterion);
 
         criterion.final_summary();
+    }
+
+    #[test]
+    fn test_span_started_while_remotely_disabled_keeps_parent_trace_open() {
+        use opentelemetry::trace::{Span, TraceContextExt, Tracer, TracerProvider};
+
+        let config = Arc::new(Config::builder().build());
+        let registry = TraceRegistry::new(config.clone());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let processor =
+            DatadogSpanProcessor::new(config.clone(), registry.clone(), resource, None).unwrap();
+        // The SDK's default sampler keeps the child recording, as if it was sampled just before
+        // remote config disabled tracing
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_span_processor(processor)
+            .build();
+        let tracer = provider.tracer("test");
+
+        let parent = tracer.start("parent");
+        let trace_id = parent.span_context().trace_id().to_bytes();
+        let parent_cx = opentelemetry::Context::current_with_span(parent);
+
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable".to_string()));
+        let mut child = tracer.start_with_context("child", &parent_cx);
+        child.end();
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+
+        assert!(
+            registry.get_trace_propagation_data(trace_id).is_some(),
+            "The parent's trace should still be registered after the child ends"
+        );
+        let stats = registry.get_metrics();
+        assert_eq!(stats.spans_finished, 1);
+        assert_eq!(stats.trace_segments_closed, 0);
     }
 
     fn create_test_span_data(trace_id: [u8; 16], span_id: [u8; 8]) -> SpanData {

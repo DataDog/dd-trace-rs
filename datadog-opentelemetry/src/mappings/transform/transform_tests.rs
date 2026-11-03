@@ -275,6 +275,24 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     KeyValue::new("name", "john"),
                     KeyValue::new("approx", 1.2),
                     KeyValue::new("count", 2),
+                    KeyValue::new(
+                        "names",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "flags",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("counts", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("ratios", opentelemetry::Value::Array(vec![0.5, 1.5].into())),
+                    KeyValue::new(
+                        "http.request.header.accept",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("text/html")].into(),
+                        ),
+                    ),
                 ],
                 dropped_attributes_count: 0,
                 events: make_test_span_events().0,
@@ -306,6 +324,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 attributes: attributes(
                     [
                         ("name", "john"),
+                        ("names.0", "a"),
+                        ("names.1", "b"),
+                        ("flags.0", "true"),
+                        ("flags.1", "false"),
+                        ("http.request.headers.accept.0", "text/html"),
                         ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
                         ("otel.status_code", "Error"),
                         ("otel.status_description", "Error"),
@@ -317,7 +340,14 @@ pub fn test_cases() -> Vec<Test<'static>> {
                         ("error.stack", "1/2/3"),
                         ("_dd.span_events.has_exception", "true"),
                     ],
-                    [("approx", 1.2), ("count", 2.0)],
+                    [
+                        ("approx", 1.2),
+                        ("count", 2.0),
+                        ("counts.0", 1.0),
+                        ("counts.1", 2.0),
+                        ("ratios.0", 0.5),
+                        ("ratios.1", 1.5),
+                    ],
                 ),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,

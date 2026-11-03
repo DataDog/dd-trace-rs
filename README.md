@@ -29,7 +29,7 @@ opentelemetry-sdk.
 Add to you Cargo.toml
 
 ```toml
-datadog-opentelemetry = { version = "0.5.3" }
+datadog-opentelemetry = { version = "0.6.0" }
 ```
 
 ### Creating traces, metrics and logs
@@ -193,7 +193,7 @@ To enable thread-level context sharing on Linux:
 
      ```toml
      [build-dependencies]
-     datadog-opentelemetry = { version = "0.5.3" }
+     datadog-opentelemetry = { version = "0.6.0" }
      ```
 
      Finally, add the following line to your `build.rs` main function (create one
@@ -217,7 +217,7 @@ To enable thread-level context sharing on Linux:
 
      ```toml
      [build-dependencies]
-     datadog-opentelemetry = { version = "0.5.3" }
+     datadog-opentelemetry = { version = "0.6.0" }
      ```
 
      Finally, add the following line to your `build.rs` main function (create one
@@ -259,7 +259,7 @@ let logging_provider = datadog_opentelemetry::logs()
 
 For advanced usage and configuration information, check out [`DatadogTracingBuilder`],
 [`configuration::ConfigBuilder`] and the
-[library documentation](https://docs.rs/datadog-opentelemetry/0.5.3/datadog_opentelemetry/).
+[library documentation](https://docs.rs/datadog-opentelemetry/0.6.0/datadog_opentelemetry/).
 
 * Through env variables
 
@@ -313,7 +313,7 @@ DD_LOG_LEVEL=debug RUST_LOG=datadog_opentelemetry=debug cargo run
 
 ## Support
 
-* MSRV: 1.87
+* MSRV: 1.91.1
 * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
   version: 0.34
