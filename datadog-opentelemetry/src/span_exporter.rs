@@ -26,7 +26,7 @@ use crate::{
     configuration::Config,
     core::telemetry_session,
     ddtrace_transform::{self, DdTracePool},
-    mappings::CachedConfig,
+    mappings::{CachedConfig, DEFAULT_OTLP_SERVICE_NAME},
 };
 
 pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
@@ -461,7 +461,7 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .iter()
                 .flat_map(|chunk| &chunk.spans)
                 .map(|s| s.service.as_str())
-                .filter(|s| !s.is_empty() && *s != "otlpresourcenoservicename");
+                .filter(|s| !s.is_empty() && *s != DEFAULT_OTLP_SERVICE_NAME);
             self.config.add_extra_services(services);
 
             let result = if !dd_trace_chunks.is_empty() {

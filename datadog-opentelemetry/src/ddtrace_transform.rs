@@ -4,6 +4,8 @@
 //! This module contains trace mapping from otel to datadog
 //! specific to datadog-opentelemetry
 
+use std::collections::HashSet;
+
 use crate::{
     core::sampling,
     mappings::{
@@ -28,7 +30,8 @@ const BASE_SERVICE_KEY: &str = "_dd.base_service";
 const SAMPLING_PRIORITY_KEY: &str = "_sampling_priority_v1";
 const ORIGIN_KEY: &str = "_dd.origin";
 const DECISION_MAKER_KEY: &str = "_dd.p.dm";
-/// The upper 64 bits of the trace id are carried by the chunk `trace_id` in v1.
+/// The v0.4 encoding of the upper 64 bits of the trace id. In v1 the chunk `trace_id` carries the
+/// full 128-bit id, so the tag is consumed and removed after conversion.
 const TRACE_ID_HIGH_KEY: &str = "_dd.p.tid";
 
 /// The OTLP receiver in the agent only receives sampled spans
@@ -63,8 +66,10 @@ pub type DdTracePool = SpanPoolV1<CowStr<'static>>;
 pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<CowStr<'a>> {
     // SAFETY: `SpanPoolV1` resets every span (all text fields set back to the empty `'static`
     // default, collections cleared) before storing it, both in its queue and in its thread-local
-    // caches, and drops the chunk shells instead of storing them. Spans and chunks handed back to
-    // the pool thus never keep a `CowStr<'a>` borrowing data past the call returning them, and the
+    // caches, and drops the chunk shells instead of storing them. The reset is implemented by
+    // `libdd_trace_utils::span::v1::span_pool::reset_span` and `SpanBatch::reset`
+    // (libdd-trace-utils 16.0.0). Spans and chunks handed back to the pool thus never keep a
+    // `CowStr<'a>` borrowing data past the call returning them, and the
     // pool only ever stores values that are valid for `'static`. Both types only differ by the
     // lifetime of `CowStr`, so they have the same layout.
     //
@@ -107,8 +112,11 @@ where
     chunk.trace_id = trace_id;
 
     if let Some(root) = local_root(&chunk.spans) {
+        // Numeric attributes are read like libdatadog's `attribute_as_f64`: both float and
+        // integer values count.
         chunk.priority = match root.attributes.get(SAMPLING_PRIORITY_KEY) {
             Some(DdAttributeValue::Float(p)) => Some(*p as i32),
+            Some(DdAttributeValue::Int(p)) => Some(*p as f64 as i32),
             _ => None,
         };
         chunk.origin = meta_get(root, ORIGIN_KEY).cloned().unwrap_or_default();
@@ -129,9 +137,10 @@ where
 /// any span is a valid source for the chunk-level fields; the local root is preferred for
 /// consistency with libdatadog's v0.4 -> v1 conversion.
 fn local_root<'s, 'a>(spans: &'s [DdSpan<'a>]) -> Option<&'s DdSpan<'a>> {
+    let span_ids: HashSet<u64> = spans.iter().map(|span| span.span_id).collect();
     spans
         .iter()
-        .find(|s| s.parent_id == 0 || !spans.iter().any(|p| p.span_id == s.parent_id))
+        .find(|span| span.parent_id == 0 || !span_ids.contains(&span.parent_id))
         .or_else(|| spans.first())
 }
 
@@ -246,8 +255,8 @@ fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a Cach
 pub mod bench_support {
     use opentelemetry_sdk::{trace::SpanData, Resource};
 
-    pub use super::DdTracePool;
-    use super::{otel_trace_chunk_to_dd_trace_chunk, trace_pool_for, Bump};
+    use super::{otel_trace_chunk_to_dd_trace_chunk, Bump};
+    pub use super::{trace_pool_for, DdTracePool};
     use crate::{configuration::Config, mappings::CachedConfig};
 
     /// What happens to the converted chunks once exported.

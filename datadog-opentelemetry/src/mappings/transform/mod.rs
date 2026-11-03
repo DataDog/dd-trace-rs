@@ -721,6 +721,21 @@ pub fn otel_span_to_dd_span_into<'a>(
     otel_resource: &'a Resource,
     alloc: &'a Bump,
 ) -> DdSpan<'a> {
+    // A non-empty span would silently mix data across exports, so the contract above is
+    // enforced in debug builds.
+    debug_assert!(
+        dd_span.attributes.is_empty(),
+        "`dd_span.attributes` must be empty on entry"
+    );
+    debug_assert!(
+        dd_span.span_links.is_empty(),
+        "`dd_span.span_links` must be empty on entry"
+    );
+    debug_assert!(
+        dd_span.span_events.is_empty(),
+        "`dd_span.span_events` must be empty on entry"
+    );
+
     // There is a performance optimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
@@ -917,13 +932,64 @@ pub fn otel_span_to_dd_span_into<'a>(
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry::SpanId;
+    use std::borrow::Cow;
 
-    use crate::mappings::transform::otel_span_id_to_dd_id;
+    use bumpalo::Bump;
+    use libdd_trace_utils::span::v1::SpanKind as DdSpanKind;
+    use opentelemetry::{
+        trace::{SpanContext, SpanId, TraceFlags, TraceId},
+        KeyValue,
+    };
+    use opentelemetry_sdk::{
+        trace::{SpanData, SpanEvents, SpanLinks},
+        Resource,
+    };
+
+    use super::{otel_span_id_to_dd_id, otel_span_to_dd_span};
+    use crate::mappings::SdkSpan;
 
     #[test]
     fn span_id_conversion() {
         let id = otel_span_id_to_dd_id(SpanId::from_bytes([2; 8]));
         assert_eq!(id, 0x0202020202020202);
+    }
+
+    /// A `span.kind` span attribute is normalized with libdatadog's own exact-case policy: only
+    /// the lowercase v0.4 values are recognized, and anything else (wrong case or unknown kind)
+    /// falls back to `DdSpanKind::Internal`.
+    #[test]
+    fn span_kind_attribute_matches_libdatadog_case() {
+        let span_kind_of = |kind: &'static str| {
+            let span_data = SpanData {
+                span_context: SpanContext::new(
+                    TraceId::from(1),
+                    SpanId::from(1),
+                    TraceFlags::SAMPLED,
+                    false,
+                    Default::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: opentelemetry::trace::SpanKind::Internal,
+                name: Cow::Borrowed("test_span"),
+                start_time: std::time::SystemTime::UNIX_EPOCH,
+                end_time: std::time::SystemTime::UNIX_EPOCH,
+                attributes: vec![KeyValue::new("span.kind", kind)],
+                dropped_attributes_count: 0,
+                events: SpanEvents::default(),
+                links: SpanLinks::default(),
+                status: opentelemetry::trace::Status::Unset,
+                instrumentation_scope: Default::default(),
+                parent_span_is_remote: false,
+            };
+            let resource = Resource::builder_empty().build();
+            let alloc = Bump::new();
+            let sdk_span = SdkSpan::from_sdk_span_data(&span_data);
+            let dd_span = otel_span_to_dd_span(&sdk_span, &resource, &alloc);
+            dd_span.span_kind
+        };
+
+        assert_eq!(span_kind_of("server"), DdSpanKind::Server);
+        assert_eq!(span_kind_of("Server"), DdSpanKind::Internal);
+        assert_eq!(span_kind_of("gateway"), DdSpanKind::Internal);
     }
 }

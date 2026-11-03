@@ -69,8 +69,40 @@ fn span_data(trace_idx: usize, span_idx: usize) -> SpanData {
             KeyValue::new("_dd.p.dm", "-0"),
         ],
         dropped_attributes_count: 0,
-        events: SpanEvents::default(),
-        links: SpanLinks::default(),
+        // One event and one link, each with a couple of attributes, so the conversion grows
+        // (and the pool recycles) the span_events/span_links buffers instead of leaving them
+        // empty.
+        events: {
+            let mut events = SpanEvents::default();
+            events.events.push(opentelemetry::trace::Event::new(
+                "db.query",
+                start_time,
+                vec![
+                    KeyValue::new("db.system", "postgresql"),
+                    KeyValue::new("db.statement", "SELECT 1"),
+                ],
+                0,
+            ));
+            events
+        },
+        links: {
+            let mut links = SpanLinks::default();
+            links.links.push(opentelemetry::trace::Link::new(
+                SpanContext::new(
+                    TraceId::from((trace_idx as u128) << 64 | 1),
+                    SpanId::from(span_idx as u64 + 1),
+                    TraceFlags::SAMPLED,
+                    false,
+                    Default::default(),
+                ),
+                vec![
+                    KeyValue::new("link.attribute", "value"),
+                    KeyValue::new("link.sampling_priority", 1),
+                ],
+                0,
+            ));
+            links
+        },
         status: Status::Unset,
         instrumentation_scope: InstrumentationScope::builder("bench").build(),
         parent_span_is_remote: false,
