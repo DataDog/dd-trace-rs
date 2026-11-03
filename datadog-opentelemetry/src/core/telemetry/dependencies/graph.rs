@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub struct Recorded {
     pub graph: Graph,
-    pub failure: Option<String>,
+    pub failure: Option<Failure>,
 }
 
 impl Recorded {
@@ -23,10 +23,35 @@ impl Recorded {
     }
 
     #[allow(dead_code)]
-    pub fn with_error(failure: &str) -> Self {
+    pub fn with_error(failure: Failure) -> Self {
         Self {
             graph: Graph::default(),
-            failure: Some(failure.to_owned()),
+            failure: Some(failure),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// allow: the build script and the tracer each construct only some of the variants
+#[allow(dead_code)]
+pub enum Failure {
+    WorkspaceNotFound,
+    CargoUnavailable,
+    CargoMetadataFailed,
+    CargoTreeFailed,
+    WriteFailed,
+    NotRecorded,
+}
+
+impl Failure {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::WorkspaceNotFound => "workspace_not_found",
+            Self::CargoUnavailable => "cargo_unavailable",
+            Self::CargoMetadataFailed => "cargo_metadata_failed",
+            Self::CargoTreeFailed => "cargo_tree_failed",
+            Self::WriteFailed => "write_failed",
+            Self::NotRecorded => "not_recorded",
         }
     }
 }
@@ -36,6 +61,9 @@ pub struct Graph {
     pub packages: Vec<Package>,
     pub dependencies: Vec<BTreeMap<usize, Builds>>,
     pub members: Vec<Member>,
+    /// The targets of the workspace packages whose dependencies couldn't be resolved, so their
+    /// executables aren't taken for unknown ones.
+    pub unresolved: Vec<Target>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

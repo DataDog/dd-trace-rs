@@ -37,16 +37,15 @@ mod dependencies {
 
     use serde_json::Value;
 
-    use super::graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
+    use super::graph::{Builds, Failure, Graph, Member, Package, Recorded, Target, TargetKind};
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
     const WORKSPACE_DIR_ENV: &str = "CARGO_WORKSPACE_DIR";
-    /// Carries the failure code to the tracer when the graph couldn't be written; must match the
-    /// tracer's. See `dependencies/mod.rs` recorded() function.
+    /// Set, to the failure code, when the graph couldn't be written; must match the tracer's. See
+    /// `dependencies/mod.rs` recorded() function.
     const DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
     /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
     const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
-    const WRITE_FAILED: &str = "write_failed";
 
     #[derive(Default)]
     struct GraphBuilder {
@@ -97,27 +96,6 @@ mod dependencies {
         }
     }
 
-    /// Why collection produced no list. Reported through telemetry as a fixed code, since the
-    /// details (cargo's output, paths on the build machine) must not leave the build.
-    #[derive(Clone, Copy)]
-    enum Failure {
-        WorkspaceNotFound,
-        CargoUnavailable,
-        CargoMetadataFailed,
-        CargoTreeFailed,
-    }
-
-    impl Failure {
-        fn code(self) -> &'static str {
-            match self {
-                Failure::WorkspaceNotFound => "workspace_not_found",
-                Failure::CargoUnavailable => "cargo_unavailable",
-                Failure::CargoMetadataFailed => "cargo_metadata_failed",
-                Failure::CargoTreeFailed => "cargo_tree_failed",
-            }
-        }
-    }
-
     /// A failure and its details, which are only shown in the build output.
     type CargoError = (Failure, String);
 
@@ -163,7 +141,7 @@ mod dependencies {
                     "cargo::warning=dependency collection failed ({}): {details}",
                     failure.code()
                 );
-                Recorded::with_error(failure.code())
+                Recorded::with_error(failure)
             }
         };
 
@@ -178,17 +156,16 @@ mod dependencies {
         match written {
             Ok(()) => println!("cargo::rustc-cfg={DD_BUILD_TIME_DEPENDENCIES_CFG}"),
             Err(err) => {
-                println!("cargo::warning=dependency collection failed ({WRITE_FAILED}): {err}");
-                println!(
-                    "cargo::rustc-env={DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV}={WRITE_FAILED}"
-                );
+                let code = Failure::WriteFailed.code();
+                println!("cargo::warning=dependency collection failed ({code}): {err}");
+                println!("cargo::rustc-env={DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV}={code}");
             }
         }
     }
 
     fn render(Recorded { graph, failure }: &Recorded) -> String {
         if let Some(failure) = failure {
-            return format!("Recorded::with_error({failure:?})\n");
+            return format!("Recorded::with_error(Failure::{failure:?})\n");
         }
         let packages: String = graph
             .packages
@@ -219,27 +196,32 @@ mod dependencies {
                     }
                     None => "None".to_owned(),
                 };
-                let targets: String = member
-                    .targets
-                    .iter()
-                    .map(|Target { name, kind }| {
-                        format!("Target {{ name: {name:?}.into(), kind: TargetKind::{kind:?} }}, ")
-                    })
-                    .collect();
                 format!(
                     "Member {{ package: {}, dev_dependencies: {dev_dependencies}, \
-                     targets: vec![{targets}] }},\n",
-                    member.package
+                     targets: vec![{}] }},\n",
+                    member.package,
+                    render_targets(&member.targets)
                 )
             })
             .collect();
+        let unresolved = render_targets(&graph.unresolved);
         format!(
             "Recorded::with(Graph {{\n\
              packages: vec![\n{packages}],\n\
              dependencies: vec![\n{dependencies}],\n\
              members: vec![\n{members}],\n\
+             unresolved: vec![{unresolved}],\n\
              }})\n"
         )
+    }
+
+    fn render_targets(targets: &[Target]) -> String {
+        targets
+            .iter()
+            .map(|Target { name, kind }| {
+                format!("Target {{ name: {name:?}.into(), kind: TargetKind::{kind:?} }}, ")
+            })
+            .collect()
     }
 
     fn collection_enabled() -> bool {
@@ -276,6 +258,7 @@ mod dependencies {
         let mut tree_error = None;
         for package in &packages {
             if let Err(err) = add_member(&cargo, &mut builder, package) {
+                builder.graph.unresolved.extend(targets(package));
                 tree_error = Some(err);
             }
         }
@@ -393,18 +376,21 @@ mod dependencies {
         } else {
             Some(Vec::new())
         };
-        let targets = package["targets"]
+        builder.graph.members.push(Member {
+            package: root,
+            dev_dependencies,
+            targets: targets(package),
+        });
+        Ok(())
+    }
+
+    fn targets(package: &Value) -> Vec<Target> {
+        package["targets"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(target)
-            .collect();
-        builder.graph.members.push(Member {
-            package: root,
-            dev_dependencies,
-            targets,
-        });
-        Ok(())
+            .collect()
     }
 
     /// A package target, or `None` for a build script.

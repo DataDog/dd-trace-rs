@@ -10,7 +10,8 @@
 //!   reports the package's dev-dependencies, with the features cargo enables to build tests.
 //!
 //! When the executable matches no target (e.g. it was renamed when packaged), the union over the
-//! packages with a binary target is reported.
+//! packages with a binary target is reported. When it was built from a package whose
+//! dependencies couldn't be resolved, nothing is reported and the failure is.
 //!
 //! Accuracy caveats: the graph comes from `cargo tree` with the workspace packages' default
 //! features, so it can differ from the actual build when features are selected on the command
@@ -28,7 +29,7 @@ use crate::dd_debug;
 
 mod graph;
 
-use graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
+use graph::{Builds, Failure, Graph, Member, Package, Recorded, Target, TargetKind};
 
 fn recorded() -> &'static Recorded {
     static RECORDED: OnceLock<Recorded> = OnceLock::new();
@@ -36,19 +37,21 @@ fn recorded() -> &'static Recorded {
         #[cfg(dd_build_time_dependencies)]
         let recorded = include!(concat!(env!("OUT_DIR"), "/build_time_dependencies.rs"));
         #[cfg(not(dd_build_time_dependencies))]
-        let recorded = Recorded::with_error(
-            option_env!("DD_BUILD_TIME_DEPENDENCIES_FAILURE").unwrap_or("not_recorded"),
-        );
+        let recorded =
+            Recorded::with_error(match option_env!("DD_BUILD_TIME_DEPENDENCIES_FAILURE") {
+                Some(_) => Failure::WriteFailed,
+                None => Failure::NotRecorded,
+            });
         recorded
     })
 }
 
 pub(super) fn collect() -> Vec<Dependency> {
     let recorded = recorded();
-    let exe = std::env::current_exe().ok();
-    let exe = exe.as_deref().and_then(Executable::from_path);
+    let exe = current_executable();
     let packages = recorded.graph.resolve(exe.as_ref());
-    if let Some(code) = &recorded.failure {
+    if let Some(failure) = failure(recorded, exe.as_ref()) {
+        let code = failure.code();
         dd_debug!("Telemetry: dependency collection failed at build time: {code}");
     }
     dd_debug!(
@@ -66,11 +69,27 @@ pub(super) fn collect() -> Vec<Dependency> {
 }
 
 pub(super) fn build_failure() -> Option<String> {
-    failure_log(recorded().failure.as_deref())
+    failure_log(failure(recorded(), current_executable().as_ref()))
 }
 
-fn failure_log(failure: Option<&str>) -> Option<String> {
-    failure.map(|code| format!("Telemetry: dependency collection failed at build time: {code}"))
+fn current_executable() -> Option<Executable> {
+    Executable::from_path(&std::env::current_exe().ok()?)
+}
+
+fn failure(recorded: &Recorded, exe: Option<&Executable>) -> Option<Failure> {
+    recorded.failure.or_else(|| {
+        recorded
+            .graph
+            .is_unresolved(exe)
+            .then_some(Failure::CargoTreeFailed)
+    })
+}
+
+fn failure_log(failure: Option<Failure>) -> Option<String> {
+    failure.map(|failure| {
+        let code = failure.code();
+        format!("Telemetry: dependency collection failed at build time: {code}")
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -119,26 +138,26 @@ impl Executable {
     }
 }
 
+fn is_built_from(exe: Option<&Executable>, targets: &[Target]) -> bool {
+    exe.is_some_and(|exe| targets.iter().any(|target| exe.is_built_from(target)))
+}
+
 fn crate_name(target: &str) -> String {
     target.replace('-', "_")
 }
 
 impl Graph {
-    /// The dependencies of `exe`, or the union over the packages with a binary target if it
-    /// matches none.
+    /// The dependencies of `exe`: none if it was built from a package whose dependencies
+    /// couldn't be resolved, or the union over the packages with a binary target if it matches
+    /// no target.
     fn resolve(&self, exe: Option<&Executable>) -> BTreeSet<&Package> {
-        let built_from = |member: &&Member| {
-            exe.is_some_and(|exe| {
-                member
-                    .targets
-                    .iter()
-                    .any(|target| exe.is_built_from(target))
-            })
-        };
+        if self.is_unresolved(exe) {
+            return BTreeSet::new();
+        }
         let mut members: Vec<(&Member, Builds)> = self
             .members
             .iter()
-            .filter(built_from)
+            .filter(|member| is_built_from(exe, &member.targets))
             .map(|member| (member, exe.map_or(Builds::Bin, Executable::build)))
             .collect();
         if members.is_empty() {
@@ -158,6 +177,14 @@ impl Graph {
             .into_iter()
             .flat_map(|(member, build)| self.dependencies_of(member, build))
             .collect()
+    }
+
+    fn is_unresolved(&self, exe: Option<&Executable>) -> bool {
+        is_built_from(exe, &self.unresolved)
+            && !self
+                .members
+                .iter()
+                .any(|member| is_built_from(exe, &member.targets))
     }
 
     fn dependencies_of(&self, member: &Member, build: Builds) -> BTreeSet<&Package> {
@@ -218,6 +245,7 @@ mod tests {
                 .map(|edges| edges.iter().copied().collect())
                 .collect(),
             members,
+            unresolved: Vec::new(),
         }
     }
 
@@ -411,6 +439,49 @@ mod tests {
         );
     }
 
+    /// `cargo tree` failed for `cli` at build time: its executables report the failure instead
+    /// of the union of the other binaries.
+    #[test]
+    fn test_resolve_unresolved_package() {
+        let graph = Graph {
+            unresolved: vec![
+                target("cli", TargetKind::Bin),
+                target("cli", TargetKind::Other),
+            ],
+            ..fixture()
+        };
+        let recorded = Recorded::with(graph);
+        let unresolved = |exe: Executable| {
+            (
+                names(&recorded.graph, Some(&exe)),
+                failure(&recorded, Some(&exe)),
+            )
+        };
+
+        assert_eq!(
+            unresolved(Executable::Bin("cli".into())),
+            (set(&[]), Some(Failure::CargoTreeFailed))
+        );
+        assert_eq!(
+            unresolved(Executable::Test("cli".into())),
+            (set(&[]), Some(Failure::CargoTreeFailed))
+        );
+        assert_eq!(
+            unresolved(Executable::Bin("app".into())),
+            (
+                set(&["datadog-opentelemetry", "serde_derive", "tokio"]),
+                None
+            )
+        );
+        assert_eq!(
+            unresolved(Executable::Bin("renamed".into())),
+            (
+                set(&["datadog-opentelemetry", "itoa", "serde_derive", "tokio"]),
+                None
+            )
+        );
+    }
+
     #[test]
     fn test_resolve_empty() {
         assert!(Graph::default()
@@ -422,7 +493,7 @@ mod tests {
     fn test_failure_log() {
         assert_eq!(failure_log(None), None);
         assert_eq!(
-            failure_log(Some("cargo_tree_failed")).as_deref(),
+            failure_log(Some(Failure::CargoTreeFailed)).as_deref(),
             Some("Telemetry: dependency collection failed at build time: cargo_tree_failed")
         );
     }
@@ -439,6 +510,7 @@ mod tests {
         }
         let Recorded { graph, failure } = recorded();
         assert!(failure.is_none(), "collection failed: {failure:?}");
+        assert!(graph.unresolved.is_empty());
         let names = |exe: &Executable| names(graph, Some(exe));
 
         let http_server = names(&Executable::Bin("http-server".into()));
