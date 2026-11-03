@@ -49,7 +49,9 @@ fn recorded() -> &'static Recorded {
 pub(super) fn collect() -> Vec<Dependency> {
     let recorded = recorded();
     let exe = current_executable();
-    let packages = recorded.graph.resolve(exe.as_ref());
+    let packages = recorded
+        .graph
+        .resolve(exe.as_ref(), running_package().as_deref());
     if let Some(failure) = failure(recorded, exe.as_ref()) {
         let code = failure.code();
         dd_debug!("Telemetry: dependency collection failed at build time: {code}");
@@ -74,6 +76,14 @@ pub(super) fn build_failure() -> Option<String> {
 
 fn current_executable() -> Option<Executable> {
     Executable::from_path(&std::env::current_exe().ok()?)
+}
+
+/// The package cargo runs the executable for, under `cargo run`, `cargo test` or
+/// `cargo nextest run`.
+// allow: cargo sets it, it isn't a configuration
+#[allow(clippy::disallowed_methods)]
+fn running_package() -> Option<String> {
+    std::env::var("CARGO_PKG_NAME").ok()
 }
 
 fn failure(recorded: &Recorded, exe: Option<&Executable>) -> Option<Failure> {
@@ -147,21 +157,20 @@ fn crate_name(target: &str) -> String {
 }
 
 impl Graph {
-    /// The dependencies of `exe`: none if it was built from a package whose dependencies
-    /// couldn't be resolved, or the union over the packages with a binary target if it matches
-    /// no target.
-    fn resolve(&self, exe: Option<&Executable>) -> BTreeSet<&Package> {
+    /// The dependencies of `exe`, run for `package` if cargo runs it: none if it was built from
+    /// a package whose dependencies couldn't be resolved, or the union over the packages with a
+    /// binary target if it matches no target.
+    fn resolve(&self, exe: Option<&Executable>, package: Option<&str>) -> BTreeSet<&Package> {
         if self.is_unresolved(exe) {
             return BTreeSet::new();
         }
-        let mut members: Vec<(&Member, Builds)> = self
+        let mut members: Vec<&Member> = self
             .members
             .iter()
             .filter(|member| is_built_from(exe, &member.targets))
-            .map(|member| (member, exe.map_or(Builds::Bin, Executable::build)))
             .collect();
-        if members.is_empty() {
-            members = self
+        let Some(exe) = exe.filter(|_| !members.is_empty()) else {
+            return self
                 .members
                 .iter()
                 .filter(|member| {
@@ -170,13 +179,30 @@ impl Graph {
                         .iter()
                         .any(|target| target.kind == TargetKind::Bin)
                 })
-                .map(|member| (member, Builds::Bin))
+                .flat_map(|member| self.dependencies_of(member, Builds::Bin))
                 .collect();
+        };
+        // Members can have targets with the same name, typically integration tests, whose
+        // executables only differ by a hash: the package cargo runs it for tells them apart.
+        if members.len() > 1 {
+            let named: Vec<&Member> = members
+                .iter()
+                .copied()
+                .filter(|member| {
+                    let name = self.packages.get(member.package).map(|p| p.name.as_str());
+                    package.is_some_and(|package| name == Some(package))
+                })
+                .collect();
+            if !named.is_empty() {
+                members = named;
+            }
         }
+        // Otherwise, only the dependencies they have in common are certainly the executable's.
         members
             .into_iter()
-            .flat_map(|(member, build)| self.dependencies_of(member, build))
-            .collect()
+            .map(|member| self.dependencies_of(member, exe.build()))
+            .reduce(|common, dependencies| common.intersection(&dependencies).copied().collect())
+            .unwrap_or_default()
     }
 
     fn is_unresolved(&self, exe: Option<&Executable>) -> bool {
@@ -295,7 +321,7 @@ mod tests {
 
     fn names(graph: &Graph, exe: Option<&Executable>) -> BTreeSet<String> {
         graph
-            .resolve(exe)
+            .resolve(exe, None)
             .into_iter()
             .map(|package| package.name.clone())
             .collect()
@@ -482,10 +508,51 @@ mod tests {
         );
     }
 
+    /// `app` and `worker` both have a `tests/integration.rs`, whose executables only differ by
+    /// their hash.
+    #[test]
+    fn test_resolve_ambiguous_target() {
+        let mut graph = fixture();
+        for member in &mut graph.members {
+            member
+                .targets
+                .push(target("integration", TargetKind::Other));
+        }
+        let exe = Executable::Test("integration".into());
+        let names = |package| {
+            graph
+                .resolve(Some(&exe), package)
+                .into_iter()
+                .map(|package| package.name.clone())
+                .collect::<BTreeSet<_>>()
+        };
+
+        // Run by cargo, for the package of the actual member.
+        assert_eq!(
+            names(Some("worker")),
+            set(&["datadog-opentelemetry", "itoa", "serde_derive"])
+        );
+        assert_eq!(
+            names(Some("app")),
+            set(&[
+                "criterion",
+                "datadog-opentelemetry",
+                "itoa",
+                "serde_derive",
+                "signal-hook",
+                "tokio",
+            ])
+        );
+        // Run directly, or for a package that isn't a candidate: only what both depend on.
+        let common = set(&["datadog-opentelemetry", "itoa", "serde_derive"]);
+        assert_eq!(names(None), common);
+        assert_eq!(names(Some("other")), common);
+    }
+
     #[test]
     fn test_resolve_empty() {
         assert!(Graph::default()
-            .resolve(Some(&Executable::Bin("app".into())))
+            .resolve(Some(&Executable::Bin("app".into())), None)
             .is_empty());
     }
 
