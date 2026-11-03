@@ -47,21 +47,30 @@ mod dependencies {
     /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
     const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
 
+    /// A package as cargo identifies it: packages with the same name and version can come from
+    /// different sources, e.g. crates.io and a patched git checkout, and depend on different
+    /// packages.
+    #[derive(Clone, PartialEq, Eq, Hash)]
+    struct Node {
+        package: Package,
+        source: Option<String>,
+    }
+
     #[derive(Default)]
     struct GraphBuilder {
         graph: Graph,
-        index: HashMap<Package, usize>,
+        index: HashMap<Node, usize>,
     }
 
     impl GraphBuilder {
-        fn node(&mut self, package: &Package) -> usize {
-            if let Some(&index) = self.index.get(package) {
+        fn node(&mut self, node: &Node) -> usize {
+            if let Some(&index) = self.index.get(node) {
                 return index;
             }
             let graph = &mut self.graph;
-            graph.packages.push(package.clone());
+            graph.packages.push(node.package.clone());
             graph.dependencies.push(BTreeMap::new());
-            self.index.insert(package.clone(), graph.packages.len() - 1);
+            self.index.insert(node.clone(), graph.packages.len() - 1);
             graph.packages.len() - 1
         }
 
@@ -79,16 +88,17 @@ mod dependencies {
     }
 
     struct Tree {
-        root: Package,
-        edges: Vec<(Package, Package, bool)>,
+        root: Node,
+        edges: Vec<(Node, Node, bool)>,
     }
 
     impl Tree {
         fn contains(&self, name: &str) -> bool {
-            self.root.name == name || self.edges.iter().any(|(_, child, _)| child.name == name)
+            let is = |node: &Node| node.package.name == name;
+            is(&self.root) || self.edges.iter().any(|(_, child, _)| is(child))
         }
 
-        fn dev_dependencies(&self) -> impl Iterator<Item = &Package> {
+        fn dev_dependencies(&self) -> impl Iterator<Item = &Node> {
             self.edges
                 .iter()
                 .filter(|(parent, _, dev)| *dev && *parent == self.root)
@@ -473,13 +483,19 @@ mod dependencies {
     }
 
     /// Parses a `cargo tree --format {p}` entry: `name vX.Y.Z [(source)] [(proc-macro)] [(*)]`.
-    fn parse_package(text: &str) -> Option<Package> {
-        let mut fields = text.split_whitespace();
-        let name = fields.next()?;
-        let version = fields.next()?.strip_prefix('v')?;
-        Some(Package {
-            name: name.to_owned(),
-            version: version.to_owned(),
+    fn parse_package(text: &str) -> Option<Node> {
+        let (name, rest) = text.split_once(' ')?;
+        let (version, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+        let version = version.strip_prefix('v')?;
+        let rest = rest.trim();
+        let rest = rest.strip_suffix("(*)").unwrap_or(rest).trim_end();
+        let source = rest.strip_suffix("(proc-macro)").unwrap_or(rest).trim_end();
+        Some(Node {
+            package: Package {
+                name: name.to_owned(),
+                version: version.to_owned(),
+            },
+            source: (!source.is_empty()).then(|| source.to_owned()),
         })
     }
 }
