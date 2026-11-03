@@ -450,7 +450,7 @@ fn report_dependencies(
     dependencies: Vec<data::Dependency>,
     failure: Option<String>,
 ) {
-    if !config.telemetry_dependency_collection_enabled() {
+    if !config.telemetry_dependency_collection_enabled() || !config.telemetry_enabled() {
         return;
     }
 
