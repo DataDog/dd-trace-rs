@@ -1,15 +1,31 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Turns `cargo tree` output into the graph `build.rs` records, and renders it as the Rust
-//! expression the tracer includes.
+//! Locates the workspace from the build output directory, turns `cargo tree` output into the
+//! graph `build.rs` records, and renders it as the Rust expression the tracer includes.
 //!
 //! The build script compiles this file too (through `#[path]`), so it must only use `std`. The
 //! tracer only compiles it for its tests.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::{Path, PathBuf},
+};
 
 use super::graph::{Builds, Graph, Package, Recorded, Target};
+
+/// The workspace root of a build script whose `OUT_DIR` is `out_dir`: the parent of the target
+/// directory holding it, if that parent holds a `Cargo.lock`.
+pub fn workspace_root(out_dir: &Path) -> Option<PathBuf> {
+    // Cargo tags the root of the target directory, and also the directory of each `--target`
+    // triple below it, so the first tagged ancestor isn't always the root.
+    out_dir
+        .ancestors()
+        .filter(|dir| dir.join("CACHEDIR.TAG").is_file())
+        .filter_map(Path::parent)
+        .find(|dir| dir.join("Cargo.lock").is_file())
+        .map(Path::to_path_buf)
+}
 
 /// A package as cargo identifies it: packages with the same name and version can come from
 /// different sources, e.g. crates.io and a patched git checkout, and depend on different
@@ -193,6 +209,8 @@ fn render_targets(targets: &[Target]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::super::graph::{Failure, Member, TargetKind};
     use super::*;
 
@@ -204,6 +222,43 @@ mod tests {
             },
             source: source.map(str::to_owned),
         }
+    }
+
+    /// A target directory as cargo lays it out, under a directory unique to `name`.
+    fn target_layout(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("dd-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let ws = root.join("ws");
+        for dir in ["target", "target/x86_64-unknown-linux-musl"] {
+            fs::create_dir_all(ws.join(dir)).expect("create the target directory");
+            fs::write(ws.join(dir).join("CACHEDIR.TAG"), "").expect("tag the target directory");
+        }
+        fs::write(ws.join("Cargo.lock"), "").expect("write the lockfile");
+        root
+    }
+
+    #[test]
+    fn test_workspace_root() {
+        let root = target_layout("workspace-root");
+        let ws = root.join("ws");
+        let out_dir = |target: &str| {
+            let dir = ws.join(target).join("build/app-0123456789abcdef/out");
+            fs::create_dir_all(&dir).expect("create OUT_DIR");
+            dir
+        };
+
+        assert_eq!(workspace_root(&out_dir("target/debug")), Some(ws.clone()));
+        // `--target`: `target/<triple>` is tagged too, but its parent holds no lockfile.
+        assert_eq!(
+            workspace_root(&out_dir("target/x86_64-unknown-linux-musl/release")),
+            Some(ws.clone())
+        );
+        // A target directory moved out of the workspace.
+        fs::remove_file(ws.join("Cargo.lock")).expect("remove the lockfile");
+        assert_eq!(workspace_root(&out_dir("target/debug")), None);
+        assert_eq!(workspace_root(&root), None);
+
+        fs::remove_dir_all(&root).expect("remove the test directory");
     }
 
     fn tree(output: &str) -> Tree {

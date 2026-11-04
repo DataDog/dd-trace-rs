@@ -41,7 +41,7 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
-        tree::{package_names, parse_tree, render, GraphBuilder, Tree},
+        tree::{package_names, parse_tree, render, workspace_root, GraphBuilder, Tree},
     };
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
@@ -202,16 +202,8 @@ mod dependencies {
                 "the target directory is not in the workspace root; set {WORKSPACE_DIR_ENV} to it"
             )
         };
-        let out_dir = PathBuf::from(env::var_os("OUT_DIR").ok_or_else(not_found)?);
-        // Cargo tags the root of the target directory, and also the directory of each
-        // `--target` triple below it, so the first tagged ancestor isn't always the root.
-        out_dir
-            .ancestors()
-            .filter(|dir| dir.join("CACHEDIR.TAG").is_file())
-            .filter_map(Path::parent)
-            .find(|dir| dir.join("Cargo.lock").is_file())
-            .map(Path::to_path_buf)
-            .ok_or_else(not_found)
+        let out_dir = env::var_os("OUT_DIR").ok_or_else(not_found)?;
+        workspace_root(Path::new(&out_dir)).ok_or_else(not_found)
     }
 
     /// The workspace packages, from `cargo metadata --no-deps`, which only reads workspace
