@@ -14,6 +14,8 @@ pub struct Recorded {
 }
 
 impl Recorded {
+    // allow: the tracer only uses it through the recorded graph, which builds that didn't record
+    // one don't include
     #[allow(dead_code)]
     pub fn with(graph: Graph) -> Self {
         Self {
@@ -22,6 +24,8 @@ impl Recorded {
         }
     }
 
+    // allow: the tracer only uses it when no graph was recorded, and the recorded graph uses it
+    // only when collection failed
     #[allow(dead_code)]
     pub fn with_error(failure: Failure) -> Self {
         Self {
