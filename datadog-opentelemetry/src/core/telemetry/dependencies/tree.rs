@@ -7,7 +7,7 @@
 //! The build script compiles this file too (through `#[path]`), so it must only use `std`. The
 //! tracer only compiles it for its tests.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use super::graph::{Builds, Graph, Package, Recorded, Target};
 
@@ -102,6 +102,15 @@ pub fn parse_tree(output: &str) -> Option<Tree> {
         path.push((package, false));
     }
     Some(Tree { root, edges })
+}
+
+/// The names of the packages in `cargo tree --prefix none --format {p}` output.
+pub fn package_names(output: &str) -> BTreeSet<String> {
+    output
+        .lines()
+        .filter_map(parse_package)
+        .map(|node| node.package.name)
+        .collect()
 }
 
 /// Parses a `cargo tree --format {p}` entry: `name vX.Y.Z [(source)] [(proc-macro)] [(*)]`.
@@ -300,6 +309,21 @@ mod tests {
         );
         let dev: Vec<&Node> = tree.dev_dependencies().collect();
         assert_eq!(dev, vec![&tempfile, &lib]);
+    }
+
+    #[test]
+    fn test_package_names() {
+        // An inverted tree: this crate, then the packages that depend on it.
+        let names = package_names(
+            "datadog-opentelemetry v0.5.3\n\
+             lib v0.1.0 (/work/lib)\n\
+             app v0.1.0 (/work/app)\n\
+             lib v0.1.0 (/work/lib) (*)\n\
+             \n\
+             tests v0.1.0 (/work/tests)\n",
+        );
+        let expected = ["app", "datadog-opentelemetry", "lib", "tests"];
+        assert_eq!(names, BTreeSet::from(expected.map(str::to_owned)));
     }
 
     #[test]

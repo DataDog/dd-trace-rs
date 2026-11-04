@@ -41,7 +41,7 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
-        tree::{parse_tree, render, GraphBuilder, Tree},
+        tree::{package_names, parse_tree, render, GraphBuilder, Tree},
     };
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
@@ -149,9 +149,21 @@ mod dependencies {
         }
 
         let packages = workspace_packages(&cargo)?;
+        // A package that doesn't depend on this crate yet may come to, so all are watched.
+        for manifest in packages.iter().filter_map(|p| p["manifest_path"].as_str()) {
+            println!("cargo::rerun-if-changed={manifest}");
+        }
+        let dependents = dependents(&cargo);
+        let may_depend = |package: &&Value| {
+            dependents.as_ref().is_none_or(|names| {
+                package["name"]
+                    .as_str()
+                    .is_some_and(|name| names.contains(name))
+            })
+        };
         let mut builder = GraphBuilder::default();
         let mut tree_error = None;
-        for package in &packages {
+        for package in packages.iter().filter(may_depend) {
             if let Err(err) = add_member(&cargo, &mut builder, package) {
                 builder.graph.unresolved.extend(targets(package));
                 tree_error = Some(err);
@@ -213,6 +225,39 @@ mod dependencies {
         }
     }
 
+    /// The names of the packages that depend on this crate, normally or through
+    /// dev-dependencies, from one inverted `cargo tree` of the whole workspace rather than one
+    /// tree per package. Features are unified across the workspace, so it may name packages
+    /// that don't depend on it when built alone, which their own trees then rule out. `None`
+    /// if it failed, e.g. dev-dependencies weren't downloaded or this crate is ambiguous: every
+    /// package is checked then.
+    fn dependents(cargo: &Cargo) -> Option<BTreeSet<String>> {
+        let this_crate = concat!(env!("CARGO_PKG_NAME"), "@", env!("CARGO_PKG_VERSION"));
+        let args = [
+            "tree",
+            "--offline",
+            "--locked",
+            "--workspace",
+            "--edges",
+            "normal,dev",
+            "--invert",
+            this_crate,
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+            "--target",
+            &cargo.target,
+        ];
+        cargo
+            .run(&args, Failure::CargoTreeFailed)
+            .inspect_err(|(_, details)| {
+                println!("cargo::warning=checking every package: {details}")
+            })
+            .ok()
+            .map(|output| package_names(&output))
+    }
+
     /// Adds a workspace `package` to the graph if it depends on this crate, normally or
     /// through its dev-dependencies.
     fn add_member(
@@ -220,9 +265,6 @@ mod dependencies {
         builder: &mut GraphBuilder,
         package: &Value,
     ) -> Result<(), CargoError> {
-        if let Some(manifest) = package["manifest_path"].as_str() {
-            println!("cargo::rerun-if-changed={manifest}");
-        }
         let Some(id) = package["id"].as_str() else {
             return Ok(());
         };
