@@ -253,69 +253,7 @@ fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a Cach
 #[cfg(feature = "test-utils")]
 #[allow(missing_docs)]
 pub mod bench_support {
-    use opentelemetry_sdk::{trace::SpanData, Resource};
-
-    use super::{otel_trace_chunk_to_dd_trace_chunk, Bump};
     pub use super::{trace_pool_for, DdTracePool};
-    use crate::{configuration::Config, mappings::CachedConfig};
-
-    /// What happens to the converted chunks once exported.
-    #[derive(Clone, Copy, Debug)]
-    pub enum Recycling {
-        /// No pool: chunks and spans are allocated and dropped.
-        None,
-        /// Chunks and spans come from the pool and are returned to it.
-        Returned,
-        /// Chunks and spans come from the pool but are consumed rather than returned to it.
-        Consumed,
-    }
-
-    pub struct ChunkConverter {
-        cached_config: CachedConfig,
-    }
-
-    impl ChunkConverter {
-        pub fn new(config: &Config) -> Self {
-            Self {
-                cached_config: CachedConfig::new(config),
-            }
-        }
-
-        /// Converts `chunks` the way the span exporter does, then drops them according to
-        /// `recycling`. Returns the number of converted spans.
-        pub fn convert(
-            &self,
-            chunks: &[Vec<SpanData>],
-            resource: &Resource,
-            pool: &DdTracePool,
-            recycling: Recycling,
-        ) -> usize {
-            let alloc = Bump::new();
-            let pool = trace_pool_for(pool);
-            let pool_to_use = match recycling {
-                Recycling::None => None,
-                Recycling::Returned | Recycling::Consumed => Some(pool),
-            };
-            let dd_chunks: Vec<_> = chunks
-                .iter()
-                .map(|c| {
-                    otel_trace_chunk_to_dd_trace_chunk(
-                        &self.cached_config,
-                        c,
-                        resource,
-                        &alloc,
-                        pool_to_use,
-                    )
-                })
-                .collect();
-            let span_count = dd_chunks.iter().map(|c| c.spans.len()).sum();
-            match recycling {
-                Recycling::Returned => drop(pool.wrap_chunks(dd_chunks)),
-                Recycling::None | Recycling::Consumed => drop(dd_chunks),
-            }
-            span_count
-        }
-    }
 }
 
 #[cfg(test)]

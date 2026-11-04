@@ -39,7 +39,6 @@ fn string(s: &'static str) -> DdAttributeValue<'static> {
     AttributeValue::String(s.into())
 }
 
-/// Builds span attributes from string and numeric tags.
 fn attributes<const N: usize, const M: usize>(
     strings: [(&'static str, &'static str); N],
     numbers: [(&'static str, f64); M],

@@ -653,12 +653,10 @@ impl<'a> CowStr<'a> {
         Self(c)
     }
 
-    /// Owns `s`.
     pub fn from_string(s: String) -> Self {
         Self(Cow::Owned(s))
     }
 
-    /// Borrows `s`.
     pub fn from_str(s: &'a str) -> Self {
         Self(Cow::Borrowed(s))
     }
@@ -670,7 +668,6 @@ impl<'a> CowStr<'a> {
         Self(Cow::Borrowed(alloc.alloc_str(s)))
     }
 
-    /// The text, as a `&str`.
     pub fn as_str(&self) -> &str {
         self.0.as_ref()
     }
