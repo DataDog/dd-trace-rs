@@ -549,6 +549,49 @@ mod tests {
         );
     }
 
+    /// `cargo tree` failed for a package whose targets are named like `app`'s, e.g. both have a
+    /// `tests/api-tests.rs`: the executable may be either, and the resolved `app` is reported,
+    /// without a failure.
+    #[test]
+    fn test_resolve_unresolved_and_resolved_target() {
+        let graph = Graph {
+            unresolved: vec![
+                target("app", TargetKind::Bin),
+                target("api-tests", TargetKind::Other),
+            ],
+            ..fixture()
+        };
+        let recorded = Recorded::with(graph);
+        let resolve = |exe: Executable| {
+            (
+                names(&recorded.graph, Some(&exe)),
+                failure(&recorded, Some(&exe)),
+            )
+        };
+
+        assert_eq!(
+            resolve(Executable::Bin("app".into())),
+            (
+                set(&["datadog-opentelemetry", "serde_derive", "tokio"]),
+                None
+            )
+        );
+        assert_eq!(
+            resolve(Executable::Test("api_tests".into())),
+            (
+                set(&[
+                    "criterion",
+                    "datadog-opentelemetry",
+                    "itoa",
+                    "serde_derive",
+                    "signal-hook",
+                    "tokio",
+                ]),
+                None
+            )
+        );
+    }
+
     /// `app` and `worker` both have a `tests/integration.rs`, whose executables only differ by
     /// their hash.
     #[test]
