@@ -22,7 +22,7 @@
 //! build time. A build-time failure is recorded as a fixed code and reported as a telemetry error
 //! log.
 
-use std::{collections::BTreeSet, path::Path, sync::OnceLock};
+use std::{collections::BTreeSet, path::Path};
 
 use libdd_telemetry::data::Dependency;
 
@@ -35,25 +35,21 @@ mod tree;
 pub(super) use graph::Failure;
 use graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
 
-fn recorded() -> &'static Recorded {
-    static RECORDED: OnceLock<Recorded> = OnceLock::new();
-    RECORDED.get_or_init(|| {
-        #[cfg(dd_build_time_dependencies)]
-        let recorded = include!(concat!(env!("OUT_DIR"), "/build_time_dependencies.rs"));
-        #[cfg(not(dd_build_time_dependencies))]
-        let recorded =
-            Recorded::with_error(match option_env!("DD_BUILD_TIME_DEPENDENCIES_FAILURE") {
-                Some(_) => Failure::WriteFailed,
-                None => Failure::NotRecorded,
-            });
-        recorded
-    })
+fn recorded() -> Recorded {
+    #[cfg(dd_build_time_dependencies)]
+    let recorded = include!(concat!(env!("OUT_DIR"), "/build_time_dependencies.rs"));
+    #[cfg(not(dd_build_time_dependencies))]
+    let recorded = Recorded::with_error(match option_env!("DD_BUILD_TIME_DEPENDENCIES_FAILURE") {
+        Some(_) => Failure::WriteFailed,
+        None => Failure::NotRecorded,
+    });
+    recorded
 }
 
 /// The running executable's dependencies, and why they couldn't be collected at build time, if
 /// they couldn't.
 pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
-    let recorded = recorded();
+    let recorded = &recorded();
     let exe = current_executable();
     let packages = recorded
         .graph
@@ -650,7 +646,7 @@ mod tests {
         ) {
             return;
         }
-        let Recorded { graph, failure } = recorded();
+        let Recorded { graph, failure } = &recorded();
         assert!(failure.is_none(), "collection failed: {failure:?}");
         assert!(graph.unresolved.is_empty());
         let names = |exe: &Executable| names(graph, Some(exe));
