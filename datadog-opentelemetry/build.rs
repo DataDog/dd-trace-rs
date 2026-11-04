@@ -128,12 +128,7 @@ mod dependencies {
 
     fn collect() -> Result<Graph, CargoError> {
         let unavailable = |details: &str| (Failure::CargoUnavailable, details.to_owned());
-        let workspace = workspace_dir().ok_or_else(|| {
-            let details = format!(
-                "the target directory is not in the workspace root; set {WORKSPACE_DIR_ENV} to it"
-            );
-            (Failure::WorkspaceNotFound, details)
-        })?;
+        let workspace = workspace_dir().map_err(|details| (Failure::WorkspaceNotFound, details))?;
         let cargo = Cargo {
             path: env::var_os("CARGO").ok_or_else(|| unavailable("CARGO is not set"))?,
             workspace,
@@ -184,13 +179,30 @@ mod dependencies {
     /// `CARGO_WORKSPACE_DIR` if set, otherwise the parent of the target directory holding
     /// `OUT_DIR`, which is the workspace root unless the target directory was moved
     /// (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`) or the workspace was mounted
-    /// elsewhere, e.g. by `cross`. Rather than guessing, this returns `None` when no such parent
-    /// holds a `Cargo.lock`.
-    fn workspace_dir() -> Option<PathBuf> {
-        if let Some(dir) = env::var_os(WORKSPACE_DIR_ENV) {
-            return Some(PathBuf::from(dir)).filter(|dir| dir.is_dir());
+    /// elsewhere, e.g. by `cross`. Rather than guessing, this fails when no such parent holds a
+    /// `Cargo.lock`. The error is only shown in the build output, so it can name paths.
+    fn workspace_dir() -> Result<PathBuf, String> {
+        if let Some(value) = env::var_os(WORKSPACE_DIR_ENV) {
+            let dir = PathBuf::from(&value);
+            if dir.is_dir() {
+                return Ok(dir);
+            }
+            let hint = if dir.is_relative() {
+                "; set it to an absolute path, e.g. with `relative = true` in `[env]`"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "{WORKSPACE_DIR_ENV}={} is not a directory{hint}",
+                dir.display()
+            ));
         }
-        let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
+        let not_found = || {
+            format!(
+                "the target directory is not in the workspace root; set {WORKSPACE_DIR_ENV} to it"
+            )
+        };
+        let out_dir = PathBuf::from(env::var_os("OUT_DIR").ok_or_else(not_found)?);
         // Cargo tags the root of the target directory, and also the directory of each
         // `--target` triple below it, so the first tagged ancestor isn't always the root.
         out_dir
@@ -199,6 +211,7 @@ mod dependencies {
             .filter_map(Path::parent)
             .find(|dir| dir.join("Cargo.lock").is_file())
             .map(Path::to_path_buf)
+            .ok_or_else(not_found)
     }
 
     /// The workspace packages, from `cargo metadata --no-deps`, which only reads workspace
