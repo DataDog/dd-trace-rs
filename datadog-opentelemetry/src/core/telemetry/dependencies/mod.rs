@@ -32,7 +32,8 @@ mod graph;
 #[cfg(test)]
 mod tree;
 
-use graph::{Builds, Failure, Graph, Member, Package, Recorded, Target, TargetKind};
+pub(super) use graph::Failure;
+use graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
 
 fn recorded() -> &'static Recorded {
     static RECORDED: OnceLock<Recorded> = OnceLock::new();
@@ -49,13 +50,16 @@ fn recorded() -> &'static Recorded {
     })
 }
 
-pub(super) fn collect() -> Vec<Dependency> {
+/// The running executable's dependencies, and why they couldn't be collected at build time, if
+/// they couldn't.
+pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
     let recorded = recorded();
     let exe = current_executable();
     let packages = recorded
         .graph
         .resolve(exe.as_ref(), running_package().as_deref());
-    if let Some(failure) = failure(recorded, exe.as_ref()) {
+    let failure = failure(recorded, exe.as_ref());
+    if let Some(failure) = failure {
         let code = failure.code();
         dd_debug!("Telemetry: dependency collection failed at build time: {code}");
     }
@@ -63,18 +67,15 @@ pub(super) fn collect() -> Vec<Dependency> {
         "Telemetry: reporting {} dependencies recorded at build time",
         packages.len()
     );
-    packages
+    let dependencies = packages
         .into_iter()
         .map(|Package { name, version }| Dependency {
             name: name.clone(),
             version: Some(version.clone()),
             ..Default::default()
         })
-        .collect()
-}
-
-pub(super) fn build_failure() -> Option<String> {
-    failure_log(failure(recorded(), current_executable().as_ref()))
+        .collect();
+    (dependencies, failure)
 }
 
 fn current_executable() -> Option<Executable> {
@@ -95,13 +96,6 @@ fn failure(recorded: &Recorded, exe: Option<&Executable>) -> Option<Failure> {
             .graph
             .is_unresolved(exe)
             .then_some(Failure::CargoTreeFailed)
-    })
-}
-
-fn failure_log(failure: Option<Failure>) -> Option<String> {
-    failure.map(|failure| {
-        let code = failure.code();
-        format!("Telemetry: dependency collection failed at build time: {code}")
     })
 }
 
@@ -594,15 +588,6 @@ mod tests {
         assert!(Graph::default()
             .resolve(Some(&Executable::Bin("app".into())), None)
             .is_empty());
-    }
-
-    #[test]
-    fn test_failure_log() {
-        assert_eq!(failure_log(None), None);
-        assert_eq!(
-            failure_log(Some(Failure::CargoTreeFailed)).as_deref(),
-            Some("Telemetry: dependency collection failed at build time: cargo_tree_failed")
-        );
     }
 
     /// The build script runs against this repository's workspace, so the graph it generated

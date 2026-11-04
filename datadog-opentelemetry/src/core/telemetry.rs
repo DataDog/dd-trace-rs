@@ -302,12 +302,7 @@ fn init_telemetry_inner(
     telemetry_cell.get_or_init(|| match make_telemetry_worker(config, custom_handle) {
         Ok(mut handle) => {
             handle.send_start(Some(config)).ok();
-            report_dependencies(
-                handle.as_mut(),
-                config,
-                dependencies::collect(),
-                dependencies::build_failure(),
-            );
+            report_dependencies(handle.as_mut(), config, dependencies::collect);
 
             Mutex::new(Telemetry {
                 handle: Some(handle),
@@ -447,19 +442,22 @@ fn notify_configuration_update_inner(
 fn report_dependencies(
     handle: &mut dyn TelemetryHandle,
     config: &Config,
-    dependencies: Vec<data::Dependency>,
-    failure: Option<String>,
+    collect: impl FnOnce() -> (Vec<data::Dependency>, Option<dependencies::Failure>),
 ) {
     if !config.telemetry_dependency_collection_enabled() || !config.telemetry_enabled() {
         return;
     }
 
+    let (dependencies, failure) = collect();
     handle.add_dependencies(dependencies).ok();
 
-    let Some(message) = failure else {
+    let Some(failure) = failure else {
         return;
     };
     if config.telemetry_log_collection_enabled() {
+        // Only the fixed code: the details, which may name paths, stay in the build output.
+        let code = failure.code();
+        let message = format!("Telemetry: dependency collection failed at build time: {code}");
         handle.add_error_log(message, None).ok();
     }
 }
@@ -961,7 +959,7 @@ mod tests {
         let config = Config::builder().build();
         assert_eq!(
             test_dependencies_reported_at_init(&config),
-            dependencies::collect()
+            dependencies::collect().0
         );
     }
 
@@ -975,17 +973,35 @@ mod tests {
 
     fn test_report_dependencies(config: &Config) -> TestTelemetryHandle {
         let mut handle = TestTelemetryHandle::new();
-        report_dependencies(
-            &mut handle,
-            config,
-            vec![data::Dependency {
-                name: "serde".to_string(),
-                version: Some("1.0.0".to_string()),
-                ..Default::default()
-            }],
-            Some("collection failed".to_string()),
-        );
+        report_dependencies(&mut handle, config, || {
+            (
+                vec![data::Dependency {
+                    name: "serde".to_string(),
+                    version: Some("1.0.0".to_string()),
+                    ..Default::default()
+                }],
+                Some(dependencies::Failure::CargoTreeFailed),
+            )
+        });
         handle
+    }
+
+    #[test]
+    fn test_report_dependencies_not_collected_when_disabled() {
+        let configs = [
+            Config::builder()
+                .set_telemetry_dependency_collection_enabled(false)
+                .build(),
+            Config::builder().set_telemetry_enabled(false).build(),
+        ];
+        for config in configs {
+            let mut handle = TestTelemetryHandle::new();
+            report_dependencies(&mut handle, &config, || {
+                panic!("dependencies collected while disabled")
+            });
+            assert!(handle.dependencies.is_empty());
+            assert!(handle.logs.is_empty());
+        }
     }
 
     #[test]
@@ -994,7 +1010,12 @@ mod tests {
         assert_eq!(handle.dependencies.len(), 1);
         assert_eq!(
             handle.logs,
-            vec![("collection failed".to_string(), data::LogLevel::Error, None)]
+            vec![(
+                "Telemetry: dependency collection failed at build time: cargo_tree_failed"
+                    .to_string(),
+                data::LogLevel::Error,
+                None
+            )]
         );
     }
 
