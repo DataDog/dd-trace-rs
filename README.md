@@ -296,8 +296,9 @@ collection isn't possible, no dependencies are reported, and the reason is sent 
 telemetry.
 
 The workspace is located from the build output directory, which works with the default
-`target/` directory. When the target directory is elsewhere, point the build script at the
-workspace in `.cargo/config.toml`:
+`target/` directory, with or without `--target`. When the target directory isn't inside the
+workspace, e.g. it was moved with `CARGO_TARGET_DIR` or the build runs in a container that
+mounts them apart, point the build script at the workspace in `.cargo/config.toml`:
 
 ```toml
 [env]

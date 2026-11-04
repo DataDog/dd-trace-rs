@@ -286,20 +286,21 @@ mod dependencies {
     /// The root of the workspace being built:
     /// `CARGO_WORKSPACE_DIR` if set, otherwise the parent of the target directory holding
     /// `OUT_DIR`, which is the workspace root unless the target directory was moved
-    /// (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`). Rather than guessing, this
-    /// returns `None` when that parent holds no `Cargo.lock`.
+    /// (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`) or the workspace was mounted
+    /// elsewhere, e.g. by `cross`. Rather than guessing, this returns `None` when no such parent
+    /// holds a `Cargo.lock`.
     fn workspace_dir() -> Option<PathBuf> {
         if let Some(dir) = env::var_os(WORKSPACE_DIR_ENV) {
             return Some(PathBuf::from(dir)).filter(|dir| dir.is_dir());
         }
         let out_dir = PathBuf::from(env::var_os("OUT_DIR")?);
-        // Cargo tags the root of the target directory, whatever its layout below.
-        let target_dir = out_dir
+        // Cargo tags the root of the target directory, and also the directory of each
+        // `--target` triple below it, so the first tagged ancestor isn't always the root.
+        out_dir
             .ancestors()
-            .find(|dir| dir.join("CACHEDIR.TAG").is_file())?;
-        target_dir
-            .parent()
-            .filter(|dir| dir.join("Cargo.lock").is_file())
+            .filter(|dir| dir.join("CACHEDIR.TAG").is_file())
+            .filter_map(Path::parent)
+            .find(|dir| dir.join("Cargo.lock").is_file())
             .map(Path::to_path_buf)
     }
 
