@@ -22,12 +22,14 @@ fn main() {
 
 #[path = "src/core/telemetry/dependencies/graph.rs"]
 mod graph;
+#[path = "src/core/telemetry/dependencies/tree.rs"]
+mod tree;
 
 // allow: cargo configures build scripts through the environment
 #[allow(clippy::disallowed_methods)]
 mod dependencies {
     use std::{
-        collections::{BTreeMap, BTreeSet, HashMap},
+        collections::BTreeSet,
         env,
         ffi::OsString,
         fs,
@@ -37,7 +39,10 @@ mod dependencies {
 
     use serde_json::Value;
 
-    use super::graph::{Builds, Failure, Graph, Member, Package, Recorded, Target, TargetKind};
+    use super::{
+        graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
+        tree::{parse_tree, render, GraphBuilder, Tree},
+    };
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
     const WORKSPACE_DIR_ENV: &str = "CARGO_WORKSPACE_DIR";
@@ -46,65 +51,6 @@ mod dependencies {
     const DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
     /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
     const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
-
-    /// A package as cargo identifies it: packages with the same name and version can come from
-    /// different sources, e.g. crates.io and a patched git checkout, and depend on different
-    /// packages.
-    #[derive(Clone, PartialEq, Eq, Hash)]
-    struct Node {
-        package: Package,
-        source: Option<String>,
-    }
-
-    #[derive(Default)]
-    struct GraphBuilder {
-        graph: Graph,
-        index: HashMap<Node, usize>,
-    }
-
-    impl GraphBuilder {
-        fn node(&mut self, node: &Node) -> usize {
-            if let Some(&index) = self.index.get(node) {
-                return index;
-            }
-            let graph = &mut self.graph;
-            graph.packages.push(node.package.clone());
-            graph.dependencies.push(BTreeMap::new());
-            self.index.insert(node.clone(), graph.packages.len() - 1);
-            graph.packages.len() - 1
-        }
-
-        /// Adds the non-dev edges of `tree`, seen in `builds`, and returns its root.
-        fn add_tree(&mut self, tree: &Tree, builds: Builds) -> usize {
-            for (parent, child, _) in tree.edges.iter().filter(|(_, _, dev)| !dev) {
-                let (parent, child) = (self.node(parent), self.node(child));
-                self.graph.dependencies[parent]
-                    .entry(child)
-                    .and_modify(|seen| *seen = seen.merge(builds))
-                    .or_insert(builds);
-            }
-            self.node(&tree.root)
-        }
-    }
-
-    struct Tree {
-        root: Node,
-        edges: Vec<(Node, Node, bool)>,
-    }
-
-    impl Tree {
-        fn contains(&self, name: &str) -> bool {
-            let is = |node: &Node| node.package.name == name;
-            is(&self.root) || self.edges.iter().any(|(_, child, _)| is(child))
-        }
-
-        fn dev_dependencies(&self) -> impl Iterator<Item = &Node> {
-            self.edges
-                .iter()
-                .filter(|(parent, _, dev)| *dev && *parent == self.root)
-                .map(|(_, child, _)| child)
-        }
-    }
 
     /// A failure and its details, which are only shown in the build output.
     type CargoError = (Failure, String);
@@ -171,67 +117,6 @@ mod dependencies {
                 println!("cargo::rustc-env={DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV}={code}");
             }
         }
-    }
-
-    fn render(Recorded { graph, failure }: &Recorded) -> String {
-        if let Some(failure) = failure {
-            return format!("Recorded::with_error(Failure::{failure:?})\n");
-        }
-        let packages: String = graph
-            .packages
-            .iter()
-            .map(|Package { name, version }| {
-                format!("Package {{ name: {name:?}.into(), version: {version:?}.into() }},\n")
-            })
-            .collect();
-        let dependencies: String = graph
-            .dependencies
-            .iter()
-            .map(|edges| {
-                let edges: String = edges
-                    .iter()
-                    .map(|(package, builds)| format!("({package}, Builds::{builds:?}), "))
-                    .collect();
-                format!("std::collections::BTreeMap::from([{edges}]),\n")
-            })
-            .collect();
-        let members: String = graph
-            .members
-            .iter()
-            .map(|member| {
-                let dev_dependencies = match &member.dev_dependencies {
-                    Some(dev) => {
-                        let dev: Vec<String> = dev.iter().map(usize::to_string).collect();
-                        format!("Some(vec![{}])", dev.join(", "))
-                    }
-                    None => "None".to_owned(),
-                };
-                format!(
-                    "Member {{ package: {}, dev_dependencies: {dev_dependencies}, \
-                     targets: vec![{}] }},\n",
-                    member.package,
-                    render_targets(&member.targets)
-                )
-            })
-            .collect();
-        let unresolved = render_targets(&graph.unresolved);
-        format!(
-            "Recorded::with(Graph {{\n\
-             packages: vec![\n{packages}],\n\
-             dependencies: vec![\n{dependencies}],\n\
-             members: vec![\n{members}],\n\
-             unresolved: vec![{unresolved}],\n\
-             }})\n"
-        )
-    }
-
-    fn render_targets(targets: &[Target]) -> String {
-        targets
-            .iter()
-            .map(|Target { name, kind }| {
-                format!("Target {{ name: {name:?}.into(), kind: TargetKind::{kind:?} }}, ")
-            })
-            .collect()
     }
 
     fn collection_enabled() -> bool {
@@ -448,55 +333,6 @@ mod dependencies {
         parse_tree(&output).ok_or_else(|| {
             let details = "unexpected `cargo tree` output".to_owned();
             (Failure::CargoTreeFailed, details)
-        })
-    }
-
-    /// Parses `cargo tree --prefix indent --charset ascii --format {p}` output. Each level is
-    /// indented by four characters, and a `[dev-dependencies]` line, indented like the
-    /// package it belongs to, starts that package's dev section.
-    fn parse_tree(output: &str) -> Option<Tree> {
-        let mut lines = output.lines();
-        let root = parse_package(lines.next()?)?;
-        // The packages on the path to the current line, and whether their children seen
-        // next are dev-dependencies.
-        let mut path = vec![(root.clone(), false)];
-        let mut edges = Vec::new();
-        for line in lines {
-            let text = line.trim_start_matches(['|', '`', '-', ' ']);
-            let depth = (line.len() - text.len()) / 4;
-            if text.starts_with('[') {
-                if let Some((_, dev)) = path.get_mut(depth) {
-                    *dev = text == "[dev-dependencies]";
-                }
-                continue;
-            }
-            let Some(package) = parse_package(text) else {
-                continue;
-            };
-            path.truncate(depth);
-            let Some((parent, dev)) = path.last() else {
-                continue;
-            };
-            edges.push((parent.clone(), package.clone(), *dev));
-            path.push((package, false));
-        }
-        Some(Tree { root, edges })
-    }
-
-    /// Parses a `cargo tree --format {p}` entry: `name vX.Y.Z [(source)] [(proc-macro)] [(*)]`.
-    fn parse_package(text: &str) -> Option<Node> {
-        let (name, rest) = text.split_once(' ')?;
-        let (version, rest) = rest.split_once(' ').unwrap_or((rest, ""));
-        let version = version.strip_prefix('v')?;
-        let rest = rest.trim();
-        let rest = rest.strip_suffix("(*)").unwrap_or(rest).trim_end();
-        let source = rest.strip_suffix("(proc-macro)").unwrap_or(rest).trim_end();
-        Some(Node {
-            package: Package {
-                name: name.to_owned(),
-                version: version.to_owned(),
-            },
-            source: (!source.is_empty()).then(|| source.to_owned()),
         })
     }
 }

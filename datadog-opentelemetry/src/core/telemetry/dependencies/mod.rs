@@ -28,6 +28,8 @@ use libdd_telemetry::data::Dependency;
 use crate::dd_debug;
 
 mod graph;
+#[cfg(test)]
+mod tree;
 
 use graph::{Builds, Failure, Graph, Member, Package, Recorded, Target, TargetKind};
 
