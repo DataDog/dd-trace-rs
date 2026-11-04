@@ -60,8 +60,7 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
         .resolve(exe.as_ref(), running_package().as_deref());
     let failure = failure(recorded, exe.as_ref());
     if let Some(failure) = failure {
-        let code = failure.code();
-        dd_debug!("Telemetry: dependency collection failed at build time: {code}");
+        dd_debug!("{}", failure.message());
     }
     dd_debug!(
         "Telemetry: reporting {} dependencies recorded at build time",
@@ -88,6 +87,14 @@ fn current_executable() -> Option<Executable> {
 #[allow(clippy::disallowed_methods)]
 fn running_package() -> Option<String> {
     std::env::var("CARGO_PKG_NAME").ok()
+}
+
+// Here rather than in `graph.rs`, which the build script compiles too and wouldn't use it.
+impl Failure {
+    pub(super) fn message(self) -> String {
+        let code = self.code();
+        format!("Telemetry: dependency collection failed at build time: {code}")
+    }
 }
 
 fn failure(recorded: &Recorded, exe: Option<&Executable>) -> Option<Failure> {

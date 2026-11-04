@@ -455,10 +455,7 @@ fn report_dependencies(
         return;
     };
     if config.telemetry_log_collection_enabled() {
-        // Only the fixed code: the details, which may name paths, stay in the build output.
-        let code = failure.code();
-        let message = format!("Telemetry: dependency collection failed at build time: {code}");
-        handle.add_error_log(message, None).ok();
+        handle.add_error_log(failure.message(), None).ok();
     }
 }
 
