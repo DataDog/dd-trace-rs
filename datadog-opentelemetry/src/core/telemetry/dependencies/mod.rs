@@ -10,8 +10,9 @@
 //!   reports the package's dev-dependencies, with the features cargo enables to build tests.
 //!
 //! When the executable matches no target (e.g. it was renamed when packaged), the union over the
-//! packages with a binary target is reported. When it was built from a package whose
-//! dependencies couldn't be resolved, nothing is reported and the failure is.
+//! packages with a binary target is reported, or over all packages when none has one, as for a
+//! library loaded by a foreign host (e.g. a Python extension in `python3`). When it was built from
+//! a package whose dependencies couldn't be resolved, nothing is reported and the failure is.
 //!
 //! Accuracy caveats: the graph comes from `cargo tree` with the workspace packages' default
 //! features, so it can differ from the actual build when features are selected on the command
@@ -161,7 +162,7 @@ fn crate_name(target: &str) -> String {
 impl Graph {
     /// The dependencies of `exe`, run for `package` if cargo runs it: none if it was built from
     /// a package whose dependencies couldn't be resolved, or the union over the packages with a
-    /// binary target if it matches no target.
+    /// binary target, or over all packages when none has one, if it matches no target.
     fn resolve(&self, exe: Option<&Executable>, package: Option<&str>) -> BTreeSet<&Package> {
         if self.is_unresolved(exe) {
             return BTreeSet::new();
@@ -172,15 +173,19 @@ impl Graph {
             .filter(|member| is_built_from(exe, &member.targets))
             .collect();
         let Some(exe) = exe.filter(|_| !members.is_empty()) else {
+            let has_bin = |member: &&Member| {
+                member
+                    .targets
+                    .iter()
+                    .any(|target| target.kind == TargetKind::Bin)
+            };
+            // Without binaries, the executable is a foreign host, e.g. `python3` loading a
+            // cdylib, or a C++ program linking a staticlib.
+            let any_bin = self.members.iter().any(|member| has_bin(&member));
             return self
                 .members
                 .iter()
-                .filter(|member| {
-                    member
-                        .targets
-                        .iter()
-                        .any(|target| target.kind == TargetKind::Bin)
-                })
+                .filter(|member| !any_bin || has_bin(member))
                 .flat_map(|member| self.dependencies_of(member, Builds::Bin))
                 .collect();
         };
@@ -406,6 +411,39 @@ mod tests {
         let expected = set(&["datadog-opentelemetry", "itoa", "serde_derive", "tokio"]);
         assert_eq!(resolve("/usr/local/bin/renamed"), expected);
         assert_eq!(names(&fixture(), None), expected);
+    }
+
+    /// `ext` is a library, e.g. a Python extension, with no binary target, so the executable is
+    /// the host loading it, which matches no target.
+    #[test]
+    fn test_resolve_library_in_foreign_host() {
+        let graph = graph(
+            &[
+                ("ext", "0.1.0"),
+                ("datadog-opentelemetry", "0.5.0"),
+                ("serde_derive", "1.0.0"),
+                ("pyo3", "0.22.0"),
+                ("proptest", "1.0.0"),
+            ],
+            &[
+                &[(1, Builds::Both), (3, Builds::Both), (4, Builds::Test)],
+                &[(2, Builds::Both)],
+                &[],
+                &[],
+                &[],
+            ],
+            vec![Member {
+                package: 0,
+                dev_dependencies: Some(vec![4]),
+                targets: vec![target("ext", TargetKind::Other)],
+            }],
+        );
+        let host = Executable::Bin("python3".into());
+        let expected = set(&["datadog-opentelemetry", "pyo3", "serde_derive"]);
+
+        assert_eq!(names(&graph, Some(&host)), expected);
+        assert_eq!(names(&graph, None), expected);
+        assert_eq!(failure(&Recorded::with(graph), Some(&host)), None);
     }
 
     /// `app` doesn't depend on this crate itself, but on the workspace library `lib-a`, which
