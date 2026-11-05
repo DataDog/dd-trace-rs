@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.5.3" }
+//! datadog-opentelemetry = { version = "0.6.0" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
