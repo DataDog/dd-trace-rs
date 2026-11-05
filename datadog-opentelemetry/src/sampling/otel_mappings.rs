@@ -7,7 +7,7 @@ use std::sync::RwLock;
 use bumpalo::Bump;
 
 use crate::mappings::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
+    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource,
     get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan,
 };
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
@@ -171,7 +171,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     }
 
     fn resource(&self) -> Cow<'_, str> {
-        Cow::Borrowed(get_otel_resource_v2(self))
+        Cow::Borrowed(get_otel_resource(self))
     }
 
     fn status_code(&self) -> Option<u32> {
@@ -315,7 +315,7 @@ mod tests {
     use opentelemetry::trace::SpanKind;
     use opentelemetry::{Key, KeyValue, Value};
     use opentelemetry_semantic_conventions::attribute::{
-        DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
+        DB_SYSTEM_NAME, HTTP_REQUEST_METHOD, HTTP_ROUTE, MESSAGING_OPERATION_TYPE, MESSAGING_SYSTEM,
     };
     use opentelemetry_semantic_conventions::trace::{
         HTTP_RESPONSE_STATUS_CODE, NETWORK_PROTOCOL_NAME,
@@ -323,6 +323,34 @@ mod tests {
 
     fn create_empty_resource() -> opentelemetry_sdk::Resource {
         opentelemetry_sdk::Resource::builder_empty().build()
+    }
+
+    #[test]
+    fn test_resource_is_span_name() {
+        // The attributes that the operation name is derived from don't shape the resource
+        let attrs = vec![
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+            KeyValue::new(HTTP_ROUTE, "/users/{id}"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("get-user", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "get-user");
+        assert_eq!(span.operation_name(), "http.server.request");
+    }
+
+    #[test]
+    fn test_resource_name_attribute_overrides_span_name() {
+        let attrs = vec![
+            KeyValue::new("resource.name", "GET /users/{id}"),
+            KeyValue::new(HTTP_REQUEST_METHOD, "GET"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("get-user", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "GET /users/{id}");
     }
 
     #[test]

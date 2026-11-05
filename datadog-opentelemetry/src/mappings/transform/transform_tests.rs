@@ -393,7 +393,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "http.server.request".into(),
-                resource: "GET /path".into(),
+                resource: "/path".into(),
                 service: "myservice".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
@@ -487,7 +487,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "http.server.request".into(),
-                resource: "GET /path".into(),
+                resource: "/path".into(),
                 service: "pylons".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
@@ -565,7 +565,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 end_time,
                 attributes: vec![
                     KeyValue::new("operation.name", "READ"),
-                    KeyValue::new("resource.name", "/path"),
+                    KeyValue::new("resource.name", "SELECT name FROM users"),
                     KeyValue::new("span.type", "db"),
                     KeyValue::new("name", "john"),
                     KeyValue::new("container.id", "cid"),
@@ -588,7 +588,8 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "READ".into(),
-                resource: "/path".into(),
+                // resource.name, not the span name
+                resource: "SELECT name FROM users".into(),
                 service: "mongo".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
@@ -665,7 +666,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "ddtracer.server".into(),
-                resource: "POST".into(),
+                resource: "POST /uploads/:document_id".into(),
                 service: "document-uploader".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
@@ -740,7 +741,7 @@ pub fn test_cases() -> Vec<Test<'static>> {
             },
             expected_out: DdSpan {
                 name: "ddtracer.server".into(),
-                resource: "POST".into(),
+                resource: "POST /uploads/:document_id".into(),
                 service: "document-uploader".into(),
                 trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
