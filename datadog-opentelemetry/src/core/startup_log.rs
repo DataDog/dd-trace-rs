@@ -8,8 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{Map, Value};
 
 use super::configuration::Config;
-use super::log::Level;
-use crate::dd_log_always;
+use crate::dd_info;
 
 const STARTUP_LOG_PREFIX: &str = "DATADOG TRACER CONFIGURATION";
 
@@ -18,21 +17,20 @@ static STARTUP_LOGGED: AtomicBool = AtomicBool::new(false);
 /// Logs the effective configuration, if `DD_TRACE_STARTUP_LOGS` is enabled. It is logged once per
 /// process, however many tracers are built.
 ///
-/// The banner is logged at info level regardless of `DD_LOG_LEVEL`, since it is enabled by its
-/// own setting (see [`dd_log_always!`]).
+/// The banner is logged at info level, so it is only shown when `DD_LOG_LEVEL` is `info` or
+/// `debug`.
 pub(crate) fn log_startup_configuration(config: &Config) {
     log_startup_configuration_once(config, &STARTUP_LOGGED);
 }
 
 fn log_startup_configuration_once(config: &Config, logged: &AtomicBool) {
-    if !config.trace_startup_logs() || logged.swap(true, Ordering::Relaxed) {
-        return;
+    if should_log_startup_configuration(config, logged) {
+        dd_info!("{STARTUP_LOG_PREFIX} {}", startup_configuration(config));
     }
-    dd_log_always!(
-        Level::Info,
-        "{STARTUP_LOG_PREFIX} {}",
-        startup_configuration(config)
-    );
+}
+
+fn should_log_startup_configuration(config: &Config, logged: &AtomicBool) -> bool {
+    config.trace_startup_logs() && !logged.swap(true, Ordering::Relaxed)
 }
 
 /// The tracer metadata and the effective value of every configuration reported to telemetry.
@@ -65,7 +63,6 @@ pub(crate) fn startup_configuration(config: &Config) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::log::test_capture::capture;
 
     #[test]
     fn test_startup_configuration() {
@@ -83,22 +80,16 @@ mod tests {
     }
 
     #[test]
-    fn test_log_startup_configuration_once() {
+    fn test_should_log_startup_configuration_once() {
         let logged = AtomicBool::new(false);
-        let banners = |config: &Config| {
-            capture(|| log_startup_configuration_once(config, &logged))
-                .into_iter()
-                .filter(|e| e.message.starts_with(STARTUP_LOG_PREFIX))
-                .count()
-        };
         let mut builder = Config::builder();
         builder.set_trace_startup_logs(false);
         let disabled = builder.build();
         let enabled = Config::builder().build();
 
         // A tracer with startup logs disabled doesn't prevent a later one from logging
-        assert_eq!(banners(&disabled), 0);
-        assert_eq!(banners(&enabled), 1);
-        assert_eq!(banners(&enabled), 0);
+        assert!(!should_log_startup_configuration(&disabled, &logged));
+        assert!(should_log_startup_configuration(&enabled, &logged));
+        assert!(!should_log_startup_configuration(&enabled, &logged));
     }
 }
