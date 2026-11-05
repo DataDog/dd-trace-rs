@@ -421,17 +421,17 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
-/// Datadog tracing telemetry handle
+/// Datadog telemetry handle
 ///
-/// It gives access to the sampling decisions of the live traces managed by a tracer provider,
+/// Gives access to the sampling decisions of the live traces managed by a tracer provider,
 /// through the [`datadog_telemetry_api::DatadogTelemetryApi`] trait implemented by this type. The
 /// handle is part of the [`TracingComponents`] returned by [`DatadogTracingBuilder::init_local`],
 /// and installed as the process-global telemetry by [`DatadogTracingBuilder::init`].
-pub struct DatadogTelemetry {
+pub struct DatadogTelemetryHandle {
     registry: TraceRegistry,
 }
 
-impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetry {
+impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetryHandle {
     fn set_sampling_decision(
         &self,
         span: &opentelemetry::trace::SpanContext,
@@ -481,7 +481,7 @@ pub struct TracingComponents {
     /// The propagator injecting and extracting the trace context
     pub propagator: DatadogPropagator,
     /// The Datadog tracing telemetry handle
-    pub datadog_telemetry: DatadogTelemetry,
+    pub datadog_telemetry: DatadogTelemetryHandle,
 }
 
 /// Builder for configuring and initializing Datadog tracing with OpenTelemetry.
@@ -761,7 +761,7 @@ fn make_tracer(
             }
         }
         let tracer_provider = tracer_provider_builder.build();
-        let datadog_telemetry = DatadogTelemetry { registry };
+        let datadog_telemetry = DatadogTelemetryHandle { registry };
 
         TracingComponents {
             tracer_provider,
@@ -776,7 +776,7 @@ fn make_tracer(
             TracingComponents {
                 tracer_provider: SdkTracerProvider::builder().build(),
                 propagator: DatadogPropagator::new(config, registry.clone()),
-                datadog_telemetry: DatadogTelemetry { registry },
+                datadog_telemetry: DatadogTelemetryHandle { registry },
             }
         }
     }

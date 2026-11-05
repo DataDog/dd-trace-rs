@@ -10,7 +10,7 @@ use std::{
 
 use datadog_opentelemetry::{
     configuration::{Config, ConfigBuilder},
-    make_test_tracer, DatadogTelemetry,
+    make_test_tracer, DatadogTelemetryHandle,
 };
 use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::propagation::{Extractor, TextMapPropagator};
@@ -31,7 +31,7 @@ pub async fn with_test_agent_session(
         &mut DatadogTestAgent,
         SdkTracerProvider,
         Box<dyn TextMapPropagator>,
-        &DatadogTelemetry,
+        &DatadogTelemetryHandle,
         Arc<Config>,
     ),
 ) {
