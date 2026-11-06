@@ -142,6 +142,11 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-cross-centos7
       cancel-in-progress: true
+    env:
+      # Lets the build.rs script find the workspace, which `cross` mounts at `/project` and the target
+      # directory outside it.
+      CARGO_WORKSPACE_DIR: /project
+      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
