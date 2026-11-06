@@ -53,7 +53,6 @@ attribute_key! {
     "datadog.service" => DATADOG_SERVICE,
     "datadog.name" => DATADOG_NAME,
     "datadog.env" => DATADOG_ENV,
-    "env" => ENV,
     "datadog.resource" => DATADOG_RESOURCE,
     "datadog.type" => DATADOG_TYPE,
     "datadog.version" => DATADOG_VERSION,
