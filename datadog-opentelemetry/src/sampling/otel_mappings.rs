@@ -8,7 +8,8 @@ use bumpalo::Bump;
 
 use crate::mappings::{
     get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
-    get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan,
+    get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan, DATADOG_ENV,
+    DATADOG_HTTP_STATUS_CODE, ENV,
 };
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
 use opentelemetry::{Key, KeyValue};
@@ -171,19 +172,14 @@ impl SpanProperties for PreSampledSpan<'_> {
     /// span (number and array attributes are exported as metrics and indexed tags), then
     /// `get_otel_env` if there is no `env` attribute at all.
     fn env(&self) -> Cow<'_, str> {
-        let datadog_env = self
-            .attributes
-            .iter()
-            .rfind(|kv| kv.key.as_str() == "datadog.env")
-            .map(|kv| crate::mappings::otel_value_string_repr(&kv.value, self.alloc))
-            .unwrap_or_default();
+        let datadog_env = self.get_attr_str(DATADOG_ENV);
         if !datadog_env.is_empty() {
             return Cow::Borrowed(datadog_env);
         }
 
-        let resource_env = self.resource.get_ref(&Key::from_static_str("env"));
+        let resource_env = self.get_res_attribute_opt(ENV);
         let span_envs = self.attributes.iter().filter(|kv| {
-            kv.key.as_str() == "env"
+            kv.key.as_str() == ENV.key()
                 && !matches!(
                     kv.value,
                     opentelemetry::Value::I64(_)
@@ -217,12 +213,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     /// `get_otel_status_code`. A `datadog.http_status_code` that isn't a number is exported as is,
     /// but has no status code here.
     fn status_code(&self) -> Option<u32> {
-        let datadog_status_code = self
-            .attributes
-            .iter()
-            .rfind(|kv| kv.key.as_str() == "datadog.http_status_code")
-            .map(|kv| crate::mappings::otel_value_string_repr(&kv.value, self.alloc))
-            .unwrap_or_default();
+        let datadog_status_code = self.get_attr_str(DATADOG_HTTP_STATUS_CODE);
         if !datadog_status_code.is_empty() {
             return datadog_status_code.parse().ok();
         }
