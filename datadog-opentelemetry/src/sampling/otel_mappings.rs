@@ -170,7 +170,8 @@ impl SpanProperties for PreSampledSpan<'_> {
     /// The `env` tag the exporter sets on the span: `datadog.env` on the span, then an `env`
     /// attribute on the resource, then the first non-empty string or bool `env` attribute on the
     /// span (number and array attributes are exported as metrics and indexed tags), then
-    /// `get_otel_env` if there is no `env` attribute at all.
+    /// `get_otel_env` if there is no `env` attribute at all. An `env` attribute on the
+    /// instrumentation scope replaces the exported value, but the sampler doesn't get the scope.
     fn env(&self) -> Cow<'_, str> {
         let datadog_env = self.get_attr_str(DATADOG_ENV);
         if !datadog_env.is_empty() {
@@ -208,10 +209,10 @@ impl SpanProperties for PreSampledSpan<'_> {
         Cow::Borrowed(get_otel_resource_v2(self))
     }
 
-    /// The `http.status_code` tag the exporter sets on the span: the last
-    /// `datadog.http_status_code` attribute if non-empty, whatever its type, then
-    /// `get_otel_status_code`. A `datadog.http_status_code` that isn't a number is exported as is,
-    /// but has no status code here.
+    /// The last `datadog.http_status_code` attribute if non-empty, whatever its type, as the
+    /// exporter does, then `get_otel_status_code`. A `datadog.http_status_code` that isn't a number
+    /// is exported as is, but has no status code here. An `http.status_code` attribute on the
+    /// instrumentation scope replaces the exported value, but the sampler doesn't get the scope.
     fn status_code(&self) -> Option<u32> {
         let datadog_status_code = self.get_attr_str(DATADOG_HTTP_STATUS_CODE);
         if !datadog_status_code.is_empty() {
