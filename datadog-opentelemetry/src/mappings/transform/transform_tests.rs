@@ -267,6 +267,24 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     KeyValue::new("name", "john"),
                     KeyValue::new("approx", 1.2),
                     KeyValue::new("count", 2),
+                    KeyValue::new(
+                        "names",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "flags",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("counts", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("ratios", opentelemetry::Value::Array(vec![0.5, 1.5].into())),
+                    KeyValue::new(
+                        "http.request.header.accept",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("text/html")].into(),
+                        ),
+                    ),
                 ],
                 dropped_attributes_count: 0,
                 events: make_test_span_events().0,
@@ -295,6 +313,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 error: 1,
                 meta: VecMap::from_iter([
                     ("name".into(), "john".into()),
+                    ("names.0".into(), "a".into()),
+                    ("names.1".into(), "b".into()),
+                    ("flags.0".into(), "true".into()),
+                    ("flags.1".into(), "false".into()),
+                    ("http.request.headers.accept.0".into(), "text/html".into()),
                     (
                         "otel.trace_id".into(),
                         "72df520af2bde7a5240031ead750e5f3".into(),
@@ -312,7 +335,14 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ("span.kind".into(), "server".into()),
                     ("_dd.span_events.has_exception".into(), "true".into()),
                 ]),
-                metrics: VecMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
+                metrics: VecMap::from_iter([
+                    ("approx".into(), 1.2),
+                    ("count".into(), 2.0),
+                    ("counts.0".into(), 1.0),
+                    ("counts.1".into(), 2.0),
+                    ("ratios.0".into(), 0.5),
+                    ("ratios.1".into(), 1.5),
+                ]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
