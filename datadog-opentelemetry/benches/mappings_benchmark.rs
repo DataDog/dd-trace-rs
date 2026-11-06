@@ -12,8 +12,8 @@ use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 use datadog_opentelemetry::mappings::transform_tests::test_span_to_sdk_span;
-use datadog_opentelemetry::mappings::SpanStr;
 use libdd_trace_utils::span::v1::span_pool::SpanPoolV1;
+use libdd_trace_utils::span::SliceData;
 
 #[global_allocator]
 static GLOBAL: ReportingAllocator<std::alloc::System> = ReportingAllocator::new(std::alloc::System);
@@ -53,7 +53,7 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
                         // resets them (dropping those borrows) before the borrow sources
                         // can go away. `trace_pool_for` is the audited lifetime
                         // erasure used by the span exporter.
-                        let pool: &SpanPoolV1<SpanStr> = trace_pool_for(&pool);
+                        let pool: &SpanPoolV1<SliceData> = trace_pool_for(&pool);
                         let mut dd_span = pool.get_span();
                         datadog_opentelemetry::mappings::otel_span_to_dd_span(
                             &mut dd_span,

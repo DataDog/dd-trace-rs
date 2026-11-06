@@ -19,6 +19,7 @@ use libdd_data_pipeline::trace_exporter::{
     TelemetryConfig, TraceExporter, TraceExporterBuilder, TraceExporterOutputFormat,
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
+use libdd_trace_model::TraceText;
 use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 

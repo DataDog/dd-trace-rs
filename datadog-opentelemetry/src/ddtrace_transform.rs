@@ -10,14 +10,15 @@ use crate::{
     core::sampling,
     mappings::{
         meta_get, meta_insert, metric_contains, metric_insert, otel_span_to_dd_span, CachedConfig,
-        CowStr, DdAttributeValue, DdSpan, DdTraceChunk, SdkSpan, SpanStr,
-        DEFAULT_OTLP_SERVICE_NAME, VERSION_KEY,
+        DdAttributeValue, DdSpan, DdTraceChunk, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME,
+        VERSION_KEY,
     },
 };
 use bumpalo::Bump;
+use libdd_trace_model::TraceText;
 use libdd_trace_utils::span::{
     v1::{span_pool::SpanPoolV1, SpanKind as DdSpanKind},
-    SpanText,
+    SliceData, SpanText,
 };
 use opentelemetry::{trace::SpanId, Key, Value};
 use opentelemetry_sdk::{trace::SpanData, Resource};
@@ -57,24 +58,24 @@ fn otel_sampling_to_dd_sampling(
 }
 
 /// Pool recycling the allocations of exported spans across exports.
-pub type DdTracePool = SpanPoolV1<CowStr<'static>>;
+pub type DdTracePool = SpanPoolV1<SliceData<'static>>;
 
 /// Shortens the text lifetime of a [`DdTracePool`] to the lifetime of the spans of one export.
 ///
 /// The pool is `'static` since it outlives every export, while the spans of an export borrow from
 /// the `SpanData`, `Resource` and arena of that export.
-pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<CowStr<'a>> {
+pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<SliceData<'a>> {
     // SAFETY: `SpanPoolV1` resets every span (all text fields set back to the empty `'static`
     // default, collections cleared) before storing it, both in its queue and in its thread-local
     // caches, and drops the chunk shells instead of storing them. The reset is implemented by
     // `libdd_trace_utils::span::v1::span_pool::reset_span` and `SpanBatch::reset`
     // (libdd-trace-utils 16.0.0). Spans and chunks handed back to the pool thus never keep a
-    // `CowStr<'a>` borrowing data past the call returning them, and the
+    // `Cow<'a, str>` borrowing data past the call returning them, and the
     // pool only ever stores values that are valid for `'static`. Both types only differ by the
-    // lifetime of `CowStr`, so they have the same layout.
+    // lifetime of `SliceData`, so they have the same layout.
     //
     // This invariant is tested by `tests_trace_pool_recycling_frees_text_data`.
-    unsafe { &*std::ptr::from_ref(pool).cast::<SpanPoolV1<CowStr<'a>>>() }
+    unsafe { &*std::ptr::from_ref(pool).cast::<SpanPoolV1<SliceData<'a>>>() }
 }
 
 // Transform a vector of opentelemetry span data into a datadog v1 trace chunk
@@ -85,7 +86,7 @@ pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     span_data: I,
     otel_resource: &'a Resource,
     alloc: &'a Bump,
-    pool: Option<&SpanPoolV1<CowStr<'a>>>,
+    pool: Option<&SpanPoolV1<SliceData<'a>>>,
 ) -> DdTraceChunk<'a>
 where
     I: IntoIterator<Item = &'a SpanData>,
@@ -169,11 +170,11 @@ fn add_config_metadata<'a>(
     meta_insert(
         dd_span,
         SpanStr::from_static_str("telemetry.sdk.version"),
-        SpanStr::from_str(&cached_config.tracer_version),
+        SpanStr::from(cached_config.tracer_version.as_str()),
     );
 
     if dd_span.service.as_str() == DEFAULT_OTLP_SERVICE_NAME {
-        dd_span.service = SpanStr::from_str(&cached_config.service);
+        dd_span.service = SpanStr::from(cached_config.service.as_str());
     }
 
     // Spans whose service was overridden keep a reference to the application service
@@ -182,12 +183,16 @@ fn add_config_metadata<'a>(
         meta_insert(
             dd_span,
             SpanStr::from_static_str(BASE_SERVICE_KEY),
-            SpanStr::from_str(base_service),
+            SpanStr::from(base_service),
         );
     }
 
     for (key, value) in &cached_config.global_tags {
-        meta_insert(dd_span, SpanStr::from_str(key), SpanStr::from_str(value));
+        meta_insert(
+            dd_span,
+            SpanStr::from(key.as_str()),
+            SpanStr::from(value.as_str()),
+        );
     }
 
     if let Some(version) = &cached_config.version {
@@ -196,7 +201,7 @@ fn add_config_metadata<'a>(
                 meta_insert(
                     dd_span,
                     SpanStr::from_static_str(VERSION_KEY),
-                    SpanStr::from_str(version),
+                    SpanStr::from(version.as_str()),
                 );
             }
         }
@@ -235,12 +240,12 @@ fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a Cach
     meta_insert(
         dd_span,
         SpanStr::from_static_str("language"),
-        SpanStr::from_str(&cached_config.language),
+        SpanStr::from(cached_config.language.as_str()),
     );
     meta_insert(
         dd_span,
         SpanStr::from_static_str("runtime-id"),
-        SpanStr::from_str(&cached_config.runtime_id),
+        SpanStr::from(cached_config.runtime_id.as_str()),
     );
     metric_insert(
         dd_span,

@@ -25,7 +25,7 @@ pub use transform::{
     otel_value_string_repr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
 };
 
-pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert, CowStr};
+pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert};
 
 #[cfg(feature = "test-utils")]
 pub use transform::{semconv_shim, transform_tests};

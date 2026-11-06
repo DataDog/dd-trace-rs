@@ -4,6 +4,7 @@
 #![allow(missing_docs)]
 
 use std::{
+    borrow::Cow,
     str::FromStr,
     time::{Duration, SystemTime},
     vec,
@@ -11,7 +12,6 @@ use std::{
 
 use libdd_trace_utils::span::v1::{AttributeValue, SpanKind as DdSpanKind, ThinVec};
 use libdd_trace_utils::span::vec_map::VecMap;
-use libdd_trace_utils::span::SpanText as _;
 
 use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{
@@ -21,18 +21,12 @@ use opentelemetry::{
 
 use super::{
     super::sdk_span::SdkSpan,
-    super::transform::{CowStr, DdAttributeValue, DdSpanEvent, DdSpanLink, SPAN_LINK_FLAGS_SET},
+    super::transform::{DdAttributeValue, DdSpanEvent, DdSpanLink, SPAN_LINK_FLAGS_SET},
     DdSpan,
 };
 
 fn timestamp_nano(nanos: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)
-}
-
-impl From<&'static str> for CowStr<'static> {
-    fn from(s: &'static str) -> Self {
-        CowStr::from_static_str(s)
-    }
 }
 
 fn string(s: &'static str) -> DdAttributeValue<'static> {
@@ -42,7 +36,7 @@ fn string(s: &'static str) -> DdAttributeValue<'static> {
 fn attributes<const N: usize, const M: usize>(
     strings: [(&'static str, &'static str); N],
     numbers: [(&'static str, f64); M],
-) -> VecMap<CowStr<'static>, DdAttributeValue<'static>> {
+) -> VecMap<Cow<'static, str>, DdAttributeValue<'static>> {
     strings
         .into_iter()
         .map(|(k, v)| (k.into(), string(v)))
@@ -773,6 +767,7 @@ mod tests {
     use std::fmt::Write;
 
     use bumpalo::Bump;
+    use libdd_trace_model::TraceText;
     use libdd_trace_utils::span::v1::AttributeValue;
     use libdd_trace_utils::span::vec_map::VecMap;
     use libdd_trace_utils::span::SpanText as _;
@@ -780,7 +775,7 @@ mod tests {
     use opentelemetry_sdk::Resource;
 
     use crate::mappings::{
-        transform::{otel_span_to_dd_span, CowStr, DdAttributeValue},
+        transform::{otel_span_to_dd_span, Cow, DdAttributeValue},
         DdSpan,
     };
 
@@ -912,7 +907,7 @@ mod tests {
                 .collect();
             assert_eq!(
                 status_codes,
-                [&AttributeValue::String(CowStr::from_static_str("200"))],
+                [&AttributeValue::String(Cow::from_static_str("200"))],
                 "{otel_key}"
             );
             assert!(
@@ -924,8 +919,8 @@ mod tests {
 
     #[track_caller]
     fn hashmap_diff<'a>(
-        output: &VecMap<CowStr<'a>, DdAttributeValue<'a>>,
-        expected: &VecMap<CowStr<'a>, DdAttributeValue<'a>>,
+        output: &VecMap<Cow<'a, str>, DdAttributeValue<'a>>,
+        expected: &VecMap<Cow<'a, str>, DdAttributeValue<'a>>,
     ) {
         let mut a = Vec::from_iter(output);
         let mut b = Vec::from_iter(expected);
