@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use crate::{
     core::sampling,
     mappings::{
-        meta_get, meta_insert, metric_contains, metric_insert, otel_span_to_dd_span_into,
-        CachedConfig, CowStr, DdAttributeValue, DdSpan, DdTraceChunk, SdkSpan, SpanStr,
+        meta_get, meta_insert, metric_contains, metric_insert, otel_span_to_dd_span, CachedConfig,
+        CowStr, DdAttributeValue, DdSpan, DdTraceChunk, SdkSpan, SpanStr,
         DEFAULT_OTLP_SERVICE_NAME, VERSION_KEY,
     },
 };
@@ -98,8 +98,8 @@ where
         trace_id = s.span_context.trace_id().to_bytes();
         let trace_flags = s.span_context.trace_flags();
         let sdk_span = SdkSpan::from_sdk_span_data(s);
-        let dd_span = pool.map_or_else(DdSpan::default, SpanPoolV1::get_span);
-        let mut dd_span = otel_span_to_dd_span_into(dd_span, &sdk_span, otel_resource, alloc);
+        let mut dd_span = pool.map_or_else(DdSpan::default, SpanPoolV1::get_span);
+        otel_span_to_dd_span(&mut dd_span, &sdk_span, otel_resource, alloc);
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
         add_config_metadata(&mut dd_span, cached_config, otel_resource);

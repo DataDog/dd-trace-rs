@@ -74,7 +74,7 @@ use super::sdk_span::SdkSpan;
 /// an allocation otherwise.
 pub type SpanStr<'a> = CowStr<'a>;
 /// A Datadog span produced by converting an OpenTelemetry span, see
-/// [`otel_span_to_dd_span_into`].
+/// [`crate::mappings::otel_span_to_dd_span`].
 pub type DdSpan<'a> = libdd_trace_utils::span::v1::Span<CowStr<'a>>;
 /// A Datadog trace chunk, grouping the [`DdSpan`]s of a trace.
 pub type DdTraceChunk<'a> = libdd_trace_utils::span::v1::TraceChunk<CowStr<'a>>;
@@ -284,10 +284,10 @@ fn set_array_otlp_with_semconv_mappings<'a>(
 /// `dd_span` is expected to be empty: either a default span or a span recycled from a pool, whose
 /// collections keep their capacity.
 fn otel_span_to_dd_span_minimal<'a>(
-    mut dd_span: DdSpan<'a>,
+    dd_span: &mut DdSpan<'a>,
     span: &SpanExtractArgs<'a, '_>,
     is_top_level: bool,
-) -> DdSpan<'a> {
+) {
     let alloc = span.alloc;
     let start = time_as_unix_nanos(span.span.start_time);
     let end = time_as_unix_nanos(span.span.end_time);
@@ -341,27 +341,25 @@ fn otel_span_to_dd_span_minimal<'a>(
     };
     if code != 0 {
         meta_insert(
-            &mut dd_span,
+            dd_span,
             SpanStr::from_static_str("http.status_code"),
             SpanStr::from_str(fmt_in(alloc, format_args!("{code}"))),
         );
     }
 
     if is_top_level {
-        metric_insert(&mut dd_span, SpanStr::from_static_str("_top_level"), 1.0);
+        metric_insert(dd_span, SpanStr::from_static_str("_top_level"), 1.0);
     }
     if span.get_attr_num(DD_MEASURED) == Some(1)
         || matches!(span.span_kind(), SpanKind::Client | SpanKind::Producer)
     {
-        metric_insert(&mut dd_span, SpanStr::from_static_str("_dd.measured"), 1.0);
+        metric_insert(dd_span, SpanStr::from_static_str("_dd.measured"), 1.0);
     }
     // TODO(paullgdc):
     // The go code does the following thing, because the affect stats computation
     // * sets peer tags
     //
     // In our case, this is hard because tags need to be fetched from the agent /info endpoint
-
-    dd_span
 }
 
 fn otel_span_id_to_dd_id(span_id: opentelemetry::SpanId) -> u64 {
@@ -710,16 +708,6 @@ impl<'a> libdd_trace_model::ValueTypes for CowStr<'a> {
 
 impl libdd_trace_utils::span::TraceData for CowStr<'_> {}
 
-/// Converts an OpenTelemetry span to a new Datadog span, see [`otel_span_to_dd_span_into`].
-#[cfg(any(test, feature = "test-utils"))]
-pub fn otel_span_to_dd_span<'a>(
-    otel_span: &SdkSpan<'a>,
-    otel_resource: &'a Resource,
-    alloc: &'a Bump,
-) -> DdSpan<'a> {
-    otel_span_to_dd_span_into(DdSpan::default(), otel_span, otel_resource, alloc)
-}
-
 /// Converts an OpenTelemetry span to a Datadog span.
 /// https://github.com/DataDog/datadog-agent/blob/d91c1b47da4f5f24559f49be284e547cc847d5e2/pkg/trace/transform/transform.go#L236
 ///
@@ -731,18 +719,18 @@ pub fn otel_span_to_dd_span<'a>(
 /// * `IgnoreMissingDatadogFields` => default to false
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
 ///
-/// `dd_span` is filled instead of allocating a new span. It is expected to be empty, typically a
-/// span recycled from a [`SpanPoolV1`](libdd_trace_utils::span::v1::span_pool::SpanPoolV1): its
-/// collections keep their capacity, which avoids reallocating them.
+/// `dd_span` is filled in place. It is expected to be empty, typically a span recycled from a
+/// [`SpanPoolV1`](libdd_trace_utils::span::v1::span_pool::SpanPoolV1): its collections keep their
+/// capacity, which avoids reallocating them.
 ///
 /// `alloc` is the arena backing every string formatted during the conversion; it must
-/// outlive the returned `DdSpan`.
-pub fn otel_span_to_dd_span_into<'a>(
-    dd_span: DdSpan<'a>,
+/// outlive the strings stored in `dd_span`.
+pub fn otel_span_to_dd_span<'a>(
+    dd_span: &mut DdSpan<'a>,
     otel_span: &SdkSpan<'a>,
     otel_resource: &'a Resource,
     alloc: &'a Bump,
-) -> DdSpan<'a> {
+) {
     // A non-empty span would silently mix data across exports, so the contract above is
     // enforced in debug builds.
     debug_assert!(
@@ -770,13 +758,13 @@ pub fn otel_span_to_dd_span_into<'a>(
 
     // Top level spans are computed later
     let is_top_level = false;
-    let mut dd_span = otel_span_to_dd_span_minimal(dd_span, &span_extracted, is_top_level);
+    otel_span_to_dd_span_minimal(dd_span, &span_extracted, is_top_level);
 
     for (dd_semantics_key, meta_key) in DD_SEMANTICS_KEY_TO_META_KEY {
         let value = span_extracted.get_attr_str(*dd_semantics_key);
         if !value.is_empty() {
             meta_insert(
-                &mut dd_span,
+                dd_span,
                 SpanStr::from_static_str(meta_key),
                 SpanStr::from_str(value),
             );
@@ -784,16 +772,16 @@ pub fn otel_span_to_dd_span_into<'a>(
     }
 
     for (key, value) in otel_resource.iter() {
-        set_meta_otlp_with_semconv_mappings(key.as_str(), value, &mut dd_span, alloc);
+        set_meta_otlp_with_semconv_mappings(key.as_str(), value, dd_span, alloc);
     }
 
     for opentelemetry::KeyValue { key, value, .. } in otel_span.instrumentation_scope.attributes() {
         let key = SpanStr::from_str(key.as_str());
         let value = SpanStr::from_str(otel_value_string_repr(value, alloc));
-        meta_insert(&mut dd_span, key, value);
+        meta_insert(dd_span, key, value);
     }
     meta_insert(
-        &mut dd_span,
+        dd_span,
         SpanStr::from_static_str("otel.trace_id"),
         SpanStr::from_str(fmt_in(
             alloc,
@@ -821,16 +809,16 @@ pub fn otel_span_to_dd_span_into<'a>(
         }
         match value {
             opentelemetry::Value::I64(v) => {
-                set_metric_otlp_with_semconv_mappings(key, *v as f64, &mut dd_span, alloc);
+                set_metric_otlp_with_semconv_mappings(key, *v as f64, dd_span, alloc);
             }
             opentelemetry::Value::F64(v) => {
-                set_metric_otlp_with_semconv_mappings(key, *v, &mut dd_span, alloc);
+                set_metric_otlp_with_semconv_mappings(key, *v, dd_span, alloc);
             }
             opentelemetry::Value::Array(array) => {
-                set_array_otlp_with_semconv_mappings(key, value, array, &mut dd_span, alloc);
+                set_array_otlp_with_semconv_mappings(key, value, array, dd_span, alloc);
             }
             _ => {
-                set_meta_otlp_with_semconv_mappings(key, value, &mut dd_span, alloc);
+                set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
             }
         }
     }
@@ -888,14 +876,14 @@ pub fn otel_span_to_dd_span_into<'a>(
             attributes,
         }
     }));
-    tag_span_if_contains_exception(&mut dd_span);
+    tag_span_if_contains_exception(dd_span);
 
     // TraceState has no borrowed serialization API, build the header String once and
     // copy it into the arena if present
     let tracestate_header = otel_span.span_context.trace_state().header();
     if !tracestate_header.is_empty() {
         meta_insert(
-            &mut dd_span,
+            dd_span,
             SpanStr::from_static_str("w3c.tracestate"),
             SpanStr::from_bump(alloc, &tracestate_header),
         );
@@ -904,7 +892,7 @@ pub fn otel_span_to_dd_span_into<'a>(
     let lib_name = otel_span.instrumentation_scope.name();
     if !lib_name.is_empty() {
         meta_insert(
-            &mut dd_span,
+            dd_span,
             SpanStr::from_static_str(semconv::attribute::OTEL_SCOPE_NAME),
             SpanStr::from_str(lib_name),
         );
@@ -914,7 +902,7 @@ pub fn otel_span_to_dd_span_into<'a>(
     if let Some(version) = lib_version {
         if !version.is_empty() {
             meta_insert(
-                &mut dd_span,
+                dd_span,
                 SpanStr::from_static_str(semconv::attribute::OTEL_SCOPE_VERSION),
                 SpanStr::from_str(version),
             );
@@ -924,7 +912,7 @@ pub fn otel_span_to_dd_span_into<'a>(
     // Code from the OTLP protocol
     // https://github.com/open-telemetry/opentelemetry-proto/blob/724e427879e3d2bae2edc0218fff06e37b9eb46e/opentelemetry/proto/trace/v1/trace.proto#L268
     meta_insert(
-        &mut dd_span,
+        dd_span,
         SpanStr::from_static_str(semconv::attribute::OTEL_STATUS_CODE),
         SpanStr::from_static_str(match &otel_span.status {
             opentelemetry::trace::Status::Unset => "Unset",
@@ -935,7 +923,7 @@ pub fn otel_span_to_dd_span_into<'a>(
     if let opentelemetry::trace::Status::Error { description } = &otel_span.status {
         if !description.is_empty() {
             meta_insert(
-                &mut dd_span,
+                dd_span,
                 SpanStr::from_static_str(semconv::attribute::OTEL_STATUS_DESCRIPTION),
                 SpanStr::from_str(description.as_ref()),
             );
@@ -944,12 +932,10 @@ pub fn otel_span_to_dd_span_into<'a>(
 
     if ["error.message", "error.type", "error.stack"]
         .into_iter()
-        .any(|k| !meta_contains(&dd_span, k))
+        .any(|k| !meta_contains(dd_span, k))
     {
-        dd_span.error = status_to_error(otel_span.status, &mut dd_span, alloc);
+        dd_span.error = status_to_error(otel_span.status, dd_span, alloc);
     }
-
-    dd_span
 }
 
 #[cfg(test)]
@@ -1010,7 +996,8 @@ mod tests {
             let resource = Resource::builder_empty().build();
             let alloc = Bump::new();
             let sdk_span = SdkSpan::from_sdk_span_data(&span_data);
-            let dd_span = otel_span_to_dd_span(&sdk_span, &resource, &alloc);
+            let mut dd_span = DdSpan::default();
+            otel_span_to_dd_span(&mut dd_span, &sdk_span, &resource, &alloc);
             dd_span.span_kind
         };
 
@@ -1048,7 +1035,8 @@ mod tests {
         };
         let alloc = Bump::new();
         let sdk_span = SdkSpan::from_sdk_span_data(&span_data);
-        let dd_span = otel_span_to_dd_span(&sdk_span, &resource, &alloc);
+        let mut dd_span = DdSpan::default();
+        otel_span_to_dd_span(&mut dd_span, &sdk_span, &resource, &alloc);
         match dd_span.attributes.get("_dd.measured") {
             Some(AttributeValue::Float(v)) => Some(*v),
             _ => None,

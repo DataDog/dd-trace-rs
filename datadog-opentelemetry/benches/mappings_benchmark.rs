@@ -54,8 +54,9 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
                         // can go away. `trace_pool_for` is the audited lifetime
                         // erasure used by the span exporter.
                         let pool: &SpanPoolV1<SpanStr> = trace_pool_for(&pool);
-                        let dd_span = datadog_opentelemetry::mappings::otel_span_to_dd_span_into(
-                            pool.get_span(),
+                        let mut dd_span = pool.get_span();
+                        datadog_opentelemetry::mappings::otel_span_to_dd_span(
+                            &mut dd_span,
                             &input_span,
                             &input_resource,
                             &arena,

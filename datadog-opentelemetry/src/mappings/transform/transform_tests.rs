@@ -873,7 +873,9 @@ mod tests {
                 )
                 .build();
             let alloc = Bump::new();
-            let output = otel_span_to_dd_span(
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
                 &test_span_to_sdk_span(&test.input_span),
                 &input_resource,
                 &alloc,
@@ -894,8 +896,13 @@ mod tests {
             };
             let resource = Resource::builder_empty().build();
             let alloc = Bump::new();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&input_span), &resource, &alloc);
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
+                &test_span_to_sdk_span(&input_span),
+                &resource,
+                &alloc,
+            );
 
             let status_codes: Vec<_> = output
                 .attributes
