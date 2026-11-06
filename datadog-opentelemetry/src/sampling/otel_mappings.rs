@@ -212,7 +212,20 @@ impl SpanProperties for PreSampledSpan<'_> {
         Cow::Borrowed(get_otel_resource_v2(self))
     }
 
+    /// The `http.status_code` tag the exporter sets on the span: the last
+    /// `datadog.http_status_code` attribute if non-empty, whatever its type, then
+    /// `get_otel_status_code`. A `datadog.http_status_code` that isn't a number is exported as is,
+    /// but has no status code here.
     fn status_code(&self) -> Option<u32> {
+        let datadog_status_code = self
+            .attributes
+            .iter()
+            .rfind(|kv| kv.key.as_str() == "datadog.http_status_code")
+            .map(|kv| crate::mappings::otel_value_string_repr(&kv.value, self.alloc))
+            .unwrap_or_default();
+        if !datadog_status_code.is_empty() {
+            return datadog_status_code.parse().ok();
+        }
         get_otel_status_code(self)
     }
 
@@ -812,6 +825,116 @@ mod tests {
             vec![],
             vec![KeyValue::new("deployment.environment", "dev")],
             "dev",
+        );
+    }
+
+    /// Asserts the sampler's status code, and the exported `http.status_code` tag
+    fn assert_status_code(attrs: Vec<KeyValue>, status_code: Option<u32>, exported: Option<&str>) {
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+        assert_eq!(span.status_code(), status_code, "sampler: {attrs:?}");
+
+        let exported_status_code = exported_tag(&attrs, &resource, "http.status_code");
+        assert_eq!(
+            exported_status_code.as_deref(),
+            exported,
+            "exporter: {attrs:?}"
+        );
+    }
+
+    #[test]
+    fn test_status_code_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("http.response.status_code", 200)],
+            Some(200),
+            Some("200"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_none() {
+        assert_status_code(vec![], None, None);
+    }
+
+    #[test]
+    fn test_status_code_numeric_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 503),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", "503"),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_datadog_status_code_without_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("datadog.http_status_code", "503")],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_last_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 500),
+                KeyValue::new("datadog.http_status_code", "503"),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_empty_datadog_status_code_is_skipped() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", ""),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(200),
+            Some("200"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_non_numeric_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", "abc"),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            None,
+            Some("abc"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_float_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 503.0),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
         );
     }
 
