@@ -647,7 +647,11 @@ mod tests {
             return;
         }
         let Recorded { graph, failure } = &recorded();
-        assert!(failure.is_none(), "collection failed: {failure:?}");
+        assert!(
+            failure.is_none(),
+            "collection failed: {failure:?}; for WorkspaceNotFound, the target directory isn't \
+             in the workspace: set CARGO_WORKSPACE_DIR to the workspace root"
+        );
         assert!(graph.unresolved.is_empty());
         let names = |exe: &Executable| names(graph, Some(exe));
 

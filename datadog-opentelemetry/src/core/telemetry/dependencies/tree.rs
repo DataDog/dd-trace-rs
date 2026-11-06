@@ -14,15 +14,15 @@ use std::{
 
 use super::graph::{Builds, Graph, Package, Recorded, Target};
 
-/// The workspace root of a build script whose `OUT_DIR` is `out_dir`: the parent of the target
-/// directory holding it, if that parent holds a `Cargo.lock`.
+/// The workspace root of a build script whose `OUT_DIR` is `out_dir`: its nearest ancestor
+/// holding a `Cargo.lock`, which cargo only writes at workspace roots, so whatever the layout of
+/// the target directory below it, e.g. with `--target`.
+///
+/// The target directory's `CACHEDIR.TAG` isn't a reliable marker: cargo only writes it when it
+/// creates the directory, not when it already exists, e.g. restored from a cache.
 pub fn workspace_root(out_dir: &Path) -> Option<PathBuf> {
-    // Cargo tags the root of the target directory, and also the directory of each `--target`
-    // triple below it, so the first tagged ancestor isn't always the root.
     out_dir
         .ancestors()
-        .filter(|dir| dir.join("CACHEDIR.TAG").is_file())
-        .filter_map(Path::parent)
         .find(|dir| dir.join("Cargo.lock").is_file())
         .map(Path::to_path_buf)
 }
@@ -224,39 +224,39 @@ mod tests {
         }
     }
 
-    /// A target directory as cargo lays it out, under a directory unique to `name`.
-    fn target_layout(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("dd-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let ws = root.join("ws");
-        for dir in ["target", "target/x86_64-unknown-linux-musl"] {
-            fs::create_dir_all(ws.join(dir)).expect("create the target directory");
-            fs::write(ws.join(dir).join("CACHEDIR.TAG"), "").expect("tag the target directory");
-        }
-        fs::write(ws.join("Cargo.lock"), "").expect("write the lockfile");
-        root
-    }
-
+    /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
+    /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
+    /// `elsewhere/target` outside any workspace.
     #[test]
     fn test_workspace_root() {
-        let root = target_layout("workspace-root");
+        let root = std::env::temp_dir().join(format!("dd-workspace-root-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
         let ws = root.join("ws");
-        let out_dir = |target: &str| {
-            let dir = ws.join(target).join("build/app-0123456789abcdef/out");
+        fs::create_dir_all(&ws).expect("create the workspace");
+        fs::write(ws.join("Cargo.lock"), "").expect("write the lockfile");
+        let out_dir = |target: &Path, profile: &str| {
+            let dir = target.join(profile).join("build/app-0123456789abcdef/out");
             fs::create_dir_all(&dir).expect("create OUT_DIR");
             dir
         };
+        let target = ws.join("target");
 
-        assert_eq!(workspace_root(&out_dir("target/debug")), Some(ws.clone()));
-        // `--target`: `target/<triple>` is tagged too, but its parent holds no lockfile.
+        assert_eq!(workspace_root(&out_dir(&target, "debug")), Some(ws.clone()));
+        // `--target`
         assert_eq!(
-            workspace_root(&out_dir("target/x86_64-unknown-linux-musl/release")),
+            workspace_root(&out_dir(&target, "x86_64-unknown-linux-musl/release")),
             Some(ws.clone())
         );
-        // A target directory moved out of the workspace.
-        fs::remove_file(ws.join("Cargo.lock")).expect("remove the lockfile");
-        assert_eq!(workspace_root(&out_dir("target/debug")), None);
-        assert_eq!(workspace_root(&root), None);
+        // `CARGO_TARGET_DIR=build/target`
+        assert_eq!(
+            workspace_root(&out_dir(&ws.join("build/target"), "debug")),
+            Some(ws.clone())
+        );
+        // Moved out of the workspace, e.g. by `cross`.
+        assert_eq!(
+            workspace_root(&out_dir(&root.join("elsewhere/target"), "debug")),
+            None
+        );
 
         fs::remove_dir_all(&root).expect("remove the test directory");
     }

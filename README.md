@@ -295,10 +295,10 @@ are included; build dependencies are excluded. The build script never fails the 
 collection isn't possible, no dependencies are reported, and the reason is sent through
 telemetry.
 
-The workspace is located from the build output directory, which works with the default
-`target/` directory, with or without `--target`. When the target directory isn't inside the
-workspace, e.g. it was moved with `CARGO_TARGET_DIR` or the build runs in a container that
-mounts them apart, point the build script at the workspace in `.cargo/config.toml`:
+The workspace is located from the build output directory, which works whenever the target
+directory is inside the workspace, such as the default `target/`. When it isn't, e.g. it was
+moved with `CARGO_TARGET_DIR` or the build runs in a container that mounts them apart, point the
+build script at the workspace in `.cargo/config.toml`:
 
 ```toml
 [env]

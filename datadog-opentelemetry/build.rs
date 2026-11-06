@@ -176,10 +176,10 @@ mod dependencies {
     }
 
     /// The root of the workspace being built:
-    /// `CARGO_WORKSPACE_DIR` if set, otherwise the parent of the target directory holding
-    /// `OUT_DIR`, which is the workspace root unless the target directory was moved
-    /// (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`) or the workspace was mounted
-    /// elsewhere, e.g. by `cross`. Rather than guessing, this fails when no such parent holds a
+    /// `CARGO_WORKSPACE_DIR` if set, otherwise the nearest ancestor of `OUT_DIR` holding a
+    /// `Cargo.lock`, which is the workspace root while the target directory is inside it, unless
+    /// it was moved out (`--target-dir`, `CARGO_TARGET_DIR`, `build.target-dir`) or mounted
+    /// elsewhere, e.g. by `cross`. Rather than guessing, this fails when no ancestor holds a
     /// `Cargo.lock`. The error is only shown in the build output, so it can name paths.
     fn workspace_dir() -> Result<PathBuf, String> {
         if let Some(value) = env::var_os(WORKSPACE_DIR_ENV) {
