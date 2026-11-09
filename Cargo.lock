@@ -637,6 +637,7 @@ dependencies = [
  "ctor",
  "datadog-opentelemetry",
  "foldhash 0.1.5",
+ "getrandom 0.4.3",
  "hashbrown 0.15.5",
  "hostname",
  "hyper",

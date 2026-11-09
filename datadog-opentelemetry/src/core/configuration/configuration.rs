@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
+use uuid::Uuid;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -26,6 +27,7 @@ use crate::core::configuration::sources::{
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
+use crate::core::telemetry_session::runtime_id;
 use crate::{dd_error, dd_warn};
 
 pub(crate) use crate::core::configuration::sources::ConfigParser;
@@ -1941,7 +1943,18 @@ impl Config {
     pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
-        RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+        // Reuse the raw id seeded by the load-time lineage constructor (see
+        // `core::telemetry_session`) so the outbound lineage it installs
+        // always matches the id reported here; generate one when it could
+        // not.
+        // SAFETY: this panics if getrandom returns an error... which is
+        // unlikely.
+        RUNTIME_ID.get_or_init(|| {
+            runtime_id()
+                .expect("operating system entropy source is unavailable")
+                .hyphenated()
+                .to_string()
+        })
     }
 
     /// Returns whether telemetry collection is enabled.
