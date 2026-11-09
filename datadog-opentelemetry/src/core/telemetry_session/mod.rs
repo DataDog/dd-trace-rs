@@ -9,11 +9,11 @@
 //! runs before any user thread exists, so the `setenv` call is sound.
 //!
 //! The constructor runs while the host's global allocator may not be usable
-//! yet (e.g. GitHub issue #346), so anything run in a ctor needs to be allocation-free and
-//! panic-free. all of
-//! that lives in [`raw`]. This module runs at tracer-init time, where
-//! allocating is safe: its job is materializing `raw`'s pointers into owned
-//! values.
+//! yet (e.g. GitHub issue #346), so everything it calls must be
+//! allocation-free and panic-free. All of that logic lives in [`raw`]; this
+//! module only hosts the `#[ctor]` entry point delegating to it. The rest of
+//! this module runs at tracer-init time, where allocating is safe: its job is
+//! materializing `raw`'s captured buffers into owned values.
 //!
 //! Best-effort: not refreshed on bare `fork()` (`exec` resets memory and
 //! re-runs the constructor. Bare fork inherits the cached value). Daemons
@@ -38,8 +38,8 @@ pub(crate) fn sessions_from_runtime_id(runtime_id: &str) -> TelemetryInstrumenta
     if let Some(captured) = raw::captured_sessions(runtime_id) {
         return TelemetryInstrumentationSessions {
             session_id: Some(runtime_id.to_owned()),
-            root_session_id: captured.root.as_ref().and_then(|b| raw_to_string(b)),
-            parent_session_id: captured.parent.as_ref().and_then(|b| raw_to_string(b)),
+            root_session_id: captured.root.as_ref().map(raw_to_string),
+            parent_session_id: captured.parent.as_ref().map(raw_to_string),
         };
     }
     sessions_from_env(runtime_id, fallback_read_env)
@@ -64,8 +64,8 @@ fn install_lineage() {
 
 /// Materializes a raw lineage snapshot (nul-terminated, truncated to
 /// `raw`'s buffer size) into an owned `String`.
-fn raw_to_string(buf: &NullTerminatedCharArray) -> Option<String> {
-    Some(String::from_utf8_lossy(&buf.bytes_no_null()).into_owned())
+fn raw_to_string(buf: &NullTerminatedCharArray) -> String {
+    String::from_utf8_lossy(buf.bytes_no_null()).into_owned()
 }
 
 fn sessions_from_env<F>(runtime_id: &str, get_env: F) -> TelemetryInstrumentationSessions
@@ -129,15 +129,34 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)]
     fn ctor_state_materializes_consistently() {
-        // The load-time constructor ran before this test, so its capture
-        // must materialize for the process runtime id.
-        let rid =
-            uuid::Uuid::from_bytes(runtime_id_bytes().expect("entropy available")).to_string();
+        // The load-time constructor ran before this test: it captured
+        // lineage for the process runtime id and exported that id as the
+        // outbound parent. No test mutates these env vars, so this holds
+        // whether tests share a process (`cargo test`) or not (nextest).
+        let rid = runtime_id()
+            .expect("entropy available")
+            .hyphenated()
+            .to_string();
+        assert!(
+            raw::captured_sessions(&rid).is_some(),
+            "the load-time constructor did not capture lineage for the runtime id"
+        );
+        assert_eq!(
+            std::env::var(ENV_PARENT_RS_SESSION_ID).ok().as_deref(),
+            Some(rid.as_str()),
+            "the load-time constructor did not export the runtime id as parent"
+        );
+
         let sessions = sessions_from_runtime_id(&rid);
         assert_eq!(sessions.session_id.as_deref(), Some(rid.as_str()));
-        // A fresh process installs its own id as root lineage, which is
-        // then dropped as self-referential.
-        assert!(sessions.root_session_id.is_none());
+        // The constructor snapshots inbound lineage before installing its
+        // own: with nothing inherited (the usual test run) it exports the
+        // runtime id as root and captures no root; otherwise it leaves the
+        // inherited root in place and captures it.
+        let env_root = std::env::var(ENV_ROOT_RS_SESSION_ID).ok();
+        let expected_root = env_root.filter(|root| root != &rid);
+        assert_eq!(sessions.root_session_id, expected_root);
     }
 }

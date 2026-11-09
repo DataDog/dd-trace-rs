@@ -21,7 +21,9 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::backtrace::Backtrace;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
+
+use datadog_opentelemetry::configuration::Config;
 
 const ENV_PARENT: &str = "_DD_PARENT_RS_SESSION_ID";
 
@@ -45,7 +47,11 @@ unsafe impl GlobalAlloc for RecordingAlloc {
                 layout.size(),
                 Backtrace::force_capture()
             );
-            PRE_MAIN_ALLOCATIONS.lock().unwrap().push(record);
+            // Never panic inside the allocator, even on a poisoned lock.
+            PRE_MAIN_ALLOCATIONS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(record);
             RECORDING.store(false, Ordering::SeqCst);
         }
         unsafe { System.alloc(layout) }
@@ -65,18 +71,24 @@ fn lineage_ctor_does_not_allocate_before_main() {
     REACHED_TEST.store(true, Ordering::SeqCst);
 
     // Reference the tracer so its constructor is linked into this binary;
-    // the env var then proves the constructor ran, so the assertions below
-    // cannot pass vacuously.
+    // the env var matching the tracer's runtime id then proves the
+    // constructor ran, so the assertions below cannot pass vacuously.
     let _ = datadog_opentelemetry::tracing();
     let parent = std::env::var(ENV_PARENT)
         .expect("the tracer's load-time lineage constructor did not run in this binary");
-    assert!(
-        uuid::Uuid::parse_str(&parent).is_ok(),
-        "runtime id is a UUID"
+    assert_eq!(
+        parent,
+        Config::builder().build().runtime_id(),
+        "the exported lineage is the tracer's runtime id"
     );
 
-    let records = PRE_MAIN_ALLOCATIONS.lock().unwrap();
-    for record in records.iter() {
+    // Release the lock before asserting: a failed assertion while holding
+    // it would poison it and obscure the real failure message.
+    let records: Vec<String> = PRE_MAIN_ALLOCATIONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    for record in &records {
         assert!(
             !record.contains("datadog_opentelemetry"),
             "the tracer allocated before `main`:\n{record}"

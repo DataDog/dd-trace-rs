@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use libdd_telemetry::data::Configuration;
-use uuid::Uuid;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -1947,7 +1946,7 @@ impl Config {
         // `core::telemetry_session`) so the outbound lineage it installs
         // always matches the id reported here; generate one when it could
         // not.
-        // SAFETY: this panics if getrandom returns an error... which is
+        // PANIC: only if the OS entropy source is unavailable, which is
         // unlikely.
         RUNTIME_ID.get_or_init(|| {
             runtime_id()

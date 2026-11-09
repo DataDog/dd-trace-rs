@@ -9,8 +9,9 @@
 //!
 //! Hard rules for everything in this module, on every path:
 //!
-//! - No Rust heap allocation (`String`, `Vec`, `format!`, `Box`, ...) and no `libc::malloc` either:
-//!   everything fits in fixed-size stack buffers or inline `OnceLock` payloads.
+//! - No Rust global allocator use (`String`, `Vec`, `format!`, `Box`, ...): everything fits in
+//!   fixed-size stack buffers or inline `OnceLock` payloads. libc-internal allocation (e.g. glibc's
+//!   `setenv` growing the environment) is acceptable, as it does not go through the Rust allocator.
 //! - No panics: a panic formats through the global allocator, which would abort such a host
 //!   regardless of the `catch_unwind` in the parent module. Failures degrade to "lineage absent"
 //!   instead.
@@ -21,15 +22,15 @@ use std::ffi::CStr;
 use std::sync::OnceLock;
 
 use uuid::fmt::Hyphenated;
-use uuid::Uuid;
+use uuid::{Builder, Uuid};
 
 const ROOT_KEY: &CStr = c"_DD_ROOT_RS_SESSION_ID";
 const PARENT_KEY: &CStr = c"_DD_PARENT_RS_SESSION_ID";
 
-/// Runtime id shared with `Config::process_runtime_id`. Stored as raw UUID
-/// bytes so the constructor can seed it without allocating; the `Copy`
-/// payload is stored inline, so the `OnceLock` never touches the allocator.
-static RUNTIME_ID_BYTES: OnceLock<[u8; 16]> = OnceLock::new();
+/// Runtime id shared with `Config::process_runtime_id`. `Uuid` is a `Copy`
+/// payload stored inline, so the constructor can seed the `OnceLock` without
+/// touching the allocator.
+static RUNTIME_ID: OnceLock<Uuid> = OnceLock::new();
 
 /// Maximum length of a captured inbound lineage value, in bytes; longer
 /// values are truncated.
@@ -51,8 +52,8 @@ impl NullTerminatedCharArray {
         Self(buf)
     }
 
-    pub fn bytes_no_null(&self) -> &[u8] {
-        // Unwrap_or here is not neccesary since by construction there is always a null,
+    pub(super) fn bytes_no_null(&self) -> &[u8] {
+        // Unwrap_or here is not necessary since by construction there is always a null,
         // but does not hurt correctness
         let end = self.0.iter().position(|&b| b == 0).unwrap_or(Self::LEN);
         &self.0[..end]
@@ -80,22 +81,23 @@ fn random_bytes() -> Option<[u8; 16]> {
     Some(bytes)
 }
 
-/// Raw runtime id of this process, generating it on first use. `None` only
-/// when the OS entropy source is unavailable (the init-time caller owns
-/// the panic policy for that case). Race-safe: concurrent losers of the
-/// `set` observe the winner's bytes.
+/// Runtime id (a version 4 UUID) of this process, generating it on first
+/// use. `None` only when the OS entropy source is unavailable (the
+/// init-time caller owns the panic policy for that case). Race-safe:
+/// concurrent losers of the `set` observe the winner's id.
 pub(crate) fn runtime_id() -> Option<Uuid> {
-    if RUNTIME_ID_BYTES.get().is_none() {
+    if RUNTIME_ID.get().is_none() {
         if let Some(bytes) = random_bytes() {
-            let _ = RUNTIME_ID_BYTES.set(bytes);
+            // `Builder` only sets the version/variant bits; no allocation.
+            let _ = RUNTIME_ID.set(Builder::from_random_bytes(bytes).into_uuid());
         }
     }
-    Some(Uuid::from_bytes(RUNTIME_ID_BYTES.get().copied()?))
+    RUNTIME_ID.get().copied()
 }
 
 /// Hyphenated lowercase form of `rid` on the stack, unlike
-/// `Uuid::to_string`. Cannot panic: the buffer is exactly the 36 bytes
-/// `encode_lower` requires.
+/// `Uuid::to_string`. Cannot panic: the buffer is exactly the
+/// `Hyphenated::LENGTH` bytes `encode_lower` requires.
 fn format_hyphenated(rid: &Uuid) -> [u8; Hyphenated::LENGTH] {
     let mut buf = [0u8; Hyphenated::LENGTH];
     let _ = rid.hyphenated().encode_lower(&mut buf);
@@ -109,7 +111,7 @@ fn format_hyphenated(rid: &Uuid) -> [u8; Hyphenated::LENGTH] {
 /// Must run exactly once, between `exec` and `main`, while the process is
 /// single-threaded: `getenv`/`setenv` are not thread-safe. The parent
 /// module's `#[ctor]` is the only intended caller.
-pub(crate) unsafe fn install_lineage() {
+pub(super) unsafe fn install_lineage() {
     // No entropy: skip lineage entirely rather than panic, which would
     // itself allocate and abort a host whose allocator is not ready yet.
     let Some(rid) = runtime_id() else {
@@ -143,7 +145,7 @@ pub(crate) unsafe fn install_lineage() {
 /// Same single-threaded contract as [`install_lineage`].
 unsafe fn snapshot_lineage(
     key: &CStr,
-    rid_hyphenated: &[u8; 36],
+    rid_hyphenated: &[u8; Hyphenated::LENGTH],
 ) -> Option<NullTerminatedCharArray> {
     // SAFETY: single-threaded; `key` is a valid nul-terminated literal.
     let ptr = unsafe { libc::getenv(key.as_ptr()) };
@@ -167,10 +169,11 @@ unsafe fn snapshot_lineage(
 /// # Safety
 ///
 /// Same single-threaded contract as [`install_lineage`].
-unsafe fn install_outbound_env(rid_hyphenated: &[u8; 36]) {
-    let mut value_buf = [0u8; 37];
-    // Both slices are 36 bytes at compile time; cannot panic.
-    value_buf[..36].copy_from_slice(rid_hyphenated);
+unsafe fn install_outbound_env(rid_hyphenated: &[u8; Hyphenated::LENGTH]) {
+    // One extra byte for the trailing nul.
+    let mut value_buf = [0u8; Hyphenated::LENGTH + 1];
+    // Both slices are `Hyphenated::LENGTH` bytes at compile time; cannot panic.
+    value_buf[..Hyphenated::LENGTH].copy_from_slice(rid_hyphenated);
     // Cannot fail here, but stay panic-free by construction.
     let Ok(value) = CStr::from_bytes_with_nul(&value_buf) else {
         return;
@@ -199,11 +202,11 @@ unsafe fn ll_setenv(key: &CStr, value: &CStr) {
 
 /// Captured lineage for this runtime id, or `None` when the constructor
 /// has not run for it.
-pub(super) fn captured_sessions(outisde_rid: &str) -> Option<RawTelemetryInstrumentationSessions> {
+pub(super) fn captured_sessions(outside_rid: &str) -> Option<RawTelemetryInstrumentationSessions> {
     let captured = LINEAGE.get()?;
     // The constructor only captures lineage for the process runtime id.
     let rid = runtime_id()?;
-    (outisde_rid.as_bytes() == format_hyphenated(&rid).as_slice()).then_some(*captured)
+    (outside_rid.as_bytes() == format_hyphenated(&rid).as_slice()).then_some(*captured)
 }
 
 #[cfg(test)]
@@ -219,5 +222,14 @@ mod tests {
             format_hyphenated(&rid).as_slice(),
             rid.to_string().as_bytes()
         );
+    }
+
+    /// The runtime id must stay a valid random (v4) UUID, as it was when
+    /// generated with `Uuid::new_v4`.
+    #[test]
+    fn runtime_id_is_v4_uuid() {
+        let rid = runtime_id().expect("entropy available");
+        assert_eq!(rid.get_version(), Some(uuid::Version::Random));
+        assert_eq!(rid.get_variant(), uuid::Variant::RFC4122);
     }
 }
