@@ -19,7 +19,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-14]
+        platform: [windows-latest, ubuntu-latest, macos-15]
         rust_version: [""]
         include:
           - platform: "ubuntu-latest"
