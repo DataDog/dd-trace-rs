@@ -676,6 +676,7 @@ pub mod tests {
                     },
                     tags: Some(tags),
                     ot: None,
+                    inherited_ot: false,
                 },
             );
 
@@ -765,6 +766,7 @@ pub mod tests {
                 origin: None,
                 tags: None,
                 ot: None,
+                inherited_ot: false,
             },
         );
 
@@ -814,6 +816,8 @@ pub mod tests {
                 origin: Some("rum".to_string()),
                 tags: Some(HashMap::from([("_dd.p.dm".to_string(), "-0".to_string())])),
                 ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                // The rv was inherited from the extracted `ot` member of the upstream context.
+                inherited_ot: true,
             },
         );
 

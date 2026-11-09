@@ -53,6 +53,8 @@ pub(crate) struct TracePropagationData {
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     pub ot: Option<String>,
+    /// If the `ot` field was were inherited from the upstream context
+    pub inherited_ot: bool,
 }
 
 const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
@@ -63,6 +65,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
     },
     tags: None,
     ot: None,
+    inherited_ot: false,
 };
 
 impl Default for TracePropagationData {
@@ -440,13 +443,23 @@ impl TraceRegistry {
                 mechanism.to_cow().into_owned(),
             );
         }
-        // See system-tests `test_force_keep_clears_inherited_th` for the cross-tracer contract.
+        // See system-tests `test_force_keep_clears_inherited_th`, and
+        // `test_force_keep_forwards_inherited_rv`.
+        // When the `ot` member was inherited, its rv is forwarded
+        //
+        // the rv/th locally computed by a probability decision are dropped,
+        // nothing was inherited to forward.
         if decision.priority.is_some() {
-            trace.propagation_data.ot = trace
-                .propagation_data
-                .ot
-                .take()
-                .and_then(|ot| ot_set_rv_th(Some(&ot), ot_extract_rv(&ot), None));
+            if trace.propagation_data.inherited_ot {
+                trace.propagation_data.ot = trace
+                    .propagation_data
+                    .ot
+                    .take()
+                    .and_then(|ot| ot_set_rv_th(Some(&ot), ot_extract_rv(&ot), None));
+            } else {
+                trace.propagation_data.ot =
+                    ot_set_rv_th(trace.propagation_data.ot.as_deref(), None, None);
+            }
         }
         trace.propagation_data.sampling_decision = decision;
     }
@@ -1049,6 +1062,7 @@ mod tests {
                                                     "foobar".to_string(),
                                                 )])),
                                                 ot: None,
+                                                inherited_ot: false,
                                             },
                                         );
                                     }
@@ -1146,8 +1160,9 @@ mod tests {
         let registry = TraceRegistry::new(Arc::new(Config::builder().build()));
         let trace_id = [42u8; 16];
 
-        // Simulate a trace whose initial decision came from the sampler: a decision-maker tag
-        // for the sampler's mechanism and a probability threshold in the `ot` member.
+        // Simulate a local root whose initial decision came from the sampler: a decision-maker
+        // tag for the sampler's mechanism and a probability rv/th pair in the `ot` member.
+        // Nothing was inherited from an upstream context.
         registry.register_local_root_trace_propagation_data(
             trace_id,
             TracePropagationData {
@@ -1161,6 +1176,7 @@ mod tests {
                     mechanism::DEFAULT.to_cow().into_owned(),
                 )])),
                 ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                inherited_ot: false,
             },
         );
 
@@ -1187,17 +1203,15 @@ mod tests {
             Some(&"-4".to_string()),
             "the decision-maker tag must be updated with the manual mechanism"
         );
-        let ot = propagation_data.ot.as_deref().unwrap_or_default();
-        assert!(
-            ot.contains("rv:65cd67504a538e"),
-            "rv must be preserved, got: {ot}"
-        );
-        assert!(
-            !ot.contains("th:"),
-            "th must be cleared: a manual decision is not probability-based, got: {ot}"
+        assert_eq!(
+            propagation_data.ot, None,
+            "a manual decision must not forward the rv/th locally computed by the sampler's \
+             probability decision: nothing was inherited from an upstream context"
         );
 
-        // A manual drop also clears the threshold: the decision no longer depends on `th`.
+        // A manual drop on a trace with an inherited rv forwards that rv: the local probability
+        // rv/th are replaced by the inherited rv, and th is cleared (the decision no longer
+        // depends on `th`).
         let dropped_trace_id = [43u8; 16];
         registry.register_local_root_trace_propagation_data(
             dropped_trace_id,
@@ -1212,6 +1226,9 @@ mod tests {
                     mechanism::DEFAULT.to_cow().into_owned(),
                 )])),
                 ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                // The rv comes from the upstream `ot` member, not from a local probability
+                // decision: it must be forwarded by the manual decision.
+                inherited_ot: true,
             },
         );
         registry.set_sampling_decision(
@@ -1226,13 +1243,9 @@ mod tests {
             .expect("the dropped trace should still be registered")
             .ot
             .unwrap_or_default();
-        assert!(
-            dropped_ot.contains("rv:65cd67504a538e"),
-            "rv must be preserved on drop, got: {dropped_ot}"
-        );
-        assert!(
-            !dropped_ot.contains("th:"),
-            "th must be cleared on drop, got: {dropped_ot}"
+        assert_eq!(
+            dropped_ot, "rv:65cd67504a538e",
+            "the inherited rv must be preserved on drop, got: {dropped_ot}"
         );
     }
 
