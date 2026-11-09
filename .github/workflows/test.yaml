@@ -185,7 +185,7 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
       cancel-in-progress: true
-    uses: DataDog/system-tests/.github/workflows/system-tests.yml@1cc5dcc2efe5e3602c9b3bce92ef05d24c658cc0  # main
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@bceb487c0e0903482e8dc997f2140b5ca629704a  # main
     permissions:
       contents: read
       id-token: write
