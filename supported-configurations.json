@@ -292,6 +292,14 @@
         "propertyKeys": ["trace_sampling_rules"]
       }
     ],
+    "DD_TRACE_STARTUP_LOGS": [
+      {
+        "version": "C",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["trace_startup_logs"]
+      }
+    ],
     "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT": [
       {
         "version": "A",
