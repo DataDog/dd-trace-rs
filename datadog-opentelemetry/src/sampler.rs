@@ -163,7 +163,8 @@ impl ShouldSample for Sampler {
                 mechanism.to_cow().into_owned(),
             );
 
-            let ot_decision = consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability);
+            let ot_decision =
+                consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability);
             Some(TracePropagationData {
                 sampling_decision: SamplingDecision {
                     priority: Some(result.get_priority()),
@@ -171,10 +172,7 @@ impl ShouldSample for Sampler {
                 },
                 origin,
                 tags,
-                ot: resolve_outbound_ot(
-                    ot_decision,
-                    inbound_ot,
-                ),
+                ot: resolve_outbound_ot(ot_decision, inbound_ot),
                 inherited_ot: matches!(ot_decision, OtDecision::Inherited),
             })
         } else if let Some(remote_ctx) =
