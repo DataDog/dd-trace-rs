@@ -188,7 +188,7 @@ The sampling decision set on the trace takes effect immediately, and all active 
 in the trace will inherit it, even if they were started before the call.
 
 The global `set_sampling_decision` method is callable from anywhere, as long as an instance
-of [`DatadogTelemetryHandle`]  has been installed, either with [`DatadogTracingBuilder::init()`],
+of [`DatadogTelemetryHandle`] has been installed, either with [`DatadogTracingBuilder::init()`],
 or by calling [`datadog_telemetry_api::set_global`].
 
 #### Limitations
