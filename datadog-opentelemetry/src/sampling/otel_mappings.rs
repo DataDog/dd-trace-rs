@@ -7,9 +7,8 @@ use std::sync::RwLock;
 use bumpalo::Bump;
 
 use crate::mappings::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
-    get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan, DATADOG_ENV,
-    DATADOG_HTTP_STATUS_CODE, ENV,
+    get_dd_env, get_dd_http_status_code, get_dd_key_for_otlp_attribute, get_otel_operation_name_v2,
+    get_otel_resource_v2, get_otel_service, AttributeIndices, AttributeKey, OtelSpan,
 };
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
 use opentelemetry::{Key, KeyValue};
@@ -175,58 +174,21 @@ impl SpanProperties for PreSampledSpan<'_> {
         Cow::Borrowed(get_otel_service(self))
     }
 
-    /// The `env` tag the exporter sets on the span: `datadog.env` on the span, then an `env`
-    /// attribute on the resource, then the first non-empty string or bool `env` attribute on the
-    /// span (number and array attributes are exported as metrics and indexed tags), then
-    /// `get_otel_env` if there is no `env` attribute at all. An `env` attribute on the
-    /// instrumentation scope replaces the exported value, but the sampler doesn't get the scope.
+    /// The exported `env` tag, see `get_dd_env`. An `env` attribute on the instrumentation scope
+    /// replaces the exported value, but the sampler doesn't get the scope.
     fn env(&self) -> Cow<'_, str> {
-        let datadog_env = self.get_attr_str(DATADOG_ENV);
-        if !datadog_env.is_empty() {
-            return Cow::Borrowed(datadog_env);
-        }
-
-        let resource_env = self.get_res_attribute_opt(ENV);
-        let span_envs = self.attributes.iter().filter(|kv| {
-            kv.key.as_str() == ENV.key()
-                && !matches!(
-                    kv.value,
-                    opentelemetry::Value::I64(_)
-                        | opentelemetry::Value::F64(_)
-                        | opentelemetry::Value::Array(_)
-                )
-        });
-        let mut has_env = false;
-        for value in resource_env
-            .into_iter()
-            .chain(span_envs.map(|kv| &kv.value))
-        {
-            has_env = true;
-            let env = crate::mappings::otel_value_string_repr(value, self.alloc);
-            if !env.is_empty() {
-                return Cow::Borrowed(env);
-            }
-        }
-        if has_env {
-            return Cow::Borrowed("");
-        }
-        Cow::Borrowed(get_otel_env(self))
+        Cow::Borrowed(get_dd_env(self).unwrap_or(""))
     }
 
     fn resource(&self) -> Cow<'_, str> {
         Cow::Borrowed(get_otel_resource_v2(self))
     }
 
-    /// The last `datadog.http_status_code` attribute if non-empty, whatever its type, as the
-    /// exporter does, then `get_otel_status_code`. A `datadog.http_status_code` that isn't a number
-    /// is exported as is, but has no status code here. An `http.status_code` attribute on the
-    /// instrumentation scope replaces the exported value, but the sampler doesn't get the scope.
+    /// The exported `http.status_code` tag, see `get_dd_http_status_code`, if it is a whole number.
+    /// An `http.status_code` attribute on the instrumentation scope replaces the exported value,
+    /// but the sampler doesn't get the scope.
     fn status_code(&self) -> Option<u32> {
-        let datadog_status_code = self.get_attr_str(DATADOG_HTTP_STATUS_CODE);
-        if !datadog_status_code.is_empty() {
-            return datadog_status_code.parse().ok();
-        }
-        get_otel_status_code(self)
+        get_dd_http_status_code(self).and_then(|status_code| status_code.parse().ok())
     }
 
     fn attributes(&self) -> impl Iterator<Item = &OtelKeyValue> + '_ {
@@ -830,16 +792,31 @@ mod tests {
 
     /// Asserts the sampler's status code, and the exported `http.status_code` tag
     fn assert_status_code(attrs: Vec<KeyValue>, status_code: Option<u32>, exported: Option<&str>) {
-        let resource = create_empty_resource();
+        assert_resource_status_code(attrs, vec![], status_code, exported);
+    }
+
+    fn assert_resource_status_code(
+        attrs: Vec<KeyValue>,
+        resource_attrs: Vec<KeyValue>,
+        status_code: Option<u32>,
+        exported: Option<&str>,
+    ) {
+        let resource = opentelemetry_sdk::Resource::builder_empty()
+            .with_attributes(resource_attrs.iter().cloned())
+            .build();
         let alloc = Bump::new();
         let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
-        assert_eq!(span.status_code(), status_code, "sampler: {attrs:?}");
+        assert_eq!(
+            span.status_code(),
+            status_code,
+            "sampler: {attrs:?} {resource_attrs:?}"
+        );
 
         let exported_status_code = exported_tag(&attrs, &resource, "http.status_code");
         assert_eq!(
             exported_status_code.as_deref(),
             exported,
-            "exporter: {attrs:?}"
+            "exporter: {attrs:?} {resource_attrs:?}"
         );
     }
 
@@ -935,6 +912,47 @@ mod tests {
             ],
             Some(503),
             Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("http.response.status_code", "503")],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_zero_semantic_attribute_is_skipped() {
+        assert_status_code(
+            vec![
+                KeyValue::new("http.response.status_code", 0),
+                KeyValue::new("http.status_code", "503"),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_resource_attribute() {
+        assert_resource_status_code(
+            vec![],
+            vec![KeyValue::new("http.status_code", 503)],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_span_attribute_overrides_resource_attribute() {
+        assert_resource_status_code(
+            vec![KeyValue::new("http.response.status_code", 200)],
+            vec![KeyValue::new("http.status_code", 503)],
+            Some(200),
+            Some("200"),
         );
     }
 

@@ -10,11 +10,10 @@ mod transform;
 pub(super) use cached_config::CachedConfig;
 pub(super) use cached_config::VERSION_KEY;
 pub(super) use sdk_span::SdkSpan;
-pub(crate) use transform::attribute_keys::{DATADOG_ENV, DATADOG_HTTP_STATUS_CODE, ENV};
 pub use transform::otel_span_to_dd_span;
 pub(super) use transform::otel_util::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
-    get_otel_service, get_otel_status_code,
+    get_dd_env, get_dd_http_status_code, get_dd_key_for_otlp_attribute, get_otel_operation_name_v2,
+    get_otel_resource_v2, get_otel_service,
 };
 // Re-exported `pub` so they are reachable from benches/tests under the test-utils feature
 // (the mappings module itself is only public in that configuration); in normal builds
