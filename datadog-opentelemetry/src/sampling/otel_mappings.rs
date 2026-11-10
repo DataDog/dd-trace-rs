@@ -151,6 +151,14 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a opentelemetry::Value> {
         self.resource.get_ref(&Key::from_static_str(attr_key.key()))
     }
+
+    fn span_attributes(&self) -> &'a [KeyValue] {
+        self.attributes
+    }
+
+    fn otel_resource(&self) -> &'a opentelemetry_sdk::Resource {
+        self.resource
+    }
 }
 
 impl SpanProperties for PreSampledSpan<'_> {
