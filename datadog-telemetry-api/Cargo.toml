@@ -13,6 +13,9 @@ authors.workspace = true
 # defines the configuration attribute `docsrs`
 rustdoc-args = ["--cfg", "docsrs"]
 
+[lints]
+workspace = true
+
 [dependencies]
 arc-swap = "1.9.3"
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
