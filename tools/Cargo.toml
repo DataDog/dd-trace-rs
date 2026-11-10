@@ -12,6 +12,9 @@ publish = false
 [lib]
 bench = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = "1.0"
 cargo_metadata = "0.18"
