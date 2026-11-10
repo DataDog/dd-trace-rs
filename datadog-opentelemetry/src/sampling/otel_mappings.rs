@@ -175,7 +175,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     }
 
     /// The exported `env` tag, see `get_dd_env`. An `env` attribute on the instrumentation scope
-    /// replaces the exported value, but the sampler doesn't get the scope.
+    /// changes the exported value, but the sampler doesn't get the scope.
     fn env(&self) -> Cow<'_, str> {
         Cow::Borrowed(get_dd_env(self).unwrap_or(""))
     }
@@ -185,7 +185,7 @@ impl SpanProperties for PreSampledSpan<'_> {
     }
 
     /// The exported `http.status_code` tag, see `get_dd_http_status_code`, if it is a whole number.
-    /// An `http.status_code` attribute on the instrumentation scope replaces the exported value,
+    /// An `http.status_code` attribute on the instrumentation scope changes the exported value,
     /// but the sampler doesn't get the scope.
     fn status_code(&self) -> Option<u32> {
         get_dd_http_status_code(self).and_then(|status_code| status_code.parse().ok())

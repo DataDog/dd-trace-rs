@@ -118,8 +118,7 @@ fn set_meta_otlp_with_semconv_mappings<'a>(
     alloc: &'a Bump,
 ) {
     let mapped_key = get_dd_key_for_otlp_attribute_in(k, alloc);
-    // `env` and `http.status_code` are set by `get_dd_env` and `get_dd_http_status_code`
-    if matches!(mapped_key.as_ref(), "" | "env" | "http.status_code") {
+    if mapped_key.is_empty() {
         return;
     }
     let mapped_key = SpanStr::from_cow(mapped_key);
@@ -1062,6 +1061,13 @@ mod tests {
                 vec![kv("env", "scope")],
                 Some("scope"),
             ),
+            // The span attributes fill an empty scope attribute
+            (
+                vec![kv("env", "prod")],
+                vec![],
+                vec![kv("env", "")],
+                Some("prod"),
+            ),
         ] {
             let case = format!("{attrs:?} {resource_attrs:?} {scope_attrs:?}");
             assert_eq!(
@@ -1174,6 +1180,13 @@ mod tests {
                 vec![],
                 vec![kv("http.status_code", "418")],
                 Some("418"),
+            ),
+            // The span attributes fill an empty scope attribute
+            (
+                vec![kv("http.response.status_code", "404")],
+                vec![],
+                vec![kv("http.status_code", "")],
+                Some("404"),
             ),
         ] {
             let case = format!("{attrs:?} {resource_attrs:?} {scope_attrs:?}");

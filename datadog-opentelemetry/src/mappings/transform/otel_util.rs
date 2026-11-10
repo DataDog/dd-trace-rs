@@ -418,8 +418,8 @@ pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     }
 }
 
-/// The `http.status_code` tag of the exported span, before the instrumentation scope attributes
-/// replace it: `datadog.http_status_code` on the span if non-empty, whatever its type, then
+/// The `http.status_code` tag of the exported span, without the instrumentation scope
+/// attributes: `datadog.http_status_code` on the span if non-empty, whatever its type, then
 /// `get_otel_status_code` if not 0, then the first non-empty `http.response.status_code` or
 /// `http.status_code` attribute exported as a tag, see `fill_tag`.
 pub(crate) fn get_dd_http_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<&'a str> {
@@ -437,7 +437,7 @@ pub(crate) fn get_dd_http_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<&'
     status_code
 }
 
-/// The `env` tag of the exported span, before the instrumentation scope attributes replace it:
+/// The `env` tag of the exported span, without the instrumentation scope attributes:
 /// `datadog.env` on the span if non-empty, then the first non-empty `env` attribute exported as
 /// a tag, see `fill_tag`, then `get_otel_env` if there is no such attribute at all.
 pub(crate) fn get_dd_env<'a>(span: &impl OtelSpan<'a>) -> Option<&'a str> {
