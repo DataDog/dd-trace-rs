@@ -21,6 +21,7 @@ use crate::{
     TraceRegistry,
 };
 
+#[derive(Clone, Copy)]
 enum OtDecision {
     Probability(OtelConsistentSampling),
     NonProbability,
@@ -162,6 +163,8 @@ impl ShouldSample for Sampler {
                 mechanism.to_cow().into_owned(),
             );
 
+            let ot_decision =
+                consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability);
             Some(TracePropagationData {
                 sampling_decision: SamplingDecision {
                     priority: Some(result.get_priority()),
@@ -169,10 +172,8 @@ impl ShouldSample for Sampler {
                 },
                 origin,
                 tags,
-                ot: resolve_outbound_ot(
-                    consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability),
-                    inbound_ot,
-                ),
+                ot: resolve_outbound_ot(ot_decision, inbound_ot),
+                inherited_ot: matches!(ot_decision, OtDecision::Inherited),
             })
         } else if let Some(remote_ctx) =
             parent_context.filter(|c| c.span().span_context().is_remote())
@@ -194,6 +195,7 @@ impl ShouldSample for Sampler {
                     sampling_decision,
                     tags: Some(internal_tags.clone()),
                     ot: resolve_outbound_ot(OtDecision::Inherited, ot.clone()),
+                    inherited_ot: ot.is_some(),
                 })
             } else {
                 None

@@ -39,7 +39,7 @@ async fn test_received_traces() {
             ..SamplingRuleConfig::default()
         },
     ]);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _, _| {
         let tracer = tracer_provider.tracer("test");
 
         // Dropped by the sampler (RecordOnly): must NOT be exported to the agent.
@@ -64,7 +64,7 @@ async fn test_injection_extraction() {
     const SESSION_NAME: &str = "opentelemetry_api/test_injection_extraction";
     let mut cfg = Config::builder();
     cfg.set_log_level_filter(LevelFilter::Debug);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             (
                 "traceparent",
@@ -146,7 +146,7 @@ async fn test_sampling_extraction() {
     with_test_agent_session(
         SESSION_NAME,
         config_builder,
-        |_, tracer_provider, propagator, _| {
+        |_, tracer_provider, propagator, _, _| {
             let mut injected = HashMap::new();
             let trace_id;
             let span_id;
@@ -239,7 +239,7 @@ async fn test_remote_config_sampling_rates() {
         .build();
     let config = Arc::new(config);
 
-    let (tracer_provider, _propagator) = make_test_tracer(config.clone());
+    let tracer_provider = make_test_tracer(config.clone()).tracer_provider;
     // Wait for the config to be applied
     // TODO(paullgdc): If this test is flaky this is probably it, fetching the config took more
     // than 2 seconds  We should probably have a way to sleep until the config is
@@ -271,7 +271,7 @@ async fn test_decision_less_extraction() {
         ..Default::default()
     }])
     .set_log_level_filter(LevelFilter::Debug);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let extractor = make_extractor([
             ("x-datadog-trace-id", "321"),
             ("x-datadog-parent-id", "654"),
@@ -303,7 +303,7 @@ async fn test_tracing_disabled() {
     let mut cfg = Config::builder();
     cfg.set_enabled(false)
         .set_log_level_filter(LevelFilter::Debug);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         {
             let span = tracer_provider
                 .tracer("test_tracing_disabled")
@@ -339,7 +339,7 @@ async fn test_trace_writer_synchronous_mode() {
         .set_log_level_filter(LevelFilter::Debug);
     let config = Arc::new(cfg.build());
 
-    let (tracer_provider, _propagator) = make_test_tracer(config.clone());
+    let tracer_provider = make_test_tracer(config.clone()).tracer_provider;
     {
         tracer_provider
             .tracer("test_trace_writer_synchronous_mode")
@@ -365,7 +365,7 @@ async fn test_force_flush_drains_pending_spans() {
         .set_log_level_filter(LevelFilter::Debug);
     let config = Arc::new(cfg.build());
 
-    let (tracer_provider, _propagator) = make_test_tracer(config.clone());
+    let tracer_provider = make_test_tracer(config.clone()).tracer_provider;
 
     drop(
         SpanBuilder::from_name("force-flush-span")
@@ -401,7 +401,7 @@ async fn test_injection_extraction_extract_behavior_restart_single_context() {
     cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
         .set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             ("x-datadog-trace-id", "1"),
             ("x-datadog-parent-id", "1"),
@@ -487,7 +487,7 @@ async fn test_injection_extraction_extract_behavior_restart_multiple_contexts() 
     cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
         .set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             ("x-datadog-trace-id", "1"),
             ("x-datadog-parent-id", "1"),
@@ -540,7 +540,7 @@ async fn test_injection_extraction_extract_behavior_restart_child_not_relinked()
     cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Restart)
         .set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             ("x-datadog-trace-id", "1"),
             ("x-datadog-parent-id", "1"),
@@ -584,7 +584,7 @@ async fn test_injection_extraction_extract_behavior_ignore() {
     cfg.set_trace_propagation_behavior_extract(TracePropagationBehaviorExtract::Ignore)
         .set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         let parent_ctx = propagator.extract(&make_extractor([
             ("x-datadog-trace-id", "1"),
             ("x-datadog-parent-id", "1"),
@@ -643,7 +643,7 @@ async fn test_baggage_only_no_trace_context_applies_baggage_span_tags() {
     let mut cfg = Config::builder();
     cfg.set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         // Only a baggage header, no x-datadog-* or traceparent headers. `user.id` is one of the
         // keys tracked by the default DD_TRACE_BAGGAGE_TAG_KEYS filter.
         let parent_ctx = propagator.extract(&make_extractor([("baggage", "user.id=alice")]));
@@ -669,7 +669,7 @@ async fn test_baggage_with_trace_context_applies_baggage_span_tags() {
     let mut cfg = Config::builder();
     cfg.set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         // A trace context plus a baggage header. `user.id` is one of the keys tracked by the
         // default DD_TRACE_BAGGAGE_TAG_KEYS filter.
         let parent_ctx = propagator.extract(&make_extractor([
@@ -700,7 +700,7 @@ async fn test_baggage_not_applied_to_non_local_root_child() {
     let mut cfg = Config::builder();
     cfg.set_log_level_filter(LevelFilter::Debug);
 
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, propagator, _, _| {
         // A trace context plus a baggage header. `user.id` is one of the keys tracked by the
         // default DD_TRACE_BAGGAGE_TAG_KEYS filter.
         let parent_ctx = propagator.extract(&make_extractor([
