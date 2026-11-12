@@ -34,7 +34,7 @@ pub(crate) type MetricView = Arc<
 /// Returns a no-op meter provider if metrics are disabled or if initialization fails.
 /// Errors are logged but not returned to ensure metrics functionality is always available.
 #[cfg(any(feature = "metrics-grpc", feature = "metrics-http"))]
-pub fn create_meter_provider(
+pub(crate) fn create_meter_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
     export_interval: Option<Duration>,

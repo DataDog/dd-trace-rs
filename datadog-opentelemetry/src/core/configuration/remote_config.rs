@@ -293,7 +293,7 @@ fn apply_apm_tracing(
 }
 
 #[derive(Debug, Clone)]
-pub enum RemoteConfigClientError {
+pub(crate) enum RemoteConfigClientError {
     InvalidAgentUri,
     SpawnFailed(String),
 }
@@ -316,7 +316,7 @@ impl fmt::Display for RemoteConfigClientError {
 /// the trace-export worker. [`Worker::trigger`] (the poll interval) is the
 /// cancellation point; a fetch already in [`Worker::run`] completes before the
 /// worker is paused.
-pub struct RemoteConfigClientWorker {
+pub(crate) struct RemoteConfigClientWorker {
     config: Arc<Config>,
     fetcher: SingleChangesFetcher<ParsedFileStorage, NativeCapabilities>,
     poll_period: Duration,
@@ -334,7 +334,7 @@ impl fmt::Debug for RemoteConfigClientWorker {
 }
 
 impl RemoteConfigClientWorker {
-    pub fn start(
+    pub(crate) fn start(
         config: Arc<Config>,
         shared_runtime: &Arc<BasicRuntime>,
     ) -> Result<(), RemoteConfigClientError> {

@@ -19,7 +19,7 @@ pub(crate) struct CachedConfig {
 }
 
 impl CachedConfig {
-    pub fn new(cfg: &Config) -> Self {
+    pub(crate) fn new(cfg: &Config) -> Self {
         let service = cfg.service().to_string();
 
         let global_tags = cfg

@@ -24,7 +24,7 @@ mod stats;
 mod telemetry_shutdown;
 mod tracing_api;
 
-pub async fn with_test_agent_session(
+pub(crate) async fn with_test_agent_session(
     session_name: &'static str,
     mut cfg: ConfigBuilder,
     f: impl FnOnce(
@@ -53,7 +53,7 @@ pub async fn with_test_agent_session(
     test_agent.assert_snapshot(session_name).await;
 }
 
-pub async fn make_test_agent(session_name: &'static str) -> DatadogTestAgent {
+pub(crate) async fn make_test_agent(session_name: &'static str) -> DatadogTestAgent {
     let relative_snapshot_path = "datadog-opentelemetry/tests/snapshots/";
     let test_agent = DatadogTestAgent::new(
         Some(relative_snapshot_path),

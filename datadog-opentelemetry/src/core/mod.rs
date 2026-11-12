@@ -5,7 +5,9 @@
 
 pub mod configuration;
 
-// Re-export from libdd-sampling
+// Re-export from libdd-sampling. `pub` so benches can reach these through
+// `core_pub_hack` when `test-utils` is on; crate-private otherwise.
+#[cfg_attr(not(feature = "test-utils"), allow(unreachable_pub))]
 pub use libdd_sampling::{dd_constants as constants, dd_sampling as sampling};
 
 mod error;

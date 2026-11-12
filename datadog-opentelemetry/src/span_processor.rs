@@ -3,6 +3,9 @@
 
 //! Datadog OTel SpanProcessor
 
+// Public under `test-utils`; private module otherwise.
+#![cfg_attr(not(feature = "test-utils"), allow(unreachable_pub))]
+
 use hashbrown::{hash_map, HashMap as BHashMap};
 use std::{
     collections::HashMap,

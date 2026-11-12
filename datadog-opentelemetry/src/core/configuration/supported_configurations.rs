@@ -91,7 +91,7 @@ pub(crate) enum SupportedConfigurations {
 }
 
 impl SupportedConfigurations {
-    pub fn as_str(&self) -> &'static str {
+    pub(super) fn as_str(&self) -> &'static str {
         match self {
             SupportedConfigurations::DD_AGENT_HOST => "DD_AGENT_HOST",
             SupportedConfigurations::DD_DOGSTATSD_HOST => "DD_DOGSTATSD_HOST",
@@ -170,7 +170,7 @@ impl SupportedConfigurations {
         }
     }
 
-    pub fn aliases(&self) -> &[&'static str] {
+    pub(super) fn aliases(&self) -> &[&'static str] {
         match self {
             SupportedConfigurations::DD_REMOTE_CONFIGURATION_ENABLED => {
                 &["DD_REMOTE_CONFIG_ENABLED"]
@@ -184,7 +184,7 @@ impl SupportedConfigurations {
         }
     }
 
-    pub fn is_deprecated(&self) -> bool {
+    pub(super) fn is_deprecated(&self) -> bool {
         match self {
             #[cfg(test)]
             SupportedConfigurations::DD_NONEXISTANT_CONFIGURATION_DEPRECATED => true,
@@ -193,7 +193,7 @@ impl SupportedConfigurations {
     }
 
     /// Whether this configuration's value is excluded from configuration telemetry.
-    pub fn is_sensitive(&self) -> bool {
+    pub(super) fn is_sensitive(&self) -> bool {
         matches!(
             self,
             SupportedConfigurations::DD_HOSTNAME

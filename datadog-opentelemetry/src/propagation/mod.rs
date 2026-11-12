@@ -3,6 +3,13 @@
 
 //! Distributed trace propagation logic
 
+// Public under `test-utils` or `_unstable_propagation`; crate-private otherwise.
+// Inner items stay `pub` for those public configurations.
+#![cfg_attr(
+    not(any(feature = "test-utils", feature = "_unstable_propagation")),
+    allow(unreachable_pub)
+)]
+
 use std::sync::Arc;
 
 use crate::{
