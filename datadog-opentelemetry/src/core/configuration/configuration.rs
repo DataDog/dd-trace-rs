@@ -171,6 +171,20 @@ fn validate_trace_sample_rate(rate: f64) -> Option<f64> {
     }
 }
 
+/// The setting that keeps SCA, when enabled, from working: it relies on
+/// the dependencies reported through telemetry.
+fn sca_disabled_by(config: &Config) -> Option<&'static str> {
+    if config.appsec_sca_enabled() != Some(true) {
+        None
+    } else if !config.telemetry_enabled() {
+        Some("DD_INSTRUMENTATION_TELEMETRY_ENABLED")
+    } else if !config.telemetry_dependency_collection_enabled() {
+        Some("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED")
+    } else {
+        None
+    }
+}
+
 enum ConfigItemRef<'a, T> {
     Ref(&'a T),
     ArcRef(arc_swap::Guard<Option<Arc<T>>>),
@@ -2715,6 +2729,14 @@ impl ConfigBuilder {
             config.hostname.default_value = HOSTNAME.clone();
         }
 
+        // An error rather than a warning, to be seen with the default log level.
+        if let Some(disabled) = sca_disabled_by(&config) {
+            crate::dd_error!(
+                "DD_APPSEC_SCA_ENABLED requires telemetry to report the application's \
+                 dependencies, but {disabled}=false: Software Composition Analysis won't work"
+            );
+        }
+
         config
     }
 
@@ -5192,6 +5214,50 @@ mod tests {
         let mut builder = Config::builder_with_sources(&sources);
         builder.set_appsec_sca_enabled(false);
         assert_eq!(builder.build().appsec_sca_enabled(), Some(false));
+    }
+
+    /// The logs about Software Composition Analysis that building a config from `env` emits, with
+    /// the default log level.
+    fn sca_logs(env: &[(&str, &str)]) -> Vec<(tracing::Level, String)> {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            env.iter().copied(),
+            ConfigSourceOrigin::EnvVar,
+        ));
+        crate::core::log::test_capture::capture_at(crate::core::log::LevelFilter::Error, || {
+            Config::builder_with_sources(&sources).build();
+        })
+        .into_iter()
+        .filter(|event| event.message.contains("DD_APPSEC_SCA_ENABLED"))
+        .map(|event| (event.level, event.message))
+        .collect()
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled_without_telemetry_logs_error() {
+        for disabled in [
+            "DD_INSTRUMENTATION_TELEMETRY_ENABLED",
+            "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED",
+        ] {
+            let logs = sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true"), (disabled, "false")]);
+            assert_eq!(logs.len(), 1, "{logs:?}");
+            let (level, message) = &logs[0];
+            assert_eq!(*level, tracing::Level::ERROR);
+            assert!(message.contains(&format!("{disabled}=false")), "{message}");
+        }
+    }
+
+    #[test]
+    fn test_appsec_sca_enabled_with_telemetry_doesnt_log() {
+        assert!(sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true")]).is_empty());
+        for sca in [None, Some("false")] {
+            let env: Vec<_> = sca
+                .map(|sca| ("DD_APPSEC_SCA_ENABLED", sca))
+                .into_iter()
+                .chain([("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false")])
+                .collect();
+            assert!(sca_logs(&env).is_empty());
+        }
     }
 
     #[test]
