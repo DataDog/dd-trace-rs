@@ -409,6 +409,17 @@ mod tests {
     }
 
     #[test]
+    fn test_resource_is_operation_name_for_empty_span_name() {
+        // The Agent sets an empty resource to the operation name
+        let attrs = vec![KeyValue::new(HTTP_REQUEST_METHOD, "GET")];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "http.client.request");
+    }
+
+    #[test]
     fn test_operation_name_http_client() {
         let attrs = vec![KeyValue::new(
             Key::from_static_str(HTTP_REQUEST_METHOD),

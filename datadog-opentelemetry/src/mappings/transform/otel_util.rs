@@ -222,7 +222,8 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 /// spans, the resource isn't derived from the HTTP, messaging or RPC attributes; those already
 /// shape the operation name.
 ///
-/// `datadog.resource` takes precedence, as for the exported span.
+/// `datadog.resource` takes precedence, as for the exported span. An empty span name falls back to
+/// the operation name, as the Agent normalizes an empty resource.
 pub fn get_otel_resource<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let resource = span.get_attr_str(DATADOG_RESOURCE);
     if !resource.is_empty() {
@@ -232,7 +233,11 @@ pub fn get_otel_resource<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     if !resource.is_empty() {
         return resource;
     }
-    span.name()
+    let name = span.name();
+    if !name.is_empty() {
+        return name;
+    }
+    get_otel_operation_name_v2(span)
 }
 
 /// `datadog.http_status_code` if set, otherwise as
