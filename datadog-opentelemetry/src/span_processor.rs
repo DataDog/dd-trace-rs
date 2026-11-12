@@ -293,7 +293,7 @@ pub struct TraceRegistry {
     // Example:
     // inner: Arc<[CacheAligned<RwLock<InnerTraceRegistry>>; N]>;
     // to access a trace we do inner[hash(trace_id) % N].read()
-    inner: Arc<[CachePadded<RwLock<InnerTraceRegistry>>; TRACE_REGISTRY_SHARDS]>,
+    inner: Arc<[CachePadded<Mutex<InnerTraceRegistry>>; TRACE_REGISTRY_SHARDS]>,
     hasher: foldhash::fast::RandomState,
 }
 
@@ -305,7 +305,7 @@ impl TraceRegistry {
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             inner: Arc::new(std::array::from_fn(|_| {
-                CachePadded(RwLock::new(InnerTraceRegistry {
+                CachePadded(Mutex::new(InnerTraceRegistry {
                     registry: BHashMap::new(),
                     metrics: TraceRegistryMetrics::default(),
                     config: config.clone(),
@@ -315,7 +315,7 @@ impl TraceRegistry {
         }
     }
 
-    fn get_shard(&self, trace_id: [u8; 16]) -> &RwLock<InnerTraceRegistry> {
+    fn get_shard(&self, trace_id: [u8; 16]) -> &Mutex<InnerTraceRegistry> {
         use std::hash::BuildHasher;
         let hash = self.hasher.hash_one(u128::from_ne_bytes(trace_id));
         let shard = hash as usize % TRACE_REGISTRY_SHARDS;
@@ -336,7 +336,7 @@ impl TraceRegistry {
     ) -> RegisterTracePropagationResult {
         let mut inner = self
             .get_shard(trace_id)
-            .write()
+            .lock()
             .expect("Failed to acquire lock on trace registry");
         inner.register_local_root_trace_propagation_data(trace_id, propagation_data)
     }
@@ -347,7 +347,7 @@ impl TraceRegistry {
     pub fn register_local_root_span(&self, trace_id: [u8; 16], root_span_id: [u8; 8]) {
         let mut inner = self
             .get_shard(trace_id)
-            .write()
+            .lock()
             .expect("Failed to acquire lock on trace registry");
         inner.register_local_root_span(trace_id, root_span_id);
     }
@@ -358,7 +358,7 @@ impl TraceRegistry {
     #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
     pub(crate) fn get_local_root_span_id(&self, trace_id: [u8; 16]) -> Option<[u8; 8]> {
         self.get_shard(trace_id)
-            .read()
+            .lock()
             .expect("Failed to acquire lock on trace registry")
             .get_local_root_span_id(&trace_id)
     }
@@ -373,7 +373,7 @@ impl TraceRegistry {
     ) {
         let mut inner = self
             .get_shard(trace_id)
-            .write()
+            .lock()
             .expect("Failed to acquire lock on trace registry");
         inner.register_span(trace_id, span_id, propagation_data);
     }
@@ -384,7 +384,7 @@ impl TraceRegistry {
     fn finish_span(&self, trace_id: [u8; 16], span_data: SpanData) -> Option<Trace> {
         let mut inner = self
             .get_shard(trace_id)
-            .write()
+            .lock()
             .expect("Failed to acquire lock on trace registry");
         inner.finish_span(trace_id, span_data)
     }
@@ -396,7 +396,7 @@ impl TraceRegistry {
     pub fn get_trace_propagation_data(&self, trace_id: [u8; 16]) -> Option<TracePropagationData> {
         let inner = self
             .get_shard(trace_id)
-            .read()
+            .lock()
             .expect("Failed to acquire lock on trace registry");
 
         inner.get_trace_propagation_data(trace_id).cloned()
@@ -409,7 +409,7 @@ impl TraceRegistry {
     pub fn get_metrics(&self) -> TraceRegistryMetrics {
         let mut stats = TraceRegistryMetrics::default();
         for shard_idx in 0..TRACE_REGISTRY_SHARDS {
-            let mut shard = self.inner[shard_idx].0.write().unwrap();
+            let mut shard = self.inner[shard_idx].0.lock().unwrap();
             let shard_stats = shard.get_metrics();
             stats.spans_created += shard_stats.spans_created;
             stats.spans_finished += shard_stats.spans_finished;
