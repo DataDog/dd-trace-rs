@@ -100,7 +100,7 @@ fn with_telemetry_handle<F: FnOnce(TelemetryProjection) -> R, R>(
 macro_rules! telemetry_metrics {
     ($($variant:ident => ($name:expr, $ns:expr, $ty:expr, [ $($key:expr => $val:expr),* $(,)?] ),)*) => {
         #[derive(PartialEq)]
-        pub enum TelemetryMetric {
+        pub(crate) enum TelemetryMetric {
             $(
                 $variant ,
             )*
@@ -273,7 +273,7 @@ struct Telemetry {
     log_collection_enabled: bool,
 }
 
-pub fn init_telemetry(config: &Config) {
+pub(crate) fn init_telemetry(config: &Config) {
     init_telemetry_inner(config, None, &TELEMETRY);
 }
 
@@ -342,7 +342,7 @@ fn trigger_stop_telemetry_inner(users: &AtomicUsize, telemetry_cell: &TelemetryC
     true
 }
 
-pub fn wait_telemetry_stopped(timeout: Duration) -> Result<(), Error> {
+pub(crate) fn wait_telemetry_stopped(timeout: Duration) -> Result<(), Error> {
     wait_telemetry_stopped_inner(timeout, &TELEMETRY)
 }
 
@@ -357,7 +357,7 @@ fn wait_telemetry_stopped_inner(
     .unwrap_or(Ok(()))
 }
 
-pub fn add_points<Points: IntoIterator<Item = (f64, TelemetryMetric)>>(points: Points) {
+pub(crate) fn add_points<Points: IntoIterator<Item = (f64, TelemetryMetric)>>(points: Points) {
     add_points_inner(&mut points.into_iter(), &TELEMETRY)
 }
 
@@ -373,7 +373,7 @@ fn add_points_inner(
 }
 
 #[allow(dead_code)]
-pub fn add_point(value: f64, metric: TelemetryMetric) {
+pub(crate) fn add_point(value: f64, metric: TelemetryMetric) {
     add_point_inner(value, metric, &TELEMETRY)
 }
 
@@ -383,7 +383,7 @@ fn add_point_inner(value: f64, metric: TelemetryMetric, telemetry_cell: &Telemet
     });
 }
 
-pub fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
+pub(crate) fn add_log_error<I: Into<String>>(message: I, stack: Option<String>) {
     add_log_error_inner(message, stack, &TELEMETRY)
 }
 
@@ -400,7 +400,7 @@ fn add_log_error_inner<I: Into<String>>(
     });
 }
 
-pub fn notify_configuration_update(config_provider: &dyn ConfigurationProvider) {
+pub(crate) fn notify_configuration_update(config_provider: &dyn ConfigurationProvider) {
     notify_configuration_update_inner(config_provider, &TELEMETRY);
 }
 

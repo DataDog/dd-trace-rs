@@ -28,7 +28,7 @@ use crate::telemetry_logs_exporter::TelemetryTrackingLogExporter;
 /// Returns a no-op logger provider if logs are disabled or if initialization fails.
 /// Errors are logged but not returned to ensure logs functionality is always available.
 #[cfg(any(feature = "logs-grpc", feature = "logs-http"))]
-pub fn create_logger_provider(
+pub(crate) fn create_logger_provider(
     config: Arc<Config>,
     resource: Option<Resource>,
 ) -> SdkLoggerProvider {

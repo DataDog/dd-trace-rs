@@ -17,7 +17,7 @@ const EMIT_INTERVAL: Duration = Duration::from_secs(10);
 /// via [`SharedRuntime::spawn_worker`] and torn down when the runtime's
 /// `shutdown_async` runs during the exporter's shutdown — the same lifecycle as
 /// the trace-export and Remote Config workers.
-pub struct TelemetryMetricsCollector {
+pub(crate) struct TelemetryMetricsCollector {
     registry: TraceRegistry,
     exporter_queue_metrics: QueueMetricsFetcher,
     /// Built lazily on the first [`Worker::trigger`] because `tokio::time`
@@ -36,7 +36,7 @@ impl std::fmt::Debug for TelemetryMetricsCollector {
 }
 
 impl TelemetryMetricsCollector {
-    pub fn start(
+    pub(crate) fn start(
         registry: TraceRegistry,
         exporter_queue_metrics: QueueMetricsFetcher,
         shared_runtime: &Arc<BasicRuntime>,

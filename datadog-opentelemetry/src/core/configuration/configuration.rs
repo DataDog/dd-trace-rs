@@ -33,7 +33,7 @@ pub(crate) use crate::core::configuration::sources::ConfigParser;
 
 /// Different types of remote configuration updates that can trigger callbacks
 #[derive(Debug, Clone)]
-pub enum RemoteConfigUpdate {
+pub(crate) enum RemoteConfigUpdate {
     /// Sampling rules were updated from remote configuration.
     /// Uses the internal type to preserve provenance from remote config.
     SamplingRules(Vec<libdd_sampling::SamplingRuleConfig>),
@@ -47,7 +47,7 @@ pub enum RemoteConfigUpdate {
 type RemoteConfigCallback = Box<dyn Fn(&RemoteConfigUpdate) + Send + Sync>;
 
 /// Struct-based callback system for remote configuration updates
-pub struct RemoteConfigCallbacks {
+pub(super) struct RemoteConfigCallbacks {
     pub sampling_rules_update: Option<RemoteConfigCallback>,
     // Future callback types can be added here as new fields
     // e.g. pub feature_flags_update: Option<RemoteConfigCallback>,
@@ -65,13 +65,13 @@ impl std::fmt::Debug for RemoteConfigCallbacks {
 }
 
 impl RemoteConfigCallbacks {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             sampling_rules_update: None,
         }
     }
 
-    pub fn set_sampling_rules_callback<F>(&mut self, callback: F)
+    pub(super) fn set_sampling_rules_callback<F>(&mut self, callback: F)
     where
         F: Fn(&RemoteConfigUpdate) + Send + Sync + 'static,
     {
@@ -80,7 +80,7 @@ impl RemoteConfigCallbacks {
 
     /// Calls all relevant callbacks for the given update type
     /// Provides a unified interface for future callback types
-    pub fn notify_update(&self, update: &RemoteConfigUpdate) {
+    pub(super) fn notify_update(&self, update: &RemoteConfigUpdate) {
         match update {
             RemoteConfigUpdate::SamplingRules(_) => {
                 if let Some(ref callback) = self.sampling_rules_update {
@@ -96,7 +96,7 @@ impl Default for RemoteConfigCallbacks {
         Self::new()
     }
 }
-pub const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(super) const TRACER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const DATADOG_TAGS_MAX_LENGTH: usize = 512;
 const RC_DEFAULT_POLL_INTERVAL: f64 = 5.0; // 5 seconds is the highest interval allowed by the spec
@@ -203,7 +203,7 @@ impl<T: ConfigurationValueProvider> ConfigurationValueProvider for ConfigItemRef
 /// as `ddtelemetry::data::Configuration` payloads for telemetry collection.
 /// It enables the configuration system to report configuration values, their
 /// origins, and associated metadata to Datadog.
-pub trait ConfigurationProvider {
+pub(crate) trait ConfigurationProvider {
     /// Returns all configurations that were set for this configuration item.
     /// e.g. If set through the environment variable,
     /// returns the environment variable config and the default config.
@@ -609,7 +609,7 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources string with transformation
-    pub fn update_string<ParsedConfig, ConfigItemType, F>(
+    pub(crate) fn update_string<ParsedConfig, ConfigItemType, F>(
         &self,
         default: ConfigItemType,
         transform: F,
@@ -624,7 +624,7 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from a boolean flag
-    pub fn update_bool<ConfigItemType: ValueSourceUpdater<Value = bool>>(
+    pub(crate) fn update_bool<ConfigItemType: ValueSourceUpdater<Value = bool>>(
         &self,
         default: ConfigItemType,
     ) -> ConfigItemType {
@@ -633,7 +633,7 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from non empty sources string with transformation
-    pub fn update_non_empty_string<ParsedConfig, ConfigItemType>(
+    pub(crate) fn update_non_empty_string<ParsedConfig, ConfigItemType>(
         &self,
         default: ConfigItemType,
         transform: impl FnOnce(String) -> ParsedConfig,
@@ -654,7 +654,7 @@ impl ConfigItemSourceUpdater<'_> {
     /// ConfigItem's own key and a `fallback` key (the primary takes precedence). An empty
     /// value on either key is treated the same as the key being absent. If neither key has a
     /// non-empty value, the default is returned.
-    pub fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType>(
+    pub(crate) fn update_non_empty_string_with_fallback<ParsedConfig, ConfigItemType>(
         &self,
         default: ConfigItemType,
         fallback: SupportedConfigurations,
@@ -679,7 +679,7 @@ impl ConfigItemSourceUpdater<'_> {
     }
 
     /// Updates a ConfigItem from sources with parsed value and transformation
-    pub fn update_parsed_with_transform<Parser, ConfigItemType>(
+    pub(crate) fn update_parsed_with_transform<Parser, ConfigItemType>(
         &self,
         default: ConfigItemType,
         transform: impl FnOnce(Parser::Parsed) -> ConfigItemType::Value,

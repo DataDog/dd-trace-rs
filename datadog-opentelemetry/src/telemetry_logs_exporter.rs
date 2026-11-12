@@ -11,13 +11,13 @@ use crate::configuration::OtlpProtocol;
 use crate::core::telemetry;
 
 #[derive(Debug)]
-pub struct TelemetryTrackingLogExporter {
+pub(crate) struct TelemetryTrackingLogExporter {
     inner: LogExporter,
     protocol: OtlpProtocol,
 }
 
 impl TelemetryTrackingLogExporter {
-    pub fn new(exporter: LogExporter, protocol: OtlpProtocol) -> Self {
+    pub(crate) fn new(exporter: LogExporter, protocol: OtlpProtocol) -> Self {
         Self {
             inner: exporter,
             protocol,

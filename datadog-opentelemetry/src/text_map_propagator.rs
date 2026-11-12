@@ -27,7 +27,7 @@ pub(crate) const TRACE_FLAG_DEFERRED: opentelemetry::TraceFlags =
     opentelemetry::TraceFlags::new(0x02);
 
 #[derive(Clone, Default, Debug)]
-pub struct DatadogExtractData {
+pub(crate) struct DatadogExtractData {
     pub links: Vec<SpanLink>,
     pub origin: Option<String>,
     pub internal_tags: HashMap<String, String>,
@@ -300,7 +300,7 @@ fn extract_trace_state_from_context(sc: &SpanContext) -> opentelemetry::trace::T
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use std::{borrow::Cow, collections::HashMap, str::FromStr, sync::Arc};
 
     use crate::core::{
@@ -349,7 +349,7 @@ pub mod tests {
     }
 
     #[derive(Debug)]
-    pub struct TestSpan(pub OtelSpanContext);
+    pub(crate) struct TestSpan(pub OtelSpanContext);
 
     impl Span for TestSpan {
         fn add_event_with_timestamp<T>(

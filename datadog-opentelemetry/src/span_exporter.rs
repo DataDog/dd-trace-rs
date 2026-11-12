@@ -30,15 +30,16 @@ use crate::{
     mappings::{CachedConfig, SpanStr},
 };
 
-pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
+pub(crate) use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
 
-pub type QueueMetricsFetcher = libdd_data_pipeline::trace_buffer::QueueMetricsFetcher<BufferedSpan>;
+pub(crate) type QueueMetricsFetcher =
+    libdd_data_pipeline::trace_buffer::QueueMetricsFetcher<BufferedSpan>;
 
 /// `SpanData` wrapper that approximates its in-memory size so it can be stored
 /// in libdatadog's [`TraceBuffer`].
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct BufferedSpan(SpanData);
+pub(crate) struct BufferedSpan(SpanData);
 
 // Rough byte-size constants used to convert a `SpanData` into a value the buffer
 // can sum to enforce its byte-based capacity. They do not need to be exact — they
@@ -107,7 +108,7 @@ impl BufferSize for BufferedSpan {
     }
 }
 
-pub struct DatadogExporter {
+pub(crate) struct DatadogExporter {
     // Wrapped in `Option` so `Drop` can move them onto a dedicated std thread —
     // their drop transitively drops a `tokio::runtime::Runtime`, which panics when
     // run from inside an async context. See `Drop for DatadogExporter`.
@@ -135,7 +136,7 @@ impl Drop for DatadogExporter {
 }
 
 #[derive(Debug)]
-pub enum DatadogExporterInitError {
+pub(crate) enum DatadogExporterInitError {
     Runtime(SharedRuntimeError),
     TraceExporter(TraceExporterError),
     /// Failed to spawn the std thread used to drive trace-exporter construction off the caller's
@@ -158,7 +159,7 @@ impl std::error::Error for DatadogExporterInitError {}
 type AgentResponseHandler = Box<dyn for<'a> Fn(&'a str) + Send + Sync>;
 
 impl DatadogExporter {
-    pub fn new(
+    pub(crate) fn new(
         config: Arc<Config>,
         agent_response_handler: Option<AgentResponseHandler>,
     ) -> Result<Self, DatadogExporterInitError> {
@@ -196,11 +197,11 @@ impl DatadogExporter {
             .expect("shared_runtime accessed after DatadogExporter::drop")
     }
 
-    pub fn queue_metrics(&self) -> QueueMetricsFetcher {
+    pub(crate) fn queue_metrics(&self) -> QueueMetricsFetcher {
         self.trace_buffer().queue_metrics()
     }
 
-    pub fn send_chunk(&self, span_data: Vec<SpanData>) -> Result<(), TraceBufferError> {
+    pub(crate) fn send_chunk(&self, span_data: Vec<SpanData>) -> Result<(), TraceBufferError> {
         if span_data.is_empty() {
             return Ok(());
         }
@@ -210,11 +211,11 @@ impl DatadogExporter {
 
     /// Triggers a flush and blocks until every span accepted by `send_chunk` before this call
     /// has been exported (or the timeout elapses).
-    pub fn flush_and_wait(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+    pub(crate) fn flush_and_wait(&self, timeout: Duration) -> Result<(), TraceBufferError> {
         self.trace_buffer().flush_and_wait(Some(timeout))
     }
 
-    pub fn trigger_shutdown(&self) {
+    pub(crate) fn trigger_shutdown(&self) {
         // Kick the worker to drain anything pending while the caller continues shutting other
         // subsystems down in parallel.
         let _ = self.trace_buffer().force_flush();
@@ -239,7 +240,7 @@ impl DatadogExporter {
         }
     }
 
-    pub fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
+    pub(crate) fn wait_for_shutdown(&self, timeout: Duration) -> Result<(), TraceBufferError> {
         let rx = self
             .shutdown_rx
             .lock()
@@ -271,7 +272,7 @@ impl DatadogExporter {
         }
     }
 
-    pub fn set_resource(&self, r: Resource) {
+    pub(crate) fn set_resource(&self, r: Resource) {
         self.otel_resource.store(Arc::new(r));
     }
 }
