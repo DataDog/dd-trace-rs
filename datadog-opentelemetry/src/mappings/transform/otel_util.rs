@@ -8,7 +8,8 @@ use bumpalo::Bump;
 
 use super::{attribute_keys::*, semconv_shim};
 
-use opentelemetry::{trace::SpanKind, Value};
+use opentelemetry::{trace::SpanKind, Array, KeyValue, Value};
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::{self as semconv};
 
 /// The Span trait is used to implement utils function is a way that is generic
@@ -31,6 +32,8 @@ pub(crate) trait OtelSpan<'a> {
     }
 
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value>;
+    fn span_attributes(&self) -> &'a [KeyValue];
+    fn otel_resource(&self) -> &'a Resource;
 }
 
 /// `Display` wrapper that formats a string lowercased without going through
@@ -84,9 +87,13 @@ pub(crate) fn fmt_in<'a>(alloc: &'a Bump, args: std::fmt::Arguments<'_>) -> &'a 
     s.into_bump_str()
 }
 
-/// Returns the datadog operation name from the otel span
+/// Returns the datadog operation name from the otel span: `datadog.name` if set, otherwise as
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
 pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let name = span.get_attr_str(DATADOG_NAME);
+    if !name.is_empty() {
+        return name;
+    }
     if let Some(name) = span.get_attr_str_opt(OPERATION_NAME) {
         return name;
     }
@@ -211,7 +218,13 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
+///
+/// `datadog.resource` takes precedence, as for the exported span.
 pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+    let resource = span.get_attr_str(DATADOG_RESOURCE);
+    if !resource.is_empty() {
+        return resource;
+    }
     let m = get_res_span_attributes(span, &[RESOURCE_NAME]);
     if !m.is_empty() {
         return m;
@@ -283,9 +296,11 @@ pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     span.name()
 }
 
-// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
+/// `datadog.http_status_code` if set, otherwise as
+/// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L571
 pub(crate) fn get_otel_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<u32> {
-    span.get_attr_num(HTTP_RESPONSE_STATUS_CODE)
+    span.get_attr_num(DATADOG_HTTP_STATUS_CODE)
+        .or_else(|| span.get_attr_num(HTTP_RESPONSE_STATUS_CODE))
         .or_else(|| span.get_attr_num(HTTP_STATUS_CODE))
 }
 
@@ -403,6 +418,77 @@ pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     }
 }
 
+/// The `http.status_code` tag of the exported span, without the instrumentation scope
+/// attributes: `datadog.http_status_code` on the span if non-empty, whatever its type, then
+/// `get_otel_status_code` if not 0, then the first non-empty `http.response.status_code` or
+/// `http.status_code` attribute exported as a tag, see `fill_tag`.
+pub(crate) fn get_dd_http_status_code<'a>(span: &impl OtelSpan<'a>) -> Option<&'a str> {
+    let datadog_status_code = span.get_attr_str(DATADOG_HTTP_STATUS_CODE);
+    if !datadog_status_code.is_empty() {
+        return Some(datadog_status_code);
+    }
+    if let Some(code) = get_otel_status_code(span).filter(|&code| code != 0) {
+        return Some(fmt_in(span.alloc(), format_args!("{code}")));
+    }
+    let mut status_code = None;
+    fill_tag(&mut status_code, span, |key| {
+        key == HTTP_RESPONSE_STATUS_CODE.key() || key == HTTP_STATUS_CODE.key()
+    });
+    status_code
+}
+
+/// The `env` tag of the exported span, without the instrumentation scope attributes:
+/// `datadog.env` on the span if non-empty, then the first non-empty `env` attribute exported as
+/// a tag, see `fill_tag`, then `get_otel_env` if there is no such attribute at all.
+pub(crate) fn get_dd_env<'a>(span: &impl OtelSpan<'a>) -> Option<&'a str> {
+    let datadog_env = span.get_attr_str(DATADOG_ENV);
+    if !datadog_env.is_empty() {
+        return Some(datadog_env);
+    }
+    let mut env = None;
+    fill_tag(&mut env, span, |key| key == ENV.key());
+    if env.is_some() {
+        return env;
+    }
+    let env = get_otel_env(span);
+    (!env.is_empty()).then_some(env)
+}
+
+/// Sets `tag`, while it is unset or empty, to each resource attribute and then each span attribute
+/// whose key matches, as the exporter maps them to tags. Number span attributes are exported as
+/// metrics, and array span attributes as indexed tags (`key.0`, `key.1`, …), so they are skipped.
+fn fill_tag<'a>(
+    tag: &mut Option<&'a str>,
+    span: &impl OtelSpan<'a>,
+    is_tag_key: impl Fn(&str) -> bool,
+) {
+    let resource_values = span
+        .otel_resource()
+        .iter()
+        .filter(|(key, _)| is_tag_key(key.as_str()))
+        .map(|(_, value)| value);
+    let span_values = span
+        .span_attributes()
+        .iter()
+        .filter(|kv| is_tag_key(kv.key.as_str()) && !is_exported_as_metric_or_array(&kv.value))
+        .map(|kv| &kv.value);
+    for value in resource_values.chain(span_values) {
+        if tag.is_none_or(str::is_empty) {
+            *tag = Some(super::otel_value_string_repr(value, span.alloc()));
+        }
+    }
+}
+
+/// Whether the exporter maps a span attribute with this value to metrics or indexed tags
+fn is_exported_as_metric_or_array(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::I64(_)
+            | Value::F64(_)
+            | Value::Array(Array::Bool(_) | Array::I64(_) | Array::F64(_) | Array::String(_))
+    )
+}
+
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
 pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
@@ -417,7 +503,12 @@ pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
 pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
-    // First, try to extract service from the span's attributes.
+    let service = span.get_attr_str(DATADOG_SERVICE);
+    if !service.is_empty() {
+        return service;
+    }
+
+    // Then, try to extract service from the span's attributes.
     if let Some(service) = span.get_attr_str_opt(SERVICE_NAME) {
         if !service.is_empty() {
             return service;

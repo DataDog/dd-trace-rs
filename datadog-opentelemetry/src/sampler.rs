@@ -21,6 +21,7 @@ use crate::{
     TraceRegistry,
 };
 
+#[derive(Clone, Copy)]
 enum OtDecision {
     Probability(OtelConsistentSampling),
     NonProbability,
@@ -162,6 +163,8 @@ impl ShouldSample for Sampler {
                 mechanism.to_cow().into_owned(),
             );
 
+            let ot_decision =
+                consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability);
             Some(TracePropagationData {
                 sampling_decision: SamplingDecision {
                     priority: Some(result.get_priority()),
@@ -169,10 +172,8 @@ impl ShouldSample for Sampler {
                 },
                 origin,
                 tags,
-                ot: resolve_outbound_ot(
-                    consistent_sampling.map_or(OtDecision::NonProbability, OtDecision::Probability),
-                    inbound_ot,
-                ),
+                ot: resolve_outbound_ot(ot_decision, inbound_ot),
+                inherited_ot: matches!(ot_decision, OtDecision::Inherited),
             })
         } else if let Some(remote_ctx) =
             parent_context.filter(|c| c.span().span_context().is_remote())
@@ -194,6 +195,7 @@ impl ShouldSample for Sampler {
                     sampling_decision,
                     tags: Some(internal_tags.clone()),
                     ot: resolve_outbound_ot(OtDecision::Inherited, ot.clone()),
+                    inherited_ot: ot.is_some(),
                 })
             } else {
                 None
@@ -250,7 +252,7 @@ mod tests {
     use libdd_sampling::OtelConsistentSampling;
     use opentelemetry::{
         trace::{SpanContext, SpanKind, TraceId, TraceState},
-        Context, SpanId, TraceFlags,
+        Context, KeyValue, SpanId, TraceFlags,
     };
     use opentelemetry_sdk::trace::{SamplingDecision, ShouldSample};
     use std::collections::HashMap;
@@ -380,6 +382,89 @@ mod tests {
                 .is_empty(),
             "Sampler should add attributes even if decision is complex"
         );
+    }
+
+    #[test]
+    fn test_sampling_rule_matches_the_span_resource() {
+        // Drops the traces whose root span has this resource
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                    sample_rate: 0.0,
+                    service: None,
+                    name: None,
+                    resource: Some("GET /users/{id}".to_string()),
+                    tags: HashMap::new(),
+                }])
+                .build(),
+        );
+        let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
+        // A new trace each time, as the decision of a known trace is reused
+        let decision = |trace_id: u8, attributes: &[KeyValue]| {
+            sampler
+                .should_sample(
+                    None,
+                    TraceId::from_bytes([trace_id; 16]),
+                    "get-user",
+                    &SpanKind::Server,
+                    attributes,
+                    &[],
+                )
+                .decision
+        };
+
+        // Without a resource attribute, the resource is the span name, so the rule doesn't match
+        assert_eq!(decision(1, &[]), SamplingDecision::RecordAndSample);
+
+        // It matches the resource set through `resource.name` or `datadog.resource`
+        for (trace_id, key) in [(2, "resource.name"), (3, "datadog.resource")] {
+            assert_eq!(
+                decision(trace_id, &[KeyValue::new(key, "GET /users/{id}")]),
+                SamplingDecision::RecordOnly,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_sampling_rule_matches_the_datadog_service_and_name() {
+        // Drops the traces whose root span has this service and operation name
+        let config = Arc::new(
+            Config::builder()
+                .set_trace_sampling_rules(vec![SamplingRuleConfig {
+                    sample_rate: 0.0,
+                    service: Some("sqlite".to_string()),
+                    name: Some("sqlite.query".to_string()),
+                    resource: None,
+                    tags: HashMap::new(),
+                }])
+                .build(),
+        );
+        let test_resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let sampler = Sampler::new(
+            config.clone(),
+            test_resource,
+            Some(TraceRegistry::new(config)),
+        );
+        let attributes = [
+            KeyValue::new("datadog.service", "sqlite"),
+            KeyValue::new("datadog.name", "sqlite.query"),
+        ];
+
+        let result = sampler.should_sample(
+            None,
+            TraceId::from_bytes([5; 16]),
+            "query",
+            &SpanKind::Client,
+            &attributes,
+            &[],
+        );
+        assert_eq!(result.decision, SamplingDecision::RecordOnly);
     }
 
     #[test]

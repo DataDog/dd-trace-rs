@@ -218,7 +218,6 @@ fn otel_span_to_dd_span_minimal<'a>(
     span: &SpanExtractArgs<'a, '_>,
     is_top_level: bool,
 ) {
-    let alloc = span.alloc;
     let (trace_id_lower_half, _) = otel_trace_id_to_dd_id(span.span.span_context.trace_id());
     let span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
     let parent_id = otel_span_id_to_dd_id(span.span.parent_span_id);
@@ -234,9 +233,10 @@ fn otel_span_to_dd_span_minimal<'a>(
     // Note: the original agent code pre-reserved `attr_len + res_len` entries for meta
     // and 6 for metrics; `VecMap` has no `reserve`, and pooled spans already carry a
     // warm capacity, so inserts just grow the existing buffers amortized.
-    dd_span.service = SpanStr::from_str(span.get_attr_str(DATADOG_SERVICE));
-    dd_span.name = SpanStr::from_str(span.get_attr_str(DATADOG_NAME));
-    dd_span.resource = SpanStr::from_str(span.get_attr_str(DATADOG_RESOURCE));
+    // The sampler resolves service, name and resource with the same functions
+    dd_span.service = SpanStr::from_str(get_otel_service(span));
+    dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
+    dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
     dd_span.r#type = SpanStr::from_str(span.get_attr_str(DATADOG_TYPE));
     dd_span.trace_id = trace_id_lower_half.into();
     dd_span.span_id = span_id;
@@ -274,29 +274,13 @@ fn otel_span_to_dd_span_minimal<'a>(
         );
     }
 
-    if dd_span.service.as_str().is_empty() {
-        dd_span.service = SpanStr::from_str(get_otel_service(span));
-    }
-
-    if dd_span.name.as_str().is_empty() {
-        dd_span.name = SpanStr::from_str(get_otel_operation_name_v2(span));
-    }
-
-    if dd_span.resource.as_str().is_empty() {
-        dd_span.resource = SpanStr::from_str(get_otel_resource_v2(span));
-    }
     if dd_span.r#type.as_str().is_empty() {
         dd_span.r#type = SpanStr::from_str(get_otel_span_type(span));
     }
-    let code: u32 = if let Some(http_status_code) = span.get_attr_num(DATADOG_HTTP_STATUS_CODE) {
-        http_status_code
-    } else {
-        get_otel_status_code(span).unwrap_or(0)
-    };
-    if code != 0 {
+    if let Some(status_code) = get_dd_http_status_code(span) {
         dd_span.meta.insert(
             SpanStr::from_static_str("http.status_code"),
-            SpanStr::from_str(fmt_in(alloc, format_args!("{code}"))),
+            SpanStr::from_str(status_code),
         );
     }
 
@@ -534,10 +518,11 @@ fn dd_value_to_string<'a>(value: &DdAttributeAnyValue<'a>, alloc: &'a Bump) -> S
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L217
+///
+/// Without `datadog.env` and `datadog.http_status_code`, which `get_dd_env` and
+/// `get_dd_http_status_code` resolve.
 const DD_SEMANTICS_KEY_TO_META_KEY: &[(AttributeKey, &str)] = &[
-    (DATADOG_ENV, "env"),
     (DATADOG_VERSION, "version"),
-    (DATADOG_HTTP_STATUS_CODE, "http.status_code"),
     (DATADOG_ERROR_MSG, "error.message"),
     (DATADOG_ERROR_TYPE, "error.type"),
     (DATADOG_ERROR_STACK, "error.stack"),
@@ -606,6 +591,14 @@ impl<'a> OtelSpan<'a> for SpanExtractArgs<'a, '_> {
 
     fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a Value> {
         self.resource.get_ref(&Key::from_static_str(attr_key.key()))
+    }
+
+    fn span_attributes(&self) -> &'a [KeyValue] {
+        self.span.attributes
+    }
+
+    fn otel_resource(&self) -> &'a Resource {
+        self.resource
     }
 }
 
@@ -739,6 +732,12 @@ pub fn otel_span_to_dd_span<'a>(
         }
     }
 
+    if let Some(env) = get_dd_env(&span_extracted) {
+        dd_span
+            .meta
+            .insert(SpanStr::from_static_str("env"), SpanStr::from_str(env));
+    }
+
     for (key, value) in otel_resource.iter() {
         set_meta_otlp_with_semconv_mappings(key.as_str(), value, dd_span, alloc);
     }
@@ -788,14 +787,6 @@ pub fn otel_span_to_dd_span<'a>(
             _ => {
                 set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
             }
-        }
-    }
-
-    let env_key = SpanStr::from_static_str("env");
-    if !dd_span.meta.contains_key(&env_key) {
-        let env = get_otel_env(&span_extracted);
-        if !env.is_empty() {
-            dd_span.meta.insert(env_key, SpanStr::from_str(env));
         }
     }
 
@@ -911,11 +902,18 @@ pub fn otel_span_to_dd_span<'a>(
 
 #[cfg(test)]
 mod tests {
-    use opentelemetry::{SpanId, TraceId};
+    use std::time::SystemTime;
+
+    use bumpalo::Bump;
+    use opentelemetry::{
+        trace::{SpanContext, SpanKind, Status},
+        InstrumentationScope, KeyValue, SpanId, StringValue, TraceId, Value,
+    };
+    use opentelemetry_sdk::Resource;
 
     use crate::mappings::transform::otel_span_id_to_dd_id;
 
-    use super::otel_trace_id_to_dd_id;
+    use super::{otel_span_to_dd_span, otel_trace_id_to_dd_id, DdSpan, SdkSpan, SpanStr};
 
     #[test]
     fn trace_id_conversion() {
@@ -928,5 +926,275 @@ mod tests {
     fn span_id_conversion() {
         let id = otel_span_id_to_dd_id(SpanId::from_bytes([2; 8]));
         assert_eq!(id, 0x0202020202020202);
+    }
+
+    fn kv(key: &'static str, value: impl Into<Value>) -> KeyValue {
+        KeyValue::new(key, value)
+    }
+
+    /// The `key` tag of the exported span
+    fn exported_tag(
+        attrs: Vec<KeyValue>,
+        resource_attrs: Vec<KeyValue>,
+        scope_attrs: Vec<KeyValue>,
+        key: &str,
+    ) -> Option<String> {
+        let resource = Resource::builder_empty()
+            .with_attributes(resource_attrs)
+            .build();
+        let scope = InstrumentationScope::builder("")
+            .with_attributes(scope_attrs)
+            .build();
+        let span_context = SpanContext::empty_context();
+        let status = Status::Unset;
+        let sdk_span = SdkSpan {
+            span_context: &span_context,
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Server,
+            name: "test",
+            start_time: SystemTime::UNIX_EPOCH,
+            end_time: SystemTime::UNIX_EPOCH,
+            attributes: &attrs,
+            dropped_attributes_count: 0,
+            events: &[],
+            dropped_event_count: 0,
+            links: &[],
+            dropped_links_count: 0,
+            status: &status,
+            instrumentation_scope: &scope,
+        };
+        let alloc = Bump::new();
+        let mut dd_span = DdSpan::default();
+        otel_span_to_dd_span(&mut dd_span, &sdk_span, &resource, &alloc);
+        dd_span
+            .meta
+            .get(&SpanStr::from_str(key))
+            .map(|v| v.as_str().to_owned())
+    }
+
+    #[test]
+    fn exported_env() {
+        for (attrs, resource_attrs, scope_attrs, env) in [
+            (vec![], vec![], vec![], None),
+            (
+                vec![kv("datadog.env", "dev"), kv("env", "prod")],
+                vec![kv("env", "staging")],
+                vec![],
+                Some("dev"),
+            ),
+            (
+                vec![kv("datadog.env", "dev")],
+                vec![kv("datadog.env", "prod")],
+                vec![],
+                Some("dev"),
+            ),
+            (
+                vec![kv("env", "prod")],
+                vec![kv("env", "staging")],
+                vec![],
+                Some("staging"),
+            ),
+            (
+                vec![kv("env", "prod")],
+                vec![kv("env", "")],
+                vec![],
+                Some("prod"),
+            ),
+            (
+                vec![kv("env", ""), kv("env", "prod")],
+                vec![],
+                vec![],
+                Some("prod"),
+            ),
+            (
+                vec![kv("env", "prod"), kv("env", "qa")],
+                vec![],
+                vec![],
+                Some("prod"),
+            ),
+            (vec![kv("env", true)], vec![], vec![], Some("true")),
+            (
+                vec![kv("env", 123), kv("env", "prod")],
+                vec![],
+                vec![],
+                Some("prod"),
+            ),
+            (
+                vec![kv("env", 1.5)],
+                vec![kv("deployment.environment.name", "qa")],
+                vec![],
+                Some("qa"),
+            ),
+            (
+                vec![kv("env", Value::Array(vec![StringValue::from("a")].into()))],
+                vec![kv("deployment.environment.name", "qa")],
+                vec![],
+                Some("qa"),
+            ),
+            (
+                vec![kv("env", "")],
+                vec![kv("deployment.environment.name", "qa")],
+                vec![],
+                Some(""),
+            ),
+            (
+                vec![],
+                vec![kv("env", ""), kv("deployment.environment.name", "qa")],
+                vec![],
+                Some(""),
+            ),
+            (
+                vec![],
+                vec![kv("datadog.env", "prod")],
+                vec![],
+                Some("prod"),
+            ),
+            (
+                vec![],
+                vec![kv("deployment.environment", "qa")],
+                vec![],
+                Some("qa"),
+            ),
+            (
+                vec![kv("datadog.env", "dev")],
+                vec![kv("env", "staging")],
+                vec![kv("env", "scope")],
+                Some("scope"),
+            ),
+            // The span attributes fill an empty scope attribute
+            (
+                vec![kv("env", "prod")],
+                vec![],
+                vec![kv("env", "")],
+                Some("prod"),
+            ),
+        ] {
+            let case = format!("{attrs:?} {resource_attrs:?} {scope_attrs:?}");
+            assert_eq!(
+                exported_tag(attrs, resource_attrs, scope_attrs, "env").as_deref(),
+                env,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn exported_http_status_code() {
+        for (attrs, resource_attrs, scope_attrs, status_code) in [
+            (vec![], vec![], vec![], None),
+            (
+                vec![kv("http.response.status_code", 200)],
+                vec![],
+                vec![],
+                Some("200"),
+            ),
+            (
+                vec![kv("http.status_code", 200.0)],
+                vec![],
+                vec![],
+                Some("200"),
+            ),
+            (
+                vec![
+                    kv("datadog.http_status_code", 503),
+                    kv("http.response.status_code", 200),
+                ],
+                vec![],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![
+                    kv("datadog.http_status_code", "503"),
+                    kv("http.response.status_code", 200),
+                ],
+                vec![],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![kv("datadog.http_status_code", "abc")],
+                vec![],
+                vec![],
+                Some("abc"),
+            ),
+            (
+                vec![kv("http.response.status_code", "503")],
+                vec![],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![
+                    kv("http.response.status_code", ""),
+                    kv("http.status_code", "503"),
+                ],
+                vec![],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![],
+                vec![kv("http.status_code", 503)],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![],
+                vec![kv("http.response.status_code", "404")],
+                vec![],
+                Some("404"),
+            ),
+            (
+                vec![kv("http.response.status_code", 200)],
+                vec![kv("http.status_code", 503)],
+                vec![],
+                Some("200"),
+            ),
+            (
+                vec![kv("http.response.status_code", 0)],
+                vec![],
+                vec![],
+                None,
+            ),
+            (
+                vec![
+                    kv("http.response.status_code", 0),
+                    kv("http.status_code", "503"),
+                ],
+                vec![],
+                vec![],
+                Some("503"),
+            ),
+            (
+                vec![kv(
+                    "http.status_code",
+                    Value::Array(vec![StringValue::from("500")].into()),
+                )],
+                vec![],
+                vec![],
+                None,
+            ),
+            (
+                vec![kv("http.response.status_code", 200)],
+                vec![],
+                vec![kv("http.status_code", "418")],
+                Some("418"),
+            ),
+            // The span attributes fill an empty scope attribute
+            (
+                vec![kv("http.response.status_code", "404")],
+                vec![],
+                vec![kv("http.status_code", "")],
+                Some("404"),
+            ),
+        ] {
+            let case = format!("{attrs:?} {resource_attrs:?} {scope_attrs:?}");
+            assert_eq!(
+                exported_tag(attrs, resource_attrs, scope_attrs, "http.status_code").as_deref(),
+                status_code,
+                "{case}"
+            );
+        }
     }
 }

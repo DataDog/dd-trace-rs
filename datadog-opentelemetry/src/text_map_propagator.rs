@@ -305,7 +305,7 @@ pub mod tests {
 
     use crate::core::{
         configuration::{Config, TracePropagationStyle},
-        sampling::SamplingDecision,
+        sampling::{mechanism, priority, SamplingDecision},
     };
     use assert_unordered::assert_eq_unordered;
     use opentelemetry::{
@@ -676,6 +676,7 @@ pub mod tests {
                     },
                     tags: Some(tags),
                     ot: None,
+                    inherited_ot: false,
                 },
             );
 
@@ -765,6 +766,7 @@ pub mod tests {
                 origin: None,
                 tags: None,
                 ot: None,
+                inherited_ot: false,
             },
         );
 
@@ -775,6 +777,78 @@ pub mod tests {
         assert!(
             !injected_trace_state.contains("ot="),
             "expected the erased `ot` to remain absent, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("congo=xyz"),
+            "expected unrelated vendor member to still pass through, got {injected_trace_state}"
+        );
+    }
+
+    #[test]
+    fn extract_inject_w3c_set_sampling_decision_updates_outbound_headers() {
+        let config = Arc::new(Config::builder().build());
+        let registry = TraceRegistry::new(config.clone());
+        let propagator = DatadogPropagator::new(config, registry.clone());
+        let extractor = HashMap::from([
+            (
+                TRACEPARENT_KEY.to_string(),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                TRACESTATE_KEY.to_string(),
+                "dd=s:-1;o:rum;t.dm:-0,ot=rv:65cd67504a538e;th:e6666666666666,congo=xyz"
+                    .to_string(),
+            ),
+        ]);
+        let extracted_context = propagator.extract(&extractor);
+        let span_context = extracted_context.span().span_context().clone();
+
+        // The sampler registered the trace with its own initial decision: a decision-maker tag
+        // for the sampler's mechanism and the threshold that rejected the trace in `ot`.
+        registry.register_span(
+            span_context.trace_id().to_bytes(),
+            span_context.span_id().to_bytes(),
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: Some(priority::AUTO_REJECT),
+                    mechanism: Some(mechanism::DEFAULT),
+                },
+                origin: Some("rum".to_string()),
+                tags: Some(HashMap::from([("_dd.p.dm".to_string(), "-0".to_string())])),
+                ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                // The rv was inherited from the extracted `ot` member of the upstream context.
+                inherited_ot: true,
+            },
+        );
+
+        // A manual Keep overrides the sampler's decision
+        registry.set_sampling_decision(
+            span_context.trace_id().to_bytes(),
+            SamplingDecision {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
+            },
+        );
+
+        let mut injector = HashMap::new();
+        propagator.inject_context(&extracted_context, &mut injector);
+
+        let injected_trace_state = Extractor::get(&injector, TRACESTATE_KEY).unwrap_or("");
+        assert!(
+            injected_trace_state.contains("s:2"),
+            "expected the manual keep to propagate as USER_KEEP, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("t.dm:-4"),
+            "expected the manual decision-maker to propagate as t.dm:-4, got {injected_trace_state}"
+        );
+        assert!(
+            injected_trace_state.contains("ot=rv:65cd67504a538e"),
+            "expected the inherited rv to be preserved, got {injected_trace_state}"
+        );
+        assert!(
+            !injected_trace_state.contains("th:"),
+            "expected the probability threshold that rejected the trace to be dropped, got {injected_trace_state}"
         );
         assert!(
             injected_trace_state.contains("congo=xyz"),

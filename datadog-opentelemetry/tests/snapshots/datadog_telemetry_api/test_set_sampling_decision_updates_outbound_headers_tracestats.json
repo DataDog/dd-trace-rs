@@ -1,0 +1,22 @@
+[
+  {
+    "Start": 0,
+    "Duration": 10000000000,
+    "Stats": [
+      {
+        "Name": "internal",
+        "Resource": "op",
+        "Service": "unnamed-rust-service",
+        "Type": "custom",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 2,
+        "TopLevelHits": 2,
+        "Duration": 66000,
+        "Errors": 0,
+        "OkSummary": 431,
+        "ErrorSummary": 24
+      }
+    ]
+  }
+]
