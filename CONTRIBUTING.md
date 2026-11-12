@@ -131,6 +131,9 @@ rumdl check .
   parameters.
 - Avoid adding dead code with `#[allow(clippy::dead_code)]`. Prefer deleting the code unless it
   will be used in subsequent work.
+- Use `pub(crate)` (or `pub(super)`) for items that are not part of a crate's public API, instead of
+  a bare `pub`. This is enforced by the `unreachable_pub` lint (see `[workspace.lints.rust]` in the
+  root `Cargo.toml`) for crates that have opted in with `[lints] workspace = true`.
 - Avoid shadowing names in the prelude, like `Result`, `None`, and `Iterator`. For instance, prefer
   `anyhow::Result<T>` instead of `use anyhow::Result`.
 - Prefer iterator patterns instead of manual loops, where convenient. For instance, use `find`

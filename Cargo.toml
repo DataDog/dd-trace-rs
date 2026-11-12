@@ -76,6 +76,22 @@ bumpalo = { version = "3.20", features = ["collections"] }
 # Datadog crates
 datadog-telemetry-api = { path = "datadog-telemetry-api", version = "0.6.0" }
 
+# Workspace-wide lint levels. Crates opt in with `[lints] workspace = true`.
+#
+# `unreachable_pub`: a bare `pub` on an item that is not reachable from the crate's public API
+# should be `pub(crate)` (or `pub(super)`). Reviewers repeatedly ask for this, and it keeps the
+# semver surface of published crates small. CI runs clippy with `-D warnings`, so a violation in an
+# opted-in crate fails the build.
+#
+# ROLLOUT: only crates that are already clean have opted in. `datadog-opentelemetry` is NOT opted
+# in yet: it has ~77 violations (more under the `test-utils` / `_unstable_propagation` features,
+# where the `core_pub_hack` re-exports in `lib.rs` intentionally widen visibility). Promotion plan:
+# narrow those items to `pub(crate)`, add scoped `#[allow(unreachable_pub)]` for the feature-gated
+# re-exports in `lib.rs`, then add `[lints] workspace = true` to its Cargo.toml.
+# Do not also enable `clippy::redundant_pub_crate`: it directly contradicts this lint.
+[workspace.lints.rust]
+unreachable_pub = "warn"
+
 [profile.dev]
 debug = 2 # full debug info
 
