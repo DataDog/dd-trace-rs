@@ -25,12 +25,9 @@ mod graph;
 #[path = "src/core/telemetry/dependencies/tree.rs"]
 mod tree;
 
-// allow: cargo configures build scripts through the environment
-#[allow(clippy::disallowed_methods)]
 mod dependencies {
     use std::{
         collections::BTreeSet,
-        env,
         ffi::OsString,
         fs,
         path::{Path, PathBuf},
@@ -51,6 +48,36 @@ mod dependencies {
     const DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
     /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
     const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
+
+    /// The environment variables this script reads: cargo configures build scripts through the
+    /// environment, rather than the tracer's configuration.
+    // allow: the only code reading the environment
+    #[allow(clippy::disallowed_methods)]
+    mod build_env {
+        use std::{env, ffi::OsString};
+
+        use super::{DEPENDENCY_COLLECTION_ENABLED_ENV, WORKSPACE_DIR_ENV};
+
+        pub(super) fn out_dir() -> Option<OsString> {
+            env::var_os("OUT_DIR")
+        }
+
+        pub(super) fn cargo() -> Option<OsString> {
+            env::var_os("CARGO")
+        }
+
+        pub(super) fn target() -> Option<String> {
+            env::var("TARGET").ok()
+        }
+
+        pub(super) fn collection_enabled() -> Option<String> {
+            env::var(DEPENDENCY_COLLECTION_ENABLED_ENV).ok()
+        }
+
+        pub(super) fn workspace_dir() -> Option<OsString> {
+            env::var_os(WORKSPACE_DIR_ENV)
+        }
+    }
 
     /// A failure and its details, which are only shown in the build output.
     type CargoError = (Failure, String);
@@ -101,7 +128,7 @@ mod dependencies {
             }
         };
 
-        let out_dir = env::var_os("OUT_DIR").expect("cargo sets OUT_DIR for build scripts");
+        let out_dir = build_env::out_dir().expect("cargo sets OUT_DIR for build scripts");
         let written = fs::write(
             Path::new(&out_dir).join("build_time_dependencies.rs"),
             render(&recorded),
@@ -121,8 +148,8 @@ mod dependencies {
 
     fn collection_enabled() -> bool {
         !matches!(
-            env::var(DEPENDENCY_COLLECTION_ENABLED_ENV).as_deref(),
-            Ok("false" | "0")
+            build_env::collection_enabled().as_deref(),
+            Some("false" | "0")
         )
     }
 
@@ -130,9 +157,9 @@ mod dependencies {
         let unavailable = |details: &str| (Failure::CargoUnavailable, details.to_owned());
         let workspace = workspace_dir().map_err(|details| (Failure::WorkspaceNotFound, details))?;
         let cargo = Cargo {
-            path: env::var_os("CARGO").ok_or_else(|| unavailable("CARGO is not set"))?,
+            path: build_env::cargo().ok_or_else(|| unavailable("CARGO is not set"))?,
             workspace,
-            target: env::var("TARGET").map_err(|_| unavailable("TARGET is not set"))?,
+            target: build_env::target().ok_or_else(|| unavailable("TARGET is not set"))?,
         };
         // The root manifest isn't a package manifest in a virtual workspace, but its
         // `[workspace.dependencies]` can still enable features of the members' dependencies.
@@ -182,7 +209,7 @@ mod dependencies {
     /// elsewhere, e.g. by `cross`. Rather than guessing, this fails when no ancestor holds a
     /// `Cargo.lock`. The error is only shown in the build output, so it can name paths.
     fn workspace_dir() -> Result<PathBuf, String> {
-        if let Some(value) = env::var_os(WORKSPACE_DIR_ENV) {
+        if let Some(value) = build_env::workspace_dir() {
             let dir = PathBuf::from(&value);
             if dir.is_dir() {
                 return Ok(dir);
@@ -202,7 +229,7 @@ mod dependencies {
                 "the target directory is not in the workspace root; set {WORKSPACE_DIR_ENV} to it"
             )
         };
-        let out_dir = env::var_os("OUT_DIR").ok_or_else(not_found)?;
+        let out_dir = build_env::out_dir().ok_or_else(not_found)?;
         workspace_root(Path::new(&out_dir)).ok_or_else(not_found)
     }
 
