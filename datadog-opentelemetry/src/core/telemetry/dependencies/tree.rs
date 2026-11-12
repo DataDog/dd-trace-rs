@@ -57,8 +57,8 @@ impl GraphBuilder {
 
     /// Adds the non-dev edges of `tree`, seen in `builds`, and returns its root.
     pub fn add_tree(&mut self, tree: &Tree, builds: Builds) -> usize {
-        for (parent, child, _) in tree.edges.iter().filter(|(_, _, dev)| !dev) {
-            let (parent, child) = (self.node(parent), self.node(child));
+        for edge in tree.edges.iter().filter(|edge| !edge.dev) {
+            let (parent, child) = (self.node(&edge.parent), self.node(&edge.child));
             self.graph.dependencies[parent]
                 .entry(child)
                 .and_modify(|seen| *seen = seen.merge(builds))
@@ -70,21 +70,28 @@ impl GraphBuilder {
 
 pub struct Tree {
     pub root: Node,
-    /// `(parent, child, is a dev-dependency)`.
-    pub edges: Vec<(Node, Node, bool)>,
+    pub edges: Vec<Edge>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Edge {
+    pub parent: Node,
+    pub child: Node,
+    /// Whether `child` is a dev-dependency of `parent`.
+    pub dev: bool,
 }
 
 impl Tree {
     pub fn contains(&self, name: &str) -> bool {
         let is = |node: &Node| node.package.name == name;
-        is(&self.root) || self.edges.iter().any(|(_, child, _)| is(child))
+        is(&self.root) || self.edges.iter().any(|edge| is(&edge.child))
     }
 
     pub fn dev_dependencies(&self) -> impl Iterator<Item = &Node> {
         self.edges
             .iter()
-            .filter(|(parent, _, dev)| *dev && *parent == self.root)
-            .map(|(_, child, _)| child)
+            .filter(|edge| edge.dev && edge.parent == self.root)
+            .map(|edge| &edge.child)
     }
 }
 
@@ -114,7 +121,11 @@ pub fn parse_tree(output: &str) -> Option<Tree> {
         let Some((parent, dev)) = path.last() else {
             continue;
         };
-        edges.push((parent.clone(), package.clone(), *dev));
+        edges.push(Edge {
+            parent: parent.clone(),
+            child: package.clone(),
+            dev: *dev,
+        });
         path.push((package, false));
     }
     Some(Tree { root, edges })
@@ -261,6 +272,14 @@ mod tests {
         fs::remove_dir_all(&root).expect("remove the test directory");
     }
 
+    fn edge(parent: &Node, child: &Node, dev: bool) -> Edge {
+        Edge {
+            parent: parent.clone(),
+            child: child.clone(),
+            dev,
+        }
+    }
+
     fn tree(output: &str) -> Tree {
         parse_tree(output).expect("the output parses")
     }
@@ -319,12 +338,12 @@ mod tests {
         assert_eq!(
             tree.edges,
             vec![
-                (app.clone(), itoa.clone(), false),
-                (app.clone(), serde.clone(), false),
-                (serde, serde_derive.clone(), false),
-                (serde_derive, itoa.clone(), false),
-                (app, lib.clone(), false),
-                (lib, itoa, false),
+                edge(&app, &itoa, false),
+                edge(&app, &serde, false),
+                edge(&serde, &serde_derive, false),
+                edge(&serde_derive, &itoa, false),
+                edge(&app, &lib, false),
+                edge(&lib, &itoa, false),
             ]
         );
         assert!(tree.contains("app"));
@@ -354,12 +373,12 @@ mod tests {
         assert_eq!(
             tree.edges,
             vec![
-                (app.clone(), lib.clone(), false),
-                (lib.clone(), itoa.clone(), false),
-                (lib.clone(), anyhow, true),
-                (app.clone(), tempfile.clone(), true),
-                (tempfile.clone(), itoa, false),
-                (app, lib.clone(), true),
+                edge(&app, &lib, false),
+                edge(&lib, &itoa, false),
+                edge(&lib, &anyhow, true),
+                edge(&app, &tempfile, true),
+                edge(&tempfile, &itoa, false),
+                edge(&app, &lib, true),
             ]
         );
         let dev: Vec<&Node> = tree.dev_dependencies().collect();
