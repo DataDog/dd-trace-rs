@@ -457,9 +457,10 @@ mod tests {
             datadog_opentelemetry::configuration::TracePropagationStyle::Datadog,
             datadog_opentelemetry::configuration::TracePropagationStyle::TraceContext,
         ]);
-        datadog_opentelemetry::tracing()
+        let components = datadog_opentelemetry::tracing()
             .with_config(config.build())
-            .init_local()
+            .init_local();
+        (components.tracer_provider, components.propagator)
     }
 
     #[test]
@@ -711,7 +712,11 @@ mod tests {
                     true,
                 ),
             ] {
-                let (provider, propagator) = datadog_opentelemetry::tracing()
+                let datadog_opentelemetry::TracingComponents {
+                    tracer_provider: provider,
+                    propagator,
+                    ..
+                } = datadog_opentelemetry::tracing()
                     .with_config(
                         Config::builder()
                             .set_trace_propagation_style(styles.clone())

@@ -14,11 +14,16 @@ use std::{
 use crate::{
     core::{
         configuration::{remote_config::RemoteConfigClientWorker, BaggageTagKeyFilter, Config},
-        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
-        sampling::SamplingDecision,
+        constants::{
+            RL_EFFECTIVE_RATE, SAMPLING_AGENT_RATE_TAG_KEY, SAMPLING_DECISION_MAKER_TAG_KEY,
+            SAMPLING_KNUTH_RATE_TAG_KEY, SAMPLING_RULE_RATE_TAG_KEY,
+        },
+        sampling::{mechanism, SamplingDecision},
         telemetry::{init_telemetry, wait_telemetry_stopped, TelemetryUser},
     },
     create_dd_resource, dd_debug, dd_error,
+    propagation::tracecontext::{ot_extract_rv, ot_set_rv_th},
+    resolve_service_name,
     span_exporter::{DatadogExporter, DatadogExporterError, DatadogExporterInitError},
     spans_metrics::TelemetryMetricsCollector,
     text_map_propagator::DatadogExtractData,
@@ -31,7 +36,6 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::{error::OTelSdkError, trace::SpanData};
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 
 #[derive(Debug)]
 struct Trace {
@@ -49,6 +53,8 @@ pub(crate) struct TracePropagationData {
     pub origin: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     pub ot: Option<String>,
+    /// If the `ot` field was were inherited from the upstream context
+    pub inherited_ot: bool,
 }
 
 const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
@@ -59,6 +65,7 @@ const EMPTY_PROPAGATION_DATA: TracePropagationData = TracePropagationData {
     },
     tags: None,
     ot: None,
+    inherited_ot: false,
 };
 
 impl Default for TracePropagationData {
@@ -412,6 +419,50 @@ impl TraceRegistry {
         }
         stats
     }
+
+    /// Sets the sampling decision of the trace with the given trace ID.
+    /// If the trace isn't registered, the decision is ignored.
+    ///
+    /// The propagation state is synchronized with the manual decision, mirroring what the
+    /// sampler does for non-probability decisions: reset the different propagation tags
+    pub fn set_sampling_decision(&self, trace_id: [u8; 16], decision: SamplingDecision) {
+        let mut inner = self
+            .get_shard(trace_id)
+            .write()
+            .expect("Failed to acquire lock on trace registry");
+        let Some(trace) = inner.registry.get_mut(&trace_id) else {
+            dd_debug!(
+                "TraceRegistry.set_sampling_decision: trace with trace_id={:?} isn't registered. The sampling decision will be ignored.",
+                u128::from_be_bytes(trace_id)
+            );
+            return;
+        };
+        if let Some(mechanism) = decision.mechanism {
+            trace.propagation_data.tags.get_or_insert_default().insert(
+                SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                mechanism.to_cow().into_owned(),
+            );
+        }
+        // See system-tests `test_force_keep_clears_inherited_th`, and
+        // `test_force_keep_forwards_inherited_rv`.
+        // When the `ot` member was inherited, its rv is forwarded
+        //
+        // the rv/th locally computed by a probability decision are dropped,
+        // nothing was inherited to forward.
+        if decision.priority.is_some() {
+            if trace.propagation_data.inherited_ot {
+                trace.propagation_data.ot = trace
+                    .propagation_data
+                    .ot
+                    .take()
+                    .and_then(|ot| ot_set_rv_th(Some(&ot), ot_extract_rv(&ot), None));
+            } else {
+                trace.propagation_data.ot =
+                    ot_set_rv_th(trace.propagation_data.ot.as_deref(), None, None);
+            }
+        }
+        trace.propagation_data.sampling_decision = decision;
+    }
 }
 
 /// Metrics collected by the trace registry.
@@ -552,6 +603,21 @@ impl DatadogSpanProcessor {
                             .push(KeyValue::new(key.clone(), value.clone()))
                     });
                 }
+
+                // A manual decision overrides the sampler. The probability sampling rates
+                // attached to the root span no longer describe how the trace was sampled, so
+                // remove them
+                if propagation_data.sampling_decision.mechanism == Some(mechanism::MANUAL) {
+                    span.attributes.retain(|attribute| {
+                        !matches!(
+                            attribute.key.as_str(),
+                            SAMPLING_RULE_RATE_TAG_KEY
+                                | SAMPLING_AGENT_RATE_TAG_KEY
+                                | RL_EFFECTIVE_RATE
+                                | SAMPLING_KNUTH_RATE_TAG_KEY
+                        )
+                    });
+                }
             }
 
             if !origin.is_empty() {
@@ -608,7 +674,11 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         span: &mut opentelemetry_sdk::trace::Span,
         parent_ctx: &opentelemetry::Context,
     ) {
-        if !self.config.enabled() || !span.is_recording() || !span.span_context().is_valid() {
+        // Don't check `config.enabled()` here: remote config can disable tracing after the sampler
+        // made this span recording. Its `on_end` still finishes it in the registry, so registering
+        // it keeps the trace's open span count balanced. Spans started while tracing is disabled
+        // are dropped by the sampler and never recording.
+        if !span.is_recording() || !span.span_context().is_valid() {
             return;
         }
 
@@ -745,17 +815,7 @@ impl opentelemetry_sdk::trace::SpanProcessor for DatadogSpanProcessor {
         *self.resource.write().unwrap() = dd_resource.clone();
 
         // update config's service name and init telemetry once service name has been resolved
-        let service_name = dd_resource
-            .get(&Key::from_static_str(SERVICE_NAME))
-            .map(|service_name| service_name.as_str().to_string());
-        // Only set calculated service name if DD_SERVICE is default
-        // and otel service name is not default
-        if self.config.service_is_default()
-            && service_name.is_some()
-            && service_name.as_ref().unwrap().as_str() != self.config.service().to_string()
-        {
-            self.config.set_calculated_service_name(service_name);
-        }
+        resolve_service_name(&self.config, &dd_resource);
         init_telemetry(&self.config);
     }
 }
@@ -789,6 +849,7 @@ mod tests {
 
     use crate::core::{
         configuration::Config,
+        constants::SAMPLING_DECISION_MAKER_TAG_KEY,
         sampling::{mechanism, priority, SamplingDecision},
     };
     use opentelemetry::{
@@ -991,6 +1052,7 @@ mod tests {
                                                     "foobar".to_string(),
                                                 )])),
                                                 ot: None,
+                                                inherited_ot: false,
                                             },
                                         );
                                     }
@@ -1047,6 +1109,134 @@ mod tests {
         bench_trace_registry(&mut criterion);
 
         criterion.final_summary();
+    }
+
+    #[test]
+    fn test_span_started_while_remotely_disabled_keeps_parent_trace_open() {
+        use opentelemetry::trace::{Span, TraceContextExt, Tracer, TracerProvider};
+
+        let config = Arc::new(Config::builder().build());
+        let registry = TraceRegistry::new(config.clone());
+        let resource = Arc::new(RwLock::new(Resource::builder_empty().build()));
+        let processor =
+            DatadogSpanProcessor::new(config.clone(), registry.clone(), resource, None).unwrap();
+        // The SDK's default sampler keeps the child recording, as if it was sampled just before
+        // remote config disabled tracing
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_span_processor(processor)
+            .build();
+        let tracer = provider.tracer("test");
+
+        let parent = tracer.start("parent");
+        let trace_id = parent.span_context().trace_id().to_bytes();
+        let parent_cx = opentelemetry::Context::current_with_span(parent);
+
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable".to_string()));
+        let mut child = tracer.start_with_context("child", &parent_cx);
+        child.end();
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+
+        assert!(
+            registry.get_trace_propagation_data(trace_id).is_some(),
+            "The parent's trace should still be registered after the child ends"
+        );
+        let stats = registry.get_metrics();
+        assert_eq!(stats.spans_finished, 1);
+        assert_eq!(stats.trace_segments_closed, 0);
+    }
+
+    #[test]
+    fn test_set_sampling_decision_syncs_propagation_state() {
+        let registry = TraceRegistry::new(Arc::new(Config::builder().build()));
+        let trace_id = [42u8; 16];
+
+        // Simulate a local root whose initial decision came from the sampler: a decision-maker
+        // tag for the sampler's mechanism and a probability rv/th pair in the `ot` member.
+        // Nothing was inherited from an upstream context.
+        registry.register_local_root_trace_propagation_data(
+            trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: Some(priority::AUTO_REJECT),
+                    mechanism: Some(mechanism::DEFAULT),
+                },
+                origin: None,
+                tags: Some(HashMap::from([(
+                    SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                    mechanism::DEFAULT.to_cow().into_owned(),
+                )])),
+                ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                inherited_ot: false,
+            },
+        );
+
+        registry.set_sampling_decision(
+            trace_id,
+            SamplingDecision {
+                priority: Some(priority::USER_KEEP),
+                mechanism: Some(mechanism::MANUAL),
+            },
+        );
+
+        let propagation_data = registry
+            .get_trace_propagation_data(trace_id)
+            .expect("the trace should still be registered");
+        assert_eq!(
+            propagation_data.sampling_decision.priority,
+            Some(priority::USER_KEEP)
+        );
+        assert_eq!(
+            propagation_data
+                .tags
+                .as_ref()
+                .and_then(|tags| tags.get(SAMPLING_DECISION_MAKER_TAG_KEY)),
+            Some(&"-4".to_string()),
+            "the decision-maker tag must be updated with the manual mechanism"
+        );
+        assert_eq!(
+            propagation_data.ot, None,
+            "a manual decision must not forward the rv/th locally computed by the sampler's \
+             probability decision: nothing was inherited from an upstream context"
+        );
+
+        // A manual drop on a trace with an inherited rv forwards that rv: the local probability
+        // rv/th are replaced by the inherited rv, and th is cleared (the decision no longer
+        // depends on `th`).
+        let dropped_trace_id = [43u8; 16];
+        registry.register_local_root_trace_propagation_data(
+            dropped_trace_id,
+            TracePropagationData {
+                sampling_decision: SamplingDecision {
+                    priority: Some(priority::AUTO_KEEP),
+                    mechanism: Some(mechanism::DEFAULT),
+                },
+                origin: None,
+                tags: Some(HashMap::from([(
+                    SAMPLING_DECISION_MAKER_TAG_KEY.to_string(),
+                    mechanism::DEFAULT.to_cow().into_owned(),
+                )])),
+                ot: Some("rv:65cd67504a538e;th:e6666666666666".to_string()),
+                // The rv comes from the upstream `ot` member, not from a local probability
+                // decision: it must be forwarded by the manual decision.
+                inherited_ot: true,
+            },
+        );
+        registry.set_sampling_decision(
+            dropped_trace_id,
+            SamplingDecision {
+                priority: Some(priority::USER_REJECT),
+                mechanism: Some(mechanism::MANUAL),
+            },
+        );
+        let dropped_ot = registry
+            .get_trace_propagation_data(dropped_trace_id)
+            .expect("the dropped trace should still be registered")
+            .ot
+            .unwrap_or_default();
+        assert_eq!(
+            dropped_ot, "rv:65cd67504a538e",
+            "the inherited rv must be preserved on drop, got: {dropped_ot}"
+        );
     }
 
     fn create_test_span_data(trace_id: [u8; 16], span_id: [u8; 8]) -> SpanData {

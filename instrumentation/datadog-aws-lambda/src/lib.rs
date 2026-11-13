@@ -280,7 +280,7 @@ mod tests {
         TracedService {
             inner: ReadyService,
             tracer,
-            propagator: datadog_opentelemetry::tracing().init_local().1,
+            propagator: datadog_opentelemetry::tracing().init_local().propagator,
             inferrer: span_inferrer::default_inferrer(),
             cold_start: true,
             _phantom: PhantomData,

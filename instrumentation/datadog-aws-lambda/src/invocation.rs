@@ -210,7 +210,7 @@ mod tests {
     }
 
     fn test_propagator() -> DatadogPropagator {
-        datadog_opentelemetry::tracing().init_local().1
+        datadog_opentelemetry::tracing().init_local().propagator
     }
 
     fn test_lambda_cx() -> lambda_runtime::Context {

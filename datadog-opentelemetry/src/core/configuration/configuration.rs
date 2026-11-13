@@ -26,6 +26,7 @@ use crate::core::configuration::sources::{
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
+use crate::core::telemetry_session::runtime_id;
 use crate::{dd_error, dd_warn};
 
 pub(crate) use crate::core::configuration::sources::ConfigParser;
@@ -1029,6 +1030,24 @@ impl ServiceName {
     }
 }
 
+/// DD_TRACE_ENABLED, which remote config can override
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TracingEnabled(bool);
+
+impl std::ops::Deref for TracingEnabled {
+    type Target = bool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Display for TracingEnabled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl std::ops::Deref for ServiceName {
     type Target = str;
 
@@ -1163,7 +1182,7 @@ static HOSTNAME: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_default()
 });
 
-impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, HttpErrorStatuses);
+impl_config_value_provider!(simple: Cow<'static, str>, String, bool, u32, usize, i32, f64, ServiceName, LevelFilter, ParsedSamplingRules, TracePropagationBehaviorExtract, TracingEnabled, HttpErrorStatuses);
 impl_config_value_provider!(option: String, f64);
 
 #[derive(Clone)]
@@ -1240,7 +1259,7 @@ pub struct Config {
     trace_rate_limit: ConfigItem<i32>,
 
     /// Disables the library if this is false
-    enabled: ConfigItem<bool>,
+    enabled: ConfigItemWithOverride<TracingEnabled>,
     /// The log level filter for the tracer
     log_level_filter: ConfigItem<LevelFilter>,
 
@@ -1288,6 +1307,9 @@ pub struct Config {
     /// The reported hostname defaults to the system hostname and can be set explicitly through
     /// the `DD_HOSTNAME` configuration or [`ConfigBuilder::set_hostname`].
     trace_report_hostname: ConfigItem<bool>,
+
+    /// When true, the library logs its configuration once at startup
+    trace_startup_logs: ConfigItem<bool>,
 
     /// Hostname reported by the library
     hostname: ConfigItem<String>,
@@ -1514,7 +1536,8 @@ impl Config {
             ),
             trace_rate_limit: cisu.update_parsed(default.trace_rate_limit),
 
-            enabled: cisu.update_bool(default.enabled),
+            enabled: cisu
+                .update_parsed_with_transform::<BooleanFlag, _>(default.enabled, TracingEnabled),
             log_level_filter: cisu.update_parsed(default.log_level_filter),
             trace_stats_computation_enabled: cisu
                 .update_bool(default.trace_stats_computation_enabled),
@@ -1577,6 +1600,7 @@ impl Config {
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             trace_writer_force_flush_timeout: default.trace_writer_force_flush_timeout,
             trace_report_hostname: cisu.update_bool(default.trace_report_hostname),
+            trace_startup_logs: cisu.update_bool(default.trace_startup_logs),
             hostname: cisu.update_non_empty_string(default.hostname, |s| s),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
@@ -1648,6 +1672,7 @@ impl Config {
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
             &self.trace_report_hostname,
+            &self.trace_startup_logs,
             &self.hostname,
             &self.trace_stats_cardinality_limit,
             &self.trace_stats_resource_cardinality_limit,
@@ -1877,6 +1902,11 @@ impl Config {
         *self.trace_report_hostname.value()
     }
 
+    /// Returns whether the library logs its configuration at startup
+    pub fn trace_startup_logs(&self) -> bool {
+        *self.trace_startup_logs.value()
+    }
+
     /// The hostname reported to datadog if [`Config::trace_report_hostname`] is true
     pub fn hostname(&self) -> &str {
         self.hostname.value()
@@ -1942,7 +1972,18 @@ impl Config {
     pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
-        RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+        // Reuse the raw id seeded by the load-time lineage constructor (see
+        // `core::telemetry_session`) so the outbound lineage it installs
+        // always matches the id reported here; generate one when it could
+        // not.
+        // PANIC: only if the OS entropy source is unavailable, which is
+        // unlikely.
+        RUNTIME_ID.get_or_init(|| {
+            runtime_id()
+                .expect("operating system entropy source is unavailable")
+                .hyphenated()
+                .to_string()
+        })
     }
 
     /// Returns whether telemetry collection is enabled.
@@ -2191,6 +2232,18 @@ impl Config {
         rules
     }
 
+    /// Enables or disables tracing from remote config. Remote config never enables tracing
+    /// that was disabled locally.
+    pub(crate) fn set_tracing_enabled_from_remote(&self, enabled: bool, config_id: Option<String>) {
+        if enabled && !*self.enabled.local_value() {
+            return;
+        }
+        self.enabled
+            .set_override_value(TracingEnabled(enabled), ConfigSourceOrigin::RemoteConfig);
+        self.enabled.set_config_id(config_id);
+        telemetry::notify_configuration_update(&self.enabled);
+    }
+
     pub(crate) fn clear_remote_sampling_rules(&self, config_id: Option<String>) {
         self.trace_sampling_rules.unset_override_value();
         self.trace_sampling_rules.set_config_id(config_id);
@@ -2361,6 +2414,7 @@ impl std::fmt::Debug for Config {
                 &self.remote_config_poll_interval,
             )
             .field("remote_config_callbacks", &self.remote_config_callbacks)
+            .field("trace_startup_logs", &self.trace_startup_logs)
             .finish()
     }
 }
@@ -2430,7 +2484,10 @@ fn default_config() -> Config {
         ),
         trace_sample_rate: ConfigItem::new(SupportedConfigurations::DD_TRACE_SAMPLE_RATE, None),
         trace_rate_limit: ConfigItem::new(SupportedConfigurations::DD_TRACE_RATE_LIMIT, 100),
-        enabled: ConfigItem::new(SupportedConfigurations::DD_TRACE_ENABLED, true),
+        enabled: ConfigItemWithOverride::new_rc(
+            SupportedConfigurations::DD_TRACE_ENABLED,
+            TracingEnabled(true),
+        ),
         log_level_filter: ConfigItem::new(
             SupportedConfigurations::DD_LOG_LEVEL,
             LevelFilter::default(),
@@ -2476,6 +2533,7 @@ fn default_config() -> Config {
             false,
         ),
         hostname: ConfigItem::new(SupportedConfigurations::DD_HOSTNAME, String::new()),
+        trace_startup_logs: ConfigItem::new(SupportedConfigurations::DD_TRACE_STARTUP_LOGS, true),
 
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
@@ -3173,7 +3231,7 @@ impl ConfigBuilder {
     ///
     /// Env variable: `DD_TRACE_ENABLED`
     pub fn set_enabled(&mut self, enabled: bool) -> &mut Self {
-        self.config.enabled.set_code(enabled);
+        self.config.enabled.set_code(TracingEnabled(enabled));
         self
     }
 
@@ -3347,6 +3405,16 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets whether the library logs its configuration once at startup.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_STARTUP_LOGS`
+    pub fn set_trace_startup_logs(&mut self, startup_logs: bool) -> &mut Self {
+        self.config.trace_startup_logs.set_code(startup_logs);
+        self
+    }
+
     /// Sets hostname reported to datadog if [`Config::trace_report_hostname`] is true.
     ///
     /// **Default**: if [`Config::trace_report_hostname`] is true, defaults to the system hostname,
@@ -3416,6 +3484,20 @@ mod tests {
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
     use crate::propagation::config::{get_extractors, get_injectors};
+
+    #[test]
+    fn test_trace_startup_logs() {
+        assert!(Config::builder().build().trace_startup_logs());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STARTUP_LOGS", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        assert!(!Config::builder_with_sources(&sources)
+            .build()
+            .trace_startup_logs());
+    }
 
     #[test]
     fn test_config_from_source() {
@@ -4860,10 +4942,10 @@ mod tests {
         assert_eq!(env.env_value, Some(Some("test-env".to_string())));
         assert_eq!(env.code_value, None);
 
-        let enabled = cisu.update_bool(default.enabled);
-        assert!(enabled.default_value);
-        assert_eq!(enabled.env_value, None);
-        assert_eq!(enabled.code_value, None);
+        let telemetry_enabled = cisu.update_bool(default.telemetry_enabled);
+        assert!(telemetry_enabled.default_value);
+        assert_eq!(telemetry_enabled.env_value, None);
+        assert_eq!(telemetry_enabled.code_value, None);
 
         struct Tags;
 
@@ -4893,6 +4975,75 @@ mod tests {
                 ("hello".to_string(), "world".to_string()),
             ])
         );
+    }
+
+    #[test]
+    fn test_set_tracing_enabled_from_remote() {
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_ENABLED", "true")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        let config = Config::builder_with_sources(&sources).build();
+        assert!(config.enabled());
+
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable".to_string()));
+        assert!(!config.enabled());
+
+        let configurations = config.enabled.get_all_configurations();
+        let active_configuration = configurations.iter().max_by_key(|c| c.seq_id).unwrap();
+        assert_eq!(active_configuration.name, "DD_TRACE_ENABLED");
+        assert_eq!(active_configuration.value.as_deref(), Some("false"));
+        assert_eq!(
+            active_configuration.origin,
+            ConfigurationOrigin::RemoteConfig
+        );
+        assert_eq!(
+            active_configuration.config_id.as_deref(),
+            Some("rc-disable")
+        );
+
+        // A new config id is reported even if the value is unchanged
+        config.set_tracing_enabled_from_remote(false, Some("rc-disable-2".to_string()));
+        assert_eq!(
+            remote_tracing_enabled_configuration(&config)
+                .config_id
+                .as_deref(),
+            Some("rc-disable-2")
+        );
+
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(config.enabled());
+    }
+
+    fn remote_tracing_enabled_configuration(config: &Config) -> Configuration {
+        let configurations = config.enabled.get_all_configurations();
+        configurations.into_iter().max_by_key(|c| c.seq_id).unwrap()
+    }
+
+    #[test]
+    fn test_remote_tracing_enabled_reports_remote_origin_when_unchanged() {
+        let config = Config::builder().build();
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(config.enabled());
+
+        let active_configuration = remote_tracing_enabled_configuration(&config);
+        assert_eq!(active_configuration.value.as_deref(), Some("true"));
+        assert_eq!(
+            active_configuration.origin,
+            ConfigurationOrigin::RemoteConfig
+        );
+        assert_eq!(active_configuration.config_id.as_deref(), Some("rc-enable"));
+    }
+
+    #[test]
+    fn test_remote_config_does_not_enable_locally_disabled_tracing() {
+        let mut builder = Config::builder();
+        builder.set_enabled(false);
+        let config = builder.build();
+
+        config.set_tracing_enabled_from_remote(true, Some("rc-enable".to_string()));
+        assert!(!config.enabled());
     }
 
     #[test]

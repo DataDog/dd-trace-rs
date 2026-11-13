@@ -8,7 +8,7 @@ on:
       - cron:  '00 03 * * *'
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.87.0
+  RUST_VERSION: 1.91.1
 
 jobs:
   test:
@@ -19,7 +19,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-14]
+        platform: [windows-latest, ubuntu-latest, macos-15]
         rust_version: [""]
         include:
           - platform: "ubuntu-latest"
@@ -185,7 +185,7 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
       cancel-in-progress: true
-    uses: DataDog/system-tests/.github/workflows/system-tests.yml@878a87866d00cd553d091b7d58f9be7288a3f9e9  # main
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@bceb487c0e0903482e8dc997f2140b5ca629704a  # main
     permissions:
       contents: read
       id-token: write
@@ -195,6 +195,6 @@ jobs:
       scenarios_groups: tracer_release
       desired_execution_time: 600
       parametric_job_count: 2
-      ref: 878a87866d00cd553d091b7d58f9be7288a3f9e9 # main
+      ref: bceb487c0e0903482e8dc997f2140b5ca629704a # main
       push_to_test_optimization: true
       skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}

@@ -1,7 +1,9 @@
 # Repository Structure
 
-This is a Cargo workspace. The production crate is `datadog-opentelemetry`; the examples under
-`datadog-opentelemetry/examples/` are separate workspace members with `publish = false`.
+This is a Cargo workspace. The production crates are `datadog-opentelemetry` and
+`datadog-telemetry-api`, the lightweight runtime API implemented by `datadog-opentelemetry`; the
+examples under `datadog-opentelemetry/examples/` are separate workspace members with
+`publish = false`.
 
 ```text
 dd-trace-rs/
@@ -19,6 +21,8 @@ dd-trace-rs/
 │   └── examples/
 │       ├── propagator/          # HTTP server example
 │       └── simple_tracing/      # Minimal tracing example
+├── datadog-telemetry-api/       # Runtime API (e.g. manual sampling decisions), no SDK dependency
+│   └── src/lib.rs
 ├── scripts/                     # Release, license, and build automation
 │   └── pack-system-tests-artifact.sh  # Stable entry point for system-test builds
 ├── docs/                        # Architecture documentation

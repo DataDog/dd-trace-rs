@@ -16,7 +16,7 @@
 //! Add to you Cargo.toml
 //!
 //! ```toml
-//! datadog-opentelemetry = { version = "0.5.3" }
+//! datadog-opentelemetry = { version = "0.6.0" }
 //! ```
 //!
 //! ### Creating traces, metrics and logs
@@ -148,6 +148,84 @@
 //!
 //! For more details, see the [Datadog OpenTelemetry Rust documentation](https://docs.datadoghq.com/opentelemetry/instrument/api_support/rust/).
 //!
+//! ### Overriding the sampling decisions
+//!
+//! Whenever a new trace is started, the sampler decides whether this trace will be sent to the
+//! intake or not. This is called a sampling decision.
+//! This sampling decision is usually immutable from there and propagates to all spans in the trace.
+//!
+//! Using the [`datadog_telemetry_api::set_sampling_decision`] API it is possible to override
+//! sampling decisions while the span is active, usually because some rare or unexpected event
+//! has happened and the span has to be recorded and sent to storage, regardless of sampling
+//! policies.
+//!
+//! This API is provided by the `datadog-telemetry-api` crate, which must be added to your
+//! dependencies, with the same major version as `datadog-opentelemetry`.
+//!
+//! The sampling decision set on the trace takes effect immediately, and all active spans
+//! in the trace will inherit it, even if they were started before the call.
+//!
+//! The global `set_sampling_decision` method is callable from anywhere, as long as an instance
+//! of [`DatadogTelemetryHandle`]  has been installed, either with
+//! [`DatadogTracingBuilder::init()`], or by calling [`datadog_telemetry_api::set_global`].
+//!
+//! #### Limitations
+//!
+//! Setting [`datadog_telemetry_api::SamplingDecision::Keep`] does not guarantee that all spans
+//! of the trace will be sampled: only the currently active spans, and the spans started after
+//! the call, are guaranteed. Spans closed before the call might carry the original sampling
+//! decision.
+//!
+//! The manual decision is applied to the spans exported by the Datadog span processor and to the
+//! headers injected by the Datadog propagator. It does not change the OpenTelemetry sampled flag
+//! ([`opentelemetry::trace::SpanContext::is_sampled`]) of the spans already started, nor of the
+//! spans started from a local parent, which inherit the flag of their parent.
+//! After a manual `Keep` on a trace rejected by the sampler, these spans keep `is_sampled() ==
+//! false`, and after a manual `Drop` on a trace kept by the sampler, they keep `is_sampled() ==
+//! true`. Other span processors or exporters added to the tracer provider only see this original
+//! flag.
+//!
+//! `set_sampling_decision` should be called only with spans started by an
+//! [`opentelemetry_sdk::trace::SdkTracerProvider`] installed by the same
+//! [`DatadogTracingBuilder::init()`] call, or returned by the same
+//! [`DatadogTracingBuilder::init_local()`] call.
+//!
+//! * Global API
+//!
+//! ```rust ,no_run
+//! use opentelemetry::global;
+//! use opentelemetry::trace::{TraceContextExt, Tracer};
+//!
+//! global::tracer("my-service").in_span("my-operation", |cx| {
+//!     datadog_telemetry_api::set_sampling_decision(
+//!         cx.span().span_context(),
+//!         datadog_telemetry_api::SamplingDecision::Keep,
+//!     );
+//! });
+//! ```
+//!
+//! * Local API
+//!
+//! ```rust ,no_run
+//! use datadog_telemetry_api::DatadogTelemetryApi;
+//! use opentelemetry::trace::{TraceContextExt, Tracer, TracerProvider};
+//!
+//! let datadog_opentelemetry::TracingComponents {
+//!     tracer_provider,
+//!     datadog_telemetry,
+//!     ..
+//! } = datadog_opentelemetry::tracing().init_local();
+//!
+//! tracer_provider
+//!     .tracer("my-service")
+//!     .in_span("my-operation", |cx| {
+//!         datadog_telemetry.set_sampling_decision(
+//!             cx.span().span_context(),
+//!             datadog_telemetry_api::SamplingDecision::Keep,
+//!         );
+//!     });
+//! ```
+//!
 //! ### Configuration
 //!
 //! Configuration can be passed either:
@@ -219,7 +297,7 @@
 //!
 //! ## Support
 //!
-//! * MSRV: 1.87
+//! * MSRV: 1.91.1
 //!
 //! * [`opentelemetry`](https://docs.rs/opentelemetry/0.33.0/opentelemetry/) version: 0.33
 //! * [`tracing-opentelemetry`](https://docs.rs/tracing-opentelemetry/0.34.0/tracing_opentelemetry/)
@@ -264,6 +342,10 @@ pub mod memory_profiling;
     doc(cfg(any(feature = "memory-profiling", feature = "memory-profiling-alloc-only")))
 )]
 pub use memory_profiling::memory_profiling;
+
+use libdd_sampling::mechanism;
+use libdd_sampling::priority;
+use libdd_sampling::SamplingDecision;
 
 #[cfg(feature = "test-utils")]
 #[allow(missing_docs)]
@@ -339,6 +421,69 @@ use crate::{
     text_map_propagator::DatadogPropagator,
 };
 
+/// Datadog telemetry handle
+///
+/// Gives access to the sampling decisions of the live traces managed by a tracer provider,
+/// through the [`datadog_telemetry_api::DatadogTelemetryApi`] trait implemented by this type. The
+/// handle is part of the [`TracingComponents`] returned by [`DatadogTracingBuilder::init_local`],
+/// and installed as the process-global telemetry by [`DatadogTracingBuilder::init`].
+pub struct DatadogTelemetryHandle {
+    registry: TraceRegistry,
+}
+
+impl datadog_telemetry_api::DatadogTelemetryApi for DatadogTelemetryHandle {
+    fn set_sampling_decision(
+        &self,
+        span: &opentelemetry::trace::SpanContext,
+        decision: datadog_telemetry_api::SamplingDecision,
+    ) {
+        self.registry.set_sampling_decision(
+            span.trace_id().to_bytes(),
+            match decision {
+                datadog_telemetry_api::SamplingDecision::Keep => SamplingDecision {
+                    priority: Some(priority::USER_KEEP),
+                    mechanism: Some(mechanism::MANUAL),
+                },
+                datadog_telemetry_api::SamplingDecision::Drop => SamplingDecision {
+                    priority: Some(priority::USER_REJECT),
+                    mechanism: Some(mechanism::MANUAL),
+                },
+            },
+        );
+    }
+}
+
+#[non_exhaustive]
+/// Interact with tracing through these types
+///
+/// * `tracer_provider` is an [`opentelemetry_sdk::trace::SdkTracerProvider`]
+/// * `propagator` implements [`opentelemetry::propagation::TextMapPropagator`]
+/// * `datadog_telemetry` implements [`datadog_telemetry_api::DatadogTelemetryApi`]
+///
+/// # Setting global context
+///
+/// In order not to have to propagate these components you can set them as globals
+///
+/// ```rust ,no_run
+/// let datadog_opentelemetry::TracingComponents {
+///     tracer_provider,
+///     propagator,
+///     datadog_telemetry,
+///     ..
+/// } = datadog_opentelemetry::tracing().init_local();
+/// opentelemetry::global::set_text_map_propagator(propagator);
+/// opentelemetry::global::set_tracer_provider(tracer_provider);
+/// datadog_telemetry_api::set_global(datadog_telemetry);
+/// ```
+pub struct TracingComponents {
+    /// The tracer provider producing the spans
+    pub tracer_provider: SdkTracerProvider,
+    /// The propagator injecting and extracting the trace context
+    pub propagator: DatadogPropagator,
+    /// The Datadog tracing telemetry handle
+    pub datadog_telemetry: DatadogTelemetryHandle,
+}
+
 /// Builder for configuring and initializing Datadog tracing with OpenTelemetry.
 pub struct DatadogTracingBuilder {
     config: Option<Config>,
@@ -398,8 +543,11 @@ impl DatadogTracingBuilder {
             dd_warn!("Couldn't publish the tracer metadata during global initialization. External readers such as an eBPF profiler won't be able to access the corresponding resource attributes: {e}");
         }
 
-        let (tracer_provider, propagator) =
-            make_tracer(Arc::new(config), self.tracer_provider, self.resource);
+        let TracingComponents {
+            tracer_provider,
+            propagator,
+            datadog_telemetry,
+        } = make_tracer(Arc::new(config), self.tracer_provider, self.resource);
         // Enable publishing the active span context to a specific TLS slot so out-of-process
         // readers (e.g. the Datadog eBPF profiler) can correlate CPU profiles with live traces.
         #[cfg(all(target_os = "linux", feature = "otel-thread-ctx"))]
@@ -408,6 +556,7 @@ impl DatadogTracingBuilder {
         }
         opentelemetry::global::set_text_map_propagator(propagator.clone());
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+        datadog_telemetry_api::set_global(datadog_telemetry);
 
         (tracer_provider, propagator)
     }
@@ -428,12 +577,18 @@ impl DatadogTracingBuilder {
     /// # Example
     ///
     /// ```rust
-    /// let (tracer_provider, propagator) = datadog_opentelemetry::tracing().init_local();
+    /// let datadog_opentelemetry::TracingComponents {
+    ///     tracer_provider,
+    ///     propagator,
+    ///     datadog_telemetry,
+    ///     ..
+    /// } = datadog_opentelemetry::tracing().init_local();
     ///
     /// opentelemetry::global::set_text_map_propagator(propagator);
     /// opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+    /// datadog_telemetry_api::set_global(datadog_telemetry);
     /// ```
-    pub fn init_local(self) -> (SdkTracerProvider, DatadogPropagator) {
+    pub fn init_local(self) -> TracingComponents {
         let config = self.config.unwrap_or_else(|| Config::builder().build());
         make_tracer(Arc::new(config), self.tracer_provider, self.resource)
     }
@@ -568,7 +723,7 @@ fn make_tracer(
     config: Arc<Config>,
     mut tracer_provider_builder: opentelemetry_sdk::trace::TracerProviderBuilder,
     resource: Option<Resource>,
-) -> (SdkTracerProvider, DatadogPropagator) {
+) -> TracingComponents {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let registry = TraceRegistry::new(config.clone());
 
@@ -585,6 +740,10 @@ fn make_tracer(
 
         let dd_resource =
             create_dd_resource(resource.unwrap_or(Resource::builder().build()), &config);
+        // Logged here rather than from the span processor, which isn't built when tracing is
+        // disabled. The processor resolves the same service name from the provider's resource.
+        resolve_service_name(&config, &dd_resource);
+        core::startup_log::log_startup_configuration(&config);
         tracer_provider_builder = tracer_provider_builder.with_resource(dd_resource);
         let propagator = DatadogPropagator::new(config.clone(), registry.clone());
 
@@ -621,16 +780,23 @@ fn make_tracer(
             }
         }
         let tracer_provider = tracer_provider_builder.build();
+        let datadog_telemetry = DatadogTelemetryHandle { registry };
 
-        (tracer_provider, propagator)
+        TracingComponents {
+            tracer_provider,
+            propagator,
+            datadog_telemetry,
+        }
     })) {
         Ok(result) => result,
         Err(_) => {
+            let registry = TraceRegistry::new(config.clone());
             crate::dd_error!("Failed to initialize Datadog tracer provider. A no-op tracer provider will be used instead. Traces will not be exported.");
-            (
-                SdkTracerProvider::builder().build(),
-                DatadogPropagator::new(config.clone(), TraceRegistry::new(config)),
-            )
+            TracingComponents {
+                tracer_provider: SdkTracerProvider::builder().build(),
+                propagator: DatadogPropagator::new(config, registry.clone()),
+                datadog_telemetry: DatadogTelemetryHandle { registry },
+            }
         }
     }
 }
@@ -656,6 +822,21 @@ fn merge_resource<I: IntoIterator<Item = (Key, Value)>>(
     }
     builder = builder.with_attributes(additional.into_iter().map(|(k, v)| KeyValue::new(k, v)));
     builder.build()
+}
+
+/// Makes the resource's service name the calculated service, when `DD_SERVICE` isn't set.
+fn resolve_service_name(cfg: &Config, dd_resource: &Resource) {
+    let service_name = dd_resource
+        .get(&Key::from_static_str(SERVICE_NAME))
+        .map(|service_name| service_name.as_str().to_string());
+    // Only set calculated service name if DD_SERVICE is default
+    // and otel service name is not default
+    if cfg.service_is_default()
+        && service_name.is_some()
+        && service_name.as_ref().unwrap().as_str() != cfg.service().to_string()
+    {
+        cfg.set_calculated_service_name(service_name);
+    }
 }
 
 fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
@@ -712,7 +893,7 @@ fn create_dd_resource(resource: Resource, cfg: &Config) -> Resource {
 }
 
 #[cfg(feature = "test-utils")]
-pub fn make_test_tracer(shared_config: Arc<Config>) -> (SdkTracerProvider, DatadogPropagator) {
+pub fn make_test_tracer(shared_config: Arc<Config>) -> TracingComponents {
     #![allow(missing_docs)]
     make_tracer(
         shared_config,
@@ -999,3 +1180,47 @@ pub fn logs() -> DatadogLogsBuilder {
 }
 
 pub mod build;
+
+#[cfg(test)]
+mod startup_log_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use opentelemetry_sdk::Resource;
+
+    use super::{make_tracer, Config};
+    use crate::{core::startup_log::startup_configuration, TracingComponents};
+
+    #[test]
+    fn test_startup_configuration_resolved_by_make_tracer() {
+        for enabled in [true, false] {
+            let mut builder = Config::builder();
+            builder.set_enabled(enabled);
+            let config = Arc::new(builder.build());
+
+            let TracingComponents {
+                tracer_provider, ..
+            } = make_tracer(
+                config.clone(),
+                opentelemetry_sdk::trace::SdkTracerProvider::builder(),
+                Some(
+                    Resource::builder()
+                        .with_service_name("otel-service")
+                        .build(),
+                ),
+            );
+            let _ = tracer_provider.shutdown_with_timeout(Duration::from_millis(100));
+
+            // The resource's service name is resolved before the banner is logged
+            let startup = startup_configuration(&config);
+            assert_eq!(
+                startup["configuration"]["DD_SERVICE"], "otel-service",
+                "enabled={enabled}"
+            );
+            assert_eq!(
+                startup["configuration"]["DD_TRACE_ENABLED"],
+                enabled.to_string()
+            );
+        }
+    }
+}
