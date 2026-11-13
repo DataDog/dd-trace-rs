@@ -73,6 +73,7 @@ libdd-library-config = { workspace = true, features = ["otel-thread-ctx"] }
 libdd-otel-thread-ctx = { workspace = true, optional = true, features = ["shared-context"] }
 
 [build-dependencies]
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 
 [dev-dependencies]

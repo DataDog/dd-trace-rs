@@ -37,13 +37,26 @@ use graph::{Builds, Graph, Member, Package, Recorded, Target, TargetKind};
 
 fn recorded() -> Recorded {
     #[cfg(dd_build_time_dependencies)]
-    let recorded = include!(concat!(env!("OUT_DIR"), "/build_time_dependencies.rs"));
+    let recorded = parse_recorded(include_bytes!(concat!(
+        env!("OUT_DIR"),
+        "/build_time_dependencies.json"
+    )));
     #[cfg(not(dd_build_time_dependencies))]
     let recorded = Recorded::with_error(match option_env!("DD_BUILD_TIME_DEPENDENCIES_FAILURE") {
         Some(_) => Failure::WriteFailed,
         None => Failure::NotRecorded,
     });
     recorded
+}
+
+/// Parses the graph the build script recorded. It's written by the same build of this crate, so
+/// it should always parse, but a failure is reported rather than panicking.
+#[cfg(any(dd_build_time_dependencies, test))]
+fn parse_recorded(json: &[u8]) -> Recorded {
+    serde_json::from_slice(json).unwrap_or_else(|err| {
+        dd_debug!("Telemetry: invalid dependency graph recorded at build time: {err}");
+        Recorded::with_error(Failure::InvalidGraph)
+    })
 }
 
 /// The running executable's dependencies, and why they couldn't be collected at build time, if
@@ -440,7 +453,7 @@ mod tests {
 
         assert_eq!(names(&graph, Some(&host)), expected);
         assert_eq!(names(&graph, None), expected);
-        assert_eq!(failure(&Recorded::with(graph), Some(&host)), None);
+        assert_eq!(failure(&Recorded::from(graph), Some(&host)), None);
     }
 
     /// `app` doesn't depend on this crate itself, but on the workspace library `lib-a`, which
@@ -513,7 +526,7 @@ mod tests {
             ],
             ..fixture()
         };
-        let recorded = Recorded::with(graph);
+        let recorded = Recorded::from(graph);
         let unresolved = |exe: Executable| {
             (
                 names(&recorded.graph, Some(&exe)),
@@ -557,7 +570,7 @@ mod tests {
             ],
             ..fixture()
         };
-        let recorded = Recorded::with(graph);
+        let recorded = Recorded::from(graph);
         let resolve = |exe: Executable| {
             (
                 names(&recorded.graph, Some(&exe)),
@@ -627,6 +640,39 @@ mod tests {
         let common = set(&["datadog-opentelemetry", "itoa", "serde_derive"]);
         assert_eq!(names(None), common);
         assert_eq!(names(Some("other")), common);
+    }
+
+    #[test]
+    fn test_parse_recorded() {
+        let recorded = Recorded::from(fixture());
+        let json = serde_json::to_vec(&recorded).expect("the graph serializes");
+        assert_eq!(parse_recorded(&json), recorded);
+
+        let failed = Recorded::with_error(Failure::CargoTreeFailed);
+        let json = serde_json::to_vec(&failed).expect("the failure serializes");
+        assert_eq!(parse_recorded(&json), failed);
+
+        assert_eq!(
+            parse_recorded(b"{\"graph\": 42}"),
+            Recorded::with_error(Failure::InvalidGraph)
+        );
+    }
+
+    #[test]
+    fn test_failure_recorded_as_code() {
+        let failures = [
+            Failure::WorkspaceNotFound,
+            Failure::CargoUnavailable,
+            Failure::CargoMetadataFailed,
+            Failure::CargoTreeFailed,
+            Failure::WriteFailed,
+            Failure::NotRecorded,
+            Failure::InvalidGraph,
+        ];
+        for failure in failures {
+            let json = serde_json::to_string(&failure).expect("the failure serializes");
+            assert_eq!(json, format!("\"{}\"", failure.code()));
+        }
     }
 
     #[test]

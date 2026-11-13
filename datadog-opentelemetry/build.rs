@@ -8,8 +8,8 @@
 //! `cargo metadata --no-deps` and resolves the dependency tree of each workspace package
 //! that depends on this crate with `cargo tree`, twice when it has dev-dependencies: as its
 //! binaries are built, and as its tests are. The trees are merged into one graph, written to
-//! `$OUT_DIR/build_time_dependencies.rs` as a Rust expression the tracer includes, and from
-//! which it picks the running executable's dependencies at runtime.
+//! `$OUT_DIR/build_time_dependencies.json`, which the tracer embeds, and from which it picks the
+//! running executable's dependencies at runtime.
 //!
 //! Collection is best-effort: any failure yields an empty list and never fails the build.
 //! Instead, the failure is recorded as a fixed code that the tracer reports as a telemetry
@@ -38,7 +38,7 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
-        tree::{package_names, parse_tree, render, workspace_root, GraphBuilder, Tree},
+        tree::{package_names, parse_tree, workspace_root, GraphBuilder, Tree},
     };
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
@@ -118,7 +118,7 @@ mod dependencies {
 
         let recorded = match collection_enabled().then(collect) {
             None => Recorded::default(),
-            Some(Ok(graph)) => Recorded::with(graph),
+            Some(Ok(graph)) => Recorded::from(graph),
             Some(Err((failure, details))) => {
                 println!(
                     "cargo::warning=dependency collection failed ({}): {details}",
@@ -129,11 +129,16 @@ mod dependencies {
         };
 
         let out_dir = build_env::out_dir().expect("cargo sets OUT_DIR for build scripts");
-        let written = fs::write(
-            Path::new(&out_dir).join("build_time_dependencies.rs"),
-            render(&recorded),
-        );
-        // The tracer only includes the file when this cfg is set, and builds that don't run this
+        let written = serde_json::to_vec(&recorded)
+            .map_err(|err| err.to_string())
+            .and_then(|json| {
+                fs::write(
+                    Path::new(&out_dir).join("build_time_dependencies.json"),
+                    json,
+                )
+                .map_err(|err| err.to_string())
+            });
+        // The tracer only embeds the file when this cfg is set, and builds that don't run this
         // script don't set it, so a missing file never fails the build.
         println!("cargo::rustc-check-cfg=cfg({DD_BUILD_TIME_DEPENDENCIES_CFG})");
         match written {

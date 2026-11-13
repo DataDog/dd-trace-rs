@@ -1,32 +1,31 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! The dependency graph `build.rs` records and the tracer reads at runtime.
+//! The dependency graph `build.rs` records, as JSON, and the tracer reads at runtime.
 //!
-//! The build script compiles this file too (through `#[path]`), so it must only use `std`.
+//! The build script compiles this file too (through `#[path]`), so it must only use `std` and
+//! `serde`, which both depend on.
 
 use std::collections::BTreeMap;
 
-#[derive(Default)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Recorded {
     pub graph: Graph,
     pub failure: Option<Failure>,
 }
 
-impl Recorded {
-    // allow: the tracer only uses it through the recorded graph, which builds that didn't record
-    // one don't include
-    #[allow(dead_code)]
-    pub fn with(graph: Graph) -> Self {
+impl From<Graph> for Recorded {
+    fn from(graph: Graph) -> Self {
         Self {
             graph,
             failure: None,
         }
     }
+}
 
-    // allow: the tracer only uses it when no graph was recorded, and the recorded graph uses it
-    // only when collection failed
-    #[allow(dead_code)]
+impl Recorded {
     pub fn with_error(failure: Failure) -> Self {
         Self {
             graph: Graph::default(),
@@ -35,7 +34,9 @@ impl Recorded {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+// Recorded as its code, so the file shows what the build output and telemetry do.
+#[serde(rename_all = "snake_case")]
 // allow: the build script and the tracer each construct only some of the variants
 #[allow(dead_code)]
 pub enum Failure {
@@ -45,6 +46,7 @@ pub enum Failure {
     CargoTreeFailed,
     WriteFailed,
     NotRecorded,
+    InvalidGraph,
 }
 
 impl Failure {
@@ -56,11 +58,12 @@ impl Failure {
             Self::CargoTreeFailed => "cargo_tree_failed",
             Self::WriteFailed => "write_failed",
             Self::NotRecorded => "not_recorded",
+            Self::InvalidGraph => "invalid_graph",
         }
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Graph {
     pub packages: Vec<Package>,
     pub dependencies: Vec<BTreeMap<usize, Builds>>,
@@ -70,13 +73,13 @@ pub struct Graph {
     pub unresolved: Vec<Target>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Package {
     pub name: String,
     pub version: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Builds {
     Bin,
     Test,
@@ -101,6 +104,7 @@ impl Builds {
     }
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Member {
     pub package: usize,
     /// `None` if the dev-dependencies couldn't be resolved, e.g. weren't downloaded.
@@ -108,12 +112,13 @@ pub struct Member {
     pub targets: Vec<Target>,
 }
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Target {
     pub name: String,
     pub kind: TargetKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TargetKind {
     Bin,
     Example,

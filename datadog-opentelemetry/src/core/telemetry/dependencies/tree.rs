@@ -1,8 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Locates the workspace from the build output directory, turns `cargo tree` output into the
-//! graph `build.rs` records, and renders it as the Rust expression the tracer includes.
+//! Locates the workspace from the build output directory, and turns `cargo tree` output into the
+//! graph `build.rs` records.
 //!
 //! The build script compiles this file too (through `#[path]`), so it must only use `std`. The
 //! tracer only compiles it for its tests.
@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::graph::{Builds, Graph, Package, Recorded, Target};
+use super::graph::{Builds, Graph, Package};
 
 /// The workspace root of a build script whose `OUT_DIR` is `out_dir`: its nearest ancestor
 /// holding a `Cargo.lock`, which cargo only writes at workspace roots, so whatever the layout of
@@ -157,72 +157,10 @@ fn parse_package(text: &str) -> Option<Node> {
     })
 }
 
-pub fn render(Recorded { graph, failure }: &Recorded) -> String {
-    if let Some(failure) = failure {
-        return format!("Recorded::with_error(Failure::{failure:?})\n");
-    }
-    let packages: String = graph
-        .packages
-        .iter()
-        .map(|Package { name, version }| {
-            format!("Package {{ name: {name:?}.into(), version: {version:?}.into() }},\n")
-        })
-        .collect();
-    let dependencies: String = graph
-        .dependencies
-        .iter()
-        .map(|edges| {
-            let edges: String = edges
-                .iter()
-                .map(|(package, builds)| format!("({package}, Builds::{builds:?}), "))
-                .collect();
-            format!("std::collections::BTreeMap::from([{edges}]),\n")
-        })
-        .collect();
-    let members: String = graph
-        .members
-        .iter()
-        .map(|member| {
-            let dev_dependencies = match &member.dev_dependencies {
-                Some(dev) => {
-                    let dev: Vec<String> = dev.iter().map(usize::to_string).collect();
-                    format!("Some(vec![{}])", dev.join(", "))
-                }
-                None => "None".to_owned(),
-            };
-            format!(
-                "Member {{ package: {}, dev_dependencies: {dev_dependencies}, \
-                 targets: vec![{}] }},\n",
-                member.package,
-                render_targets(&member.targets)
-            )
-        })
-        .collect();
-    let unresolved = render_targets(&graph.unresolved);
-    format!(
-        "Recorded::with(Graph {{\n\
-         packages: vec![\n{packages}],\n\
-         dependencies: vec![\n{dependencies}],\n\
-         members: vec![\n{members}],\n\
-         unresolved: vec![{unresolved}],\n\
-         }})\n"
-    )
-}
-
-fn render_targets(targets: &[Target]) -> String {
-    targets
-        .iter()
-        .map(|Target { name, kind }| {
-            format!("Target {{ name: {name:?}.into(), kind: TargetKind::{kind:?} }}, ")
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::super::graph::{Failure, Member, TargetKind};
     use super::*;
 
     fn node(name: &str, version: &str, source: Option<&str>) -> Node {
@@ -469,56 +407,5 @@ mod tests {
             vec![Builds::Both]
         );
         assert_eq!(builder.node(&node("itoa", "1.0.15", None)), 1);
-    }
-
-    #[test]
-    fn test_render() {
-        let mut builder = GraphBuilder::default();
-        let root = builder.add_tree(
-            &tree("app v0.1.0 (/work/app)\n`-- itoa v1.0.15\n"),
-            Builds::Bin,
-        );
-        let graph = &mut builder.graph;
-        graph.members.push(Member {
-            package: root,
-            dev_dependencies: Some(vec![1]),
-            targets: vec![Target {
-                name: "app".to_owned(),
-                kind: TargetKind::Bin,
-            }],
-        });
-        graph.members.push(Member {
-            package: root,
-            dev_dependencies: None,
-            targets: Vec::new(),
-        });
-        graph.unresolved.push(Target {
-            name: "worker".to_owned(),
-            kind: TargetKind::Other,
-        });
-        let recorded = Recorded::with(std::mem::take(&mut builder.graph));
-        assert_eq!(
-            render(&recorded),
-            "Recorded::with(Graph {\n\
-             packages: vec![\n\
-             Package { name: \"app\".into(), version: \"0.1.0\".into() },\n\
-             Package { name: \"itoa\".into(), version: \"1.0.15\".into() },\n\
-             ],\n\
-             dependencies: vec![\n\
-             std::collections::BTreeMap::from([(1, Builds::Bin), ]),\n\
-             std::collections::BTreeMap::from([]),\n\
-             ],\n\
-             members: vec![\n\
-             Member { package: 0, dev_dependencies: Some(vec![1]), \
-             targets: vec![Target { name: \"app\".into(), kind: TargetKind::Bin }, ] },\n\
-             Member { package: 0, dev_dependencies: None, targets: vec![] },\n\
-             ],\n\
-             unresolved: vec![Target { name: \"worker\".into(), kind: TargetKind::Other }, ],\n\
-             })\n"
-        );
-        assert_eq!(
-            render(&Recorded::with_error(Failure::CargoTreeFailed)),
-            "Recorded::with_error(Failure::CargoTreeFailed)\n"
-        );
     }
 }
