@@ -139,8 +139,8 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     fn is_async(&self) -> bool {
-        // WebSocket events are always async
-        true
+        // The connection handshake waits for the $connect integration to finish.
+        self.request_context.route_key != "$connect"
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
@@ -163,14 +163,14 @@ mod tests {
         let expected = APIGatewayWebSocketEvent {
             headers: HashMap::new(),
             request_context: RequestContext {
-                route_key: "hello".to_string(),
+                route_key: "$connect".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
                 time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
                 connection_id: "ahVWscZqmjQCI1w=".to_string(),
-                event_type: "MESSAGE".to_string(),
+                event_type: "CONNECT".to_string(),
                 message_direction: "IN".to_string(),
             },
         };
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_enrich_span() {
-        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let json = read_json_file("api_gateway_websocket_message_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = APIGatewayWebSocketEvent::new(payload)
             .expect("Failed to deserialize APIGatewayWebSocketEvent");
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_get_tags() {
-        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let json = read_json_file("api_gateway_websocket_message_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = APIGatewayWebSocketEvent::new(payload)
             .expect("Failed to deserialize APIGatewayWebSocketEvent");

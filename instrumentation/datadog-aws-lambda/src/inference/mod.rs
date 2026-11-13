@@ -281,6 +281,28 @@ mod tests {
     }
 
     #[test]
+    fn sns_sqs_without_message_attributes_preserves_both_spans() {
+        let inferrer = SpanInferrer::new(InferConfig::default());
+        let original = read_json_file("sns_sqs_event.json");
+        let expected = inferrer.infer_span(&original).unwrap();
+        assert!(expected.wrapped_span.is_some());
+        let mut payload: Value = serde_json::from_str(&original).unwrap();
+        let mut notification: Value =
+            serde_json::from_str(payload["Records"][0]["body"].as_str().unwrap()).unwrap();
+        notification
+            .as_object_mut()
+            .unwrap()
+            .remove("MessageAttributes");
+        payload["Records"][0]["body"] = Value::String(notification.to_string());
+
+        let result = inferrer.infer_span(&payload.to_string()).unwrap();
+
+        assert_eq!(result.span_data, expected.span_data);
+        assert_eq!(result.wrapped_span, expected.wrapped_span);
+        assert!(result.carrier.is_empty());
+    }
+
+    #[test]
     fn wrapped_trigger_tags_exclude_the_wrapped_event_source_arn() {
         for (fixture, wrapped_source) in [
             ("sns_sqs_event.json", "sns"),

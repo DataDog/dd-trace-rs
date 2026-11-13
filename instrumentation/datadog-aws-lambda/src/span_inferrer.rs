@@ -15,7 +15,7 @@ use crate::inference::{InferConfig, InferenceResult, SpanInferrer};
 
 use datadog_opentelemetry::configuration::Config;
 use datadog_opentelemetry::propagation::DatadogPropagator;
-use opentelemetry::trace::{SpanKind, TraceContextExt, Tracer};
+use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;
 use std::collections::HashMap;
@@ -131,6 +131,18 @@ impl InferredSpanScope {
             .as_ref()
             .map(|s| s.cx.clone())
             .unwrap_or_else(|| fallback.clone())
+    }
+
+    /// Propagates handler errors to inferred spans, matching Bottlecap's behavior.
+    pub(crate) fn set_error(&self, err: &impl std::fmt::Display) {
+        let status = Status::error(err.to_string());
+        for cx in self
+            .outer
+            .iter()
+            .chain(self.inner.iter().map(|span| &span.cx))
+        {
+            cx.span().set_status(status.clone());
+        }
     }
 
     /// End all inferred spans with correct timing.
@@ -481,6 +493,16 @@ mod tests {
             ("api_gateway_rest_event.json", "aws.apigateway", false),
             (
                 "api_gateway_websocket_connect_event.json",
+                "aws.apigateway",
+                false,
+            ),
+            (
+                "api_gateway_websocket_message_event.json",
+                "aws.apigateway",
+                true,
+            ),
+            (
+                "api_gateway_websocket_disconnect_event.json",
                 "aws.apigateway",
                 true,
             ),

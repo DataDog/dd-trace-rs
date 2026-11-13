@@ -173,6 +173,7 @@ impl Invocation {
 
         if let Err(ref err) = result {
             self.lambda_span.set_error(err);
+            self.inferred_spans.set_error(err);
         }
         self.finish_spans(invocation_end);
         result
@@ -444,6 +445,38 @@ mod tests {
         let attrs = &spans[0].attributes;
         assert!(find_attr(attrs, "error").is_none());
         assert!(find_attr(attrs, "error.message").is_none());
+    }
+
+    #[test]
+    fn handler_result_sets_status_on_all_inferred_spans() {
+        for (fixture, result, span_count) in [
+            ("api_gateway_http_event.json", Err("boom"), 2),
+            ("sns_sqs_event.json", Err("boom"), 3),
+            ("sns_sqs_event.json", Ok(()), 3),
+        ] {
+            let (provider, exporter) = test_provider();
+            let invocation = Invocation::start(
+                &provider.tracer("test"),
+                &test_propagator(),
+                &crate::span_inferrer::default_inferrer(),
+                &read_json_file(fixture),
+                &test_lambda_cx(),
+                false,
+            );
+
+            assert_eq!(invocation.finish(result), result);
+            provider.force_flush().unwrap();
+
+            let expected_status = match result {
+                Ok(()) => Status::Unset,
+                Err(err) => Status::error(err),
+            };
+            let spans = finished_spans(&exporter);
+            assert_eq!(spans.len(), span_count, "{fixture}");
+            for span in spans {
+                assert_eq!(span.status, expected_status, "{fixture}: {}", span.name);
+            }
+        }
     }
 
     #[test]

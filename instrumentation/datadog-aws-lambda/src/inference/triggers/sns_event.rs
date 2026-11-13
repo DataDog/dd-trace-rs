@@ -61,7 +61,7 @@ pub struct SnsEntity {
     pub r#type: String,
     #[serde(rename = "TopicArn")]
     pub topic_arn: String,
-    #[serde(rename = "MessageAttributes")]
+    #[serde(rename = "MessageAttributes", default)]
     pub message_attributes: HashMap<String, MessageAttribute>,
     #[serde(rename = "Timestamp")]
     pub timestamp: DateTime<Utc>,
