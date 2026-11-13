@@ -26,6 +26,7 @@ use crate::core::configuration::sources::{
 use crate::core::configuration::supported_configurations::SupportedConfigurations;
 use crate::core::log::LevelFilter;
 use crate::core::telemetry;
+use crate::core::telemetry_session::runtime_id;
 use crate::{dd_error, dd_warn};
 
 pub(crate) use crate::core::configuration::sources::ConfigParser;
@@ -1319,6 +1320,9 @@ pub struct Config {
     /// the `DD_HOSTNAME` configuration or [`ConfigBuilder::set_hostname`].
     trace_report_hostname: ConfigItem<bool>,
 
+    /// When true, the library logs its configuration once at startup
+    trace_startup_logs: ConfigItem<bool>,
+
     /// Hostname reported by the library
     hostname: ConfigItem<String>,
 
@@ -1606,6 +1610,7 @@ impl Config {
             trace_writer_max_flush_interval: default.trace_writer_max_flush_interval,
             trace_writer_force_flush_timeout: default.trace_writer_force_flush_timeout,
             trace_report_hostname: cisu.update_bool(default.trace_report_hostname),
+            trace_startup_logs: cisu.update_bool(default.trace_startup_logs),
             hostname: cisu.update_non_empty_string(default.hostname, |s| s),
             #[cfg(feature = "test-utils")]
             wait_agent_info_ready: default.wait_agent_info_ready,
@@ -1675,6 +1680,7 @@ impl Config {
             &self.log_level_filter,
             &self.trace_stats_computation_enabled,
             &self.trace_report_hostname,
+            &self.trace_startup_logs,
             &self.hostname,
             &self.trace_stats_cardinality_limit,
             &self.trace_stats_resource_cardinality_limit,
@@ -1893,6 +1899,11 @@ impl Config {
         *self.trace_report_hostname.value()
     }
 
+    /// Returns whether the library logs its configuration at startup
+    pub fn trace_startup_logs(&self) -> bool {
+        *self.trace_startup_logs.value()
+    }
+
     /// The hostname reported to datadog if [`Config::trace_report_hostname`] is true
     pub fn hostname(&self) -> &str {
         self.hostname.value()
@@ -1958,7 +1969,18 @@ impl Config {
     pub(crate) fn process_runtime_id() -> &'static str {
         // TODO(paullgdc): Regenerate on fork? Would we even support forks?
         static RUNTIME_ID: OnceLock<String> = OnceLock::new();
-        RUNTIME_ID.get_or_init(|| uuid::Uuid::new_v4().to_string())
+        // Reuse the raw id seeded by the load-time lineage constructor (see
+        // `core::telemetry_session`) so the outbound lineage it installs
+        // always matches the id reported here; generate one when it could
+        // not.
+        // PANIC: only if the OS entropy source is unavailable, which is
+        // unlikely.
+        RUNTIME_ID.get_or_init(|| {
+            runtime_id()
+                .expect("operating system entropy source is unavailable")
+                .hyphenated()
+                .to_string()
+        })
     }
 
     /// Returns whether telemetry collection is enabled.
@@ -2394,6 +2416,7 @@ impl std::fmt::Debug for Config {
                 &self.remote_config_poll_interval,
             )
             .field("remote_config_callbacks", &self.remote_config_callbacks)
+            .field("trace_startup_logs", &self.trace_startup_logs)
             .finish()
     }
 }
@@ -2507,6 +2530,7 @@ fn default_config() -> Config {
             false,
         ),
         hostname: ConfigItem::new(SupportedConfigurations::DD_HOSTNAME, String::new()),
+        trace_startup_logs: ConfigItem::new(SupportedConfigurations::DD_TRACE_STARTUP_LOGS, true),
 
         #[cfg(feature = "test-utils")]
         wait_agent_info_ready: false,
@@ -3396,6 +3420,16 @@ impl ConfigBuilder {
         self
     }
 
+    /// Sets whether the library logs its configuration once at startup.
+    ///
+    /// **Default**: `true`
+    ///
+    /// Env variable: `DD_TRACE_STARTUP_LOGS`
+    pub fn set_trace_startup_logs(&mut self, startup_logs: bool) -> &mut Self {
+        self.config.trace_startup_logs.set_code(startup_logs);
+        self
+    }
+
     /// Sets hostname reported to datadog if [`Config::trace_report_hostname`] is true.
     ///
     /// **Default**: if [`Config::trace_report_hostname`] is true, defaults to the system hostname,
@@ -3465,6 +3499,20 @@ mod tests {
     use super::*;
     use crate::core::configuration::sources::{CompositeSource, ConfigSourceOrigin, HashMapSource};
     use crate::propagation::config::{get_extractors, get_injectors};
+
+    #[test]
+    fn test_trace_startup_logs() {
+        assert!(Config::builder().build().trace_startup_logs());
+
+        let mut sources = CompositeSource::new();
+        sources.add_source(HashMapSource::from_iter(
+            [("DD_TRACE_STARTUP_LOGS", "false")],
+            ConfigSourceOrigin::EnvVar,
+        ));
+        assert!(!Config::builder_with_sources(&sources)
+            .build()
+            .trace_startup_logs());
+    }
 
     #[test]
     fn test_config_from_source() {
