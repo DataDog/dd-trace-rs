@@ -33,6 +33,8 @@ pub(crate) mod trace_propagation_style;
 pub mod tracecontext;
 
 pub use crate::core::configuration::TracePropagationStyle;
+#[cfg(any(feature = "test-utils", feature = "_unstable_propagation"))]
+pub use crate::text_map_propagator::DatadogPropagator;
 
 /// Configuration required for trace context propagation.
 ///
@@ -89,6 +91,17 @@ pub struct DatadogCompositePropagator<C: PropagationConfig> {
     extractors: Vec<TracePropagationStyle>,
     injectors: Vec<TracePropagationStyle>,
     fields: Vec<String>,
+}
+
+impl<C: PropagationConfig> Clone for DatadogCompositePropagator<C> {
+    fn clone(&self) -> Self {
+        Self {
+            config: Arc::clone(&self.config),
+            extractors: self.extractors.clone(),
+            injectors: self.injectors.clone(),
+            fields: self.fields.clone(),
+        }
+    }
 }
 
 /// ExtractResult stores the action associated with that given result
@@ -155,24 +168,56 @@ impl<C: PropagationConfig> DatadogCompositePropagator<C> {
 
     /// Extracts trace context from the carrier using the configured extraction styles.
     /// Returns an [`ExtractResult`] indicating how the caller should treat the carrier.
+    #[cfg(any(test, feature = "test-utils", feature = "_unstable_propagation"))]
     pub fn extract(&self, carrier: &dyn Extractor) -> ExtractResult {
+        self.extract_with_fallback(carrier, None)
+    }
+
+    /// Like [`Self::extract`], but uses `fallback` when no configured trace extractor finds a
+    /// context in the carrier.
+    pub(crate) fn extract_with_fallback(
+        &self,
+        carrier: &dyn Extractor,
+        fallback: Option<&SpanContext>,
+    ) -> ExtractResult {
         match self.config.trace_propagation_behavior_extract() {
             TracePropagationBehaviorExtract::Ignore => ExtractResult::Ignore,
-            TracePropagationBehaviorExtract::Continue => match self.extracted_contexts(carrier) {
-                Some(contexts) => {
-                    ExtractResult::Continue(Self::resolve_contexts(contexts, carrier))
-                }
-                None => ExtractResult::Passthrough,
-            },
-            TracePropagationBehaviorExtract::Restart => match self.extracted_contexts(carrier) {
-                Some(contexts) => {
-                    let style = contexts[0].1;
-                    let span_context = Self::resolve_contexts(contexts, carrier);
+            TracePropagationBehaviorExtract::Continue => self
+                .find_context(carrier, fallback)
+                .map_or(ExtractResult::Passthrough, |(_, span_context)| {
+                    ExtractResult::Continue(span_context)
+                }),
+            TracePropagationBehaviorExtract::Restart => self
+                .find_context(carrier, fallback)
+                .map_or(ExtractResult::Passthrough, |(style, span_context)| {
                     ExtractResult::Restart(SpanLink::restart(&span_context, style))
-                }
-                None => ExtractResult::Passthrough,
-            },
+                }),
         }
+    }
+
+    /// Returns the carrier's context and the style that extracted it.
+    ///
+    /// Without one, returns `fallback` as a Datadog context, provided a trace extractor is
+    /// configured: baggage alone never extracts a trace.
+    fn find_context(
+        &self,
+        carrier: &dyn Extractor,
+        fallback: Option<&SpanContext>,
+    ) -> Option<(TracePropagationStyle, SpanContext)> {
+        if let Some(contexts) = self.extracted_contexts(carrier) {
+            let style = contexts[0].1;
+            return Some((style, Self::resolve_contexts(contexts, carrier)));
+        }
+        if !self
+            .extractors
+            .iter()
+            .any(|style| *style != TracePropagationStyle::Baggage)
+        {
+            return None;
+        }
+        fallback
+            .filter(|context| context.trace_id != 0 && context.span_id != 0)
+            .map(|context| (TracePropagationStyle::Datadog, context.clone()))
     }
 
     /// Injects trace context into the carrier using the configured injection styles.
