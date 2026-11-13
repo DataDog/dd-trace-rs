@@ -17,8 +17,6 @@ ALLOWED_CRATES=(
     "datadog-opentelemetry"
 )
 
-LIBDATADOG_OWNERS="github:datadog:libdatadog-owners"
-
 # Semver version with an optional prerelease suffix (e.g. 1.2.3 or 1.2.3-rc.1).
 VERSION_REGEX='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'
 # Full release tag: {crate-name}-v{version}. Used with `[[ ... =~ $TAG_REGEX ]]` (unquoted);
@@ -39,18 +37,16 @@ Options:
     -h, --help              Show this help message
     -d, --dry-run           Perform a dry run without actually publishing
     -c, --check-published   Only check if crates are already published (no build/test/publish)
-    -o, --set-ownership     Set crate ownership after publishing (adds libdatadog-owners team)
-    -t, --token TOKEN       Cargo registry token (defaults to CARGO_REGISTRY_TOKEN env var)
     -v, --verbose           Enable verbose output
 
 Environment Variables:
-    CARGO_REGISTRY_TOKEN    Token for publishing to crates.io (required unless --token provided)
+    CARGO_REGISTRY_TOKEN    Token for publishing to crates.io (required unless --dry-run). In CI this is
+                            a short-lived token obtained through crates.io trusted publishing.
 
 Examples:
     $(basename "$0") libdd-common-v1.0.0 libdd-telemetry-v2.0.0
     $(basename "$0") --dry-run libdd-common-v1.0.0
     $(basename "$0") --check-published libdd-common-v1.0.0 libdd-telemetry-v2.0.0
-    $(basename "$0") --token "my-token" libdd-common-v1.0.0
 
 EOF
 }
@@ -171,23 +167,9 @@ check_already_published() {
     fi
 }
 
-set_ownership() {
-    local crate=$1
-    local username=$2
-    local token=$3
-
-    if ! cargo owner --list "$crate" 2>&1 | grep -q "^$username"; then
-        cargo owner --add "$username" "$crate" --token "$token"
-    else
-        echo "User already owns $crate, skipping..."
-    fi
-}
-
 publish_crate() {
     local tag=$1
     local dry_run=$2
-    local token=$3
-    local set_ownership_flag=$4
     
     echo "Processing tag: $tag" >&2
     
@@ -257,12 +239,13 @@ publish_crate() {
     # Publish to crates.io
     echo "--- Publishing $crate_name v$crate_version to crates.io ---" >&2
     
-    if [ -z "$token" ]; then
+    # cargo reads the token from CARGO_REGISTRY_TOKEN
+    if [ "$dry_run" != "true" ] && [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
         echo -e "${RED}❌ ERROR: CARGO_REGISTRY_TOKEN is not set${NC}" >&2
         return 1
     fi
     
-    local publish_cmd="cargo publish --locked --package $crate_name --token $token --all-features"
+    local publish_cmd="cargo publish --locked --package $crate_name --all-features"
     
     if [ "$dry_run" = "true" ]; then
         publish_cmd="$publish_cmd --dry-run"
@@ -272,13 +255,6 @@ publish_crate() {
     if $publish_cmd; then
         echo -e "${GREEN}✓ Published $crate_name v$crate_version successfully${NC}" >&2
         echo "" >&2
-
-        if [ "$dry_run" != "true" ] && [ "$set_ownership_flag" = "true" ]; then
-            if ! set_ownership "$crate_name" "$LIBDATADOG_OWNERS" "$token"; then
-                echo -e "${RED}❌ Failed to set ${LIBDATADOG_OWNERS} as crate owners${NC}" >&2
-                return 1
-            fi
-        fi
         return 0
     else
         echo -e "${RED}❌ Failed to publish $crate_name v$crate_version${NC}" >&2
@@ -374,8 +350,6 @@ check_publication_status() {
 main() {
     local dry_run=false
     local check_only=false
-    local set_ownership=false
-    local token="${CARGO_REGISTRY_TOKEN:-}"
     local -a tags=()
     
     while [[ $# -gt 0 ]]; do
@@ -391,14 +365,6 @@ main() {
             -c|--check-published)
                 check_only=true
                 shift
-                ;;
-            -o|--set-ownership)
-                set_ownership=true
-                shift
-                ;;
-            -t|--token)
-                token="$2"
-                shift 2
                 ;;
             -v|--verbose)
                 set -x
@@ -438,7 +404,7 @@ main() {
     # Normal publication mode
     local failed=0
     for tag in "${sorted_tags[@]}"; do
-        if ! publish_crate "$tag" "$dry_run" "$token" "$set_ownership"; then
+        if ! publish_crate "$tag" "$dry_run"; then
             ((++failed))
         fi
     done
