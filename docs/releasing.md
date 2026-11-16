@@ -1,6 +1,15 @@
 # Releasing
 
-## Datadog-opentelemetry
+## Datadog-opentelemetry and datadog-telemetry-api
+
+`datadog-opentelemetry` and `datadog-telemetry-api` are always released together, with the same
+version: `datadog-telemetry-api` inherits the workspace version, and `datadog-opentelemetry`
+requires exactly that version (a caret requirement, e.g. `0.6.1`, never `=0.6.1`). A single
+`datadog-opentelemetry-v<version>` tag publishes both crates, `datadog-telemetry-api` first.
+
+Since both crates stay on the same `0.N` line, cargo unifies any mix of their patch versions in a
+customer's dependency graph (e.g. `datadog-opentelemetry` `0.6.1` with `datadog-telemetry-api`
+`0.6.2`, or the opposite) to a single, highest, `datadog-telemetry-api` version.
 
 > [!CAUTION]
 > Before releasing, check the Codex Security Scanning results board and ensure there are no new
@@ -88,11 +97,13 @@ Run it from the tip of the branch you are releasing (usually `main`, up to date 
 It will:
 
 - verify your checkout is in sync with the release branch,
-- bump the workspace crate version,
+- bump the workspace crate version (shared by `datadog-opentelemetry` and
+  `datadog-telemetry-api`, along with the `datadog-opentelemetry` requirement on it),
 - update the version references in `README.md`, `src/lib.rs`, the bug-report issue template, and the
   `datadog-aws-lambda` dependency pin (plus its lockfile),
 - prepend a `CHANGELOG.md` section listing the commits since the previous release tag,
-- verify that the rustdocs build and that the crate publishes cleanly (a `cargo publish` dry-run).
+- verify that the rustdocs build and that both crates publish cleanly (a `cargo publish` dry-run
+  packaging them together).
 
 Then review the working tree — especially the generated changelog, pruning it to user-facing
 changes — and commit.
@@ -130,7 +141,9 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p datadog-opentelemetry --no-dep
 7. Tag the release commit with the version. Set `BUMP_COMMIT_HASH` to the commit being released —
    the version-bump merge commit on `main` for a normal release, or the hotfix merge commit on the
    `hotfix/<major>.<minor>.x` branch for a hotfix (do **not** tag `main` for a hotfix). The tag must
-   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github.
+   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github. It publishes both
+   `datadog-telemetry-api` and `datadog-opentelemetry`; there is no separate tag for
+   `datadog-telemetry-api`.
 
 ```text
 VERSION="0.0.0" # Placeholder, please replace!

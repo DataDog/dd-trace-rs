@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Prepares a datadog-opentelemetry release *proposal* in the working tree:
-#   1. bumps the (workspace-shared) crate version,
+#   1. bumps the (workspace-shared) crate version, shared by datadog-opentelemetry and
+#      datadog-telemetry-api which are always released together, with the same version,
 #   2. updates version references (README, lib.rs, bug report template) via
 #      cargo-release `pre-release-replacements`,
 #   3. prepends a changelog section listing the commits since the last release (via git-cliff),
@@ -22,6 +23,8 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 PACKAGE="datadog-opentelemetry"
+# Released in lockstep with $PACKAGE: same version, and $PACKAGE requires exactly that version.
+API_PACKAGE="datadog-telemetry-api"
 BASE_BRANCH="main"
 DOC_TOOLCHAIN="nightly"
 RUN_PUBLISH_DRY_RUN=true
@@ -250,7 +253,7 @@ mv "$tmp" "$CHANGELOG"
 
 # 3a. Verify rustdocs still build (mirrors docs/releasing.md).
 echo -e "${BLUE}--- Building rustdocs (+$DOC_TOOLCHAIN) ---${NC}"
-RUSTDOCFLAGS="--cfg docsrs" cargo "+$DOC_TOOLCHAIN" doc --package "$PACKAGE" --no-deps
+RUSTDOCFLAGS="--cfg docsrs" cargo "+$DOC_TOOLCHAIN" doc --package "$PACKAGE" --package "$API_PACKAGE" --no-deps
 
 # 3b. Verify every version reference now points at the new version.
 echo -e "${BLUE}--- Verifying version references ---${NC}"
@@ -270,6 +273,8 @@ check "lib.rs install snippet"  "$PACKAGE/src/lib.rs"                "datadog-op
 check "bug report template"     ".github/ISSUE_TEMPLATE/bug_report.yml" "placeholder: \"$NEW_VERSION\""
 check "aws-lambda dep pin"      "$lambda_manifest"                   "datadog-opentelemetry = { version = \"$version_req\""
 check "changelog section"       "$PACKAGE/CHANGELOG.md"              "## $NEW_VERSION"
+check "$API_PACKAGE version"    "$API_PACKAGE/Cargo.toml"            "version.workspace = true"
+check "$API_PACKAGE requirement" "Cargo.toml"                       "$API_PACKAGE = { path = \"$API_PACKAGE\", version = \"$NEW_VERSION\" }"
 if [ "$fail" -ne 0 ]; then
     echo -e "${RED}❌ ERROR: version reference verification failed${NC}" >&2
     exit 1
@@ -278,7 +283,9 @@ fi
 # 3c. Verify the crate still packages/publishes cleanly against the updated lockfile.
 if [ "$RUN_PUBLISH_DRY_RUN" = true ]; then
     echo -e "${BLUE}--- cargo publish --dry-run ---${NC}"
-    cargo publish --package "$PACKAGE" --all-features --locked --dry-run --allow-dirty
+    # Package both crates together, so $PACKAGE is verified against the new, not yet published,
+    # $API_PACKAGE rather than against the one on crates.io.
+    cargo publish --package "$API_PACKAGE" --package "$PACKAGE" --all-features --locked --dry-run --allow-dirty
 fi
 
 echo -e "${GREEN}✓ Release proposal prepared: $PREV_VERSION -> $NEW_VERSION${NC}"
