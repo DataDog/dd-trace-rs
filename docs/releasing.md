@@ -139,8 +139,9 @@ RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p datadog-opentelemetry --no-dep
 7. Tag the release commit with the version. Set `BUMP_COMMIT_HASH` to the commit being released —
    the version-bump merge commit on `main` for a normal release, or the hotfix merge commit on the
    `hotfix/<major>.<minor>.x` branch for a hotfix (do **not** tag `main` for a hotfix). The tag must
-   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github. It publishes both `datadog-telemetry-api` and `datadog-opentelemetry`. There is no separate
-   tag for `datadog-telemetry-api`.
+   follow the format `datadog-opentelemetry-v0.0.0`, then push it to github. It publishes both
+   `datadog-telemetry-api` and `datadog-opentelemetry`. There is no separate tag for
+   `datadog-telemetry-api`.
 
 ```text
 VERSION="0.0.0" # Placeholder, please replace!
