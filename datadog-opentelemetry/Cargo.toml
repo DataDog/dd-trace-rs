@@ -44,6 +44,7 @@ rustc_version_runtime = "0.3.0"
 hyper = { version = "1.6", features = ["client", "http1"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 uuid = { version = "1.11.0", features = ["v4"] }
+getrandom = { version = "0.4", default-features = false }
 arc-swap = "1.7.1"
 ctor = "0.2"
 libc = "0.2"
@@ -73,6 +74,10 @@ hostname = "0.4.2"
 [target.'cfg(target_os="linux")'.dependencies]
 libdd-library-config = { workspace = true, features = ["otel-thread-ctx"] }
 libdd-otel-thread-ctx = { workspace = true, optional = true, features = ["shared-context"] }
+
+[build-dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 assert_unordered = "0.3"
