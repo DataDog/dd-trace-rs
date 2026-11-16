@@ -1,7 +1,6 @@
 name: Publish
 
-# datadog-telemetry-api is released in lockstep with datadog-opentelemetry (same version), so the
-# datadog-opentelemetry tag publishes both crates, datadog-telemetry-api first.
+# datadog-opentelemetry tag publishes both datadog-opentelemtry and datatdog-telemetry-api crates
 on:
   push:
     tags:

@@ -4,8 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Prepares a datadog-opentelemetry release *proposal* in the working tree:
-#   1. bumps the (workspace-shared) crate version, shared by datadog-opentelemetry and
-#      datadog-telemetry-api which are always released together, with the same version,
+#   1. bumps the (workspace-shared) crate version,
 #   2. updates version references (README, lib.rs, bug report template) via
 #      cargo-release `pre-release-replacements`,
 #   3. prepends a changelog section listing the commits since the last release (via git-cliff),
@@ -23,7 +22,6 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 PACKAGE="datadog-opentelemetry"
-# Released in lockstep with $PACKAGE: same version, and $PACKAGE requires exactly that version.
 API_PACKAGE="datadog-telemetry-api"
 BASE_BRANCH="main"
 DOC_TOOLCHAIN="nightly"
@@ -283,8 +281,6 @@ fi
 # 3c. Verify the crate still packages/publishes cleanly against the updated lockfile.
 if [ "$RUN_PUBLISH_DRY_RUN" = true ]; then
     echo -e "${BLUE}--- cargo publish --dry-run ---${NC}"
-    # Package both crates together, so $PACKAGE is verified against the new, not yet published,
-    # $API_PACKAGE rather than against the one on crates.io.
     cargo publish --package "$API_PACKAGE" --package "$PACKAGE" --all-features --locked --dry-run --allow-dirty
 fi
 
