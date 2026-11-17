@@ -205,6 +205,12 @@ version = "0.1.0"
     fn test_lock_dependencies_without_packages() {
         assert_eq!(lock_dependencies(""), None);
         assert_eq!(lock_dependencies("version = 4\n"), None);
+        assert_eq!(lock_dependencies("[[package]]\nname = a\n"), None);
+        // A malformed name fails the whole lockfile, rather than leaving out that package.
+        assert_eq!(
+            lock_dependencies("[[package]]\nname = \"b\"\n\n[[package]]\nname = a\n"),
+            None
+        );
     }
 
     #[test]
