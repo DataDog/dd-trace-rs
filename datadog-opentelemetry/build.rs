@@ -12,6 +12,9 @@
 //! `$OUT_DIR/build_time_dependencies.json`, which the tracer embeds, and from which it picks the
 //! running executable's dependencies at runtime.
 //!
+//! It runs again when `Cargo.lock` or the root manifest changes, or the manifest of a member
+//! that may depend on this crate, through any feature, or that such a member may depend on.
+//!
 //! Collection is best-effort: any failure yields an empty list and never fails the build.
 //! Instead, the failure is recorded as a fixed code that the tracer reports as a telemetry
 //! error at runtime. Setting `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false` at build time skips
@@ -23,6 +26,8 @@ fn main() {
 
 #[path = "src/core/telemetry/dependencies/graph.rs"]
 mod graph;
+#[path = "src/core/telemetry/dependencies/lock.rs"]
+mod lock;
 #[path = "src/core/telemetry/dependencies/tree.rs"]
 mod tree;
 
@@ -41,6 +46,7 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
+        lock::{lock_dependencies, watched_members},
         tree::{package_names, parse_tree, workspace_root, GraphBuilder, Tree},
     };
 
@@ -183,10 +189,7 @@ mod dependencies {
         }
 
         let packages = workspace_packages(&cargo)?;
-        // A package that doesn't depend on this crate yet may come to, so all are watched.
-        for manifest in packages.iter().filter_map(|p| p["manifest_path"].as_str()) {
-            println!("cargo::rerun-if-changed={manifest}");
-        }
+        watch_manifests(&cargo, &packages);
         let dependents = dependents(&cargo);
         let may_depend = |package: &&Value| {
             dependents.as_ref().is_none_or(|names| {
@@ -220,6 +223,26 @@ mod dependencies {
         }
         println!("cargo::warning=no package of the workspace depends on this crate");
         Ok(builder.graph)
+    }
+
+    /// Watches the manifests of the members that can change the recorded graph without
+    /// changing `Cargo.lock`, or of every member if it can't be read.
+    fn watch_manifests(cargo: &Cargo, packages: &[Value]) {
+        let lock = fs::read_to_string(cargo.workspace.join("Cargo.lock"))
+            .ok()
+            .and_then(|lock| lock_dependencies(&lock));
+        let names = packages.iter().filter_map(|p| p["name"].as_str());
+        let watched = lock.map(|lock| watched_members(&lock, names, env!("CARGO_PKG_NAME")));
+        for package in packages {
+            let is_watched = watched.as_ref().is_none_or(|watched| {
+                package["name"]
+                    .as_str()
+                    .is_some_and(|name| watched.contains(name))
+            });
+            if let Some(manifest) = package["manifest_path"].as_str().filter(|_| is_watched) {
+                println!("cargo::rerun-if-changed={manifest}");
+            }
+        }
     }
 
     /// The root of the workspace being built:

@@ -381,10 +381,11 @@ build script at the workspace in `.cargo/config.toml`:
 CARGO_WORKSPACE_DIR = { value = "", relative = true }
 ```
 
-The build script runs again when `Cargo.lock` or a manifest of the workspace is newer than its
-last run, and cargo then recompiles this crate and the crates depending on it. Cargo compares
-modification times, not contents, so a fresh checkout over a cached build recompiles it on every
-build. With [cargo-chef](https://github.com/LukeMathWalker/cargo-chef), the cooked layer already
+The build script runs again when `Cargo.lock`, the root `Cargo.toml` or the manifest of a member
+that may depend on this crate, or that such a member depends on, is newer than its last run, and
+cargo then recompiles this crate and the crates depending on it. Cargo compares modification times,
+not contents, so a fresh checkout over a cached build recompiles it on every build. With
+[cargo-chef](https://github.com/LukeMathWalker/cargo-chef), the cooked layer already
 recorded the dependencies from the same manifests and lockfile, and is cooked again whenever they
 change: the final build can reset their modification times to avoid the recompilation:
 

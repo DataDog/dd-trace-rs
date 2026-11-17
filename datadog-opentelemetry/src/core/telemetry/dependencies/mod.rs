@@ -30,6 +30,8 @@ use crate::dd_debug;
 
 mod graph;
 #[cfg(test)]
+mod lock;
+#[cfg(test)]
 mod tree;
 
 pub(super) use graph::Failure;
