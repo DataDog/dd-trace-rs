@@ -59,7 +59,7 @@ git push -u origin hotfix/0.5.x
 ```
 
 2. Land the fix on that branch (usually a cherry-pick from `main`). If the branch has no
-   `scripts/prepare-release.sh`, backport branch-compatible release automation too: that script,
+   `scripts/prepare-release.sh`, backport the release automation too: that script,
    `cliff.toml`, the `[workspace.metadata.release]` block in `Cargo.toml`, and the
    `[package.metadata.release]` block in `datadog-opentelemetry/Cargo.toml`. Without them the
    workflow fails at the prepare step.
