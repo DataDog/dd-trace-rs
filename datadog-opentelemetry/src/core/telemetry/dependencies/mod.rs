@@ -32,6 +32,8 @@ mod graph;
 #[cfg(test)]
 mod lock;
 #[cfg(test)]
+mod parallel;
+#[cfg(test)]
 mod tree;
 
 pub(super) use graph::Failure;

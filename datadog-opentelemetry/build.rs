@@ -28,6 +28,8 @@ fn main() {
 mod graph;
 #[path = "src/core/telemetry/dependencies/lock.rs"]
 mod lock;
+#[path = "src/core/telemetry/dependencies/parallel.rs"]
+mod parallel;
 #[path = "src/core/telemetry/dependencies/tree.rs"]
 mod tree;
 
@@ -38,8 +40,6 @@ mod dependencies {
         fs,
         path::{Path, PathBuf},
         process::Command,
-        sync::atomic::{AtomicUsize, Ordering},
-        thread,
     };
 
     use serde_json::Value;
@@ -47,6 +47,7 @@ mod dependencies {
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
         lock::{lock_dependencies, watched_members},
+        parallel::parallel_map,
         tree::{package_names, parse_tree, workspace_root, GraphBuilder, Tree},
     };
 
@@ -205,7 +206,9 @@ mod dependencies {
             .collect();
         // Resolving the trees is the slow part, but the graph is built in the members' order,
         // so that the recorded graph doesn't depend on which thread finishes first.
-        let trees = parallel_map(&members, |(id, package)| member_trees(&cargo, id, package));
+        let trees = parallel_map(&members, tree_threads(), |(id, package)| {
+            member_trees(&cargo, id, package)
+        });
         let mut builder = GraphBuilder::default();
         let mut tree_error = None;
         for ((id, package), trees) in members.into_iter().zip(trees) {
@@ -355,44 +358,11 @@ mod dependencies {
         MemberTrees { tree, dev_tree }
     }
 
-    /// Runs `f` on each of `items` on up to `NUM_JOBS` threads, and returns the results in the
-    /// order of `items`.
-    fn parallel_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-        // `cargo tree` holds the package cache lock while resolving, so more threads don't help.
+    /// The threads to resolve the members' trees on: `NUM_JOBS`, at most 4, as `cargo tree`
+    /// holds the package cache lock while resolving, so more threads don't help.
+    fn tree_threads() -> usize {
         const MAX_THREADS: usize = 4;
-        let threads = build_env::num_jobs()
-            .unwrap_or(1)
-            .clamp(1, MAX_THREADS)
-            .min(items.len());
-        let next = AtomicUsize::new(0);
-        let work = || {
-            let mut done = Vec::new();
-            loop {
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some(item) = items.get(index) else {
-                    return done;
-                };
-                done.push((index, f(item)));
-            }
-        };
-        let mut results = thread::scope(|scope| {
-            // Spawning fails when threads are limited, e.g. in a container: the current thread
-            // works too, so that every item is still mapped.
-            let workers: Vec<_> = (1..threads)
-                .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
-                .collect();
-            let mut results = work();
-            for worker in workers {
-                // A panic in `f` would have failed the sequential loop too.
-                let done = worker
-                    .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
-                results.extend(done);
-            }
-            results
-        });
-        results.sort_unstable_by_key(|(index, _)| *index);
-        results.into_iter().map(|(_, result)| result).collect()
+        build_env::num_jobs().unwrap_or(1).clamp(1, MAX_THREADS)
     }
 
     /// Adds the workspace package `id` to the graph if it depends on this crate, normally or
