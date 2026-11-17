@@ -7,7 +7,8 @@
 //! (the application's, not this crate's), lists its binary targets with
 //! `cargo metadata --no-deps` and resolves the dependency tree of each workspace package
 //! that depends on this crate with `cargo tree`, twice when it has dev-dependencies: as its
-//! binaries are built, and as its tests are. The trees are merged into one graph, written to
+//! binaries are built, and as its tests are. The packages are resolved in parallel, and their
+//! trees merged into one graph, written to
 //! `$OUT_DIR/build_time_dependencies.json`, which the tracer embeds, and from which it picks the
 //! running executable's dependencies at runtime.
 //!
@@ -32,6 +33,8 @@ mod dependencies {
         fs,
         path::{Path, PathBuf},
         process::Command,
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
     };
 
     use serde_json::Value;
@@ -68,6 +71,10 @@ mod dependencies {
 
         pub(super) fn target() -> Option<String> {
             env::var("TARGET").ok()
+        }
+
+        pub(super) fn num_jobs() -> Option<usize> {
+            env::var("NUM_JOBS").ok()?.parse().ok()
         }
 
         pub(super) fn collection_enabled() -> Option<String> {
@@ -188,10 +195,18 @@ mod dependencies {
                     .is_some_and(|name| names.contains(name))
             })
         };
+        let members: Vec<(&str, &Value)> = packages
+            .iter()
+            .filter(may_depend)
+            .filter_map(|package| Some((package["id"].as_str()?, package)))
+            .collect();
+        // Resolving the trees is the slow part, but the graph is built in the members' order,
+        // so that the recorded graph doesn't depend on which thread finishes first.
+        let trees = parallel_map(&members, |(id, package)| member_trees(&cargo, id, package));
         let mut builder = GraphBuilder::default();
         let mut tree_error = None;
-        for package in packages.iter().filter(may_depend) {
-            if let Err(err) = add_member(&cargo, &mut builder, package) {
+        for ((id, package), trees) in members.into_iter().zip(trees) {
+            if let Err(err) = add_member(&mut builder, id, package, trees) {
                 builder.graph.unresolved.extend(targets(package));
                 tree_error = Some(err);
             }
@@ -295,34 +310,89 @@ mod dependencies {
             .map(|output| package_names(&output))
     }
 
-    /// Adds a workspace `package` to the graph if it depends on this crate, normally or
-    /// through its dev-dependencies.
-    fn add_member(
-        cargo: &Cargo,
-        builder: &mut GraphBuilder,
-        package: &Value,
-    ) -> Result<(), CargoError> {
-        let Some(id) = package["id"].as_str() else {
-            return Ok(());
-        };
-        let tree = dependency_tree(cargo, id, "normal")
-            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
+    /// The dependency trees of a workspace package: as its binaries are built, and as its tests
+    /// are when it has dev-dependencies.
+    struct MemberTrees {
+        tree: Result<Tree, CargoError>,
+        /// `None` without dev-dependencies, or when `tree` failed.
+        dev_tree: Option<Result<Tree, CargoError>>,
+    }
+
+    /// Resolves the trees of the workspace package `id`. It doesn't print, so that it can run
+    /// on any thread.
+    fn member_trees(cargo: &Cargo, id: &str, package: &Value) -> MemberTrees {
+        let tree = dependency_tree(cargo, id, "normal");
         let has_dev_dependencies = package["dependencies"]
             .as_array()
             .into_iter()
             .flatten()
             .any(|dependency| dependency["kind"] == "dev");
+        let dev_tree = (tree.is_ok() && has_dev_dependencies)
+            .then(|| dependency_tree(cargo, id, "normal,dev"));
+        MemberTrees { tree, dev_tree }
+    }
+
+    /// Runs `f` on each of `items` on up to `NUM_JOBS` threads, and returns the results in the
+    /// order of `items`.
+    fn parallel_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+        // `cargo tree` holds the package cache lock while resolving, so more threads don't help.
+        const MAX_THREADS: usize = 4;
+        let threads = build_env::num_jobs()
+            .unwrap_or(1)
+            .clamp(1, MAX_THREADS)
+            .min(items.len());
+        let next = AtomicUsize::new(0);
+        let work = || {
+            let mut done = Vec::new();
+            loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(item) = items.get(index) else {
+                    return done;
+                };
+                done.push((index, f(item)));
+            }
+        };
+        let mut results = thread::scope(|scope| {
+            // Spawning fails when threads are limited, e.g. in a container: the current thread
+            // works too, so that every item is still mapped.
+            let workers: Vec<_> = (1..threads)
+                .filter_map(|_| thread::Builder::new().spawn_scoped(scope, work).ok())
+                .collect();
+            let mut results = work();
+            for worker in workers {
+                // A panic in `f` would have failed the sequential loop too.
+                let done = worker
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
+                results.extend(done);
+            }
+            results
+        });
+        results.sort_unstable_by_key(|(index, _)| *index);
+        results.into_iter().map(|(_, result)| result).collect()
+    }
+
+    /// Adds the workspace package `id` to the graph if it depends on this crate, normally or
+    /// through its dev-dependencies.
+    fn add_member(
+        builder: &mut GraphBuilder,
+        id: &str,
+        package: &Value,
+        trees: MemberTrees,
+    ) -> Result<(), CargoError> {
+        let tree = trees
+            .tree
+            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
+        let has_dev_dependencies = trees.dev_tree.is_some();
         // Unlike `cargo build`, `cargo test` downloads the dev-dependencies, so they may be
         // missing: their tests then report the normal dependencies only.
-        let dev_tree = has_dev_dependencies
-            .then(|| {
-                dependency_tree(cargo, id, "normal,dev")
-                    .inspect_err(|(_, details)| {
-                        println!("cargo::warning=dev-dependencies of {id} not recorded: {details}")
-                    })
-                    .ok()
-            })
-            .flatten();
+        let dev_tree = trees.dev_tree.and_then(|dev_tree| {
+            dev_tree
+                .inspect_err(|(_, details)| {
+                    println!("cargo::warning=dev-dependencies of {id} not recorded: {details}")
+                })
+                .ok()
+        });
         let this_crate = env!("CARGO_PKG_NAME");
         if !tree.contains(this_crate)
             && !dev_tree
