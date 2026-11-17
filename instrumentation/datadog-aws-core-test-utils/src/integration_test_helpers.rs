@@ -10,6 +10,7 @@ use aws_credential_types::Credentials;
 use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
+use datadog_opentelemetry::opentelemetry;
 use opentelemetry::global;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::{

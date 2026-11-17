@@ -22,6 +22,7 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::orchestrator::Metadata;
 use aws_smithy_types::config_bag::{ConfigBag, Storable, StoreReplace};
 use aws_types::region::Region;
+use datadog_opentelemetry::opentelemetry;
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{global, Context, KeyValue};
 

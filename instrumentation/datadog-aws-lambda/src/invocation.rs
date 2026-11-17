@@ -13,6 +13,7 @@
 
 use crate::attribute_keys as attr;
 
+use datadog_opentelemetry::{opentelemetry, opentelemetry_sdk};
 use opentelemetry::trace::{SpanKind, Status, TraceContextExt, Tracer};
 use opentelemetry::{Context, KeyValue};
 use opentelemetry_sdk::trace::SdkTracer;

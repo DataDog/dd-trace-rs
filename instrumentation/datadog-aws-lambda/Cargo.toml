@@ -17,8 +17,6 @@ datadog-opentelemetry = { workspace = true }
 lambda_runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = ["trace", "metrics", "logs"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
