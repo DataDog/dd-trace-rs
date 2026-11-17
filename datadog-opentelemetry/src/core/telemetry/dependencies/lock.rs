@@ -9,7 +9,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The dependencies of each package of a `Cargo.lock`, by name: packages with the same name are
-/// merged, which only adds edges. `None` if it has no packages.
+/// merged, which only adds edges. `None` if it has no packages, or a line that cargo doesn't
+/// write, e.g. edited by hand, as that could leave out edges.
 ///
 /// The lockfile is resolved with every feature enabled, so it holds the optional dependencies
 /// too: a manifest change that enables a feature leaves it unchanged, and one that adds a
@@ -20,50 +21,68 @@ pub fn lock_dependencies(lock: &str) -> Option<BTreeMap<String, BTreeSet<String>
     let mut in_dependencies = false;
     for line in lock.lines() {
         let line = line.trim();
-        if line.starts_with('[') && !in_dependencies {
-            if let Some((name, dependencies)) = current.take() {
-                merge(&mut packages, name, dependencies);
-            }
-            if line == "[[package]]" {
-                current = Some((String::new(), BTreeSet::new()));
-            }
-            continue;
-        }
-        let Some((name, dependencies)) = current.as_mut() else {
-            continue;
-        };
         if in_dependencies {
             if line == "]" {
                 in_dependencies = false;
-            } else if let Some(dependency) = quoted(line.trim_end_matches(',')) {
-                // `name`, `name version` or `name version (source)`
+            } else {
+                // One `"name"`, `"name version"` or `"name version (source)"` per line
+                let dependency = quoted(line.strip_suffix(',').unwrap_or(line))?;
                 let name = dependency.split(' ').next().unwrap_or(dependency);
+                let (_, dependencies) = current.as_mut()?;
                 dependencies.insert(name.to_owned());
             }
-        } else if let Some(value) = line.strip_prefix("name = ") {
+            continue;
+        }
+        if line.starts_with('[') {
+            if let Some((name, dependencies)) = current.take() {
+                merge(&mut packages, name, dependencies)?;
+            }
+            match line {
+                "[[package]]" => current = Some((String::new(), BTreeSet::new())),
+                // The root package of a version 1 lockfile, which isn't read.
+                "[root]" => return None,
+                _ => {}
+            }
+            continue;
+        }
+        let Some((name, _)) = current.as_mut() else {
+            continue;
+        };
+        if let Some(value) = line.strip_prefix("name = ") {
             *name = quoted(value)?.to_owned();
         } else if line == "dependencies = [" {
             in_dependencies = true;
+        } else if line.starts_with("name") || line.starts_with("dependencies") {
+            return None;
         }
     }
-    if let Some((name, dependencies)) = current {
-        merge(&mut packages, name, dependencies);
+    if in_dependencies {
+        return None;
     }
-    packages.remove("");
+    if let Some((name, dependencies)) = current {
+        merge(&mut packages, name, dependencies)?;
+    }
     (!packages.is_empty()).then_some(packages)
 }
 
 /// Adds the `dependencies` of a package entry to those of the earlier entries with its name.
+/// `None` if the entry has no name.
 fn merge(
     packages: &mut BTreeMap<String, BTreeSet<String>>,
     name: String,
     dependencies: BTreeSet<String>,
-) {
+) -> Option<()> {
+    if name.is_empty() {
+        return None;
+    }
     packages.entry(name).or_default().extend(dependencies);
+    Some(())
 }
 
+/// The contents of a string without quotes inside, which cargo doesn't write.
 fn quoted(value: &str) -> Option<&str> {
-    value.strip_prefix('"')?.strip_suffix('"')
+    let value = value.strip_prefix('"')?.strip_suffix('"')?;
+    (!value.contains('"')).then_some(value)
 }
 
 /// The `members` whose manifests can change the graph recorded for `this_crate`, without
@@ -211,6 +230,41 @@ version = "0.1.0"
             lock_dependencies("[[package]]\nname = \"b\"\n\n[[package]]\nname = a\n"),
             None
         );
+    }
+
+    #[test]
+    fn test_lock_dependencies_not_written_by_cargo() {
+        // After a valid package, so that leaving out the edges of the next one would still give
+        // a map.
+        let valid = "[[package]]\nname = \"b\"\nversion = \"0.1.0\"\n\n";
+        assert!(lock_dependencies(valid).is_some());
+        let packages = [
+            // inline array
+            "[[package]]\nname = \"a\"\ndependencies = [\"b\", \"c\"]\n",
+            // comment after the opener
+            "[[package]]\nname = \"a\"\ndependencies = [ # c\n \"b\",\n]\n",
+            // two dependencies on a line
+            "[[package]]\nname = \"a\"\ndependencies = [\n \"b\", \"c\",\n]\n",
+            // comment in the array
+            "[[package]]\nname = \"a\"\ndependencies = [\n # c\n \"b\",\n]\n",
+            // unterminated array
+            "[[package]]\nname = \"a\"\ndependencies = [\n \"b\",\n",
+            // unquoted name
+            "[[package]]\nname = a\n",
+            // name without spaces
+            "[[package]]\nname=\"a\"\n",
+            // no name
+            "[[package]]\nversion = \"0.1.0\"\n",
+            // version 1 root package
+            "[root]\nname = \"a\"\ndependencies = [\n \"b\",\n]\n",
+        ];
+        for package in packages {
+            assert_eq!(
+                lock_dependencies(&format!("{valid}{package}")),
+                None,
+                "{package}"
+            );
+        }
     }
 
     #[test]
