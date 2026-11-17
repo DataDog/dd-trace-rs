@@ -381,6 +381,23 @@ build script at the workspace in `.cargo/config.toml`:
 CARGO_WORKSPACE_DIR = { value = "", relative = true }
 ```
 
+The build script runs again when `Cargo.lock` or a manifest of the workspace is newer than its
+last run, and cargo then recompiles this crate and the crates depending on it. Cargo compares
+modification times, not contents, so a fresh checkout over a cached build recompiles it on every
+build. With [cargo-chef](https://github.com/LukeMathWalker/cargo-chef), the cooked layer already
+recorded the dependencies from the same manifests and lockfile, and is cooked again whenever they
+change: the final build can reset their modification times to avoid the recompilation:
+
+```dockerfile
+COPY . .
+RUN find . -path ./target -prune -o \( -name Cargo.toml -o -name Cargo.lock \) \
+        -exec touch -d @0 {} + \
+    && cargo build --release
+```
+
+Don't do this without cargo-chef: when the target directory is kept between builds, it would
+stop the build script from recording changed dependencies.
+
 To disable it, set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false`:
 
 * while building, to skip collection, for instance for every build of a repository in its
