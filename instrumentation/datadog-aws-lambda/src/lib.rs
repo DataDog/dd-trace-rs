@@ -7,6 +7,36 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 #![cfg_attr(not(test), deny(clippy::expect_used))]
 
+//! Datadog tracing for AWS Lambda handlers using `lambda_runtime`.
+//!
+//! # What it instruments
+//!
+//! [`TracedService`] wraps a Lambda Tower service and creates one `aws.lambda` server span for each
+//! Lambda invocation. The invocation span is a child of the current OpenTelemetry context and is
+//! made active while the user handler future runs, so spans created by the handler and supported
+//! AWS SDK client calls are parented to the invocation.
+//!
+//! The invocation span records Lambda metadata such as function name, function ARN, version,
+//! request ID, cold-start status, `language = rust`, `_dd.origin = lambda`, and `span.type =
+//! serverless`. If the handler returns an error or the event payload cannot be deserialized, the
+//! span is marked as errored before the original Lambda result is returned.
+//!
+//! The wrapper owns the Datadog OpenTelemetry tracer provider lifecycle and forces Lambda-safe
+//! defaults: client-side trace stats computation is disabled and trace writes are synchronous to
+//! reduce span loss when the runtime freezes after a handler returns.
+//!
+//! # Usage
+//!
+//! ```rust,no_run
+//! use datadog_aws_lambda::TracedService;
+//!
+//! # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
+//! #     Ok(())
+//! # }
+//! # async fn example() -> Result<(), lambda_runtime::Error> {
+//! lambda_runtime::run(TracedService::new(lambda_runtime::service_fn(my_handler))).await
+//! # }
+//! ```
 mod attribute_keys;
 mod invocation;
 
@@ -65,17 +95,26 @@ impl From<serde_json::Error> for TracedServiceError {
 
 /// A Lambda service wrapped with Datadog tracing.
 ///
-/// Owns the [`SdkTracerProvider`] lifecycle,
+/// Owns the [`SdkTracerProvider`](opentelemetry_sdk::trace::SdkTracerProvider) lifecycle,
 /// applies Lambda-appropriate defaults, and implements [`Service`] so it composes
 /// naturally with tower middleware.
 ///
 /// # Examples
 ///
-/// ```ignore
+/// ```rust,no_run
+/// use datadog_aws_lambda::TracedService;
+/// use datadog_opentelemetry::configuration::Config;
+/// use lambda_runtime::tower;
+///
+/// # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
+/// #     Ok(())
+/// # }
+/// # async fn example() -> Result<(), lambda_runtime::Error> {
+/// # let some_middleware = tower::layer::layer_fn(|service| service);
 /// // Zero-config
 /// lambda_runtime::run(TracedService::new(
 ///     lambda_runtime::service_fn(my_handler),
-/// )).await
+/// )).await?;
 ///
 /// // Set service/env/version
 /// let mut config = Config::builder();
@@ -86,7 +125,7 @@ impl From<serde_json::Error> for TracedServiceError {
 /// lambda_runtime::run(TracedService::with_config(
 ///     lambda_runtime::service_fn(my_handler),
 ///     config,
-/// )).await
+/// )).await?;
 ///
 /// // With tower middleware
 /// lambda_runtime::run(
@@ -96,6 +135,7 @@ impl From<serde_json::Error> for TracedServiceError {
 ///             .service(lambda_runtime::service_fn(my_handler)),
 ///     )
 /// ).await
+/// # }
 /// ```
 pub struct TracedService<S, E, R> {
     inner: S,

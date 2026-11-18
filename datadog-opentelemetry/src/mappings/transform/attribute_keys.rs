@@ -53,6 +53,7 @@ attribute_key! {
     "datadog.service" => DATADOG_SERVICE,
     "datadog.name" => DATADOG_NAME,
     "datadog.env" => DATADOG_ENV,
+    "env" => ENV,
     "datadog.resource" => DATADOG_RESOURCE,
     "datadog.type" => DATADOG_TYPE,
     "datadog.version" => DATADOG_VERSION,
@@ -111,6 +112,8 @@ impl AttributeKey {
 }
 
 #[derive(Debug)]
+/// Cached positions of the well-known [`AttributeKey`]s in an OpenTelemetry span's
+/// attribute list, to skip linear key lookups during conversion.
 pub struct AttributeIndices([u32; NUMBER_OF_ATTRIBUTES]);
 
 impl Default for AttributeIndices {

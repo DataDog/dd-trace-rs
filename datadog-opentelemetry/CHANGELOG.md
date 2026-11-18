@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0 (Oct 29, 2026)
+
+- Apply tracing_enabled from APM_TRACING in https://github.com/DataDog/dd-trace-rs/pull/340
+- Flatten array span attributes to key.N in https://github.com/DataDog/dd-trace-rs/pull/338
+- Raise MSRV to 1.91.1 in https://github.com/DataDog/dd-trace-rs/pull/349
+
+## 0.5.3 (Oct 26, 2026)
+
+- Handle repeated traceparent and tracestate headers in https://github.com/DataDog/dd-trace-rs/pull/325
+- Support DD_TRACE_HTTP_{SERVER,CLIENT}_ERROR_STATUSES in https://github.com/DataDog/dd-trace-rs/pull/328
+- Set _dd.base_service on spans with an overridden service in https://github.com/DataDog/dd-trace-rs/pull/331
+- Parse ipv6 agent host values correctly in https://github.com/DataDog/dd-trace-rs/pull/321
+- Support space-separated DD_TAGS and tags without a value in https://github.com/DataDog/dd-trace-rs/pull/322
+- Otel thread-level context sharing in https://github.com/DataDog/dd-trace-rs/pull/269
+- Enable hostname reporting on trace exporter in https://github.com/DataDog/dd-trace-rs/pull/308
+- Add stats cardinality limits configurations in https://github.com/DataDog/dd-trace-rs/pull/309
+- Route the tracer's own diagnostics through tracing in https://github.com/DataDog/dd-trace-rs/pull/281
+- Accept 0/1 as boolean flags in configuration in https://github.com/DataDog/dd-trace-rs/pull/305
+
+## 0.5.2 (Aug 28, 2026)
+
+- Preserve unchanged `ot` member order in W3C tracestate in https://github.com/DataDog/dd-trace-rs/pull/296
+- Emit and forward OTel consistent-probability ot tracestate member in https://github.com/DataDog/dd-trace-rs/pull/283
+- Shutdown with a deadline in https://github.com/DataDog/dd-trace-rs/pull/276
+- Run remote config on the trace exporter's shared runtime in https://github.com/DataDog/dd-trace-rs/pull/275
+- Drain pending spans in force_flush [APMSP-3915] in https://github.com/DataDog/dd-trace-rs/pull/287
+- Emit expected rate-limiter metric `_dd.limit_psr` in https://github.com/DataDog/dd-trace-rs/pull/288
+
 ## 0.5.1 (Aug 13, 2026)
 
 - Only error when no extractor recovers a real trace [SVLS-9550] in https://github.com/DataDog/dd-trace-rs/pull/284

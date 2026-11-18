@@ -4,9 +4,11 @@
 use std::borrow::Cow;
 use std::sync::RwLock;
 
+use bumpalo::Bump;
+
 use crate::mappings::{
-    get_dd_key_for_otlp_attribute, get_otel_env, get_otel_operation_name_v2, get_otel_resource_v2,
-    get_otel_service, get_otel_status_code, AttributeIndices, AttributeKey, OtelSpan,
+    get_dd_env, get_dd_http_status_code, get_dd_key_for_otlp_attribute, get_otel_operation_name_v2,
+    get_otel_resource_v2, get_otel_service, AttributeIndices, AttributeKey, OtelSpan,
 };
 use crate::sampling::{AttributeLike, SamplingData, SpanProperties, TraceIdLike, ValueLike};
 use opentelemetry::{Key, KeyValue};
@@ -86,7 +88,8 @@ pub struct PreSampledSpan<'a> {
     pub span_kind: opentelemetry::trace::SpanKind,
     pub attributes: &'a [opentelemetry::KeyValue],
     pub resource: &'a opentelemetry_sdk::Resource,
-    pub span_attrs: AttributeIndices,
+    pub alloc: &'a Bump,
+    span_attrs: AttributeIndices,
 }
 
 impl<'a> PreSampledSpan<'a> {
@@ -95,18 +98,24 @@ impl<'a> PreSampledSpan<'a> {
         span_kind: opentelemetry::trace::SpanKind,
         attributes: &'a [opentelemetry::KeyValue],
         resource: &'a opentelemetry_sdk::Resource,
+        alloc: &'a Bump,
     ) -> Self {
         Self {
             name,
             span_kind,
             attributes,
             resource,
+            alloc,
             span_attrs: AttributeIndices::from_attribute_slice(attributes),
         }
     }
 }
 
 impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
+    fn alloc(&self) -> &'a Bump {
+        self.alloc
+    }
+
     fn name(&self) -> &'a str {
         self.name
     }
@@ -119,10 +128,12 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
         self.span_attrs.get(attr_key).is_some()
     }
 
-    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<Cow<'static, str>> {
+    fn get_attr_str_opt(&self, attr_key: AttributeKey) -> Option<&'a str> {
         let idx = self.span_attrs.get(attr_key)?;
         let kv = self.attributes.get(idx)?;
-        Some(Cow::Owned(kv.value.to_string()))
+        Some(crate::mappings::otel_value_string_repr(
+            &kv.value, self.alloc,
+        ))
     }
 
     fn get_attr_num<T: TryFrom<i64>>(&self, attr_key: AttributeKey) -> Option<T> {
@@ -136,16 +147,16 @@ impl<'a> OtelSpan<'a> for PreSampledSpan<'a> {
         T::try_from(i).ok()
     }
 
-    fn attr_len(&self) -> usize {
-        self.attributes.len()
+    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<&'a opentelemetry::Value> {
+        self.resource.get_ref(&Key::from_static_str(attr_key.key()))
     }
 
-    fn get_res_attribute_opt(&self, attr_key: AttributeKey) -> Option<opentelemetry::Value> {
-        self.resource.get(&Key::from_static_str(attr_key.key()))
+    fn span_attributes(&self) -> &'a [KeyValue] {
+        self.attributes
     }
 
-    fn res_len(&self) -> usize {
-        self.resource.len()
+    fn otel_resource(&self) -> &'a opentelemetry_sdk::Resource {
+        self.resource
     }
 }
 
@@ -156,23 +167,28 @@ impl SpanProperties for PreSampledSpan<'_> {
         Self: 'a;
 
     fn operation_name(&self) -> Cow<'_, str> {
-        get_otel_operation_name_v2(self)
+        Cow::Borrowed(get_otel_operation_name_v2(self))
     }
 
     fn service(&self) -> Cow<'_, str> {
-        get_otel_service(self)
+        Cow::Borrowed(get_otel_service(self))
     }
 
+    /// The exported `env` tag, see `get_dd_env`. An `env` attribute on the instrumentation scope
+    /// changes the exported value, but the sampler doesn't get the scope.
     fn env(&self) -> Cow<'_, str> {
-        get_otel_env(self)
+        Cow::Borrowed(get_dd_env(self).unwrap_or(""))
     }
 
     fn resource(&self) -> Cow<'_, str> {
-        get_otel_resource_v2(self)
+        Cow::Borrowed(get_otel_resource_v2(self))
     }
 
+    /// The exported `http.status_code` tag, see `get_dd_http_status_code`, if it is a whole number.
+    /// An `http.status_code` attribute on the instrumentation scope changes the exported value,
+    /// but the sampler doesn't get the scope.
     fn status_code(&self) -> Option<u32> {
-        get_otel_status_code(self)
+        get_dd_http_status_code(self).and_then(|status_code| status_code.parse().ok())
     }
 
     fn attributes(&self) -> impl Iterator<Item = &OtelKeyValue> + '_ {
@@ -253,11 +269,13 @@ impl SamplingData for OtelSamplingData<'_> {
         F: for<'b> Fn(&S, &PreSampledSpan<'b>) -> T,
     {
         let resource_guard = self.resource.read().unwrap();
+        let alloc = Bump::with_capacity(0);
         let span = PreSampledSpan::new(
             self.name,
             self.span_kind.clone(),
             self.attributes,
             &resource_guard,
+            &alloc,
         );
         f(s, &span)
     }
@@ -321,13 +339,56 @@ mod tests {
     }
 
     #[test]
+    fn test_datadog_resource_attribute_overrides_resource_name() {
+        // Same precedence as the exported span, so resource sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.resource", "GET"),
+            KeyValue::new("resource.name", "GET /users/{id}"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("request", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.resource(), "GET");
+    }
+
+    #[test]
+    fn test_datadog_service_attribute_overrides_service_name() {
+        // Same precedence as the exported span, so service sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.service", "sqlite"),
+            KeyValue::new("service.name", "otel-service"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("query", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.service(), "sqlite");
+    }
+
+    #[test]
+    fn test_datadog_name_attribute_overrides_operation_name() {
+        // Same precedence as the exported span, so name sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.name", "sqlite.query"),
+            KeyValue::new("operation.name", "db.query"),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("query", SpanKind::Client, &attrs, &resource, &alloc);
+
+        assert_eq!(span.operation_name(), "sqlite.query");
+    }
+
+    #[test]
     fn test_operation_name_http_client() {
         let attrs = vec![KeyValue::new(
             Key::from_static_str(HTTP_REQUEST_METHOD),
             Value::String("GET".into()),
         )];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Client, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Client, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "http.client.request");
@@ -344,7 +405,8 @@ mod tests {
             Value::String("POST".into()),
         )];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Server, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "http.server.request");
@@ -360,7 +422,8 @@ mod tests {
             Value::String("postgresql".into()),
         )];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Client, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Client, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "postgresql.query");
@@ -382,7 +445,8 @@ mod tests {
             ),
         ];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Consumer, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Consumer, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "kafka.process");
@@ -398,7 +462,8 @@ mod tests {
             Value::String("http".into()),
         )];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Server, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "http.server.request");
@@ -411,7 +476,8 @@ mod tests {
     fn test_operation_name_internal_fallback() {
         let attrs = vec![KeyValue::new("custom.tag", "value")];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("", SpanKind::Internal, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("", SpanKind::Internal, &attrs, &resource, &alloc);
 
         let op_name = span.operation_name();
         assert_eq!(op_name, "internal");
@@ -428,7 +494,8 @@ mod tests {
             .with_attributes(vec![KeyValue::new(SERVICE_NAME, "my-service")])
             .build();
         let attrs = vec![];
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.service(), "my-service");
     }
@@ -437,16 +504,464 @@ mod tests {
     fn test_env_from_attributes() {
         let attrs = vec![KeyValue::new("datadog.env", "production")];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.env(), "production");
+    }
+
+    /// The value of the `key` tag on the exported span
+    fn exported_tag(
+        attrs: &[KeyValue],
+        resource: &opentelemetry_sdk::Resource,
+        key: &str,
+    ) -> Option<String> {
+        use crate::mappings::{otel_span_to_dd_span, DdSpan, SdkSpan, SpanStr};
+
+        let span_context = opentelemetry::trace::SpanContext::empty_context();
+        let status = opentelemetry::trace::Status::Unset;
+        let scope = opentelemetry::InstrumentationScope::default();
+        let sdk_span = SdkSpan {
+            span_context: &span_context,
+            parent_span_id: opentelemetry::trace::SpanId::INVALID,
+            span_kind: SpanKind::Server,
+            name: "test",
+            start_time: std::time::SystemTime::UNIX_EPOCH,
+            end_time: std::time::SystemTime::UNIX_EPOCH,
+            attributes: attrs,
+            dropped_attributes_count: 0,
+            events: &[],
+            dropped_event_count: 0,
+            links: &[],
+            dropped_links_count: 0,
+            status: &status,
+            instrumentation_scope: &scope,
+        };
+        let alloc = Bump::new();
+        let mut dd_span = DdSpan::default();
+        otel_span_to_dd_span(&mut dd_span, &sdk_span, resource, &alloc);
+        dd_span
+            .meta
+            .get(&SpanStr::from_str(key))
+            .map(|v| v.as_str().to_owned())
+    }
+
+    /// Asserts that the sampler resolves `env`, and the exporter exports the `env` tag, as `env`
+    fn assert_env(attrs: Vec<KeyValue>, resource_attrs: Vec<KeyValue>, env: &str) {
+        let resource = opentelemetry_sdk::Resource::builder_empty()
+            .with_attributes(resource_attrs.iter().cloned())
+            .build();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+        assert_eq!(span.env(), env, "sampler: {attrs:?} {resource_attrs:?}");
+
+        let exported_env = exported_tag(&attrs, &resource, "env").unwrap_or_default();
+        assert_eq!(exported_env, env, "exporter: {attrs:?} {resource_attrs:?}");
+    }
+
+    // 1. `datadog.env` on the span
+
+    #[test]
+    fn test_env_span_datadog_env_overrides_resource_env() {
+        assert_env(
+            vec![KeyValue::new("datadog.env", "dev")],
+            vec![
+                KeyValue::new("env", "staging"),
+                KeyValue::new("datadog.env", "prod"),
+            ],
+            "dev",
+        );
+    }
+
+    #[test]
+    fn test_env_last_span_datadog_env() {
+        assert_env(
+            vec![
+                KeyValue::new("datadog.env", "dev"),
+                KeyValue::new("datadog.env", "qa"),
+            ],
+            vec![],
+            "qa",
+        );
+    }
+
+    #[test]
+    fn test_env_numeric_span_datadog_env() {
+        assert_env(vec![KeyValue::new("datadog.env", 123)], vec![], "123");
+    }
+
+    #[test]
+    fn test_env_empty_span_datadog_env_is_skipped() {
+        assert_env(
+            vec![
+                KeyValue::new("datadog.env", ""),
+                KeyValue::new("env", "dev"),
+            ],
+            vec![],
+            "dev",
+        );
+    }
+
+    // 2. `env` on the resource
+
+    #[test]
+    fn test_env_resource_env() {
+        assert_env(vec![], vec![KeyValue::new("env", "staging")], "staging");
+    }
+
+    #[test]
+    fn test_env_resource_env_overrides_span_env() {
+        assert_env(
+            vec![KeyValue::new("env", "dev")],
+            vec![KeyValue::new("env", "staging")],
+            "staging",
+        );
+    }
+
+    #[test]
+    fn test_env_empty_resource_env_is_skipped() {
+        assert_env(
+            vec![KeyValue::new("env", "dev")],
+            vec![KeyValue::new("env", "")],
+            "dev",
+        );
+    }
+
+    // 3. The first non-empty string or bool `env` on the span
+
+    #[test]
+    fn test_env_span_env() {
+        assert_env(vec![KeyValue::new("env", "dev")], vec![], "dev");
+    }
+
+    #[test]
+    fn test_env_span_env_overrides_resource_datadog_env() {
+        assert_env(
+            vec![KeyValue::new("env", "dev")],
+            vec![KeyValue::new("datadog.env", "prod")],
+            "dev",
+        );
+    }
+
+    #[test]
+    fn test_env_bool_span_env() {
+        assert_env(vec![KeyValue::new("env", true)], vec![], "true");
+    }
+
+    #[test]
+    fn test_env_first_span_env() {
+        assert_env(
+            vec![KeyValue::new("env", "dev"), KeyValue::new("env", "qa")],
+            vec![],
+            "dev",
+        );
+    }
+
+    #[test]
+    fn test_env_first_non_empty_span_env() {
+        assert_env(
+            vec![KeyValue::new("env", ""), KeyValue::new("env", "qa")],
+            vec![],
+            "qa",
+        );
+    }
+
+    #[test]
+    fn test_env_i64_span_env_is_skipped() {
+        assert_env(
+            vec![KeyValue::new("env", 123)],
+            vec![KeyValue::new("datadog.env", "prod")],
+            "prod",
+        );
+    }
+
+    #[test]
+    fn test_env_f64_span_env_is_skipped() {
+        assert_env(
+            vec![KeyValue::new("env", 1.5)],
+            vec![KeyValue::new("datadog.env", "prod")],
+            "prod",
+        );
+    }
+
+    #[test]
+    fn test_env_array_span_env_is_skipped() {
+        assert_env(
+            vec![KeyValue::new(
+                "env",
+                Value::Array(opentelemetry::Array::String(vec!["dev".into()])),
+            )],
+            vec![KeyValue::new("datadog.env", "prod")],
+            "prod",
+        );
+    }
+
+    #[test]
+    fn test_env_skipped_span_env_before_string_span_env() {
+        assert_env(
+            vec![KeyValue::new("env", 123), KeyValue::new("env", "dev")],
+            vec![],
+            "dev",
+        );
+    }
+
+    // 4. An empty `env` hides the later attributes
+
+    #[test]
+    fn test_env_empty_resource_env_hides_fallback() {
+        assert_env(
+            vec![],
+            vec![
+                KeyValue::new("env", ""),
+                KeyValue::new("datadog.env", "prod"),
+            ],
+            "",
+        );
+    }
+
+    #[test]
+    fn test_env_empty_span_env_hides_fallback() {
+        assert_env(
+            vec![KeyValue::new("env", "")],
+            vec![KeyValue::new("datadog.env", "prod")],
+            "",
+        );
+    }
+
+    // 5. `datadog.env`, then `deployment.environment.name`, then `deployment.environment` on the
+    // resource
+
+    #[test]
+    fn test_env_resource_datadog_env() {
+        assert_env(vec![], vec![KeyValue::new("datadog.env", "prod")], "prod");
+    }
+
+    #[test]
+    fn test_env_resource_datadog_env_overrides_deployment_environment() {
+        assert_env(
+            vec![],
+            vec![
+                KeyValue::new("datadog.env", "prod"),
+                KeyValue::new("deployment.environment.name", "qa"),
+            ],
+            "prod",
+        );
+    }
+
+    #[test]
+    fn test_env_empty_resource_datadog_env_is_skipped() {
+        assert_env(
+            vec![],
+            vec![
+                KeyValue::new("datadog.env", ""),
+                KeyValue::new("deployment.environment.name", "qa"),
+            ],
+            "qa",
+        );
+    }
+
+    #[test]
+    fn test_env_empty_span_datadog_env_falls_back() {
+        assert_env(
+            vec![KeyValue::new("datadog.env", "")],
+            vec![KeyValue::new("deployment.environment.name", "qa")],
+            "qa",
+        );
+    }
+
+    #[test]
+    fn test_env_deployment_environment_name_overrides_deployment_environment() {
+        assert_env(
+            vec![],
+            vec![
+                KeyValue::new("deployment.environment.name", "qa"),
+                KeyValue::new("deployment.environment", "dev"),
+            ],
+            "qa",
+        );
+    }
+
+    #[test]
+    fn test_env_deployment_environment() {
+        assert_env(
+            vec![],
+            vec![KeyValue::new("deployment.environment", "dev")],
+            "dev",
+        );
+    }
+
+    /// Asserts the sampler's status code, and the exported `http.status_code` tag
+    fn assert_status_code(attrs: Vec<KeyValue>, status_code: Option<u32>, exported: Option<&str>) {
+        assert_resource_status_code(attrs, vec![], status_code, exported);
+    }
+
+    fn assert_resource_status_code(
+        attrs: Vec<KeyValue>,
+        resource_attrs: Vec<KeyValue>,
+        status_code: Option<u32>,
+        exported: Option<&str>,
+    ) {
+        let resource = opentelemetry_sdk::Resource::builder_empty()
+            .with_attributes(resource_attrs.iter().cloned())
+            .build();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+        assert_eq!(
+            span.status_code(),
+            status_code,
+            "sampler: {attrs:?} {resource_attrs:?}"
+        );
+
+        let exported_status_code = exported_tag(&attrs, &resource, "http.status_code");
+        assert_eq!(
+            exported_status_code.as_deref(),
+            exported,
+            "exporter: {attrs:?} {resource_attrs:?}"
+        );
+    }
+
+    #[test]
+    fn test_status_code_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("http.response.status_code", 200)],
+            Some(200),
+            Some("200"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_none() {
+        assert_status_code(vec![], None, None);
+    }
+
+    #[test]
+    fn test_status_code_numeric_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 503),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", "503"),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_datadog_status_code_without_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("datadog.http_status_code", "503")],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_last_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 500),
+                KeyValue::new("datadog.http_status_code", "503"),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_empty_datadog_status_code_is_skipped() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", ""),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(200),
+            Some("200"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_non_numeric_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", "abc"),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            None,
+            Some("abc"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_float_datadog_status_code() {
+        assert_status_code(
+            vec![
+                KeyValue::new("datadog.http_status_code", 503.0),
+                KeyValue::new("http.response.status_code", 200),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_string_semantic_attribute() {
+        assert_status_code(
+            vec![KeyValue::new("http.response.status_code", "503")],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_zero_semantic_attribute_is_skipped() {
+        assert_status_code(
+            vec![
+                KeyValue::new("http.response.status_code", 0),
+                KeyValue::new("http.status_code", "503"),
+            ],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_resource_attribute() {
+        assert_resource_status_code(
+            vec![],
+            vec![KeyValue::new("http.status_code", 503)],
+            Some(503),
+            Some("503"),
+        );
+    }
+
+    #[test]
+    fn test_status_code_span_attribute_overrides_resource_attribute() {
+        assert_resource_status_code(
+            vec![KeyValue::new("http.response.status_code", 200)],
+            vec![KeyValue::new("http.status_code", 503)],
+            Some(200),
+            Some("200"),
+        );
     }
 
     #[test]
     fn test_env_empty_when_not_present() {
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.env(), "");
     }
@@ -458,16 +973,35 @@ mod tests {
             Value::I64(404),
         )];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.status_code(), Some(404));
+    }
+
+    #[test]
+    fn test_datadog_http_status_code_attribute_overrides_status_code() {
+        // Same precedence as the exported span, so status code sampling rules match it
+        let attrs = vec![
+            KeyValue::new("datadog.http_status_code", Value::I64(503)),
+            KeyValue::new(
+                Key::from_static_str(HTTP_RESPONSE_STATUS_CODE),
+                Value::I64(404),
+            ),
+        ];
+        let resource = create_empty_resource();
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
+
+        assert_eq!(span.status_code(), Some(503));
     }
 
     #[test]
     fn test_status_code_none_when_not_present() {
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         assert_eq!(span.status_code(), None);
     }
@@ -479,7 +1013,8 @@ mod tests {
             KeyValue::new("key2", Value::I64(42)),
         ];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         let collected: Vec<_> = span.attributes().collect();
         assert_eq!(collected.len(), 2);
@@ -491,7 +1026,8 @@ mod tests {
     fn test_get_alternate_key_http_status() {
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         // Test HTTP status code mapping
         let alternate = span.get_alternate_key("http.response.status_code");
@@ -502,7 +1038,8 @@ mod tests {
     fn test_get_alternate_key_http_method() {
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         // Test HTTP method mapping
         let alternate = span.get_alternate_key("http.request.method");
@@ -513,7 +1050,8 @@ mod tests {
     fn test_get_alternate_key_no_mapping() {
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         // Test key with no mapping
         let alternate = span.get_alternate_key("custom.attribute");
@@ -525,7 +1063,8 @@ mod tests {
         // Test that OTel attribute keys are correctly mapped to Datadog keys
         let attrs = vec![];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new("test", SpanKind::Server, &attrs, &resource, &alloc);
 
         // HTTP attribute mappings (OTel -> DD)
         assert_eq!(
@@ -572,7 +1111,14 @@ mod tests {
             KeyValue::new("url.full", "https://example.com/api"),
         ];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test-span", SpanKind::Client, &otel_attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new(
+            "test-span",
+            SpanKind::Client,
+            &otel_attrs,
+            &resource,
+            &alloc,
+        );
 
         // Verify the OTel attributes are present
         let attrs: Vec<_> = span.attributes().collect();
@@ -608,7 +1154,14 @@ mod tests {
             KeyValue::new("url.full", "https://example.com/api/v1/resource"),
         ];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test-span", SpanKind::Client, &mixed_attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new(
+            "test-span",
+            SpanKind::Client,
+            &mixed_attrs,
+            &resource,
+            &alloc,
+        );
 
         // Verify all three OTel attributes have correct DD mappings
         assert_eq!(
@@ -642,7 +1195,14 @@ mod tests {
             KeyValue::new("custom.tag", "custom_value"),
         ];
         let resource = create_empty_resource();
-        let span = PreSampledSpan::new("test-span", SpanKind::Client, &mixed_attrs, &resource);
+        let alloc = Bump::new();
+        let span = PreSampledSpan::new(
+            "test-span",
+            SpanKind::Client,
+            &mixed_attrs,
+            &resource,
+            &alloc,
+        );
 
         // OTel attribute should have alternate DD key
         assert_eq!(

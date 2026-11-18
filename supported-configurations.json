@@ -10,6 +10,14 @@
         "propertyKeys": ["agent_host"]
       }
     ],
+    "DD_APPSEC_SCA_ENABLED": [
+      {
+        "version": "B",
+        "type": "boolean",
+        "default": null,
+        "propertyKeys": ["appsec_sca_enabled"]
+      }
+    ],
     "DD_DOGSTATSD_HOST": [
       {
         "version": "A",
@@ -40,6 +48,39 @@
         "type": "string",
         "default": "",
         "propertyKeys": ["env"]
+      }
+    ],
+    "DD_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["hostname"],
+        "sensitive": true
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_ID": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_id"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TIME": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_time"]
+      }
+    ],
+    "DD_INSTRUMENTATION_INSTALL_TYPE": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": null,
+        "propertyKeys": ["instrumentation_install_type"]
       }
     ],
     "DD_INSTRUMENTATION_TELEMETRY_ENABLED": [
@@ -107,6 +148,14 @@
         "propertyKeys": ["global_tags"]
       }
     ],
+    "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["telemetry_dependency_collection_enabled"]
+      }
+    ],
     "DD_TELEMETRY_HEARTBEAT_INTERVAL": [
       {
         "version": "B",
@@ -153,6 +202,22 @@
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["enabled"]
+      }
+    ],
+    "DD_TRACE_HTTP_CLIENT_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "400-499",
+        "propertyKeys": ["trace_http_client_error_statuses"]
+      }
+    ],
+    "DD_TRACE_HTTP_SERVER_ERROR_STATUSES": [
+      {
+        "version": "A",
+        "type": "string",
+        "default": "500-599",
+        "propertyKeys": ["trace_http_server_error_statuses"]
       }
     ],
     "DD_TRACE_PARTIAL_FLUSH_ENABLED": [
@@ -219,6 +284,14 @@
         "propertyKeys": ["trace_rate_limit"]
       }
     ],
+    "DD_TRACE_REPORT_HOSTNAME": [
+      {
+        "version": "A",
+        "type": "boolean",
+        "default": "false",
+        "propertyKeys": ["trace_report_hostname"]
+      }
+    ],
     "DD_TRACE_SAMPLE_RATE": [
       {
         "version": "B",
@@ -235,12 +308,60 @@
         "propertyKeys": ["trace_sampling_rules"]
       }
     ],
+    "DD_TRACE_STARTUP_LOGS": [
+      {
+        "version": "C",
+        "type": "boolean",
+        "default": "true",
+        "propertyKeys": ["trace_startup_logs"]
+      }
+    ],
+    "DD_TRACE_STATS_ADDITIONAL_TAGS_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "100",
+        "propertyKeys": ["trace_stats_additional_tags_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_CARDINALITY_LIMIT": [
+      {
+        "version": "D",
+        "type": "int",
+        "default": "7000",
+        "propertyKeys": ["trace_stats_cardinality_limit"]
+      }
+    ],
     "DD_TRACE_STATS_COMPUTATION_ENABLED": [
       {
         "version": "B",
         "type": "boolean",
         "default": "true",
         "propertyKeys": ["trace_stats_computation_enabled"]
+      }
+    ],
+    "DD_TRACE_STATS_HTTP_ENDPOINT_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "512",
+        "propertyKeys": ["trace_stats_http_endpoint_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_PEER_TAGS_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "512",
+        "propertyKeys": ["trace_stats_peer_tags_cardinality_limit"]
+      }
+    ],
+    "DD_TRACE_STATS_RESOURCE_CARDINALITY_LIMIT": [
+      {
+        "version": "A",
+        "type": "int",
+        "default": "1024",
+        "propertyKeys": ["trace_stats_resource_cardinality_limit"]
       }
     ],
     "DD_TRACE_X_DATADOG_TAGS_MAX_LENGTH": [

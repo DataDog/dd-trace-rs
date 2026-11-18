@@ -77,8 +77,10 @@ impl LambdaSpan {
         span.set_status(Status::Error {
             description: err_msg.clone().into(),
         });
-        span.set_attribute(KeyValue::new(attr::ERROR, true));
-        span.set_attribute(KeyValue::new(attr::ERROR_MESSAGE, err_msg));
+        span.set_attributes([
+            KeyValue::new(attr::ERROR, true),
+            KeyValue::new(attr::ERROR_MESSAGE, err_msg),
+        ]);
         // error.type is omitted: lambda_runtime boxes the error, erasing its type.
     }
 

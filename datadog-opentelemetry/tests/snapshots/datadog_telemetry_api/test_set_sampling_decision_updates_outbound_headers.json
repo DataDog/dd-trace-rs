@@ -1,0 +1,30 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "op",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-4",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "datadog_telemetry_api_test",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6ae1e983000000004a6447b5ece5e44a",
+      "runtime-id": "6d90402b-eb66-4be1-979b-c59018ce8ad3",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.5.3"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 2.0,
+      "_top_level": 1.0,
+      "process_id": 85191.0
+    },
+    "duration": 45000,
+    "start": 1793190275107206000
+  }]]

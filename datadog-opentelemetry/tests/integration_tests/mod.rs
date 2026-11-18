@@ -10,34 +10,46 @@ use std::{
 
 use datadog_opentelemetry::{
     configuration::{Config, ConfigBuilder},
-    make_test_tracer,
+    make_test_tracer, DatadogTelemetryHandle,
 };
 use libdd_trace_utils::test_utils::datadog_test_agent::DatadogTestAgent;
 use opentelemetry::propagation::{Extractor, TextMapPropagator};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
+mod datadog_telemetry_api;
 mod logs;
 mod metrics;
 mod opentelemetry_api;
+mod stats;
 mod telemetry_shutdown;
 mod tracing_api;
 
 pub async fn with_test_agent_session(
     session_name: &'static str,
     mut cfg: ConfigBuilder,
-    f: impl FnOnce(&mut DatadogTestAgent, SdkTracerProvider, Box<dyn TextMapPropagator>, Arc<Config>),
+    f: impl FnOnce(
+        &mut DatadogTestAgent,
+        SdkTracerProvider,
+        Box<dyn TextMapPropagator>,
+        &DatadogTelemetryHandle,
+        Arc<Config>,
+    ),
 ) {
     let mut test_agent = make_test_agent(session_name).await;
     cfg.set_trace_agent_url(test_agent.get_base_uri().await.to_string());
     let cfg = Arc::new(cfg.build());
-    let (tracer_provider, propagator) = make_test_tracer(cfg.clone());
+    let components = make_test_tracer(cfg.clone());
     f(
         &mut test_agent,
-        tracer_provider.clone(),
-        Box::new(propagator),
+        components.tracer_provider.clone(),
+        Box::new(components.propagator),
+        &components.datadog_telemetry,
         cfg,
     );
-    tracer_provider.shutdown().expect("failed to shutdown");
+    components
+        .tracer_provider
+        .shutdown()
+        .expect("failed to shutdown");
     test_agent.assert_snapshot(session_name).await;
 }
 
@@ -50,7 +62,7 @@ pub async fn make_test_agent(session_name: &'static str) -> DatadogTestAgent {
             ("SNAPSHOT_CI", "0"),
             (
                 "SNAPSHOT_IGNORED_ATTRS",
-                "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id,meta.telemetry.sdk.version,metrics.busy_ns,metrics.idle_ns,metrics.thread.id,metrics.code.line.number,metrics.thread.id,span_events.time_unix_nano,span_events.attributes.code.line.number",
+                "span_id,trace_id,parent_id,duration,start,meta.otel.trace_id,meta.runtime-id,meta.telemetry.sdk.version,metrics.process_id,metrics.busy_ns,metrics.idle_ns,metrics.thread.id,metrics.code.line.number,metrics.thread.id,span_events.time_unix_nano,span_events.attributes.code.line.number",
             ),
         ],
     )

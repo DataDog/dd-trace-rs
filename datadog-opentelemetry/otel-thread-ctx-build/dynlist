@@ -1,0 +1,14 @@
+/*
+ * Dynamic list forcing `otel_thread_ctx_v1` into the executable's dynamic
+ * symbol table (.dynsym).
+ *
+ * When linking a (statically-linked) executable, the linker does not, by
+ * default, place defined global symbols into .dynsym: a regular executable has
+ * nothing to export. But the OTel thread-level context spec requires an
+ * out-of-process reader (the eBPF profiler) to discover `otel_thread_ctx_v1`
+ * through .dynsym. Naming the symbol here makes the linker keep it dynamic, the
+ * same role the cdylib version script plays for the shared-library case.
+ */
+{
+    otel_thread_ctx_v1;
+};

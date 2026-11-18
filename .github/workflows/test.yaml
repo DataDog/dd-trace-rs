@@ -8,7 +8,7 @@ on:
       - cron:  '00 03 * * *'
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.87.0
+  RUST_VERSION: 1.91.1
 
 jobs:
   test:
@@ -19,7 +19,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-14]
+        platform: [windows-latest, ubuntu-latest, macos-15]
         rust_version: [""]
         include:
           - platform: "ubuntu-latest"
@@ -142,6 +142,11 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-cross-centos7
       cancel-in-progress: true
+    env:
+      # Lets the build.rs script find the workspace, which `cross` mounts at `/project` and the target
+      # directory outside it.
+      CARGO_WORKSPACE_DIR: /project
+      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
@@ -163,7 +168,7 @@ jobs:
       - run: cross build --locked --workspace --target x86_64-unknown-linux-gnu 
       - run: cross test --locked --workspace --target x86_64-unknown-linux-gnu -- --skip "integration_tests::"
 
-  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch of run-parametric.yml
+  # TODO: check if we can avoid build-artifacts step indicating the target branch with _system_tests_library_target_branch_map of system-tests.yml
   build-artifacts:
     runs-on: ubuntu-latest
     steps:
@@ -179,17 +184,22 @@ jobs:
           name: system_tests_binaries
           path: ./binaries/**/*
 
-  parametric:
+  system-tests:
     needs:
       - build-artifacts
-    uses: DataDog/system-tests/.github/workflows/run-parametric.yml@53687a2f4eab136c61d2a97474a37846d9ca6959  # main
+    concurrency:
+      group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
+      cancel-in-progress: true
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3  # main
     permissions:
       contents: read
       id-token: write
     with:
       library: rust
       binaries_artifact: system_tests_binaries
-      job_count: 2
-      job_matrix: '[1,2]'
-      ref: 53687a2f4eab136c61d2a97474a37846d9ca6959 # main
+      scenarios_groups: tracer_release
+      desired_execution_time: 600
+      parametric_job_count: 2
+      ref: c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3 # main
       push_to_test_optimization: true
+      skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}

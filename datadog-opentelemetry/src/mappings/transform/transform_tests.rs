@@ -14,7 +14,9 @@ use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue
 use libdd_trace_utils::span::vec_map::VecMap;
 use libdd_trace_utils::span::SpanText as _;
 
-use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
+use crate::{
+    core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY, mappings::transform::SPAN_LINK_FLAGS_SET,
+};
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -115,7 +117,20 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     false,
                     TraceState::default(),
                 ),
-                vec![],
+                vec![
+                    KeyValue::new(
+                        "array",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "bools",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("nested", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("floats", opentelemetry::Value::Array(vec![1.5].into())),
+                ],
                 2,
             ),
             Link::new(
@@ -140,7 +155,23 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                     ("a2".into(), "v2".into()),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
+            },
+            DdSpanLink {
+                trace_id: 12379813738877118345,
+                trace_id_high: 12379813738877118345,
+                span_id: 18364758544493064720,
+                attributes: HashMap::from_iter([
+                    ("array.0".into(), "a".into()),
+                    ("array.1".into(), "b".into()),
+                    ("bools.0".into(), "true".into()),
+                    ("bools.1".into(), "false".into()),
+                    ("nested.0".into(), "1".into()),
+                    ("nested.1".into(), "2".into()),
+                    ("floats.0".into(), "1.5".into()),
+                ]),
+                tracestate: "".into(),
+                flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
                 trace_id: 12379813738877118345,
@@ -148,15 +179,7 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 span_id: 18364758544493064720,
                 attributes: HashMap::new(),
                 tracestate: "".into(),
-                flags: 0,
-            },
-            DdSpanLink {
-                trace_id: 12379813738877118345,
-                trace_id_high: 12379813738877118345,
-                span_id: 18364758544493064720,
-                attributes: HashMap::new(),
-                tracestate: "".into(),
-                flags: 0,
+                flags: SPAN_LINK_FLAGS_SET,
             },
         ],
     )
@@ -244,6 +267,24 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     KeyValue::new("name", "john"),
                     KeyValue::new("approx", 1.2),
                     KeyValue::new("count", 2),
+                    KeyValue::new(
+                        "names",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("a"), "b".into()].into(),
+                        ),
+                    ),
+                    KeyValue::new(
+                        "flags",
+                        opentelemetry::Value::Array(vec![true, false].into()),
+                    ),
+                    KeyValue::new("counts", opentelemetry::Value::Array(vec![1_i64, 2].into())),
+                    KeyValue::new("ratios", opentelemetry::Value::Array(vec![0.5, 1.5].into())),
+                    KeyValue::new(
+                        "http.request.header.accept",
+                        opentelemetry::Value::Array(
+                            vec![opentelemetry::StringValue::from("text/html")].into(),
+                        ),
+                    ),
                 ],
                 dropped_attributes_count: 0,
                 events: make_test_span_events().0,
@@ -272,6 +313,11 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 error: 1,
                 meta: VecMap::from_iter([
                     ("name".into(), "john".into()),
+                    ("names.0".into(), "a".into()),
+                    ("names.1".into(), "b".into()),
+                    ("flags.0".into(), "true".into()),
+                    ("flags.1".into(), "false".into()),
+                    ("http.request.headers.accept.0".into(), "text/html".into()),
                     (
                         "otel.trace_id".into(),
                         "72df520af2bde7a5240031ead750e5f3".into(),
@@ -289,7 +335,14 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     ("span.kind".into(), "server".into()),
                     ("_dd.span_events.has_exception".into(), "true".into()),
                 ]),
-                metrics: VecMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
+                metrics: VecMap::from_iter([
+                    ("approx".into(), 1.2),
+                    ("count".into(), 2.0),
+                    ("counts.0".into(), 1.0),
+                    ("counts.1".into(), 2.0),
+                    ("ratios.0".into(), 0.5),
+                    ("ratios.1".into(), 1.5),
+                ]),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
@@ -723,6 +776,270 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 meta_struct: VecMap::new(),
             },
         },
+        Test {
+            name: "datadog_overrides",
+            input_resource: vec![
+                ("service.name", "resource-service"),
+                ("env", "staging"),
+                ("service.version", "v1.2.3"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Server,
+                name: "GET /users/:id".into(),
+                start_time,
+                end_time,
+                attributes: vec![
+                    KeyValue::new("datadog.service", "datadog-service"),
+                    KeyValue::new("datadog.name", "datadog.name"),
+                    KeyValue::new("datadog.resource", "datadog-resource"),
+                    KeyValue::new("datadog.type", "datadog-type"),
+                    KeyValue::new("datadog.env", "datadog-env"),
+                    KeyValue::new("datadog.version", "datadog-version"),
+                    KeyValue::new("datadog.http_status_code", 503),
+                    KeyValue::new("service.name", "span-service"),
+                    KeyValue::new("operation.name", "span.operation"),
+                    KeyValue::new("resource.name", "span-resource"),
+                    KeyValue::new("span.type", "span-type"),
+                    KeyValue::new("env", "span-env"),
+                    KeyValue::new("http.request.method", "GET"),
+                    KeyValue::new("http.response.status_code", 200),
+                ],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "datadog.name".into(),
+                resource: "datadog-resource".into(),
+                service: "datadog-service".into(),
+                trace_id: 2594128270069917171,
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: 0,
+                meta: VecMap::from_iter([
+                    ("otel.scope.name".into(), "ddtracer".into()),
+                    ("otel.scope.version".into(), "v2".into()),
+                    (
+                        "otel.trace_id".into(),
+                        "72df520af2bde7a5240031ead750e5f3".into(),
+                    ),
+                    ("otel.status_code".into(), "Unset".into()),
+                    ("env".into(), "datadog-env".into()),
+                    ("version".into(), "datadog-version".into()),
+                    ("http.status_code".into(), "503".into()),
+                    ("http.status_code".into(), "503".into()),
+                    ("http.method".into(), "GET".into()),
+                    ("service.version".into(), "v1.2.3".into()),
+                    ("span.kind".into(), "server".into()),
+                ]),
+                metrics: VecMap::from_iter([("http.status_code".into(), 200.0)]),
+                r#type: "datadog-type".into(),
+                span_events: vec![],
+                span_links: vec![],
+                meta_struct: VecMap::new(),
+            },
+        },
+        Test {
+            name: "numeric_env",
+            input_resource: vec![
+                ("service.name", "svc"),
+                ("deployment.environment.name", "prod"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", 123)],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                trace_id: 2594128270069917171,
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: 0,
+                meta: VecMap::from_iter([
+                    ("otel.scope.name".into(), "ddtracer".into()),
+                    ("otel.scope.version".into(), "v2".into()),
+                    (
+                        "otel.trace_id".into(),
+                        "72df520af2bde7a5240031ead750e5f3".into(),
+                    ),
+                    ("otel.status_code".into(), "Unset".into()),
+                    ("env".into(), "prod".into()),
+                    ("deployment.environment.name".into(), "prod".into()),
+                    ("span.kind".into(), "internal".into()),
+                ]),
+                metrics: VecMap::from_iter([("env".into(), 123.0)]),
+                r#type: "custom".into(),
+                span_events: vec![],
+                span_links: vec![],
+                meta_struct: VecMap::new(),
+            },
+        },
+        Test {
+            name: "empty_env",
+            input_resource: vec![
+                ("service.name", "svc"),
+                ("deployment.environment.name", "prod"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", "")],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                trace_id: 2594128270069917171,
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: 0,
+                meta: VecMap::from_iter([
+                    ("otel.scope.name".into(), "ddtracer".into()),
+                    ("otel.scope.version".into(), "v2".into()),
+                    (
+                        "otel.trace_id".into(),
+                        "72df520af2bde7a5240031ead750e5f3".into(),
+                    ),
+                    ("otel.status_code".into(), "Unset".into()),
+                    ("env".into(), "".into()),
+                    ("deployment.environment.name".into(), "prod".into()),
+                    ("span.kind".into(), "internal".into()),
+                ]),
+                metrics: VecMap::new(),
+                r#type: "custom".into(),
+                span_events: vec![],
+                span_links: vec![],
+                meta_struct: VecMap::new(),
+            },
+        },
+        Test {
+            name: "duplicate_env",
+            input_resource: vec![("service.name", "svc")],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", "dev"), KeyValue::new("env", "qa")],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                trace_id: 2594128270069917171,
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: 0,
+                meta: VecMap::from_iter([
+                    ("otel.scope.name".into(), "ddtracer".into()),
+                    ("otel.scope.version".into(), "v2".into()),
+                    (
+                        "otel.trace_id".into(),
+                        "72df520af2bde7a5240031ead750e5f3".into(),
+                    ),
+                    ("otel.status_code".into(), "Unset".into()),
+                    ("env".into(), "dev".into()),
+                    ("span.kind".into(), "internal".into()),
+                ]),
+                metrics: VecMap::new(),
+                r#type: "custom".into(),
+                span_events: vec![],
+                span_links: vec![],
+                meta_struct: VecMap::new(),
+            },
+        },
     ]
 }
 
@@ -733,6 +1050,8 @@ mod tests {
     use libdd_trace_utils::span::vec_map::VecMap;
     use opentelemetry::KeyValue;
     use opentelemetry_sdk::Resource;
+
+    use bumpalo::Bump;
 
     use crate::mappings::{
         transform::{otel_span_to_dd_span, CowStr},
@@ -756,8 +1075,14 @@ mod tests {
                         .map(|(k, v)| KeyValue::new(k, v)),
                 )
                 .build();
-            let output =
-                otel_span_to_dd_span(&test_span_to_sdk_span(&test.input_span), &input_resource);
+            let alloc = Bump::new();
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
+                &test_span_to_sdk_span(&test.input_span),
+                &input_resource,
+                &alloc,
+            );
             hashmap_diff(&output.meta, &test.expected_out.meta);
             hashmap_diff(&output.metrics, &test.expected_out.metrics);
             assert_eq!(

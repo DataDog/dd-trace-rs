@@ -20,11 +20,11 @@ use crate::{dd_warn, propagation::carrier::Extractor};
 pub const BAGGAGE_KEY: &str = "baggage";
 
 /// Cap on the number of baggage members extracted. Entries beyond this are dropped.
-const MAX_BAGGAGE_MEMBERS: usize = 32;
+const MAX_BAGGAGE_MEMBERS: usize = 64;
 
 /// Cap on the cumulative byte length of baggage members parsed. Once exceeded, remaining entries
 /// are dropped.
-const MAX_BAGGAGE_LENGTH: usize = 1024;
+const MAX_BAGGAGE_LENGTH: usize = 8192;
 
 static BAGGAGE_HEADER_KEYS: LazyLock<[String; 1]> = LazyLock::new(|| [BAGGAGE_KEY.to_owned()]);
 
@@ -263,12 +263,13 @@ mod tests {
 
     #[test]
     fn test_extract_baggage_respects_max_length() {
-        // Each member is exactly 50 bytes: "k{NN}={padding...}".
-        // 21 members * 50 = 1050 bytes (separators excluded by the
-        // implementation), so the 21st entry pushes allocated_size past
-        // MAX_BAGGAGE_LENGTH (1024) and must be dropped.
-        let member_size = 50;
-        let total = 25;
+        // Each member is exactly 200 bytes: "k{NN}={padding...}".
+        // 41 members * 200 = 8200 bytes (separators excluded by the
+        // implementation), so the 41st entry pushes allocated_size past
+        // MAX_BAGGAGE_LENGTH (8192) and must be dropped, before the
+        // MAX_BAGGAGE_MEMBERS (64) limit is reached.
+        let member_size = 200;
+        let total = 50;
         let members: Vec<String> = (0..total)
             .map(|i| {
                 let prefix = format!("k{i:02}=");
