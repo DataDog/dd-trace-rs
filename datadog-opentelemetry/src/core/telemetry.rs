@@ -951,21 +951,21 @@ mod tests {
             .clone()
     }
 
+    /// Depends on whether the build script collected: by default only for release builds, so
+    /// CI sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true` to test collection too.
     #[test]
     fn test_init_reports_dependencies() {
-        if matches!(
-            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
-            Some("false" | "0")
-        ) {
-            return;
-        }
         let config = Config::builder().build();
         let reported = test_dependencies_reported_at_init(&config);
-        // This test harness's dependencies, so an empty graph doesn't pass.
-        assert!(reported
-            .iter()
-            .any(|dependency| dependency.name == "libdd-telemetry"));
-        assert_eq!(reported, dependencies::collect().0);
+        if cfg!(dd_dependency_collection_enabled) {
+            // This test harness's dependencies, so an empty graph doesn't pass.
+            assert!(reported
+                .iter()
+                .any(|dependency| dependency.name == "libdd-telemetry"));
+            assert_eq!(reported, dependencies::collect().0);
+        } else {
+            assert_eq!(reported, vec![]);
+        }
     }
 
     #[test]

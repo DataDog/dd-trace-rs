@@ -371,6 +371,10 @@ are included; build dependencies are excluded. The build script never fails the 
 collection isn't possible, no dependencies are reported, and the reason is sent through
 telemetry.
 
+Dependencies are only collected for release builds (`--release`, or a profile that inherits from
+`release`), so the debug builds of the edit and test loop don't pay for it. Debug builds report
+no dependencies.
+
 The workspace is located from the build output directory, which works whenever the target
 directory is inside the workspace, such as the default `target/`. When it isn't, e.g. it was
 moved with `CARGO_TARGET_DIR` or the build runs in a container that mounts them apart, point the
@@ -381,17 +385,17 @@ build script at the workspace in `.cargo/config.toml`:
 CARGO_WORKSPACE_DIR = { value = "", relative = true }
 ```
 
-To disable it, set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false`:
+Set `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` to change that:
 
-* while building, to skip collection, for instance for every build of a repository in its
-  `.cargo/config.toml`:
+* while building, `true` to also collect for debug builds, or `false` to skip collection for
+  release builds too, for instance for every build of a repository in its `.cargo/config.toml`:
 
   ```toml
   [env]
   DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED = "false"
   ```
 
-* at runtime, to skip reporting.
+* at runtime, `false` to skip reporting.
 
 ### Tracer diagnostics
 

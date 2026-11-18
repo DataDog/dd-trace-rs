@@ -19,8 +19,8 @@
 //! line; the trees of all workspace packages are merged, so a package they share carries the
 //! dependencies enabled by any of them; tests only report dev-dependencies that were downloaded
 //! when this crate was built; and the graph is empty when collection failed or was disabled at
-//! build time. A build-time failure is recorded as a fixed code and reported as a telemetry error
-//! log.
+//! build time, which it is by default for debug builds. A build-time failure is recorded as a fixed
+//! code and reported as a telemetry error log.
 
 use std::{collections::BTreeSet, path::Path};
 
@@ -70,6 +70,11 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
     let failure = failure(recorded, exe.as_ref());
     if let Some(failure) = failure {
         dd_debug!("{}", failure.message());
+    } else if recorded.graph.members.is_empty() {
+        dd_debug!(
+            "Telemetry: no dependencies recorded at build time; they are only collected for \
+             release builds, unless DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED is set at build time"
+        );
     }
     dd_debug!(
         "Telemetry: reporting {} dependencies recorded at build time",
@@ -683,16 +688,17 @@ mod tests {
     }
 
     /// The build script runs against this repository's workspace, so the graph it generated
-    /// must cover the packages that depend on this crate, and only those.
+    /// must cover the packages that depend on this crate, and only those. It only collects for
+    /// release builds by default, so CI sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true`.
     #[test]
     fn test_generated_graph_covers_workspace() {
-        if matches!(
-            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
-            Some("false" | "0")
-        ) {
+        let Recorded { graph, failure } = &recorded();
+        if !cfg!(dd_dependency_collection_enabled) {
+            // Skipped, so neither empty nor failed.
+            assert_eq!(*failure, None);
+            assert!(graph.packages.is_empty() && graph.members.is_empty());
             return;
         }
-        let Recorded { graph, failure } = &recorded();
         assert!(
             failure.is_none(),
             "collection failed: {failure:?}; for WorkspaceNotFound, the target directory isn't \

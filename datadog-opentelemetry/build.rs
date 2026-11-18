@@ -13,8 +13,12 @@
 //!
 //! Collection is best-effort: any failure yields an empty list and never fails the build.
 //! Instead, the failure is recorded as a fixed code that the tracer reports as a telemetry
-//! error at runtime. Setting `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=false` at build time skips
-//! collection, and is not reported as a failure.
+//! error at runtime.
+//!
+//! It only collects for release builds, as the rebuilds it causes would slow down the edit and
+//! debug loop most. Setting `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` at build time overrides
+//! that: `false` or `0` skips collection, and is not reported as a failure, and any other value
+//! collects for every profile.
 
 fn main() {
     dependencies::generate();
@@ -38,7 +42,7 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
-        tree::{package_names, parse_tree, workspace_root, GraphBuilder, Tree},
+        tree::{collection_enabled, package_names, parse_tree, workspace_root, GraphBuilder, Tree},
     };
 
     const DEPENDENCY_COLLECTION_ENABLED_ENV: &str = "DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED";
@@ -48,6 +52,9 @@ mod dependencies {
     const DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV: &str = "DD_BUILD_TIME_DEPENDENCIES_FAILURE";
     /// Set when the graph was written; must match the tracer's. See `dependencies/mod.rs`.
     const DD_BUILD_TIME_DEPENDENCIES_CFG: &str = "dd_build_time_dependencies";
+    /// Set when collection was enabled, so the tracer's tests know which graph to expect; must
+    /// match theirs. See `telemetry.rs` and `dependencies/mod.rs`.
+    const DD_DEPENDENCY_COLLECTION_CFG: &str = "dd_dependency_collection_enabled";
 
     /// The environment variables this script reads: cargo configures build scripts through the
     /// environment, rather than the tracer's configuration.
@@ -68,6 +75,10 @@ mod dependencies {
 
         pub(super) fn target() -> Option<String> {
             env::var("TARGET").ok()
+        }
+
+        pub(super) fn profile() -> Option<String> {
+            env::var("PROFILE").ok()
         }
 
         pub(super) fn collection_enabled() -> Option<String> {
@@ -116,7 +127,15 @@ mod dependencies {
         println!("cargo::rerun-if-env-changed={DEPENDENCY_COLLECTION_ENABLED_ENV}");
         println!("cargo::rerun-if-env-changed={WORKSPACE_DIR_ENV}");
 
-        let recorded = match collection_enabled().then(collect) {
+        let enabled = collection_enabled(
+            build_env::collection_enabled().as_deref(),
+            build_env::profile().as_deref(),
+        );
+        println!("cargo::rustc-check-cfg=cfg({DD_DEPENDENCY_COLLECTION_CFG})");
+        if enabled {
+            println!("cargo::rustc-cfg={DD_DEPENDENCY_COLLECTION_CFG}");
+        }
+        let recorded = match enabled.then(collect) {
             None => Recorded::default(),
             Some(Ok(graph)) => Recorded::from(graph),
             Some(Err((failure, details))) => {
@@ -149,13 +168,6 @@ mod dependencies {
                 println!("cargo::rustc-env={DD_BUILD_TIME_DEPENDENCIES_FAILURE_ENV}={code}");
             }
         }
-    }
-
-    fn collection_enabled() -> bool {
-        !matches!(
-            build_env::collection_enabled().as_deref(),
-            Some("false" | "0")
-        )
     }
 
     fn collect() -> Result<Graph, CargoError> {

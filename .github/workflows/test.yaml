@@ -8,6 +8,9 @@ on:
       - cron:  '00 03 * * *'
 env:
   CARGO_TERM_COLOR: always
+  # Dependencies are only collected for release builds by default; collect them for the debug
+  # builds of the tests too, so they test collection.
+  DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED: "true"
   RUST_VERSION: 1.91.1
 
 jobs:
