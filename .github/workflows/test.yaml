@@ -149,7 +149,8 @@ jobs:
       # Lets the build.rs script find the workspace, which `cross` mounts at `/project` and the target
       # directory outside it.
       CARGO_WORKSPACE_DIR: /project
-      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR
+      # Whitespace-separated
+      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
