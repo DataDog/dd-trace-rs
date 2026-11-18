@@ -72,8 +72,11 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
         dd_debug!("{}", failure.message());
     } else if recorded.graph.members.is_empty() {
         dd_debug!(
-            "Telemetry: no dependencies recorded at build time; they are only collected for \
-             release builds, unless DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED is set at build time"
+            "Telemetry: no dependencies recorded at build time: {}",
+            nothing_recorded(
+                cfg!(dd_dependency_collection_enabled),
+                option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
+            )
         );
     }
     dd_debug!(
@@ -89,6 +92,18 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
         })
         .collect();
     (dependencies, failure)
+}
+
+fn nothing_recorded(collected: bool, variable: Option<&str>) -> &'static str {
+    if collected {
+        "no workspace package depends on this crate"
+    } else if variable.is_some() {
+        // Any value but `false` and `0` collects.
+        "collection was disabled with DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"
+    } else {
+        "collection only runs for release builds; set \
+         DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true at build time to collect for the others"
+    }
 }
 
 fn current_executable() -> Option<Executable> {
@@ -678,6 +693,16 @@ mod tests {
             let json = serde_json::to_string(&failure).expect("the failure serializes");
             assert_eq!(json, format!("\"{}\"", failure.code()));
         }
+    }
+
+    #[test]
+    fn test_nothing_recorded() {
+        let no_package = "no workspace package depends on this crate";
+        assert_eq!(nothing_recorded(true, None), no_package);
+        assert_eq!(nothing_recorded(true, Some("true")), no_package);
+        assert!(nothing_recorded(false, Some("false")).contains("disabled"));
+        assert!(nothing_recorded(false, Some("0")).contains("disabled"));
+        assert!(nothing_recorded(false, None).contains("release builds"));
     }
 
     #[test]
