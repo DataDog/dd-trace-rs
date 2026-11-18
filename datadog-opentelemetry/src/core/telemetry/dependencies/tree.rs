@@ -183,9 +183,6 @@ mod tests {
         }
     }
 
-    /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
-    /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
-    /// `elsewhere/target` outside any workspace.
     #[test]
     fn test_collection_enabled() {
         for profile in [Some("release"), Some("debug"), None] {
@@ -199,6 +196,9 @@ mod tests {
         assert!(!collection_enabled(None, None));
     }
 
+    /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
+    /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
+    /// `elsewhere/target` outside any workspace.
     #[test]
     fn test_workspace_root() {
         let root = std::env::temp_dir().join(format!("dd-workspace-root-{}", std::process::id()));
