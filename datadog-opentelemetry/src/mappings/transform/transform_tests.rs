@@ -759,6 +759,263 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 ..Default::default()
             },
         },
+        Test {
+            name: "datadog_overrides",
+            input_resource: vec![
+                ("service.name", "resource-service"),
+                ("env", "staging"),
+                ("service.version", "v1.2.3"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Server,
+                name: "GET /users/:id".into(),
+                start_time,
+                end_time,
+                attributes: vec![
+                    KeyValue::new("datadog.service", "datadog-service"),
+                    KeyValue::new("datadog.name", "datadog.name"),
+                    KeyValue::new("datadog.resource", "datadog-resource"),
+                    KeyValue::new("datadog.type", "datadog-type"),
+                    KeyValue::new("datadog.env", "datadog-env"),
+                    KeyValue::new("datadog.version", "datadog-version"),
+                    KeyValue::new("datadog.http_status_code", 503),
+                    KeyValue::new("service.name", "span-service"),
+                    KeyValue::new("operation.name", "span.operation"),
+                    KeyValue::new("resource.name", "span-resource"),
+                    KeyValue::new("span.type", "span-type"),
+                    KeyValue::new("env", "span-env"),
+                    KeyValue::new("http.request.method", "GET"),
+                    KeyValue::new("http.response.status_code", 200),
+                ],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "datadog.name".into(),
+                resource: "datadog-resource".into(),
+                service: "datadog-service".into(),
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: false,
+                span_kind: DdSpanKind::Server,
+                env: "datadog-env".into(),
+                version: "datadog-version".into(),
+                attributes: attributes(
+                    [
+                        ("http.status_code", "503"),
+                        ("http.method", "GET"),
+                        ("service.version", "v1.2.3"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
+                r#type: "datadog-type".into(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
+            },
+        },
+        Test {
+            name: "numeric_env",
+            input_resource: vec![
+                ("service.name", "svc"),
+                ("deployment.environment.name", "prod"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", 123)],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "prod".into(),
+                attributes: attributes(
+                    [
+                        ("deployment.environment.name", "prod"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    // The `env` span attribute is exported as a metric in v0.4; the v1
+                    // span keeps the resolved `env` string tag instead.
+                    [],
+                ),
+                r#type: "custom".into(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
+            },
+        },
+        Test {
+            name: "empty_env",
+            input_resource: vec![
+                ("service.name", "svc"),
+                ("deployment.environment.name", "prod"),
+            ],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", "")],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "".into(),
+                attributes: attributes(
+                    [
+                        ("deployment.environment.name", "prod"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
+                r#type: "custom".into(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
+            },
+        },
+        Test {
+            name: "duplicate_env",
+            input_resource: vec![("service.name", "svc")],
+            input_span: TestSpan {
+                span_context: SpanContext::new(
+                    TEST_TRACE_ID,
+                    TEST_SPAN_ID,
+                    TraceFlags::default(),
+                    false,
+                    TraceState::default(),
+                ),
+                parent_span_id: SpanId::INVALID,
+                span_kind: SpanKind::Internal,
+                name: "op".into(),
+                start_time,
+                end_time,
+                attributes: vec![KeyValue::new("env", "dev"), KeyValue::new("env", "qa")],
+                dropped_attributes_count: 0,
+                events: vec![],
+                dropped_event_count: 0,
+                links: vec![],
+                dropped_links_count: 0,
+                status: Status::Unset,
+                instrumentation_scope: InstrumentationScope::builder("ddtracer")
+                    .with_version("v2")
+                    .build(),
+            },
+            expected_out: DdSpan {
+                name: "internal".into(),
+                resource: "op".into(),
+                service: "svc".into(),
+                span_id: 2594128270069917171,
+                parent_id: 0,
+                start: start_time
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64,
+                duration: 200000000,
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "dev".into(),
+                attributes: attributes(
+                    [
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
+                r#type: "custom".into(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
+            },
+        },
     ]
 }
 

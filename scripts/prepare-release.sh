@@ -138,6 +138,21 @@ require_tool git-cliff "install: cargo install git-cliff"
 require_tool cargo-release "install: cargo install cargo-release"
 require_tool jq "install it via your package manager, e.g. apt-get install jq / brew install jq"
 
+# macOS ships a BSD sed whose `-i` syntax differs from GNU sed (it requires a backup suffix
+# argument and lacks some GNU extensions). Use GNU sed (`gsed`) on macOS and plain `sed` on Linux.
+# Homebrew installs GNU sed as `gsed` (via the `gnu-sed` formula) to avoid shadowing the system BSD sed.
+if [ "$(uname -s)" = "Darwin" ]; then
+    if command -v gsed >/dev/null 2>&1; then
+        SED="gsed"
+    else
+        echo -e "${RED}❌ ERROR: 'gsed' (GNU sed) is required on macOS but was not found.${NC}" >&2
+        echo -e "   Install it with Homebrew: ${BLUE}brew install gnu-sed${NC}" >&2
+        exit 1
+    fi
+else
+    SED="sed"
+fi
+
 # A shallow clone hides older commits and tags
 if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
     echo -e "${RED}❌ ERROR: shallow clone detected; the changelog needs full history and tags.${NC}" >&2
@@ -211,7 +226,7 @@ case "$NEW_VERSION" in
 esac
 lambda_manifest="instrumentation/datadog-aws-lambda/Cargo.toml"
 echo -e "${BLUE}--- Bumping datadog-opentelemetry pin in $lambda_manifest to $version_req ---${NC}"
-sed -i -E "s|(datadog-opentelemetry = \{ version = \")[^\"]+|\1${version_req}|g" "$lambda_manifest"
+"$SED" -i -E "s|(datadog-opentelemetry = \{ version = \")[^\"]+|\1${version_req}|g" "$lambda_manifest"
 cargo update --manifest-path instrumentation/Cargo.toml --package datadog-opentelemetry
 
 # 3. Prepend a changelog section listing the commits since the last release.
@@ -227,10 +242,10 @@ previous_tag="$(git describe --tags --abbrev=0 --match "$PACKAGE-v*" 2>/dev/null
 # cases are branched rather than relying on array expansion.) Strip leading blank lines it emits.
 if [ -n "$previous_tag" ]; then
     echo "Listing commits since $previous_tag" >&2
-    commits="$(git cliff --config cliff.toml "$previous_tag..HEAD" 2>/dev/null | sed '/./,$!d')"
+    commits="$(git cliff --config cliff.toml "$previous_tag..HEAD" 2>/dev/null | "$SED" '/./,$!d')"
 else
     echo "No previous $PACKAGE release tag found; listing all history" >&2
-    commits="$(git cliff --config cliff.toml 2>/dev/null | sed '/./,$!d')"
+    commits="$(git cliff --config cliff.toml 2>/dev/null | "$SED" '/./,$!d')"
 fi
 if [ -z "$commits" ]; then
     commits="- _No changes._"
@@ -244,7 +259,7 @@ tmp="$(mktemp)"
     printf '## %s (%s)\n\n' "$NEW_VERSION" "$release_date"
     printf '%s\n\n' "$commits"
     # everything after the original "# Changelog" title line (drop its following blank line)
-    tail -n +2 "$CHANGELOG" | sed '1{/^$/d}'
+    tail -n +2 "$CHANGELOG" | "$SED" '1{/^$/d}'
 } > "$tmp"
 mv "$tmp" "$CHANGELOG"
 

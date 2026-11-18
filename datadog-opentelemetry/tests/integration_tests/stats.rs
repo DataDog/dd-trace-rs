@@ -23,7 +23,7 @@ async fn test_stats_cardinality_limit_folds_overflow_buckets() {
     // Only two distinct stats keys are admitted; anything beyond folds into the
     // overflow bucket.
     cfg.set_trace_stats_cardinality_limit(2);
-    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _| {
+    with_test_agent_session(SESSION_NAME, cfg, |_, tracer_provider, _, _, _| {
         let tracer = tracer_provider.tracer("test");
 
         for span_name in ["stats-op-1", "stats-op-2", "stats-op-3", "stats-op-4"] {

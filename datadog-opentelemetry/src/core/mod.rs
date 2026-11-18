@@ -11,6 +11,7 @@ pub use libdd_sampling::{dd_constants as constants, dd_sampling as sampling};
 mod error;
 
 pub mod log;
+pub(crate) mod startup_log;
 pub(crate) mod telemetry;
 pub(crate) mod telemetry_session;
 

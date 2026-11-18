@@ -19,7 +19,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        platform: [windows-latest, ubuntu-latest, macos-14]
+        platform: [windows-latest, ubuntu-latest, macos-15]
         rust_version: [""]
         include:
           - platform: "ubuntu-latest"
@@ -142,6 +142,11 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-cross-centos7
       cancel-in-progress: true
+    env:
+      # Lets the build.rs script find the workspace, which `cross` mounts at `/project` and the target
+      # directory outside it.
+      CARGO_WORKSPACE_DIR: /project
+      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
@@ -185,7 +190,7 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
       cancel-in-progress: true
-    uses: DataDog/system-tests/.github/workflows/system-tests.yml@1cc5dcc2efe5e3602c9b3bce92ef05d24c658cc0  # main
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3  # main
     permissions:
       contents: read
       id-token: write
@@ -195,6 +200,6 @@ jobs:
       scenarios_groups: tracer_release
       desired_execution_time: 600
       parametric_job_count: 2
-      ref: 1cc5dcc2efe5e3602c9b3bce92ef05d24c658cc0 # main
+      ref: c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3 # main
       push_to_test_optimization: true
       skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}
