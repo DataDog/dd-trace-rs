@@ -11,6 +11,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     environment: publish
+    permissions:
+      id-token: write # Enable OIDC, required for crates.io trusted publishing
+      contents: read
     steps:
       - name: "Install Rust ${RUST_VERSION}"
         run: rustup install ${RUST_VERSION} && rustup default ${RUST_VERSION}
@@ -27,10 +30,15 @@ jobs:
         id: tag
         uses: devops-actions/action-get-tag@fda546b7024dab74c867f31930073a85b5313d3a # 1.1
 
+      # Exchanges the job's OIDC identity for a short-lived crates.io token.
+      - name: "Authenticate to crates.io"
+        id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
       - name: "Publish"
         shell: bash
         env:
-          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
           PUBLISH_TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          ./scripts/publish-crate.sh --token "${CRATES_IO_TOKEN}" "${PUBLISH_TAG}"
+          ./scripts/publish-crate.sh "${PUBLISH_TAG}"
