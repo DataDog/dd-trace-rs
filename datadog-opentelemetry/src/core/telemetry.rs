@@ -25,6 +25,8 @@ use crate::{dd_debug, dd_error, dd_warn};
 
 mod dependencies;
 
+pub(crate) use dependencies::skipped_at_build as dependency_collection_skipped_at_build;
+
 static TELEMETRY: TelemetryCell = OnceLock::new();
 static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 

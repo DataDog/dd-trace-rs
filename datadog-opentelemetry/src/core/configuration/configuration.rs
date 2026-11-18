@@ -2759,6 +2759,16 @@ impl ConfigBuilder {
                 "DD_APPSEC_SCA_ENABLED requires telemetry to report the application's \
                  dependencies, but {disabled}=false: Software Composition Analysis won't work"
             );
+        } else if config.appsec_sca_enabled() == Some(true) {
+            // Not a failure, so not reported through telemetry with the build-time failures.
+            if let Some(skipped) = crate::core::telemetry::dependency_collection_skipped_at_build()
+            {
+                crate::dd_error!(
+                    "DD_APPSEC_SCA_ENABLED requires the application's dependencies, but they \
+                     weren't collected at build time ({skipped}): Software Composition Analysis \
+                     won't work"
+                );
+            }
         }
 
         config
@@ -5295,9 +5305,26 @@ mod tests {
         }
     }
 
+    /// Depends on whether the build script collected: by default only for release builds, so CI
+    /// sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true` to test both outcomes.
     #[test]
-    fn test_appsec_sca_enabled_with_telemetry_doesnt_log() {
-        assert!(sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true")]).is_empty());
+    fn test_appsec_sca_enabled_with_telemetry() {
+        let logs = sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true")]);
+        if cfg!(dd_dependency_collection_enabled) {
+            assert!(logs.is_empty(), "{logs:?}");
+        } else {
+            assert_eq!(logs.len(), 1, "{logs:?}");
+            let (level, message) = &logs[0];
+            assert_eq!(*level, tracing::Level::ERROR);
+            assert!(
+                message.contains("weren't collected at build time"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_appsec_sca_disabled_doesnt_log() {
         for sca in [None, Some("false")] {
             let env: Vec<_> = sca
                 .map(|sca| ("DD_APPSEC_SCA_ENABLED", sca))

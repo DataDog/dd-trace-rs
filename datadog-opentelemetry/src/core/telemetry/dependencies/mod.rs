@@ -94,6 +94,28 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
     (dependencies, failure)
 }
 
+/// Why the build script skipped collection, if it did: then no dependencies are reported, which
+/// isn't a failure.
+pub(crate) fn skipped_at_build() -> Option<&'static str> {
+    collection_skipped(
+        cfg!(dd_build_time_dependencies),
+        cfg!(dd_dependency_collection_enabled),
+        option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
+    )
+}
+
+/// Why the build script skipped collection, given whether it wrote a graph, whether it collected
+/// it, and the variable it ran with. A script that didn't write one failed, or didn't run.
+fn collection_skipped(
+    written: bool,
+    collected: bool,
+    variable: Option<&str>,
+) -> Option<&'static str> {
+    (written && !collected).then(|| nothing_recorded(false, variable))
+}
+
+/// Why the build script recorded no package depending on this crate, when it didn't fail: given
+/// whether it collected, and the `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` it ran with.
 fn nothing_recorded(collected: bool, variable: Option<&str>) -> &'static str {
     if collected {
         "no workspace package depends on this crate"
@@ -703,6 +725,20 @@ mod tests {
         assert!(nothing_recorded(false, Some("false")).contains("disabled"));
         assert!(nothing_recorded(false, Some("0")).contains("disabled"));
         assert!(nothing_recorded(false, None).contains("release builds"));
+    }
+
+    #[test]
+    fn test_collection_skipped() {
+        assert_eq!(collection_skipped(true, true, None), None);
+        assert_eq!(collection_skipped(false, false, None), None);
+        assert_eq!(
+            collection_skipped(true, false, None),
+            Some(nothing_recorded(false, None))
+        );
+        assert_eq!(
+            collection_skipped(true, false, Some("false")),
+            Some(nothing_recorded(false, Some("false")))
+        );
     }
 
     #[test]
