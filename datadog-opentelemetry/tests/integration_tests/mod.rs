@@ -18,12 +18,12 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 
 mod datadog_telemetry_api;
 mod logs;
+mod mapping_snapshot;
 mod metrics;
 mod opentelemetry_api;
 mod stats;
 mod telemetry_shutdown;
 mod tracing_api;
-mod mapping_snapshot;
 
 pub async fn with_test_agent_session(
     session_name: &'static str,

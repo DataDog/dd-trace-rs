@@ -1045,20 +1045,34 @@ pub fn test_cases() -> Vec<Test<'static>> {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::{Debug, Write};
-
-    use libdd_trace_utils::span::vec_map::VecMap;
-    use opentelemetry::KeyValue;
-    use opentelemetry_sdk::Resource;
+    use std::{
+        borrow::Cow,
+        fmt::{Debug, Write},
+        str::FromStr,
+        time::{Duration, SystemTime},
+    };
 
     use bumpalo::Bump;
+    use libdd_trace_utils::span::{
+        v04::{AttributeAnyValue as Any, AttributeArrayValue as Scalar},
+        vec_map::VecMap,
+    };
+    use opentelemetry::{
+        trace::{Event, SpanContext, SpanKind, Status, TraceState},
+        InstrumentationScope, KeyValue, SpanId, StringValue, TraceFlags, TraceId, Value,
+    };
+    use opentelemetry_sdk::{
+        trace::{SpanData, SpanEvents, SpanLinks},
+        Resource,
+    };
 
     use crate::mappings::{
-        transform::{otel_span_to_dd_span, CowStr},
+        sdk_span::SdkSpan,
+        transform::{otel_span_to_dd_span, CowStr, SpanStr},
         DdSpan,
     };
 
-    use crate::mappings::transform::transform_tests::{test_cases, test_span_to_sdk_span};
+    use super::{test_cases, test_span_to_sdk_span};
 
     fn downcast_lifetime<'a: 'b, 'b>(span: DdSpan<'a>) -> DdSpan<'b> {
         unsafe { std::mem::transmute(span) }
@@ -1140,6 +1154,272 @@ mod tests {
         }
         if output != expected {
             eprintln!("Hashmaps are not equal :\n{message}");
+        }
+    }
+
+    fn span_data() -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                TraceId::from_hex("fedcba98765432100123456789abcdef").unwrap(),
+                SpanId::from_hex("abcdef0123456789").unwrap(),
+                TraceFlags::SAMPLED,
+                false,
+                TraceState::from_str("vendor=value,other=state").unwrap(),
+            ),
+            parent_span_id: SpanId::from_hex("0123456789abcdef").unwrap(),
+            parent_span_is_remote: false,
+            span_kind: SpanKind::Internal,
+            name: Cow::Borrowed("fixed-span"),
+            start_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(1234),
+            end_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(5678),
+            attributes: vec![],
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
+            status: Status::Unset,
+            instrumentation_scope: InstrumentationScope::default(),
+        }
+    }
+
+    fn convert<'a>(data: &'a SpanData, resource: &'a Resource, alloc: &'a Bump) -> DdSpan<'a> {
+        let mut output = DdSpan::default();
+        otel_span_to_dd_span(
+            &mut output,
+            &SdkSpan::from_sdk_span_data(data),
+            resource,
+            alloc,
+        );
+        output
+    }
+
+    fn tag<'a>(span: &'a DdSpan<'_>, key: &str) -> Option<&'a str> {
+        span.meta.get(key).map(SpanStr::as_str)
+    }
+
+    #[test]
+    fn sampling_priority_remap_before_processor_override() {
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        for value in [-1.0, 0.0, 0.5, 1.0, 2.0] {
+            let mut data = span_data();
+            data.attributes = vec![KeyValue::new("sampling.priority", value)];
+            let output = convert(&data, &resource, &alloc);
+            assert_eq!(
+                output
+                    .metrics
+                    .get(&SpanStr::from_str("_sampling_priority_v1")),
+                Some(&value)
+            );
+            assert!(!output
+                .metrics
+                .contains_key(&SpanStr::from_str("sampling.priority")));
+        }
+    }
+
+    #[test]
+    fn span_context_identity_tracestate_and_exact_time() {
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let data = span_data();
+        let output = convert(&data, &resource, &alloc);
+        assert_eq!(output.trace_id, 0x0123456789abcdef_u64.into());
+        assert_eq!(output.span_id, 0xabcdef0123456789);
+        assert_eq!(output.parent_id, 0x0123456789abcdef);
+        assert_eq!(
+            tag(&output, "otel.trace_id"),
+            Some("fedcba98765432100123456789abcdef")
+        );
+        assert_eq!(
+            tag(&output, "w3c.tracestate"),
+            Some("vendor=value,other=state")
+        );
+        assert_eq!(output.start, 1234);
+        assert_eq!(output.duration, 4444);
+    }
+
+    #[test]
+    fn duration_and_pre_epoch_timestamps_are_clamped() {
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let mut data = span_data();
+        for (start, end, expected_start, expected_duration) in [
+            (10, 9, 10, 0),
+            (10, 10, 10, 0),
+            (-2, -1, 0, 0),
+            (-1, 10, 0, 10),
+        ] {
+            let time = |n: i64| {
+                if n < 0 {
+                    SystemTime::UNIX_EPOCH - Duration::from_nanos(n.unsigned_abs())
+                } else {
+                    SystemTime::UNIX_EPOCH + Duration::from_nanos(n as u64)
+                }
+            };
+            data.start_time = time(start);
+            data.end_time = time(end);
+            data.events.events = vec![Event::new("event", time(start), vec![], 0)];
+            let output = convert(&data, &resource, &alloc);
+            assert_eq!(
+                (output.start, output.duration),
+                (expected_start, expected_duration)
+            );
+            assert_eq!(output.span_events[0].time_unix_nano, expected_start as u64);
+        }
+    }
+
+    /// The agent cannot downgrade these arrays, so assert their native v0.4 types
+    /// directly instead of accepting a snapshot that never sees their values.
+    #[test]
+    fn event_arrays_preserve_every_element_and_type() {
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let mut data = span_data();
+        data.events.events = vec![Event::new(
+            "arrays",
+            SystemTime::UNIX_EPOCH + Duration::from_nanos(42),
+            vec![
+                KeyValue::new("bools", Value::Array(vec![true, false].into())),
+                KeyValue::new("ints", Value::Array(vec![-7_i64, 8].into())),
+                KeyValue::new("floats", Value::Array(vec![0.25, -1.5].into())),
+                KeyValue::new(
+                    "strings",
+                    Value::Array(vec![StringValue::from("a"), "".into()].into()),
+                ),
+                KeyValue::new("empty-bools", Value::Array(Vec::<bool>::new().into())),
+                KeyValue::new("empty-ints", Value::Array(Vec::<i64>::new().into())),
+                KeyValue::new("empty-floats", Value::Array(Vec::<f64>::new().into())),
+                KeyValue::new(
+                    "empty-strings",
+                    Value::Array(Vec::<StringValue>::new().into()),
+                ),
+            ],
+            0,
+        )];
+        let output = convert(&data, &resource, &alloc);
+        let event = &output.span_events[0];
+        assert_eq!(event.time_unix_nano, 42);
+        for (key, expected) in [
+            ("bools", vec![Scalar::Boolean(true), Scalar::Boolean(false)]),
+            ("ints", vec![Scalar::Integer(-7), Scalar::Integer(8)]),
+            ("floats", vec![Scalar::Double(0.25), Scalar::Double(-1.5)]),
+            (
+                "strings",
+                vec![
+                    Scalar::String(SpanStr::from_str("a")),
+                    Scalar::String(SpanStr::from_str("")),
+                ],
+            ),
+            ("empty-bools", vec![]),
+            ("empty-ints", vec![]),
+            ("empty-floats", vec![]),
+            ("empty-strings", vec![]),
+        ] {
+            assert_eq!(
+                event.attributes.get(&SpanStr::from_str(key)),
+                Some(&Any::Array(expected)),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn typed_exception_values_format_without_losing_false_or_empty_arrays() {
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        for (value, expected) in [
+            (Value::Bool(false), "false"),
+            (Value::I64(-42), "-42"),
+            (Value::F64(1.5), "1.5"),
+            (Value::Array(vec![true, false].into()), "[true,false]"),
+            (Value::Array(vec![-1_i64, 2].into()), "[-1,2]"),
+            (Value::Array(vec![1.5, 0.25].into()), "[1.5,0.25]"),
+            (
+                Value::Array(vec![StringValue::from("a"), "b".into()].into()),
+                "[a,b]",
+            ),
+            (Value::Array(Vec::<i64>::new().into()), "[]"),
+        ] {
+            let mut data = span_data();
+            data.status = Status::error("description must lose");
+            data.events.events = vec![Event::new(
+                "Exception",
+                SystemTime::UNIX_EPOCH,
+                vec![
+                    KeyValue::new("exception.message", value.clone()),
+                    KeyValue::new("exception.type", value.clone()),
+                    KeyValue::new("exception.stacktrace", value),
+                ],
+                0,
+            )];
+            let output = convert(&data, &resource, &alloc);
+            assert_eq!(output.error, 1);
+            for key in ["error.message", "error.type", "error.stack"] {
+                assert_eq!(tag(&output, key), Some(expected), "{key}");
+            }
+        }
+    }
+
+    /// SDK builders can overwrite duplicate keys. Feed the raw converter slice to
+    /// distinguish last-index lookup from first-nonempty protected-tag insertion.
+    #[test]
+    fn duplicate_keys_and_indexed_arrays_keep_both_v04_namespaces() {
+        let alloc = Bump::new();
+        let resource = Resource::builder_empty()
+            .with_attributes([KeyValue::new("shared", "resource")])
+            .build();
+        for reverse in [false, true] {
+            let mut data = span_data();
+            data.attributes = vec![
+                KeyValue::new("datadog.name", "first-name"),
+                KeyValue::new("datadog.name", "last-name"),
+                KeyValue::new("ordinary", "first"),
+                KeyValue::new("ordinary", "last"),
+                KeyValue::new("shared", 42),
+                KeyValue::new("shared", "span"),
+                KeyValue::new("array", Value::Array(vec![7_i64].into())),
+                KeyValue::new("array.0", "string"),
+                KeyValue::new(
+                    "indexed",
+                    Value::Array(vec![StringValue::from("array")].into()),
+                ),
+                KeyValue::new("indexed.0", "scalar"),
+                KeyValue::new("version", "first-version"),
+                KeyValue::new("version", "last-version"),
+            ];
+            if reverse {
+                data.attributes.reverse();
+            }
+            let output = convert(&data, &resource, &alloc);
+            assert_eq!(
+                output.name.as_str(),
+                if reverse { "first-name" } else { "last-name" }
+            );
+            assert_eq!(
+                tag(&output, "ordinary"),
+                Some(if reverse { "first" } else { "last" })
+            );
+            assert_eq!(
+                tag(&output, "version"),
+                Some(if reverse {
+                    "last-version"
+                } else {
+                    "first-version"
+                })
+            );
+            assert_eq!(tag(&output, "shared"), Some("span"));
+            assert_eq!(
+                output.metrics.get(&SpanStr::from_str("shared")),
+                Some(&42.0)
+            );
+            assert_eq!(tag(&output, "array.0"), Some("string"));
+            assert_eq!(
+                output.metrics.get(&SpanStr::from_str("array.0")),
+                Some(&7.0)
+            );
+            assert_eq!(
+                tag(&output, "indexed.0"),
+                Some(if reverse { "array" } else { "scalar" })
+            );
         }
     }
 }

@@ -1,0 +1,128 @@
+[[
+  {
+    "name": "internal",
+    "service": "app",
+    "resource": "root:first=false",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment.name": "resource-env",
+      "env": "resource-env",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced90000000027098b8c3f4c9276",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "shared": "global",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "config-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 10000,
+    "start": 1795018457152894000
+  },
+     {
+       "name": "internal",
+       "service": "child-service",
+       "resource": "child:first=false",
+       "trace_id": 0,
+       "span_id": 2,
+       "parent_id": 1,
+       "type": "custom",
+       "meta": {
+         "_dd.base_service": "app",
+         "_dd.p.dm": "-0",
+         "deployment.environment.name": "resource-env",
+         "env": "resource-env",
+         "otel.scope.name": "mapping",
+         "otel.status_code": "Unset",
+         "otel.trace_id": "6afdced90000000027098b8c3f4c9276",
+         "service.version": "resource-version",
+         "shared": "global",
+         "span.kind": "internal",
+         "telemetry.sdk.name": "datadog",
+         "telemetry.sdk.version": "0.6.0",
+         "version": "global-version"
+       },
+       "metrics": {
+         "_sampling_priority_v1": 1.0,
+         "_top_level": 1.0
+       },
+       "duration": 1000,
+       "start": 1795018457152900000
+     }],
+[
+  {
+    "name": "internal",
+    "service": "app",
+    "resource": "root:first=true",
+    "trace_id": 1,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment.name": "resource-env",
+      "env": "resource-env",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced900000000bddd8eb369a3ce38",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "shared": "global",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "config-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 3000,
+    "start": 1795018457152919000
+  },
+     {
+       "name": "internal",
+       "service": "child-service",
+       "resource": "child:first=true",
+       "trace_id": 1,
+       "span_id": 2,
+       "parent_id": 1,
+       "type": "custom",
+       "meta": {
+         "_dd.base_service": "app",
+         "_dd.p.dm": "-0",
+         "deployment.environment.name": "resource-env",
+         "env": "resource-env",
+         "otel.scope.name": "mapping",
+         "otel.status_code": "Unset",
+         "otel.trace_id": "6afdced900000000bddd8eb369a3ce38",
+         "service.version": "resource-version",
+         "shared": "global",
+         "span.kind": "internal",
+         "telemetry.sdk.name": "datadog",
+         "telemetry.sdk.version": "0.6.0",
+         "version": "global-version"
+       },
+       "metrics": {
+         "_sampling_priority_v1": 1.0,
+         "_top_level": 1.0
+       },
+       "duration": 2000,
+       "start": 1795018457152921000
+     }]]

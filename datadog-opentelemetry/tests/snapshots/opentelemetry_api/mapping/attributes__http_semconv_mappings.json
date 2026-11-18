@@ -12,6 +12,7 @@
       "_dd.sdk.otlp_export": "false",
       "http.client_ip": "10.0.0.1",
       "http.method": "GET",
+      "http.referrer": "https://referrer.example/",
       "http.request.headers.x_custom": "header-value",
       "http.server_name": "example.com",
       "http.url": "https://example.com/path",
@@ -20,8 +21,8 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdc5f000000000942b15b96bf842ce",
-      "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
+      "otel.trace_id": "6afdcddd00000000d2e63146117f165d",
+      "runtime-id": "069635d4-54e4-4c51-9b34-23e8bcfe616e",
       "span.kind": "server",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
@@ -30,9 +31,10 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.response.body_size": 1024.0,
-      "process_id": 76830.0
+      "http.request.content_length": 512.0,
+      "http.response.content_length": 1024.0,
+      "process_id": 27559.0
     },
     "duration": 8000,
-    "start": 1795016176122512000
+    "start": 1795018205047574000
   }]]

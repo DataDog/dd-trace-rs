@@ -4,7 +4,7 @@
     "Duration": 10000000000,
     "Stats": [
       {
-        "Name": "client.request",
+        "Name": "aws.s3.invoke",
         "Resource": "ignored-name",
         "Service": "unnamed-rust-service",
         "Type": "http",
@@ -12,7 +12,7 @@
         "Synthetics": false,
         "Hits": 1,
         "TopLevelHits": 1,
-        "Duration": 10000,
+        "Duration": 6000,
         "Errors": 0,
         "OkSummary": 37,
         "ErrorSummary": 24

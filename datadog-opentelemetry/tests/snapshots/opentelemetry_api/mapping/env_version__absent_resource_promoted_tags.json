@@ -1,0 +1,212 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "absent",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "new-env",
+      "language": "rust",
+      "mapping.case": "absent",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced9000000004133e212f549fe5b",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "resource-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 5000,
+    "start": 1795018457434838000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "empty-dd",
+    "trace_id": 1,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "new-env",
+      "language": "rust",
+      "mapping.case": "empty-dd",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced900000000463c6fa058c394c0",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "resource-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 1000,
+    "start": 1795018457434860000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "empty-conventional",
+    "trace_id": 2,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "",
+      "language": "rust",
+      "mapping.case": "empty-conventional",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced900000000860031212f2182ed",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "resource-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 1000,
+    "start": 1795018457434868000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "nonempty-conventional",
+    "trace_id": 3,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "span-env",
+      "language": "rust",
+      "mapping.case": "nonempty-conventional",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced90000000098bdf3159b1f793b",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "resource-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 1000,
+    "start": 1795018457434875000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "nonempty-dd",
+    "trace_id": 4,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "dd-env",
+      "language": "rust",
+      "mapping.case": "nonempty-dd",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced900000000c871479777e61dcd",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "dd-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 1000,
+    "start": 1795018457434881000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "numeric-conventional",
+    "trace_id": 5,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "deployment.environment": "old-env",
+      "deployment.environment.name": "new-env",
+      "env": "new-env",
+      "language": "rust",
+      "mapping.case": "numeric-conventional",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced90000000037730fdaf9cc985a",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "service.version": "resource-version",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0",
+      "version": "resource-version"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "env": 42.0,
+      "process_id": 35767.0,
+      "version": 43.0
+    },
+    "duration": 1000,
+    "start": 1795018457434887000
+  }]]
