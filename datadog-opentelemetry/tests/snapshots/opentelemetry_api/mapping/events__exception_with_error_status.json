@@ -1,0 +1,56 @@
+[[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "exception-span",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "_dd.span_events.has_exception": "true",
+      "error.message": "event boom",
+      "error.stack": "TypeError: event boom\n  at mapping",
+      "error.type": "TypeError",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.trace_id": "6afdc5f000000000c0da795e4af4916a",
+      "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 76830.0
+    },
+    "span_events": [
+      {
+        "time_unix_nano": 1795016176949365000,
+        "name": "exception",
+        "attributes": {
+          "exception.message": {
+            "type": 0,
+            "string_value": "event boom"
+          },
+          "exception.stacktrace": {
+            "type": 0,
+            "string_value": "TypeError: event boom\n  at mapping"
+          },
+          "exception.type": {
+            "type": 0,
+            "string_value": "TypeError"
+          }
+        }
+      }
+    ],
+    "duration": 9000,
+    "start": 1795016176949358000
+  }]]

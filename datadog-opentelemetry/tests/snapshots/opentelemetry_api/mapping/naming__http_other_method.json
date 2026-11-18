@@ -1,0 +1,31 @@
+[[
+  {
+    "name": "http.server.request",
+    "service": "unnamed-rust-service",
+    "resource": "HTTP",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.method": "_OTHER",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdc5ee00000000b747154eda5e5739",
+      "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 76830.0
+    },
+    "duration": 8000,
+    "start": 1795016174182437000
+  }]]

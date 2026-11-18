@@ -1,0 +1,29 @@
+[[
+  {
+    "name": "internal",
+    "service": "otel-svc",
+    "resource": "ignored-name",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdc5f10000000090ddfa7263c29770",
+      "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
+      "span.kind": "internal",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 76830.0
+    },
+    "duration": 5000,
+    "start": 1795016177374915000
+  }]]
