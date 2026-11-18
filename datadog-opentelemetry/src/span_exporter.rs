@@ -20,6 +20,8 @@ use libdd_data_pipeline::trace_exporter::{
 };
 use libdd_shared_runtime::{BasicRuntime, BlockingRuntime, SharedRuntime, SharedRuntimeError};
 use libdd_trace_model::TraceText;
+use libdd_trace_utils::span::trace_utils::SDK_OTLP_EXPORT_KEY;
+use libdd_trace_utils::span::SpanText;
 use opentelemetry::Context;
 use opentelemetry_sdk::{trace::SpanData, Resource};
 
@@ -27,7 +29,7 @@ use crate::{
     configuration::Config,
     core::telemetry_session,
     ddtrace_transform::{self, DdTracePool},
-    mappings::{CachedConfig, DEFAULT_OTLP_SERVICE_NAME},
+    mappings::{CachedConfig, DdAttributeValue, SpanStr, DEFAULT_OTLP_SERVICE_NAME},
 };
 
 pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
@@ -445,7 +447,7 @@ impl Export<BufferedSpan> for SpanDataExport {
             let resource = self.otel_resource.load_full();
             let alloc = bumpalo::Bump::new();
             let pool = ddtrace_transform::trace_pool_for(&self.trace_pool);
-            let dd_trace_chunks = trace_chunks
+            let mut dd_trace_chunks = trace_chunks
                 .iter()
                 .map(|chunk| {
                     ddtrace_transform::otel_trace_chunk_to_dd_trace_chunk(
@@ -464,6 +466,20 @@ impl Export<BufferedSpan> for SpanDataExport {
                 .map(|s| s.service.as_str())
                 .filter(|s| !s.is_empty() && *s != DEFAULT_OTLP_SERVICE_NAME);
             self.config.add_extra_services(services);
+
+            // The pipeline marks native (non-OTLP) exports with `_dd.sdk.otlp_export` on each
+            // chunk's first span in the v0.4 path; the v0.4 span type it mutates doesn't exist on
+            // our v1 path yet.
+            // TODO(libdd-data-pipeline): remove once the pipeline's v1 path marks the spans
+            // itself and the crate is bumped past that release.
+            for chunk in &mut dd_trace_chunks {
+                if let Some(first) = chunk.spans.first_mut() {
+                    first.attributes.insert(
+                        SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
+                        DdAttributeValue::String(SpanStr::from_static_str("false")),
+                    );
+                }
+            }
 
             let result = if !dd_trace_chunks.is_empty() {
                 self.trace_exporter
