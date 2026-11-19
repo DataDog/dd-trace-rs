@@ -7,9 +7,13 @@
 //! (the application's, not this crate's), lists its binary targets with
 //! `cargo metadata --no-deps` and resolves the dependency tree of each workspace package
 //! that depends on this crate with `cargo tree`, twice when it has dev-dependencies: as its
-//! binaries are built, and as its tests are. The trees are merged into one graph, written to
+//! binaries are built, and as its tests are. The packages are resolved in parallel, and their
+//! trees merged into one graph, written to
 //! `$OUT_DIR/build_time_dependencies.json`, which the tracer embeds, and from which it picks the
 //! running executable's dependencies at runtime.
+//!
+//! It runs again when `Cargo.lock` or the root manifest changes, or the manifest of a member
+//! that may depend on this crate, through any feature, or that such a member may depend on.
 //!
 //! Collection is best-effort: any failure yields an empty list and never fails the build.
 //! Instead, the failure is recorded as a fixed code that the tracer reports as a telemetry
@@ -22,6 +26,10 @@ fn main() {
 
 #[path = "src/core/telemetry/dependencies/graph.rs"]
 mod graph;
+#[path = "src/core/telemetry/dependencies/lock.rs"]
+mod lock;
+#[path = "src/core/telemetry/dependencies/parallel.rs"]
+mod parallel;
 #[path = "src/core/telemetry/dependencies/tree.rs"]
 mod tree;
 
@@ -38,6 +46,8 @@ mod dependencies {
 
     use super::{
         graph::{Builds, Failure, Graph, Member, Recorded, Target, TargetKind},
+        lock::{lock_dependencies, watched_members},
+        parallel::parallel_map,
         tree::{package_names, parse_tree, workspace_root, GraphBuilder, Tree},
     };
 
@@ -68,6 +78,10 @@ mod dependencies {
 
         pub(super) fn target() -> Option<String> {
             env::var("TARGET").ok()
+        }
+
+        pub(super) fn num_jobs() -> Option<usize> {
+            env::var("NUM_JOBS").ok()?.parse().ok()
         }
 
         pub(super) fn collection_enabled() -> Option<String> {
@@ -176,10 +190,7 @@ mod dependencies {
         }
 
         let packages = workspace_packages(&cargo)?;
-        // A package that doesn't depend on this crate yet may come to, so all are watched.
-        for manifest in packages.iter().filter_map(|p| p["manifest_path"].as_str()) {
-            println!("cargo::rerun-if-changed={manifest}");
-        }
+        watch_manifests(&cargo, &packages);
         let dependents = dependents(&cargo);
         let may_depend = |package: &&Value| {
             dependents.as_ref().is_none_or(|names| {
@@ -188,10 +199,20 @@ mod dependencies {
                     .is_some_and(|name| names.contains(name))
             })
         };
+        let members: Vec<(&str, &Value)> = packages
+            .iter()
+            .filter(may_depend)
+            .filter_map(|package| Some((package["id"].as_str()?, package)))
+            .collect();
+        // Resolving the trees is the slow part, but the graph is built in the members' order,
+        // so that the recorded graph doesn't depend on which thread finishes first.
+        let trees = parallel_map(&members, tree_threads(), |(id, package)| {
+            member_trees(&cargo, id, package)
+        });
         let mut builder = GraphBuilder::default();
         let mut tree_error = None;
-        for package in packages.iter().filter(may_depend) {
-            if let Err(err) = add_member(&cargo, &mut builder, package) {
+        for ((id, package), trees) in members.into_iter().zip(trees) {
+            if let Err(err) = add_member(&mut builder, id, package, trees) {
                 builder.graph.unresolved.extend(targets(package));
                 tree_error = Some(err);
             }
@@ -205,6 +226,26 @@ mod dependencies {
         }
         println!("cargo::warning=no package of the workspace depends on this crate");
         Ok(builder.graph)
+    }
+
+    /// Watches the manifests of the members that can change the recorded graph without
+    /// changing `Cargo.lock`, or of every member if it can't be read.
+    fn watch_manifests(cargo: &Cargo, packages: &[Value]) {
+        let lock = fs::read_to_string(cargo.workspace.join("Cargo.lock"))
+            .ok()
+            .and_then(|lock| lock_dependencies(&lock));
+        let names = packages.iter().filter_map(|p| p["name"].as_str());
+        let watched = lock.map(|lock| watched_members(&lock, names, env!("CARGO_PKG_NAME")));
+        for package in packages {
+            let is_watched = watched.as_ref().is_none_or(|watched| {
+                package["name"]
+                    .as_str()
+                    .is_some_and(|name| watched.contains(name))
+            });
+            if let Some(manifest) = package["manifest_path"].as_str().filter(|_| is_watched) {
+                println!("cargo::rerun-if-changed={manifest}");
+            }
+        }
     }
 
     /// The root of the workspace being built:
@@ -295,34 +336,56 @@ mod dependencies {
             .map(|output| package_names(&output))
     }
 
-    /// Adds a workspace `package` to the graph if it depends on this crate, normally or
-    /// through its dev-dependencies.
-    fn add_member(
-        cargo: &Cargo,
-        builder: &mut GraphBuilder,
-        package: &Value,
-    ) -> Result<(), CargoError> {
-        let Some(id) = package["id"].as_str() else {
-            return Ok(());
-        };
-        let tree = dependency_tree(cargo, id, "normal")
-            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
+    /// The dependency trees of a workspace package: as its binaries are built, and as its tests
+    /// are when it has dev-dependencies.
+    struct MemberTrees {
+        tree: Result<Tree, CargoError>,
+        /// `None` without dev-dependencies, or when `tree` failed.
+        dev_tree: Option<Result<Tree, CargoError>>,
+    }
+
+    /// Resolves the trees of the workspace package `id`. It doesn't print, so that it can run
+    /// on any thread.
+    fn member_trees(cargo: &Cargo, id: &str, package: &Value) -> MemberTrees {
+        let tree = dependency_tree(cargo, id, "normal");
         let has_dev_dependencies = package["dependencies"]
             .as_array()
             .into_iter()
             .flatten()
             .any(|dependency| dependency["kind"] == "dev");
+        let dev_tree = (tree.is_ok() && has_dev_dependencies)
+            .then(|| dependency_tree(cargo, id, "normal,dev"));
+        MemberTrees { tree, dev_tree }
+    }
+
+    /// The threads to resolve the members' trees on: `NUM_JOBS`, at most 4, as `cargo tree`
+    /// holds the package cache lock while resolving, so more threads don't help.
+    fn tree_threads() -> usize {
+        const MAX_THREADS: usize = 4;
+        build_env::num_jobs().unwrap_or(1).clamp(1, MAX_THREADS)
+    }
+
+    /// Adds the workspace package `id` to the graph if it depends on this crate, normally or
+    /// through its dev-dependencies.
+    fn add_member(
+        builder: &mut GraphBuilder,
+        id: &str,
+        package: &Value,
+        trees: MemberTrees,
+    ) -> Result<(), CargoError> {
+        let tree = trees
+            .tree
+            .inspect_err(|(_, details)| println!("cargo::warning=skipping {id}: {details}"))?;
+        let has_dev_dependencies = trees.dev_tree.is_some();
         // Unlike `cargo build`, `cargo test` downloads the dev-dependencies, so they may be
         // missing: their tests then report the normal dependencies only.
-        let dev_tree = has_dev_dependencies
-            .then(|| {
-                dependency_tree(cargo, id, "normal,dev")
-                    .inspect_err(|(_, details)| {
-                        println!("cargo::warning=dev-dependencies of {id} not recorded: {details}")
-                    })
-                    .ok()
-            })
-            .flatten();
+        let dev_tree = trees.dev_tree.and_then(|dev_tree| {
+            dev_tree
+                .inspect_err(|(_, details)| {
+                    println!("cargo::warning=dev-dependencies of {id} not recorded: {details}")
+                })
+                .ok()
+        });
         let this_crate = env!("CARGO_PKG_NAME");
         if !tree.contains(this_crate)
             && !dev_tree

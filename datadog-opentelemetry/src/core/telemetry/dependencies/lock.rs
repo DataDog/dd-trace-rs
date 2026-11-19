@@ -1,0 +1,318 @@
+// Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
+//! Picks, from `Cargo.lock`, the workspace members whose manifests `build.rs` watches.
+//!
+//! The build script compiles this file too (through `#[path]`), so it must only use `std`. The
+//! tracer only compiles it for its tests.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+/// The dependencies of each package of a `Cargo.lock`, by name: packages with the same name are
+/// merged, which only adds edges. `None` if it has no packages, or a line that cargo doesn't
+/// write, e.g. edited by hand, as that could leave out edges.
+///
+/// The lockfile is resolved with every feature enabled, so it holds the optional dependencies
+/// too: a manifest change that enables a feature leaves it unchanged, and one that adds a
+/// dependency to a package rewrites that package's entry.
+pub fn lock_dependencies(lock: &str) -> Option<BTreeMap<String, BTreeSet<String>>> {
+    let mut packages = BTreeMap::new();
+    let mut current: Option<(String, BTreeSet<String>)> = None;
+    let mut in_dependencies = false;
+    for line in lock.lines() {
+        let line = line.trim();
+        if in_dependencies {
+            if line == "]" {
+                in_dependencies = false;
+            } else {
+                // One `"name"`, `"name version"` or `"name version (source)"` per line
+                let dependency = quoted(line.strip_suffix(',').unwrap_or(line))?;
+                let name = dependency.split(' ').next().unwrap_or(dependency);
+                let (_, dependencies) = current.as_mut()?;
+                dependencies.insert(name.to_owned());
+            }
+            continue;
+        }
+        if line.starts_with('[') {
+            if let Some((name, dependencies)) = current.take() {
+                merge(&mut packages, name, dependencies)?;
+            }
+            match line {
+                "[[package]]" => current = Some((String::new(), BTreeSet::new())),
+                // The root package of a version 1 lockfile, which isn't read.
+                "[root]" => return None,
+                _ => {}
+            }
+            continue;
+        }
+        let Some((name, _)) = current.as_mut() else {
+            continue;
+        };
+        if let Some(value) = line.strip_prefix("name = ") {
+            *name = quoted(value)?.to_owned();
+        } else if line == "dependencies = [" {
+            in_dependencies = true;
+        } else if line.starts_with("name") || line.starts_with("dependencies") {
+            return None;
+        }
+    }
+    if in_dependencies {
+        return None;
+    }
+    if let Some((name, dependencies)) = current {
+        merge(&mut packages, name, dependencies)?;
+    }
+    (!packages.is_empty()).then_some(packages)
+}
+
+/// Adds the `dependencies` of a package entry to those of the earlier entries with its name.
+/// `None` if the entry has no name.
+fn merge(
+    packages: &mut BTreeMap<String, BTreeSet<String>>,
+    name: String,
+    dependencies: BTreeSet<String>,
+) -> Option<()> {
+    if name.is_empty() {
+        return None;
+    }
+    packages.entry(name).or_default().extend(dependencies);
+    Some(())
+}
+
+/// The contents of a string without quotes inside, which cargo doesn't write.
+fn quoted(value: &str) -> Option<&str> {
+    let value = value.strip_prefix('"')?.strip_suffix('"')?;
+    (!value.contains('"')).then_some(value)
+}
+
+/// The `members` whose manifests can change the graph recorded for `this_crate`, without
+/// changing `lock`: the members that may depend on it, through any feature or dependency kind,
+/// and the members they may depend on. Any other member only comes to matter by adding a
+/// dependency, which rewrites the lockfile.
+pub fn watched_members<'a>(
+    lock: &BTreeMap<String, BTreeSet<String>>,
+    members: impl IntoIterator<Item = &'a str>,
+    this_crate: &str,
+) -> BTreeSet<String> {
+    let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (package, dependencies) in lock {
+        for dependency in dependencies {
+            dependents.entry(dependency).or_default().push(package);
+        }
+    }
+    let depending = reachable([this_crate], |name| {
+        dependents.get(name).into_iter().flatten().copied()
+    });
+    let members: BTreeSet<&str> = members.into_iter().collect();
+    let roots = members.iter().copied().filter(|m| depending.contains(m));
+    let watched = reachable(roots, |name| {
+        lock.get(name).into_iter().flatten().map(String::as_str)
+    });
+    members
+        .into_iter()
+        .filter(|member| watched.contains(member))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The names reachable from `roots` through `next`, `roots` included.
+fn reachable<'a, I: Iterator<Item = &'a str>>(
+    roots: impl IntoIterator<Item = &'a str>,
+    next: impl Fn(&str) -> I,
+) -> BTreeSet<&'a str> {
+    let mut seen = BTreeSet::new();
+    let mut stack: Vec<&str> = roots.into_iter().collect();
+    while let Some(name) = stack.pop() {
+        if seen.insert(name) {
+            stack.extend(next(name));
+        }
+    }
+    seen
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOCK: &str = r#"# This file is automatically @generated by Cargo.
+# It is not intended for manual editing.
+version = 4
+
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+ "datadog-opentelemetry",
+ "shared",
+]
+
+[[package]]
+name = "datadog-opentelemetry"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000000000000000000000000000000000000000000000000000000000000000"
+dependencies = [
+ "itoa 1.0.15 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "itoa"
+version = "1.0.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "earlier",
+]
+
+[[package]]
+name = "itoa"
+version = "1.0.15"
+source = "git+https://github.com/dtolnay/itoa#a1b2c3d4"
+dependencies = [
+ "extra",
+]
+
+[[package]]
+name = "optional"
+version = "0.1.0"
+dependencies = [
+ "datadog-opentelemetry",
+]
+
+[[package]]
+name = "plugin"
+version = "0.1.0"
+dependencies = [
+ "optional",
+]
+
+[[package]]
+name = "shared"
+version = "0.1.0"
+dependencies = [
+ "serde 1.0.219",
+]
+
+[[package]]
+name = "tool"
+version = "0.1.0"
+dependencies = [
+ "shared",
+]
+
+[[package]]
+name = "unrelated"
+version = "0.1.0"
+"#;
+
+    fn names(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    #[test]
+    fn test_lock_dependencies() {
+        let lock = lock_dependencies(LOCK).expect("the lockfile parses");
+        assert_eq!(lock["app"], names(&["datadog-opentelemetry", "shared"]));
+        assert_eq!(lock["datadog-opentelemetry"], names(&["itoa"]));
+        // Both sources of `itoa` are merged, each with dependencies the other doesn't have.
+        assert_eq!(lock["itoa"], names(&["earlier", "extra"]));
+        assert_eq!(lock["shared"], names(&["serde"]));
+        assert_eq!(lock["unrelated"], names(&[]));
+        assert_eq!(lock.len(), 8);
+    }
+
+    #[test]
+    fn test_lock_dependencies_without_packages() {
+        assert_eq!(lock_dependencies(""), None);
+        assert_eq!(lock_dependencies("version = 4\n"), None);
+        assert_eq!(lock_dependencies("[[package]]\nname = a\n"), None);
+        // A malformed name fails the whole lockfile, rather than leaving out that package.
+        assert_eq!(
+            lock_dependencies("[[package]]\nname = \"b\"\n\n[[package]]\nname = a\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_lock_dependencies_not_written_by_cargo() {
+        // After a valid package, so that leaving out the edges of the next one would still give
+        // a map.
+        let valid = "[[package]]\nname = \"b\"\nversion = \"0.1.0\"\n\n";
+        assert!(lock_dependencies(valid).is_some());
+        let packages = [
+            // inline array
+            "[[package]]\nname = \"a\"\ndependencies = [\"b\", \"c\"]\n",
+            // comment after the opener
+            "[[package]]\nname = \"a\"\ndependencies = [ # c\n \"b\",\n]\n",
+            // two dependencies on a line
+            "[[package]]\nname = \"a\"\ndependencies = [\n \"b\", \"c\",\n]\n",
+            // comment in the array
+            "[[package]]\nname = \"a\"\ndependencies = [\n # c\n \"b\",\n]\n",
+            // unterminated array
+            "[[package]]\nname = \"a\"\ndependencies = [\n \"b\",\n",
+            // unquoted name
+            "[[package]]\nname = a\n",
+            // name without spaces
+            "[[package]]\nname=\"a\"\n",
+            // no name
+            "[[package]]\nversion = \"0.1.0\"\n",
+            // version 1 root package
+            "[root]\nname = \"a\"\ndependencies = [\n \"b\",\n]\n",
+        ];
+        for package in packages {
+            assert_eq!(
+                lock_dependencies(&format!("{valid}{package}")),
+                None,
+                "{package}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_watched_members() {
+        let lock = lock_dependencies(LOCK).expect("the lockfile parses");
+        let members = ["app", "optional", "plugin", "shared", "tool", "unrelated"];
+        // `app` and `plugin` (through the optional dependency of `optional`) may depend on it,
+        // and `shared` is in the graph of `app`; `tool` and `unrelated` aren't in any.
+        assert_eq!(
+            watched_members(&lock, members, "datadog-opentelemetry"),
+            names(&["app", "optional", "plugin", "shared"])
+        );
+        assert_eq!(watched_members(&lock, members, "missing"), names(&[]));
+    }
+
+    #[test]
+    fn test_watched_members_through_an_earlier_version() {
+        // Only the earlier of the two versions of `bridge` depends on this crate.
+        let lock = lock_dependencies(
+            r#"
+[[package]]
+name = "app"
+version = "0.1.0"
+dependencies = [
+ "bridge 0.1.0",
+ "bridge 0.2.0",
+]
+
+[[package]]
+name = "bridge"
+version = "0.1.0"
+dependencies = [
+ "datadog-opentelemetry",
+]
+
+[[package]]
+name = "bridge"
+version = "0.2.0"
+dependencies = [
+ "itoa",
+]
+"#,
+        )
+        .expect("the lockfile parses");
+        assert_eq!(lock["bridge"], names(&["datadog-opentelemetry", "itoa"]));
+        assert_eq!(
+            watched_members(&lock, ["app"], "datadog-opentelemetry"),
+            names(&["app"])
+        );
+    }
+}
