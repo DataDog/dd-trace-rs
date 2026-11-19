@@ -39,6 +39,7 @@ async fn sns_publish_with_topic_creates_span_and_injects_binary_context() {
     assert_eq!(attrs["aws.service"], "SNS");
     assert_eq!(attrs["aws.operation"], "Publish");
     assert_eq!(attrs["topicname"], "MyTopic");
+    assert_eq!(attrs["aws.sns.topic.arn"], TOPIC_ARN);
     assert_eq!(attrs["operation.name"], "aws.sns.request");
     assert_eq!(attrs["resource.name"], "SNS.Publish");
 
@@ -70,6 +71,7 @@ async fn sns_publish_with_target_sets_targetname_tag() {
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["targetname"], "MyTarget");
     assert!(!attrs.contains_key("topicname"));
+    assert!(!attrs.contains_key("aws.sns.topic.arn"));
 }
 
 #[tokio::test]
