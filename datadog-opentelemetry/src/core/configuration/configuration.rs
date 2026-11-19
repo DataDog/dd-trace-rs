@@ -2861,8 +2861,10 @@ impl ConfigBuilder {
     /// Enable or disable dependency collection for telemetry.
     ///
     /// When enabled, the tracer reports the application's dependencies via telemetry. They
-    /// are recorded at build time by the crate's build script, which skips collection when
-    /// the env variable is set to `false` while building.
+    /// are recorded at build time by the crate's build script, which by default only collects
+    /// them for release builds, so debug builds report none. Setting the env variable while
+    /// building overrides that: `true` collects for every profile, and `false` skips
+    /// collection.
     ///
     /// **Default**: `true`
     ///
