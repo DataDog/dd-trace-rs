@@ -74,6 +74,14 @@ jobs:
         run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
         env:
           RUST_BACKTRACE: 1
+      - name: "[${{ steps.rust-version.outputs.version}}] test that debug builds don't collect dependencies"
+        if: runner.os == 'Linux'
+        shell: bash
+        # Without the workflow's DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED, so the tests check the
+        # default. cargo test rather than nextest, which would overwrite the JUnit report.
+        run: env -u DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED cargo test -p datadog-opentelemetry --lib --locked
+        env:
+          RUST_BACKTRACE: 1
       - name: Add file attributes to JUnit XML
         if: success() || failure()
         shell: bash

@@ -17,8 +17,9 @@
 //!
 //! It only collects for release builds, as the rebuilds it causes would slow down the edit and
 //! debug loop most. Setting `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` at build time overrides
-//! that: `false` or `0` skips collection, and is not reported as a failure, and any other value
-//! collects for every profile.
+//! that: `true` or `1` collects for every profile, and `false` or `0` skips collection, which
+//! is not reported as a failure. Any other value is ignored, as the tracer's configuration
+//! ignores it.
 
 fn main() {
     dependencies::generate();

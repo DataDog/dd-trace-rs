@@ -15,12 +15,13 @@ use std::{
 use super::graph::{Builds, Graph, Package};
 
 /// Whether to collect, given `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` and the `PROFILE` cargo
-/// sets: when the variable isn't set, only for release builds.
+/// sets: when the variable isn't a boolean the tracer's configuration accepts, only for release
+/// builds.
 pub fn collection_enabled(variable: Option<&str>, profile: Option<&str>) -> bool {
     match variable {
+        Some("true" | "1") => true,
         Some("false" | "0") => false,
-        Some(_) => true,
-        None => profile == Some("release"),
+        _ => profile == Some("release"),
     }
 }
 
@@ -183,6 +184,9 @@ mod tests {
         }
     }
 
+    /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
+    /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
+    /// `elsewhere/target` outside any workspace.
     #[test]
     fn test_collection_enabled() {
         for profile in [Some("release"), Some("debug"), None] {
@@ -191,14 +195,17 @@ mod tests {
             assert!(collection_enabled(Some("true"), profile));
             assert!(collection_enabled(Some("1"), profile));
         }
-        assert!(collection_enabled(None, Some("release")));
-        assert!(!collection_enabled(None, Some("debug")));
-        assert!(!collection_enabled(None, None));
+        // Unset, or a value the tracer's configuration rejects too.
+        for variable in [None, Some(""), Some("yes"), Some("TRUE"), Some("False")] {
+            assert!(
+                collection_enabled(variable, Some("release")),
+                "{variable:?}"
+            );
+            assert!(!collection_enabled(variable, Some("debug")), "{variable:?}");
+            assert!(!collection_enabled(variable, None), "{variable:?}");
+        }
     }
 
-    /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
-    /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
-    /// `elsewhere/target` outside any workspace.
     #[test]
     fn test_workspace_root() {
         let root = std::env::temp_dir().join(format!("dd-workspace-root-{}", std::process::id()));

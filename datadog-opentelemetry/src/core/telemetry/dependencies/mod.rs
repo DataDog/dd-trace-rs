@@ -119,8 +119,7 @@ fn collection_skipped(
 fn nothing_recorded(collected: bool, variable: Option<&str>) -> &'static str {
     if collected {
         "no workspace package depends on this crate"
-    } else if variable.is_some() {
-        // Any value but `false` and `0` collects.
+    } else if matches!(variable, Some("false" | "0")) {
         "collection was disabled with DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"
     } else {
         "collection only runs for release builds; set \
@@ -725,6 +724,23 @@ mod tests {
         assert!(nothing_recorded(false, Some("false")).contains("disabled"));
         assert!(nothing_recorded(false, Some("0")).contains("disabled"));
         assert!(nothing_recorded(false, None).contains("release builds"));
+        assert!(nothing_recorded(false, Some("yes")).contains("release builds"));
+    }
+
+    /// The build script collected exactly when the profile and variable it ran with say so. The
+    /// profile is told by `debug_assertions`, which only the release profiles turn off here.
+    #[test]
+    fn test_collection_follows_the_profile() {
+        let profile = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        let expected = tree::collection_enabled(
+            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
+            Some(profile),
+        );
+        assert_eq!(cfg!(dd_dependency_collection_enabled), expected);
     }
 
     #[test]
