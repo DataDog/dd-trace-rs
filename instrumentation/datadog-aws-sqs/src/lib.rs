@@ -15,8 +15,8 @@
 //! status, AWS request ID, and SDK errors.
 //!
 //! SQS-specific span tags include `messaging.system = amazonsqs`, `queuename`,
-//! `aws.sqs.queue.url`, `cloud.resource_id`, `messaging.batch.message_count`, and the sent `messaging.message.id` when
-//! available.
+//! `aws.sqs.queue.url`, `cloud.resource_id`, `messaging.batch.message_count`, and the sent
+//! `messaging.message.id` when available.
 //!
 //! For `SendMessage` and `SendMessageBatch`, the interceptor injects the active request span
 //! context as an SQS message attribute named `_datadog` with data type `String`. Existing
