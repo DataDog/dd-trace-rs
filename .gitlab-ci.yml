@@ -18,25 +18,22 @@ default:
 # Config inversion CI steps
 validate_supported_configurations_v2_local_file:
   stage: config-validation
-  image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:154750924
   rules:
     - when: on_success
   extends: .validate_supported_configurations_v2_local_file
   variables:
     LOCAL_JSON_PATH: "supported-configurations.json"
-    BACKFILLED: "true"
 
 # Executed on release tag datadog-opentelemetry-vx.y.z
 update_central_configurations_version_range_v2:
   stage: config-validation
-  image: registry.ddbuild.io/ci/libdatadog-build/packaging:100425777
+  image: registry.ddbuild.io/ci/libdatadog-build/packaging:154750924
   rules:
     - if: '$CI_COMMIT_TAG =~ /^datadog-opentelemetry-v[0-9]+\.[0-9]+\.[0-9]+$/'
       when: on_success
   extends: .update_central_configurations_version_range_v2
   variables:
-    LOCAL_REPO_NAME: "dd-trace-rs"
     LOCAL_JSON_PATH: "supported-configurations.json"
     LANGUAGE_NAME: "rust"
     SEND_ALIASES: "true"
-    TAG_PREFIX: "datadog-opentelemetry-v"
