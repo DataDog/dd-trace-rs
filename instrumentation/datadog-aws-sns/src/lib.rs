@@ -14,7 +14,7 @@
 //! context. Spans are tagged with common AWS SDK metadata, HTTP method, URL, user agent, response
 //! status, AWS request ID, and SDK errors.
 //!
-//! SNS-specific span tags include `topicname`, `targetname`, and
+//! SNS-specific span tags include `topicname`, `aws.sns.topic.arn`, `targetname`, and
 //! `messaging.batch.message_count` for `PublishBatch`.
 //!
 //! For `Publish` and `PublishBatch`, the interceptor injects the active request span context as an
@@ -68,7 +68,8 @@ use opentelemetry::{global, Context, KeyValue};
 
 use datadog_aws_core::{
     attribute_keys::{
-        DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT, TARGET_NAME, TOPIC_NAME,
+        AWS_SNS_TOPIC_ARN, DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT, TARGET_NAME,
+        TOPIC_NAME,
     },
     finish_request_span, request_span_trace_headers, start_request_span, update_request_span,
     AwsRequestMetadata,
@@ -169,6 +170,8 @@ impl Intercept for SnsInterceptor {
         };
         let service_tags = [
             topic_name.map(|name| KeyValue::new(TOPIC_NAME, name.to_owned())),
+            // The topic of the request; a publish target ARN names an endpoint, not a topic.
+            topic_arn.map(|arn| KeyValue::new(AWS_SNS_TOPIC_ARN, arn.to_owned())),
             target_name.map(|name| KeyValue::new(TARGET_NAME, name.to_owned())),
             batch_message_count.map(|count| KeyValue::new(MESSAGING_BATCH_MESSAGE_COUNT, count)),
         ]

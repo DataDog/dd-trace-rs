@@ -37,6 +37,7 @@ fn assert_queue_name_span(harness: &TestHarness, operation: &str) {
     assert_eq!(attrs["aws.operation"], operation);
     assert_eq!(attrs["queuename"], "MyQueue");
     assert!(!attrs.contains_key("cloud.resource_id"));
+    assert!(!attrs.contains_key("aws.sqs.queue.url"));
 }
 
 fn sns_envelope_body(data_type: &str, value: impl Into<serde_json::Value>) -> String {
@@ -99,6 +100,7 @@ async fn sqs_send_message_creates_span_with_tags_and_injects_context() {
     assert_eq!(attrs["resource.name"], "SQS.SendMessage");
     assert_eq!(attrs["span.kind"], "client");
     assert_eq!(attrs["queuename"], "MyQueue");
+    assert_eq!(attrs["aws.sqs.queue.url"], QUEUE_URL);
     assert_eq!(
         attrs["cloud.resource_id"],
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"
@@ -183,6 +185,7 @@ async fn sqs_receive_message_creates_span_with_queue_tags() {
     let attrs = span_attrs(&spans[0]);
     assert_eq!(attrs["aws.operation"], "ReceiveMessage");
     assert_eq!(attrs["queuename"], "MyQueue");
+    assert_eq!(attrs["aws.sqs.queue.url"], QUEUE_URL);
     assert_eq!(
         attrs["cloud.resource_id"],
         "arn:aws:sqs:us-east-1:123456789012:MyQueue"

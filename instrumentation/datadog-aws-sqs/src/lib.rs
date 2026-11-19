@@ -15,7 +15,7 @@
 //! status, AWS request ID, and SDK errors.
 //!
 //! SQS-specific span tags include `messaging.system = amazonsqs`, `queuename`,
-//! `cloud.resource_id`, `messaging.batch.message_count`, and the sent `messaging.message.id` when
+//! `aws.sqs.queue.url`, `cloud.resource_id`, `messaging.batch.message_count`, and the sent `messaging.message.id` when
 //! available.
 //!
 //! For `SendMessage` and `SendMessageBatch`, the interceptor injects the active request span
@@ -89,8 +89,8 @@ use serde_json::Value;
 
 use datadog_aws_core::{
     attribute_keys::{
-        CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT, MESSAGING_SYSTEM,
-        QUEUE_NAME,
+        AWS_SQS_QUEUE_URL, CLOUD_RESOURCE_ID, DATADOG_ATTRIBUTE_KEY, MESSAGING_BATCH_MESSAGE_COUNT,
+        MESSAGING_SYSTEM, QUEUE_NAME,
     },
     finish_request_span, request_span_context, request_span_trace_headers, start_request_span,
     update_request_span, AwsRequestMetadata,
@@ -464,6 +464,7 @@ impl Intercept for SqsInterceptor {
         let service_tags = [
             Some(KeyValue::new(MESSAGING_SYSTEM, "amazonsqs")),
             queue_name.map(|name| KeyValue::new(QUEUE_NAME, name.to_string())),
+            queue_url.map(|url| KeyValue::new(AWS_SQS_QUEUE_URL, url.to_string())),
             cloud_resource_id.map(|id| KeyValue::new(CLOUD_RESOURCE_ID, id)),
             batch_message_count.map(|count| KeyValue::new(MESSAGING_BATCH_MESSAGE_COUNT, count)),
         ]
