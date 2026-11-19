@@ -1170,8 +1170,9 @@ mod tests {
             parent_span_is_remote: false,
             span_kind: SpanKind::Internal,
             name: Cow::Borrowed("fixed-span"),
-            start_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(1234),
-            end_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(5678),
+            // Windows SystemTime represents timestamps in 100 ns ticks.
+            start_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(123_400),
+            end_time: SystemTime::UNIX_EPOCH + Duration::from_nanos(567_800),
             attributes: vec![],
             dropped_attributes_count: 0,
             events: SpanEvents::default(),
@@ -1233,8 +1234,8 @@ mod tests {
             tag(&output, "w3c.tracestate"),
             Some("vendor=value,other=state")
         );
-        assert_eq!(output.start, 1234);
-        assert_eq!(output.duration, 4444);
+        assert_eq!(output.start, 123_400);
+        assert_eq!(output.duration, 444_400);
     }
 
     #[test]
@@ -1243,10 +1244,10 @@ mod tests {
         let alloc = Bump::new();
         let mut data = span_data();
         for (start, end, expected_start, expected_duration) in [
-            (10, 9, 10, 0),
-            (10, 10, 10, 0),
-            (-2, -1, 0, 0),
-            (-1, 10, 0, 10),
+            (1000, 900, 1000, 0),
+            (1000, 1000, 1000, 0),
+            (-200, -100, 0, 0),
+            (-100, 1000, 0, 1000),
         ] {
             let time = |n: i64| {
                 if n < 0 {
@@ -1276,7 +1277,7 @@ mod tests {
         let mut data = span_data();
         data.events.events = vec![Event::new(
             "arrays",
-            SystemTime::UNIX_EPOCH + Duration::from_nanos(42),
+            SystemTime::UNIX_EPOCH + Duration::from_nanos(4200),
             vec![
                 KeyValue::new("bools", Value::Array(vec![true, false].into())),
                 KeyValue::new("ints", Value::Array(vec![-7_i64, 8].into())),
@@ -1297,7 +1298,7 @@ mod tests {
         )];
         let output = convert(&data, &resource, &alloc);
         let event = &output.span_events[0];
-        assert_eq!(event.time_unix_nano, 42);
+        assert_eq!(event.time_unix_nano, 4200);
         for (key, expected) in [
             ("bools", vec![Scalar::Boolean(true), Scalar::Boolean(false)]),
             ("ints", vec![Scalar::Integer(-7), Scalar::Integer(8)]),

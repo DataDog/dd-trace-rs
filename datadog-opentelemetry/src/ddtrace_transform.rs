@@ -518,10 +518,11 @@ mod tests {
                 "_dd.p.tid",
                 "fedcba9876543210",
             ));
+            // Windows SystemTime represents timestamps in 100 ns ticks.
             span.start_time =
-                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(1234);
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(123_400);
             span.end_time =
-                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(5678);
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(567_800);
         }
         let pool = SpanPool::with_capacity(2);
         for indices in [vec![0, 1], vec![1, 0], vec![1]] {
@@ -546,7 +547,7 @@ mod tests {
             for (span, index) in chunk.spans.iter().zip(&indices) {
                 assert_eq!(span.span_id, (*index + 1) as u64);
                 assert_eq!(span.parent_id, *index as u64);
-                assert_eq!((span.start, span.duration), (1234, 4444));
+                assert_eq!((span.start, span.duration), (123_400, 444_400));
                 assert_eq!(span.attributes.contains_key("language"), *index == 0);
                 assert!(!span.attributes.contains_key("_dd.p.tid"));
                 // Baseline v0.4->v1 encoding also retains origin, decision maker
