@@ -1,6 +1,6 @@
 name: Publish
 
-# datadog-opentelemetry tag publishes both datadog-opentelemtry and datatdog-telemetry-api crates
+# datadog-opentelemetry tag publishes both datadog-opentelemetry and datatdog-telemetry-api crates
 on:
   push:
     tags:
