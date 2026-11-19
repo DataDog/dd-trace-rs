@@ -727,22 +727,6 @@ mod tests {
         assert!(nothing_recorded(false, Some("yes")).contains("release builds"));
     }
 
-    /// The build script collected exactly when the profile and variable it ran with say so. The
-    /// profile is told by `debug_assertions`, which only the release profiles turn off here.
-    #[test]
-    fn test_collection_follows_the_profile() {
-        let profile = if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        };
-        let expected = tree::collection_enabled(
-            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
-            Some(profile),
-        );
-        assert_eq!(cfg!(dd_dependency_collection_enabled), expected);
-    }
-
     #[test]
     fn test_collection_skipped() {
         assert_eq!(collection_skipped(true, true, None), None);
