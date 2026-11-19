@@ -77,9 +77,13 @@ jobs:
       - name: "[${{ steps.rust-version.outputs.version}}] test that debug builds don't collect dependencies"
         if: runner.os == 'Linux'
         shell: bash
-        # Without the workflow's DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED, so the tests check the
-        # default. cargo test rather than nextest, which would overwrite the JUnit report.
-        run: env -u DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED cargo test -p datadog-opentelemetry --lib --locked
+        # Without the workflow's DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED, the tests whose checks
+        # depend on whether the build collected, in the `sca_build_collection` test modules, so they
+        # check the default, including the ignored test that it's off. cargo test rather than
+        # nextest, which would overwrite the JUnit report.
+        run: |
+          unset DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED
+          cargo test -p datadog-opentelemetry --lib --locked -- --include-ignored sca_build_collection::
         env:
           RUST_BACKTRACE: 1
       - name: Add file attributes to JUnit XML

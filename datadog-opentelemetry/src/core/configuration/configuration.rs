@@ -5307,24 +5307,6 @@ mod tests {
         }
     }
 
-    /// Depends on whether the build script collected: by default only for release builds, so CI
-    /// sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true` to test both outcomes.
-    #[test]
-    fn test_appsec_sca_enabled_with_telemetry() {
-        let logs = sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true")]);
-        if cfg!(dd_dependency_collection_enabled) {
-            assert!(logs.is_empty(), "{logs:?}");
-        } else {
-            assert_eq!(logs.len(), 1, "{logs:?}");
-            let (level, message) = &logs[0];
-            assert_eq!(*level, tracing::Level::ERROR);
-            assert!(
-                message.contains("weren't collected at build time"),
-                "{message}"
-            );
-        }
-    }
-
     #[test]
     fn test_appsec_sca_disabled_doesnt_log() {
         for sca in [None, Some("false")] {
@@ -5647,5 +5629,29 @@ mod tests {
             ])
             .as_deref()
         );
+    }
+
+    /// Tests whose checks depend on whether the build script collected: CI also runs them
+    /// without `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`, filtered by this module's name.
+    mod sca_build_collection {
+        use super::*;
+
+        /// Depends on whether the build script collected: by default only for release builds, so CI
+        /// sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true` to test both outcomes.
+        #[test]
+        fn test_appsec_sca_enabled_with_telemetry() {
+            let logs = sca_logs(&[("DD_APPSEC_SCA_ENABLED", "true")]);
+            if cfg!(dd_dependency_collection_enabled) {
+                assert!(logs.is_empty(), "{logs:?}");
+            } else {
+                assert_eq!(logs.len(), 1, "{logs:?}");
+                let (level, message) = &logs[0];
+                assert_eq!(*level, tracing::Level::ERROR);
+                assert!(
+                    message.contains("weren't collected at build time"),
+                    "{message}"
+                );
+            }
+        }
     }
 }
