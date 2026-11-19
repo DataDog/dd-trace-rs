@@ -11,7 +11,7 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 
-use super::{emit, resource, start_span, MappingCase};
+use super::{emit, ignored_name_span, resource, start_span, MappingCase};
 
 pub(super) const CASES: &[MappingCase] = &[
     // Dedicated Datadog fields and conventional overrides
@@ -105,13 +105,13 @@ pub(super) const CASES: &[MappingCase] = &[
         name: "env_version__deployment_environment_resource",
         configure: None,
         resource: Some(env_version_deployment_environment_resource_res),
-        run: env_version_deployment_environment_resource,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "env_version__deployment_environment_name_resource",
         configure: None,
         resource: Some(env_version_deployment_environment_name_resource_res),
-        run: env_version_deployment_environment_name_resource,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "env_version__dd_env_beats_resource",
@@ -119,17 +119,20 @@ pub(super) const CASES: &[MappingCase] = &[
         resource: Some(env_version_dd_env_beats_resource_res),
         run: env_version_dd_env_beats_resource,
     },
+    // `service.version` on the resource sets the span version.
     MappingCase {
         name: "env_version__service_version_resource",
         configure: None,
         resource: Some(env_version_service_version_resource_res),
-        run: env_version_service_version_resource,
+        run: ignored_name_span,
     },
+    // The configured version is applied as the `version` tag when the span service is
+    // the resource's `service.name`.
     MappingCase {
         name: "env_version__config_version",
         configure: Some(env_version_config_version_config),
         resource: Some(env_version_config_version_res),
-        run: env_version_config_version,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "attributes__promoted_meta_keys",
@@ -137,11 +140,12 @@ pub(super) const CASES: &[MappingCase] = &[
         resource: None,
         run: attributes_promoted_meta_keys,
     },
+    // The configured env is applied to the resource, which resolves the span env.
     MappingCase {
         name: "config__env",
         configure: Some(config_env_config),
         resource: None,
-        run: config_env,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "env_version__scope_span_config_conflicts",
@@ -193,11 +197,13 @@ pub(super) const CASES: &[MappingCase] = &[
         resource: None,
         run: attributes_service_name_span_attribute,
     },
+    // The resource `service.name` resolves the span service; a matching configured
+    // version is applied.
     MappingCase {
         name: "resource__service_name_resolution",
         configure: None,
         resource: Some(resource_service_name_resolution_res),
-        run: resource_service_name_resolution,
+        run: ignored_name_span,
     },
     // Span type inference and lookup precedence
     MappingCase {
@@ -206,11 +212,12 @@ pub(super) const CASES: &[MappingCase] = &[
         resource: None,
         run: span_type_attribute,
     },
+    // `span.type` is read from the resource attributes as well.
     MappingCase {
         name: "span_type__resource_attribute",
         configure: None,
         resource: Some(span_type_resource_attribute_resource),
-        run: span_type_resource_attribute,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "span_type__db_lookup_table",
@@ -318,32 +325,8 @@ fn env_version_dd_env_attribute(provider: &SdkTracerProvider, _: &dyn TextMapPro
     ));
 }
 
-fn env_version_deployment_environment_resource(
-    provider: &SdkTracerProvider,
-    _: &dyn TextMapPropagator,
-) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
-}
-
 fn env_version_deployment_environment_resource_res() -> Resource {
     resource(vec![KeyValue::new("deployment.environment", "prod")])
-}
-
-fn env_version_deployment_environment_name_resource(
-    provider: &SdkTracerProvider,
-    _: &dyn TextMapPropagator,
-) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
 }
 
 fn env_version_deployment_environment_name_resource_res() -> Resource {
@@ -370,29 +353,8 @@ fn env_version_dd_env_beats_resource_res() -> Resource {
     )])
 }
 
-/// `service.version` on the resource sets the span version.
-fn env_version_service_version_resource(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
-}
-
 fn env_version_service_version_resource_res() -> Resource {
     resource(vec![KeyValue::new("service.version", "1.2.3")])
-}
-
-/// The configured version is applied as the `version` tag when the span service is
-/// the resource's `service.name`.
-fn env_version_config_version(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
 }
 
 fn env_version_config_version_res() -> Resource {
@@ -416,16 +378,6 @@ fn attributes_promoted_meta_keys(provider: &SdkTracerProvider, _: &dyn TextMapPr
             KeyValue::new("component", "my-component"),
             KeyValue::new("span.kind", "server"),
         ],
-    ));
-}
-
-/// The configured env is applied to the resource, which resolves the span env.
-fn config_env(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
     ));
 }
 
@@ -515,17 +467,6 @@ fn attributes_service_name_span_attribute(provider: &SdkTracerProvider, _: &dyn 
     ));
 }
 
-/// The resource `service.name` resolves the span service; a matching configured
-/// version is applied.
-fn resource_service_name_resolution(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
-}
-
 fn resource_service_name_resolution_res() -> Resource {
     resource(vec![KeyValue::new("service.name", "otel-svc")])
 }
@@ -537,16 +478,6 @@ fn span_type_attribute(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) 
         "ignored-name",
         SpanKind::Internal,
         vec![KeyValue::new("span.type", "queue")],
-    ));
-}
-
-/// `span.type` is read from the resource attributes as well.
-fn span_type_resource_attribute(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
     ));
 }
 

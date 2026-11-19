@@ -6,7 +6,7 @@
 use opentelemetry::{propagation::TextMapPropagator, trace::SpanKind, KeyValue};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
-use super::{emit, resource, start_span, MappingCase};
+use super::{emit, ignored_name_span, resource, start_span, MappingCase};
 
 pub(super) const CASES: &[MappingCase] = &[
     // Operation name fallbacks and competing families
@@ -140,7 +140,7 @@ pub(super) const CASES: &[MappingCase] = &[
         name: "naming__kind_internal",
         configure: None,
         resource: None,
-        run: naming_kind_internal,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "naming__kind_producer",
@@ -471,15 +471,6 @@ fn naming_generic_client_fallback(provider: &SdkTracerProvider, _: &dyn TextMapP
         "ignored-name",
         SpanKind::Client,
         vec![KeyValue::new("some.attribute", "value")],
-    ));
-}
-
-fn naming_kind_internal(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
     ));
 }
 

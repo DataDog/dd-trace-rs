@@ -11,7 +11,7 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::trace::SdkTracerProvider;
 
-use super::{resource, start_span, MappingCase};
+use super::{ignored_name_span, resource, start_span, MappingCase};
 
 pub(super) const CASES: &[MappingCase] = &[
     // Chunk and local-root metadata
@@ -37,11 +37,12 @@ pub(super) const CASES: &[MappingCase] = &[
         run: remote_root_and_child,
     },
     // Configured global metadata
+    // Global tags from the configuration are applied to every span.
     MappingCase {
         name: "config__global_tags",
         configure: Some(config_global_tags_config),
         resource: None,
-        run: config_global_tags,
+        run: ignored_name_span,
     },
     MappingCase {
         name: "config__root_child_global_tag_version_conflicts",
@@ -121,16 +122,6 @@ fn remote_root_and_child(provider: &SdkTracerProvider, propagator: &dyn TextMapP
             .start_with_context(&provider.tracer("mapping"), &local),
     );
     local.span().end();
-}
-
-/// Global tags from the configuration are applied to every span.
-fn config_global_tags(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
 }
 
 fn config_global_tags_config(cfg: &mut ConfigBuilder) {

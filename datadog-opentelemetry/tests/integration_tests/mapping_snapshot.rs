@@ -47,6 +47,7 @@ fn cases() -> impl Iterator<Item = &'static MappingCase> {
 }
 
 /// The shared agent helper creates missing files. Do not silently accept an absent oracle.
+/// Every problem is collected first, then reported in one panic listing them all.
 #[test]
 // This switch controls fixture tooling, not tracer configuration.
 #[allow(clippy::disallowed_methods)]
@@ -56,21 +57,23 @@ fn mapping_snapshot_fixtures_exist() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/snapshots/opentelemetry_api/mapping");
     let mut names = std::collections::HashSet::new();
+    let mut failures = Vec::new();
     for case in cases() {
-        assert!(
-            names.insert(case.name),
-            "duplicate mapping case {}",
-            case.name
-        );
+        if !names.insert(case.name) {
+            failures.push(format!("duplicate mapping case {}", case.name));
+        }
         for suffix in [".json", "_tracestats.json"] {
             let path = dir.join(format!("{}{suffix}", case.name));
-            assert!(
-                generate || path.is_file(),
-                "missing snapshot {}",
-                path.display()
-            );
+            if !generate && !path.is_file() {
+                failures.push(format!("missing snapshot {}", path.display()));
+            }
         }
     }
+    assert!(
+        failures.is_empty(),
+        "mapping snapshot problems:\n  {}",
+        failures.join("\n  ")
+    );
 }
 
 /// A single span case: one snapshot session, one mapping scenario.
@@ -121,14 +124,15 @@ fn build_bundle(
 }
 
 /// Starts a span with the given name, kind and attributes, through the OpenTelemetry
-/// API. The span ends when dropped.
+/// API. The span ends when dropped, so a case can sequence several spans (parents,
+/// children, events, links) before they end.
 fn start_span(
     provider: &SdkTracerProvider,
-    name: &'static str,
+    name: &str,
     kind: SpanKind,
     attributes: Vec<KeyValue>,
 ) -> opentelemetry_sdk::trace::Span {
-    SpanBuilder::from_name(name)
+    SpanBuilder::from_name(name.to_owned())
         .with_kind(kind)
         .with_attributes(attributes)
         .start(&provider.tracer("mapping"))
@@ -141,14 +145,23 @@ fn resource(attributes: Vec<KeyValue>) -> Resource {
         .build()
 }
 
+/// Emits one complete fire-and-forget span labeled with its input name, the shortcut
+/// for single-span inputs and multi-input sessions that need no sequencing. Cases that
+/// need the live span (parents, children, events, links) use `start_span` instead.
 fn emit(provider: &SdkTracerProvider, name: &str, kind: SpanKind, mut attrs: Vec<KeyValue>) {
     attrs.push(KeyValue::new("mapping.case", name.to_owned()));
-    drop(
-        SpanBuilder::from_name(name.to_owned())
-            .with_kind(kind)
-            .with_attributes(attrs)
-            .start(&provider.tracer("mapping")),
-    );
+    drop(start_span(provider, name, kind, attrs));
+}
+
+/// The input of cases whose whole scenario lives in their resource or configuration:
+/// one internal span named `ignored-name`, closed immediately.
+fn ignored_name_span(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
+    drop(start_span(
+        provider,
+        "ignored-name",
+        SpanKind::Internal,
+        vec![],
+    ));
 }
 
 #[tokio::test]

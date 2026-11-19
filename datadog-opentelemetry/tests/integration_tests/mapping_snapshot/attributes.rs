@@ -10,7 +10,7 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 
-use super::{emit, resource, start_span, MappingCase};
+use super::{emit, ignored_name_span, resource, start_span, MappingCase};
 
 pub(super) const CASES: &[MappingCase] = &[
     // Span attributes, aliases and namespace collisions
@@ -113,11 +113,13 @@ pub(super) const CASES: &[MappingCase] = &[
         run: numeric_flags,
     },
     // Resource attribute mapping
+    // Resource attributes go through the same semconv key mapping as span attributes
+    // (`url.full` -> `http.url`, ...); unknown keys are kept as-is.
     MappingCase {
         name: "resource__attribute_mapping",
         configure: None,
         resource: Some(resource_attribute_mapping_res),
-        run: resource_attribute_mapping,
+        run: ignored_name_span,
     },
 ];
 
@@ -373,17 +375,6 @@ fn numeric_flags(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
             );
         }
     }
-}
-
-/// Resource attributes go through the same semconv key mapping as span attributes
-/// (`url.full` -> `http.url`, ...); unknown keys are kept as-is.
-fn resource_attribute_mapping(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
-    drop(start_span(
-        provider,
-        "ignored-name",
-        SpanKind::Internal,
-        vec![],
-    ));
 }
 
 fn resource_attribute_mapping_res() -> Resource {
