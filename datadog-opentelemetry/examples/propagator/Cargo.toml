@@ -11,6 +11,9 @@ path = "src/server.rs"
 doc = false
 bench = false
 
+[lints]
+workspace = true
+
 [dependencies]
 datadog-opentelemetry = { path = "../../../datadog-opentelemetry"}
 
