@@ -22,8 +22,10 @@ pub(crate) use transform::otel_util::OtelSpan;
 pub use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
     otel_util::DEFAULT_OTLP_SERVICE_NAME,
-    otel_value_string_repr, DdSpan, SpanStr,
+    otel_value_string_repr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
 };
+
+pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert};
 
 #[cfg(feature = "test-utils")]
 pub use transform::{semconv_shim, transform_tests};
