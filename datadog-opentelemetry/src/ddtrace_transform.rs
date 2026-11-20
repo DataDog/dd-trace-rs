@@ -184,7 +184,9 @@ fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a Cach
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::configuration::Config;
+    use crate::core::configuration::{Config, ConfigParser, HttpErrorStatuses};
+    use libdd_trace_model::AttributeValue;
+    use libdd_trace_utils::{msgpack_decoder, msgpack_encoder, tracer_metadata::TracerMetadata};
     use opentelemetry::trace::{SpanContext, TraceFlags, TraceId};
     use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
     use std::borrow::Cow;
@@ -274,9 +276,10 @@ mod tests {
         let resource = Resource::builder_empty().build();
         let alloc = Bump::new();
         let span_data = [
-            span_data(1, 0, false), // local root of a new trace
-            span_data(2, 1, false), // its child
-            span_data(3, 99, true), // local root continuing a remote trace
+            span_data(2, 1, false),  // child completed before its root
+            span_data(1, 0, false),  // local root of a new trace
+            span_data(3, 99, true),  // local root continuing a remote trace
+            span_data(4, 99, false), // partial chunk: absent parent is not a local root
         ];
 
         // Declared last: the pooled spans borrow from everything above
@@ -289,9 +292,9 @@ mod tests {
             &alloc,
         );
 
-        assert_eq!(chunk.len(), 3);
+        assert_eq!(chunk.len(), 4);
         let process_id = f64::from(std::process::id());
-        for (span, is_local_root) in chunk.iter().zip([true, false, true]) {
+        for (span, is_local_root) in chunk.iter().zip([false, true, true, false]) {
             let meta = |key| {
                 span.meta
                     .get(&SpanStr::from_static_str(key))
@@ -410,5 +413,158 @@ mod tests {
             error_after(&cached_config, span("producer", Some("200"), 1)),
             1
         );
+    }
+
+    #[test]
+    fn test_configured_http_status_boundaries_and_kind_override() {
+        let mut cached_config = CachedConfig::new(&Config::builder().build());
+        cached_config.http_server_error_statuses = HttpErrorStatuses::parse("200-201,418").unwrap();
+        cached_config.http_client_error_statuses = HttpErrorStatuses::parse("500-501").unwrap();
+        for (kind, codes, expected) in [
+            (
+                "server",
+                [199, 200, 201, 202, 417, 418, 419],
+                [0, 1, 1, 0, 0, 1, 0],
+            ),
+            (
+                "client",
+                [399, 400, 499, 500, 501, 502, 599],
+                [0, 0, 0, 1, 1, 0, 0],
+            ),
+        ] {
+            for (code, expected) in codes.into_iter().zip(expected) {
+                for initial_error in [0, 1, -7] {
+                    let mut input = span(kind, None, initial_error);
+                    input.meta.insert(
+                        SpanStr::from_static_str("http.status_code"),
+                        SpanStr::from_string(code.to_string()),
+                    );
+                    apply_http_error_statuses(&mut input, &cached_config);
+                    assert_eq!(input.error, expected, "{kind}:{code}:{initial_error}");
+                }
+            }
+        }
+        for code in ["", "not-a-code", "-1", "65536"] {
+            assert_eq!(
+                error_after(&cached_config, span("server", Some(code), -7)),
+                -7
+            );
+        }
+        for kind in ["Server", "internal", "producer", "consumer"] {
+            assert_eq!(error_after(&cached_config, span(kind, Some("200"), -7)), -7);
+        }
+    }
+
+    #[test]
+    fn test_sampling_priority_survives_chunk_conversion_without_processor() {
+        let config = CachedConfig::new(&Config::builder().build());
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let mut data = [span_data(2, 1, false), span_data(1, 0, false)];
+        data[0].attributes = vec![opentelemetry::KeyValue::new("sampling.priority", -1)];
+        data[1].span_context = SpanContext::new(
+            TraceId::from(1),
+            SpanId::from(1),
+            TraceFlags::default(),
+            false,
+            Default::default(),
+        );
+        let pool = SpanPool::with_capacity(2);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(&config, &data, &resource, &pool, &alloc);
+        assert_eq!(
+            chunk
+                .iter()
+                .map(|s| (s.span_id, s.parent_id))
+                .collect::<Vec<_>>(),
+            [(2, 1), (1, 0)]
+        );
+        for (span, priority) in chunk.iter().zip([-1.0, 0.0]) {
+            assert_eq!(
+                span.metrics
+                    .get(&SpanStr::from_static_str("_sampling_priority_v1")),
+                Some(&priority)
+            );
+        }
+    }
+
+    /// The test agent ignores IDs/times and downgrades native chunk fields back to
+    /// span tags. Exercise the shared v0.4-to-v1 codec without that normalization;
+    /// the production exporter on this baseline still selects v0.4 output.
+    #[test]
+    fn test_native_v1_chunk_fields_out_of_order_and_partial_chunks() {
+        let config = CachedConfig::new(&Config::builder().build());
+        let resource = Resource::builder_empty().build();
+        let alloc = Bump::new();
+        let mut data = [span_data(1, 0, false), span_data(2, 1, false)];
+        data[0].attributes = vec![
+            opentelemetry::KeyValue::new("sampling.priority", 2),
+            opentelemetry::KeyValue::new("_dd.origin", "rum"),
+            opentelemetry::KeyValue::new("_dd.p.dm", "-4"),
+        ];
+        data[1].attributes = vec![
+            opentelemetry::KeyValue::new("sampling.priority", -1),
+            opentelemetry::KeyValue::new("_dd.origin", "child-origin"),
+            opentelemetry::KeyValue::new("_dd.p.dm", "-3"),
+        ];
+        for span in &mut data {
+            span.span_context = SpanContext::new(
+                TraceId::from_hex("fedcba98765432100123456789abcdef").unwrap(),
+                span.span_context.span_id(),
+                TraceFlags::SAMPLED,
+                false,
+                Default::default(),
+            );
+            span.attributes.push(opentelemetry::KeyValue::new(
+                "_dd.p.tid",
+                "fedcba9876543210",
+            ));
+            // Windows SystemTime represents timestamps in 100 ns ticks.
+            span.start_time =
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(123_400);
+            span.end_time =
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(567_800);
+        }
+        let pool = SpanPool::with_capacity(2);
+        for indices in [vec![0, 1], vec![1, 0], vec![1]] {
+            let has_root = indices.contains(&0);
+            let chunk = otel_trace_chunk_to_dd_trace_chunk(
+                &config,
+                indices.iter().map(|&i| &data[i]),
+                &resource,
+                &pool,
+                &alloc,
+            );
+            let encoded =
+                msgpack_encoder::v1::to_vec_from_v04(&[chunk], &TracerMetadata::default());
+            let (payload, _) = msgpack_decoder::v1::from_slice(&encoded).unwrap();
+            assert_eq!(payload.chunks.len(), 1);
+            let chunk = &payload.chunks[0];
+            assert_eq!(chunk.trace_id, data[0].span_context.trace_id().to_bytes());
+            assert_eq!(chunk.priority, Some(if has_root { 2 } else { -1 }));
+            assert_eq!(chunk.origin, if has_root { "rum" } else { "child-origin" });
+            assert_eq!(chunk.sampling_mechanism, Some(if has_root { 4 } else { 3 }));
+            assert!(!chunk.dropped_trace);
+            for (span, index) in chunk.spans.iter().zip(&indices) {
+                assert_eq!(span.span_id, (*index + 1) as u64);
+                assert_eq!(span.parent_id, *index as u64);
+                assert_eq!((span.start, span.duration), (123_400, 444_400));
+                assert_eq!(span.attributes.contains_key("language"), *index == 0);
+                assert!(!span.attributes.contains_key("_dd.p.tid"));
+                // Baseline v0.4->v1 encoding also retains origin, decision maker
+                // and priority on spans, despite lifting them to the chunk.
+                assert!(matches!(
+                    span.attributes.get("_dd.origin"),
+                    Some(AttributeValue::String(_))
+                ));
+                assert!(matches!(
+                    span.attributes.get("_dd.p.dm"),
+                    Some(AttributeValue::String(_))
+                ));
+                assert!(matches!(
+                    span.attributes.get("_sampling_priority_v1"),
+                    Some(AttributeValue::Float(_))
+                ));
+            }
+        }
     }
 }

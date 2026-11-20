@@ -18,6 +18,7 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 
 mod datadog_telemetry_api;
 mod logs;
+mod mapping_snapshot;
 mod metrics;
 mod opentelemetry_api;
 mod stats;

@@ -1,0 +1,33 @@
+[[
+  {
+    "name": "aws.s3.invoke",
+    "service": "unnamed-rust-service",
+    "resource": "ignored-name",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "faas.invoked_name": "S3",
+      "faas.invoked_provider": "aws",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdcddb000000008c24fea803fc456f",
+      "runtime-id": "069635d4-54e4-4c51-9b34-23e8bcfe616e",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 27559.0
+    },
+    "duration": 6000,
+    "start": 1795018203613086000
+  }]]

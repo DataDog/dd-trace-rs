@@ -1,0 +1,32 @@
+[[
+  {
+    "name": "dd-name",
+    "service": "dd-service",
+    "resource": "dd-resource",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "dd-type",
+    "meta": {
+      "_dd.base_service": "resource-service",
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "mapping.case": "conflict",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced80000000070f3453f4dee5ec6",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "span.kind": "client",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "duration": 5000,
+    "start": 1795018456860147000
+  }]]

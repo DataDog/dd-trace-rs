@@ -1,0 +1,2932 @@
+[[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "api=Server,dd=client,code=404",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "404",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdd10b00000000c75d1df604d04bad",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 404.0,
+      "process_id": 70626.0
+    },
+    "duration": 11000,
+    "start": 1795019019107613000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "api=Server,dd=producer,code=404",
+    "trace_id": 1,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "boom",
+      "http.status_code": "404",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "boom",
+      "otel.trace_id": "6afdd10b000000004147350a7e3092e0",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "producer",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 404.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107648000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "api=Client,dd=server,code=404",
+    "trace_id": 2,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "404",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "boom",
+      "otel.trace_id": "6afdd10b0000000034880dcd5bcb4c8d",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 404.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107658000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "api=Server,dd=Server,code=503",
+    "trace_id": 3,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "503",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdd10b000000008f57dd836ad49477",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "Server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 503.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107667000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:0:error=false",
+    "trace_id": 4,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000439dfc5596897d95",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107678000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:0:error=true",
+    "trace_id": 5,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000002bdecaf658081475",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107686000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:199:error=false",
+    "trace_id": 6,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000012ba0115a8af0288",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107695000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:199:error=true",
+    "trace_id": 7,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000aadd4c0423c88616",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107713000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:200:error=false",
+    "trace_id": 8,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000e8f23198bd0cb0d2",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107721000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:200:error=true",
+    "trace_id": 9,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000000b819ba58fd6097d",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107728000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:299:error=false",
+    "trace_id": 10,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000e5516b87af32982f",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107735000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:299:error=true",
+    "trace_id": 11,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000eb0b3e087b65be4b",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107742000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:300:error=false",
+    "trace_id": 12,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000098e7117fe068364b",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107749000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:300:error=true",
+    "trace_id": 13,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000b625bea62bb15c7c",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107756000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:399:error=false",
+    "trace_id": 14,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000051d890132e6d350f",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107763000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:399:error=true",
+    "trace_id": 15,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000925bd26795166e5f",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107770000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:400:error=false",
+    "trace_id": 16,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000a9f301bdfcec8b84",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107776000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:400:error=true",
+    "trace_id": 17,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000002e44632ec34b5686",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107784000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:499:error=false",
+    "trace_id": 18,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000924ead6cb2b70ebf",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107790000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:499:error=true",
+    "trace_id": 19,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000005ff9a56ff54544a4",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107797000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:500:error=false",
+    "trace_id": 20,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000004b298079b0da6d2c",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107804000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:500:error=true",
+    "trace_id": 21,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000e3e29548259ea22e",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107811000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:599:error=false",
+    "trace_id": 22,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000005ba5b4b07e1f8984",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107818000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:599:error=true",
+    "trace_id": 23,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000004259c595420dfa1a",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107824000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:600:error=false",
+    "trace_id": 24,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000a3bb3fccfe0d9807",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107831000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:600:error=true",
+    "trace_id": 25,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000004bb7dbf409a8744d",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107838000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:65535:error=false",
+    "trace_id": 26,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000007986536b3f8f9a98",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107845000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:65535:error=true",
+    "trace_id": 27,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000003cb3708fc232b3c9",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107852000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:65536:error=false",
+    "trace_id": 28,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000095ef932a2c59b613",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107859000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:65536:error=true",
+    "trace_id": 29,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000007000478ee2ea810e",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107866000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:-1:error=false",
+    "trace_id": 30,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000af4ab90c1b1a45b9",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107872000
+  }],
+[
+  {
+    "name": "server.request",
+    "service": "unnamed-rust-service",
+    "resource": "Server:-1:error=true",
+    "trace_id": 31,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "web",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000002c83cdf95be5c988",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "server",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107879000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:0:error=false",
+    "trace_id": 32,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000021b72ec3641205ae",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107886000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:0:error=true",
+    "trace_id": 33,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000e368c91327d6c535",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107893000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:199:error=false",
+    "trace_id": 34,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000a5f8ca0316413de6",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107900000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:199:error=true",
+    "trace_id": 35,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000d325bd526cf89d0e",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107906000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:200:error=false",
+    "trace_id": 36,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000a6546ddb204e7965",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107914000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:200:error=true",
+    "trace_id": 37,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000facdd8431ecbd918",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107920000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:299:error=false",
+    "trace_id": 38,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000006f8c4d8caede0c44",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107927000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:299:error=true",
+    "trace_id": 39,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000003aed614ba87f7cf4",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107934000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:300:error=false",
+    "trace_id": 40,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000bb92e439cbbd648c",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107941000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:300:error=true",
+    "trace_id": 41,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000006d2872809e866f68",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107948000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:399:error=false",
+    "trace_id": 42,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000762b2918db48069d",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107955000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:399:error=true",
+    "trace_id": 43,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000000b6833d9f0025272",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107961000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:400:error=false",
+    "trace_id": 44,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000886002faf40b796f",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107968000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:400:error=true",
+    "trace_id": 45,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000eb2db34f3259fe56",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019107975000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:499:error=false",
+    "trace_id": 46,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000e1bf2171e03307a8",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107981000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:499:error=true",
+    "trace_id": 47,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000ea55706840f6221b",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107988000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:500:error=false",
+    "trace_id": 48,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000008e15ba1b6c042383",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019107995000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:500:error=true",
+    "trace_id": 49,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000005b1ef470cd3661eb",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108002000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:599:error=false",
+    "trace_id": 50,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000f55039f1aaa1d0b7",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108008000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:599:error=true",
+    "trace_id": 51,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000d50b157c00e4bd7a",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108015000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:600:error=false",
+    "trace_id": 52,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000008ed6ac17c4cebd94",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108022000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:600:error=true",
+    "trace_id": 53,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000b5a6a7ee3843c297",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108029000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:65535:error=false",
+    "trace_id": 54,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000075667bbd373b2e3",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108035000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:65535:error=true",
+    "trace_id": 55,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000feabcc668e800a4e",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108042000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:65536:error=false",
+    "trace_id": 56,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000004884d2bbc6defbfa",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108049000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:65536:error=true",
+    "trace_id": 57,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000120f31178ef7d357",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108056000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:-1:error=false",
+    "trace_id": 58,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000a87108c6e5271b2d",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108062000
+  }],
+[
+  {
+    "name": "client.request",
+    "service": "unnamed-rust-service",
+    "resource": "Client:-1:error=true",
+    "trace_id": 59,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "http",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000369d691b9b036fb5",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "client",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_dd.measured": 1.0,
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108069000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:0:error=false",
+    "trace_id": 60,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000073b86b08b5f7578b",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108076000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:0:error=true",
+    "trace_id": 61,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000baa1ab8c2f3d2132",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 0.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108083000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:199:error=false",
+    "trace_id": 62,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000005cf115d5eda06d37",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108090000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:199:error=true",
+    "trace_id": 63,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "199",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000002da002d3250e3f58",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 199.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108097000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:200:error=false",
+    "trace_id": 64,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000002d1c4dfd149ef741",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108103000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:200:error=true",
+    "trace_id": 65,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "200",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000332329adf26e1dd4",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 200.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108110000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:299:error=false",
+    "trace_id": 66,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000007362b9234ef61ac3",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108122000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:299:error=true",
+    "trace_id": 67,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "299",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000cea43e4d5021ac77",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 299.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108128000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:300:error=false",
+    "trace_id": 68,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000304c591a595f3b53",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108135000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:300:error=true",
+    "trace_id": 69,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "300",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000004ec59ea9df453d6c",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 300.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108141000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:399:error=false",
+    "trace_id": 70,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000006c5ac515cd779814",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108148000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:399:error=true",
+    "trace_id": 71,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "399",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000e9ba344470867216",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 399.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108155000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:400:error=false",
+    "trace_id": 72,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000031a69bf685dbd3ea",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108167000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:400:error=true",
+    "trace_id": 73,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "400",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000000648884315e262a1",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 400.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108174000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:499:error=false",
+    "trace_id": 74,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000000eb071c1fe6ea090",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108180000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:499:error=true",
+    "trace_id": 75,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "499",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000001328a995bd80bb29",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 499.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108187000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:500:error=false",
+    "trace_id": 76,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000008a9364930bb80a88",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108195000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:500:error=true",
+    "trace_id": 77,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "500",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000e9b28c9d8184ce92",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 500.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108202000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:599:error=false",
+    "trace_id": 78,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000b7faa7dcad07a7a4",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108209000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:599:error=true",
+    "trace_id": 79,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "599",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b0000000014988167d01aa716",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 599.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108215000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:600:error=false",
+    "trace_id": 80,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000e46d391217043090",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108222000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:600:error=true",
+    "trace_id": 81,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "600",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b000000008ceff27858befdcc",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 600.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108228000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:65535:error=false",
+    "trace_id": 82,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b0000000097fcf39e0aaa3437",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108235000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:65535:error=true",
+    "trace_id": 83,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "65535",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000497d6330cbfa4371",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65535.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108241000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:65536:error=false",
+    "trace_id": 84,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b000000001f30f36f3ee67fa2",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108247000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:65536:error=true",
+    "trace_id": 85,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "http.status_code": "65536",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b00000000e6eb64011b6ccce8",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": 65536.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108254000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:-1:error=false",
+    "trace_id": 86,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Ok",
+      "otel.trace_id": "6afdd10b00000000215a117d12986d76",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 1000,
+    "start": 1795019019108262000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "Internal:-1:error=true",
+    "trace_id": 87,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "error.message": "description",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "description",
+      "otel.trace_id": "6afdd10b0000000077944aca2d565d90",
+      "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "http.status_code": -1.0,
+      "process_id": 70626.0
+    },
+    "duration": 0,
+    "start": 1795019019108269000
+  }]]
