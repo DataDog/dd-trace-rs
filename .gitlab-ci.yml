@@ -14,7 +14,6 @@ variables:
   REPO_LANG: rust
   REPO_NOTIFICATION_CHANNEL: "#dd-trace-rs-alerts"
   SKIP_SHARED_PIPELINE: "true"
-  DANGEROUSLY_SKIP_SHARED_PIPELINE_TESTS: "true"
 
 default:
   tags: ["arch:amd64"]
@@ -36,7 +35,6 @@ update_central_configurations_version_range_v2:
     LANGUAGE_NAME: "rust"
     SEND_ALIASES: "true"
 
-# one-pipeline jobs that ignore SKIP_SHARED_PIPELINE
 deploy_to_reliability_env:
   rules:
     - when: never
