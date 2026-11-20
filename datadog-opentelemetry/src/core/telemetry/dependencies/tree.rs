@@ -1,8 +1,8 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-//! Locates the workspace from the build output directory, and turns `cargo tree` output into the
-//! graph `build.rs` records.
+//! Decides whether `build.rs` collects, locates the workspace from the build output directory, and
+//! turns `cargo tree` output into the graph it records.
 //!
 //! The build script compiles this file too (through `#[path]`), so it must only use `std`. The
 //! tracer only compiles it for its tests.
@@ -13,6 +13,17 @@ use std::{
 };
 
 use super::graph::{Builds, Graph, Package};
+
+/// Whether to collect, given `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` and the `PROFILE` cargo
+/// sets: when the variable isn't a boolean the tracer's configuration accepts, only for release
+/// builds.
+pub fn collection_enabled(variable: Option<&str>, profile: Option<&str>) -> bool {
+    match variable {
+        Some("true" | "1") => true,
+        Some("false" | "0") => false,
+        _ => profile == Some("release"),
+    }
+}
 
 /// The workspace root of a build script whose `OUT_DIR` is `out_dir`: its nearest ancestor
 /// holding a `Cargo.lock`, which cargo only writes at workspace roots, so whatever the layout of
@@ -176,6 +187,25 @@ mod tests {
     /// Target directories laid out as cargo does, without the `CACHEDIR.TAG` it doesn't write in
     /// one that already existed: `ws/target`, `ws/build/target` in the workspace `ws`, and
     /// `elsewhere/target` outside any workspace.
+    #[test]
+    fn test_collection_enabled() {
+        for profile in [Some("release"), Some("debug"), None] {
+            assert!(!collection_enabled(Some("false"), profile));
+            assert!(!collection_enabled(Some("0"), profile));
+            assert!(collection_enabled(Some("true"), profile));
+            assert!(collection_enabled(Some("1"), profile));
+        }
+        // Unset, or a value the tracer's configuration rejects too.
+        for variable in [None, Some(""), Some("yes"), Some("TRUE"), Some("False")] {
+            assert!(
+                collection_enabled(variable, Some("release")),
+                "{variable:?}"
+            );
+            assert!(!collection_enabled(variable, Some("debug")), "{variable:?}");
+            assert!(!collection_enabled(variable, None), "{variable:?}");
+        }
+    }
+
     #[test]
     fn test_workspace_root() {
         let root = std::env::temp_dir().join(format!("dd-workspace-root-{}", std::process::id()));

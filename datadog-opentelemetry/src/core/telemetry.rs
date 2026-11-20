@@ -25,6 +25,8 @@ use crate::{dd_debug, dd_error, dd_warn};
 
 mod dependencies;
 
+pub(crate) use dependencies::skipped_at_build as dependency_collection_skipped_at_build;
+
 static TELEMETRY: TelemetryCell = OnceLock::new();
 static TELEMETRY_USERS: AtomicUsize = AtomicUsize::new(0);
 
@@ -952,23 +954,6 @@ mod tests {
     }
 
     #[test]
-    fn test_init_reports_dependencies() {
-        if matches!(
-            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
-            Some("false" | "0")
-        ) {
-            return;
-        }
-        let config = Config::builder().build();
-        let reported = test_dependencies_reported_at_init(&config);
-        // This test harness's dependencies, so an empty graph doesn't pass.
-        assert!(reported
-            .iter()
-            .any(|dependency| dependency.name == "libdd-telemetry"));
-        assert_eq!(reported, dependencies::collect().0);
-    }
-
-    #[test]
     fn test_init_dependency_collection_disabled() {
         let config = Config::builder()
             .set_telemetry_dependency_collection_enabled(false)
@@ -1032,5 +1017,28 @@ mod tests {
         let handle = test_report_dependencies(&config);
         assert_eq!(handle.dependencies.len(), 1);
         assert!(handle.logs.is_empty());
+    }
+
+    /// Tests whose checks depend on whether the build script collected: CI also runs them
+    /// without `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`, filtered by this module's name.
+    mod sca_build_collection {
+        use super::*;
+
+        /// Depends on whether the build script collected: by default only for release builds, so
+        /// CI sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true` to test collection too.
+        #[test]
+        fn test_init_reports_dependencies() {
+            let config = Config::builder().build();
+            let reported = test_dependencies_reported_at_init(&config);
+            if cfg!(dd_dependency_collection_enabled) {
+                // This test harness's dependencies, so an empty graph doesn't pass.
+                assert!(reported
+                    .iter()
+                    .any(|dependency| dependency.name == "libdd-telemetry"));
+                assert_eq!(reported, dependencies::collect().0);
+            } else {
+                assert_eq!(reported, vec![]);
+            }
+        }
     }
 }

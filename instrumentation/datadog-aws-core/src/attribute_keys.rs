@@ -45,9 +45,13 @@ pub const MESSAGING_BATCH_MESSAGE_COUNT: &str = "messaging.batch.message_count";
 pub const CLOUD_RESOURCE_ID: &str = "cloud.resource_id";
 /// AWS SDK request field key for SQS queue names.
 pub const QUEUE_NAME: &str = "queuename";
+/// Span attribute key for the SQS queue URL of the request (OpenTelemetry semantic conventions).
+pub const AWS_SQS_QUEUE_URL: &str = "aws.sqs.queue.url";
 
 /// AWS SDK request field key for SNS topic names.
 pub const TOPIC_NAME: &str = "topicname";
+/// Span attribute key for the SNS topic ARN of the request (OpenTelemetry semantic conventions).
+pub const AWS_SNS_TOPIC_ARN: &str = "aws.sns.topic.arn";
 /// AWS SDK request field key for SNS publish target names.
 pub const TARGET_NAME: &str = "targetname";
 

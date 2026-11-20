@@ -1,0 +1,31 @@
+[[
+  {
+    "name": "conv-operation",
+    "service": "conv-service",
+    "resource": "conv-resource",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "conv-type",
+    "meta": {
+      "_dd.base_service": "unnamed-rust-service",
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdc5f000000000378571ffaa08c1d5",
+      "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 76830.0
+    },
+    "duration": 7000,
+    "start": 1795016176205923000
+  }]]

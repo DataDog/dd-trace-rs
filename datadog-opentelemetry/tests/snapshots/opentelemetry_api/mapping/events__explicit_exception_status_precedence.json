@@ -1,0 +1,148 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "complete=false",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "_dd.span_events.has_exception": "true",
+      "error.message": "last exception",
+      "error.stack": "event stack",
+      "error.type": "event type",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "status description",
+      "otel.trace_id": "6afdced90000000067c16754303dd201",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "span_events": [
+      {
+        "time_unix_nano": 1795018457025884000,
+        "name": "exception",
+        "attributes": {
+          "exception.message": {
+            "type": 0,
+            "string_value": "first exception"
+          },
+          "exception.stacktrace": {
+            "type": 0,
+            "string_value": "event stack"
+          },
+          "exception.type": {
+            "type": 0,
+            "string_value": "event type"
+          }
+        }
+      },
+      {
+        "time_unix_nano": 1795018457025885000,
+        "name": "exception",
+        "attributes": {
+          "exception.message": {
+            "type": 0,
+            "string_value": "last exception"
+          },
+          "exception.stacktrace": {
+            "type": 0,
+            "string_value": "event stack"
+          },
+          "exception.type": {
+            "type": 0,
+            "string_value": "event type"
+          }
+        }
+      }
+    ],
+    "duration": 15000,
+    "start": 1795018457025871000
+  }],
+[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "complete=true",
+    "trace_id": 1,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "error": 1,
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "_dd.span_events.has_exception": "true",
+      "error.message": "explicit message",
+      "error.stack": "explicit stack",
+      "error.type": "explicit type",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Error",
+      "otel.status_description": "status description",
+      "otel.trace_id": "6afdced9000000002723785dfd6a5024",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "span_events": [
+      {
+        "time_unix_nano": 1795018457025914000,
+        "name": "exception",
+        "attributes": {
+          "exception.message": {
+            "type": 0,
+            "string_value": "first exception"
+          },
+          "exception.stacktrace": {
+            "type": 0,
+            "string_value": "event stack"
+          },
+          "exception.type": {
+            "type": 0,
+            "string_value": "event type"
+          }
+        }
+      },
+      {
+        "time_unix_nano": 1795018457025914000,
+        "name": "exception",
+        "attributes": {
+          "exception.message": {
+            "type": 0,
+            "string_value": "last exception"
+          },
+          "exception.stacktrace": {
+            "type": 0,
+            "string_value": "event stack"
+          },
+          "exception.type": {
+            "type": 0,
+            "string_value": "event type"
+          }
+        }
+      }
+    ],
+    "duration": 2000,
+    "start": 1795018457025912000
+  }]]

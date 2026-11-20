@@ -1,0 +1,43 @@
+[[
+  {
+    "name": "internal",
+    "service": "unnamed-rust-service",
+    "resource": "link-edge-flags",
+    "trace_id": 0,
+    "span_id": 1,
+    "parent_id": 0,
+    "type": "custom",
+    "meta": {
+      "_dd.p.dm": "-0",
+      "_dd.sdk.otlp_export": "false",
+      "language": "rust",
+      "otel.scope.name": "mapping",
+      "otel.status_code": "Unset",
+      "otel.trace_id": "6afdced9000000007a056289baa09ff7",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "span.kind": "internal",
+      "telemetry.sdk.language": "rust",
+      "telemetry.sdk.name": "datadog",
+      "telemetry.sdk.version": "0.6.0"
+    },
+    "metrics": {
+      "_sampling_priority_v1": 1.0,
+      "_top_level": 1.0,
+      "process_id": 35767.0
+    },
+    "span_links": [
+      {
+        "trace_id": 1,
+        "trace_id_high": 0,
+        "span_id": 2,
+        "attributes": {
+          "bool": "false",
+          "float": "1.5",
+          "int": "-7"
+        },
+        "flags": 2147483902
+      }
+    ],
+    "duration": 6000,
+    "start": 1795018457383028000
+  }]]
