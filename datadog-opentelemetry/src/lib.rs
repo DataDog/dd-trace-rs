@@ -330,6 +330,24 @@ pub(crate) mod core;
 pub use core::configuration;
 pub use core::log;
 
+/// The `opentelemetry` crate this crate is built against.
+///
+/// Use this re-export instead of a direct `opentelemetry` dependency. A
+/// different `opentelemetry` version is a different crate to the compiler, so
+/// its traits do not apply to the types this crate returns, and its global
+/// tracer does not see the provider this crate installs.
+///
+/// ```rust,no_run
+/// use datadog_opentelemetry::opentelemetry::trace::TracerProvider;
+///
+/// let tracer_provider = datadog_opentelemetry::tracing().init();
+/// let _tracer = tracer_provider.tracer("my_application_name");
+/// ```
+pub use opentelemetry;
+/// The `opentelemetry_sdk` crate this crate is built against. See
+/// [`opentelemetry`](crate::opentelemetry) for why to use this re-export.
+pub use opentelemetry_sdk;
+
 #[cfg(feature = "_memory-profiling")]
 #[cfg_attr(
     docsrs,

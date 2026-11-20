@@ -6,6 +6,7 @@
 use aws_types::SdkConfig;
 use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{span_attrs, TestHarness};
+use datadog_opentelemetry::opentelemetry;
 
 use datadog_aws_sns::ConfigExt as _;
 

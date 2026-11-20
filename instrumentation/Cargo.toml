@@ -24,14 +24,16 @@ publish = false
 
 [workspace.dependencies]
 datadog-aws-core = { version = "0.1.0", path = "datadog-aws-core" }
-datadog-opentelemetry = "0.5"
+# By path, so these crates build against the datadog-opentelemetry in the same
+# commit. Use its opentelemetry re-exports instead of depending on opentelemetry.
+datadog-opentelemetry = { version = "0.6", path = "../datadog-opentelemetry" }
 base64 = "0.22.1"
 lambda_runtime = "0.13"
 serde = "1.0.194"
 serde_json = "1.0.140"
-opentelemetry = { version = "0.32.0", features = ["trace", "metrics", "logs"], default-features = false }
-opentelemetry_sdk = { version = "0.32.1", default-features = false }
-opentelemetry-semantic-conventions = { version = "0.32.0", features = ["semconv_experimental"] }
+# Only for the `testing` feature in tests. Keep it on the line that
+# datadog-opentelemetry uses, or the tests fail to compile.
+opentelemetry_sdk = { version = "0.33", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tokio = { version = "1.44.1" }
 wiremock = "0.6"
