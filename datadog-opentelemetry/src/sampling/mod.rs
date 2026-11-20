@@ -3,6 +3,9 @@
 
 //! Datadog sampling logic
 
+// Public under `test-utils`; crate-private otherwise.
+#![cfg_attr(not(feature = "test-utils"), allow(unreachable_pub))]
+
 pub(crate) mod otel_mappings;
 pub(crate) mod utils;
 

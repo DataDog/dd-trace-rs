@@ -3,6 +3,10 @@
 
 //! Span conversion logic from Opentelemetry to Datadog
 
+// This module is `pub` only under `test-utils` (and otherwise `pub(crate)`).
+// Keep inner items `pub` so benches/tests can use them when the feature is on.
+#![cfg_attr(not(feature = "test-utils"), allow(unreachable_pub))]
+
 mod cached_config;
 mod sdk_span;
 mod transform;

@@ -29,7 +29,7 @@ macro_rules! attribute_key {
         const NUMBER_OF_ATTRIBUTES: usize = token_count!($($idx)*);
     };
     ($string_lit:expr => $key_name:ident $(, $string_lit_rest:expr => $key_name_rest:ident)* , @ $($idx:tt)*) => {
-        pub const $key_name: AttributeKey = AttributeKey {
+        pub(crate) const $key_name: AttributeKey = AttributeKey {
             idx: token_count!($($idx)*),
             key: $string_lit,
         };

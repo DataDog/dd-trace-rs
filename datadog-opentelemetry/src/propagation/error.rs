@@ -5,7 +5,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Copy, Clone)]
 #[error("Cannot {} from {}, {}", operation, propagator_name, message)]
-pub struct Error {
+pub(crate) struct Error {
     pub message: &'static str,
     // which propagator this error comes from
     propagator_name: &'static str,
@@ -16,7 +16,7 @@ pub struct Error {
 impl Error {
     /// Error when extracting a value from a carrier
     #[must_use]
-    pub fn extract(message: &'static str, propagator_name: &'static str) -> Self {
+    pub(crate) fn extract(message: &'static str, propagator_name: &'static str) -> Self {
         Self {
             message,
             propagator_name,
@@ -26,7 +26,7 @@ impl Error {
 
     /// Error when injecting a value into a carrier
     #[allow(clippy::must_use_candidate)]
-    pub fn inject(message: &'static str, propagator_name: &'static str) -> Self {
+    pub(crate) fn inject(message: &'static str, propagator_name: &'static str) -> Self {
         Self {
             message,
             propagator_name,

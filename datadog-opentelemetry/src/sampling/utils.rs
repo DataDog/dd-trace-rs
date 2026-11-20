@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use opentelemetry::Value;
 
 /// Extracts a string value from an OpenTelemetry Value
-pub fn extract_string_value(value: &Value) -> Option<Cow<'_, str>> {
+pub(crate) fn extract_string_value(value: &Value) -> Option<Cow<'_, str>> {
     match value {
         Value::String(s) => Some(Cow::Borrowed(s.as_str())),
         Value::I64(i) => Some(Cow::Owned(i.to_string())),
@@ -17,7 +17,7 @@ pub fn extract_string_value(value: &Value) -> Option<Cow<'_, str>> {
 }
 
 /// Extracts a float value from an OpenTelemetry Value
-pub fn extract_float_value(value: &Value) -> Option<f64> {
+pub(crate) fn extract_float_value(value: &Value) -> Option<f64> {
     match value {
         Value::F64(f) => Some(*f),
         Value::I64(i) => Some(*i as f64),

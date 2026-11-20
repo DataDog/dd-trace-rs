@@ -58,7 +58,7 @@ impl<C: PropagationConfig + ?Sized> Propagator<C> for TracePropagationStyle {
 
 #[allow(clippy::module_name_repetitions)]
 #[allow(unused)]
-pub fn deserialize_trace_propagation_style<'de, D>(
+pub(crate) fn deserialize_trace_propagation_style<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<TracePropagationStyle>>, D::Error>
 where

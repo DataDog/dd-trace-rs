@@ -3,6 +3,9 @@
 
 //! Datadog OTel Sampler
 
+// Public under `test-utils`; private module otherwise.
+#![cfg_attr(not(feature = "test-utils"), allow(unreachable_pub))]
+
 use opentelemetry::trace::{TraceContextExt, TraceState};
 use opentelemetry_sdk::{trace::ShouldSample, Resource};
 use std::sync::{Arc, RwLock};
