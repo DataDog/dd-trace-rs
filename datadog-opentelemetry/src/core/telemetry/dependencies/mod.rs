@@ -19,8 +19,8 @@
 //! line; the trees of all workspace packages are merged, so a package they share carries the
 //! dependencies enabled by any of them; tests only report dev-dependencies that were downloaded
 //! when this crate was built; and the graph is empty when collection failed or was disabled at
-//! build time. A build-time failure is recorded as a fixed code and reported as a telemetry error
-//! log.
+//! build time, which it is by default for debug builds. A build-time failure is recorded as a fixed
+//! code and reported as a telemetry error log.
 
 use std::{collections::BTreeSet, path::Path};
 
@@ -70,6 +70,14 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
     let failure = failure(recorded, exe.as_ref());
     if let Some(failure) = failure {
         dd_debug!("{}", failure.message());
+    } else if recorded.graph.members.is_empty() {
+        dd_debug!(
+            "Telemetry: no dependencies recorded at build time: {}",
+            nothing_recorded(
+                cfg!(dd_dependency_collection_enabled),
+                option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
+            )
+        );
     }
     dd_debug!(
         "Telemetry: reporting {} dependencies recorded at build time",
@@ -84,6 +92,39 @@ pub(super) fn collect() -> (Vec<Dependency>, Option<Failure>) {
         })
         .collect();
     (dependencies, failure)
+}
+
+/// Why the build script skipped collection, if it did: then no dependencies are reported, which
+/// isn't a failure.
+pub(crate) fn skipped_at_build() -> Option<&'static str> {
+    collection_skipped(
+        cfg!(dd_build_time_dependencies),
+        cfg!(dd_dependency_collection_enabled),
+        option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
+    )
+}
+
+/// Why the build script skipped collection, given whether it wrote a graph, whether it collected
+/// it, and the variable it ran with. A script that didn't write one failed, or didn't run.
+fn collection_skipped(
+    written: bool,
+    collected: bool,
+    variable: Option<&str>,
+) -> Option<&'static str> {
+    (written && !collected).then(|| nothing_recorded(false, variable))
+}
+
+/// Why the build script recorded no package depending on this crate, when it didn't fail: given
+/// whether it collected, and the `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED` it ran with.
+fn nothing_recorded(collected: bool, variable: Option<&str>) -> &'static str {
+    if collected {
+        "no workspace package depends on this crate"
+    } else if matches!(variable, Some("false" | "0")) {
+        "collection was disabled with DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"
+    } else {
+        "collection only runs for release builds; set \
+         DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true at build time to collect for the others"
+    }
 }
 
 fn current_executable() -> Option<Executable> {
@@ -676,51 +717,93 @@ mod tests {
     }
 
     #[test]
+    fn test_nothing_recorded() {
+        let no_package = "no workspace package depends on this crate";
+        assert_eq!(nothing_recorded(true, None), no_package);
+        assert_eq!(nothing_recorded(true, Some("true")), no_package);
+        assert!(nothing_recorded(false, Some("false")).contains("disabled"));
+        assert!(nothing_recorded(false, Some("0")).contains("disabled"));
+        assert!(nothing_recorded(false, None).contains("release builds"));
+        assert!(nothing_recorded(false, Some("yes")).contains("release builds"));
+    }
+
+    #[test]
+    fn test_collection_skipped() {
+        assert_eq!(collection_skipped(true, true, None), None);
+        assert_eq!(collection_skipped(false, false, None), None);
+        assert_eq!(
+            collection_skipped(true, false, None),
+            Some(nothing_recorded(false, None))
+        );
+        assert_eq!(
+            collection_skipped(true, false, Some("false")),
+            Some(nothing_recorded(false, Some("false")))
+        );
+    }
+
+    #[test]
     fn test_resolve_empty() {
         assert!(Graph::default()
             .resolve(Some(&Executable::Bin("app".into())), None)
             .is_empty());
     }
 
-    /// The build script runs against this repository's workspace, so the graph it generated
-    /// must cover the packages that depend on this crate, and only those.
-    #[test]
-    fn test_generated_graph_covers_workspace() {
-        if matches!(
-            option_env!("DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED"),
-            Some("false" | "0")
-        ) {
-            return;
+    /// Tests whose checks depend on whether the build script collected: CI also runs them
+    /// without `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`, filtered by this module's name.
+    mod sca_build_collection {
+        use super::*;
+
+        /// Run by CI with `--include-ignored`, from a debug build without
+        /// `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED`: collection is off by default there.
+        #[test]
+        #[ignore = "only meaningful in a debug build without the collection variable"]
+        // allow: constant for a build, but a `const` assert would fail every build that collects
+        #[allow(clippy::assertions_on_constants)]
+        fn test_debug_build_skips_collection() {
+            assert!(!cfg!(dd_dependency_collection_enabled));
         }
-        let Recorded { graph, failure } = &recorded();
-        assert!(
-            failure.is_none(),
-            "collection failed: {failure:?}; for WorkspaceNotFound, the target directory isn't \
-             in the workspace: set CARGO_WORKSPACE_DIR to the workspace root"
-        );
-        assert!(graph.unresolved.is_empty());
-        let names = |exe: &Executable| names(graph, Some(exe));
 
-        let http_server = names(&Executable::Bin("http-server".into()));
-        assert!(http_server.contains("datadog-opentelemetry"));
-        assert!(http_server.contains("hyper"));
-        // Proc-macros generate code that ends up in the binary.
-        assert!(http_server.contains("serde_derive"));
-        assert!(!http_server.contains("criterion"));
-        assert!(!names(&Executable::Bin("simple_tracing".into())).is_empty());
+        /// The build script runs against this repository's workspace, so the graph it generated
+        /// must cover the packages that depend on this crate, and only those. It only collects for
+        /// release builds by default, so CI sets `DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED=true`.
+        #[test]
+        fn test_generated_graph_covers_workspace() {
+            let Recorded { graph, failure } = &recorded();
+            if !cfg!(dd_dependency_collection_enabled) {
+                // Skipped, so neither empty nor failed.
+                assert_eq!(*failure, None);
+                assert!(graph.packages.is_empty() && graph.members.is_empty());
+                return;
+            }
+            assert!(
+                failure.is_none(),
+                "collection failed: {failure:?}; for WorkspaceNotFound, the target directory isn't \
+                 in the workspace: set CARGO_WORKSPACE_DIR to the workspace root"
+            );
+            assert!(graph.unresolved.is_empty());
+            let names = |exe: &Executable| names(graph, Some(exe));
 
-        // This test runs in this crate's test harness, which links its dev-dependencies.
-        let exe = std::env::current_exe().expect("the test executable has a path");
-        let this_test = Executable::from_path(&exe).expect("the test executable has a name");
-        assert!(matches!(this_test, Executable::Test(_)));
-        let this_test = names(&this_test);
-        assert!(this_test.contains("criterion"));
-        assert!(!this_test.contains("datadog-opentelemetry"));
+            let http_server = names(&Executable::Bin("http-server".into()));
+            assert!(http_server.contains("datadog-opentelemetry"));
+            assert!(http_server.contains("hyper"));
+            // Proc-macros generate code that ends up in the binary.
+            assert!(http_server.contains("serde_derive"));
+            assert!(!http_server.contains("criterion"));
+            assert!(!names(&Executable::Bin("simple_tracing".into())).is_empty());
 
-        // The `tools` package doesn't depend on this crate.
-        assert!(!graph.members.iter().any(|member| member
-            .targets
-            .iter()
-            .any(|target| target.name == "add_junit_file_attributes")));
+            // This test runs in this crate's test harness, which links its dev-dependencies.
+            let exe = std::env::current_exe().expect("the test executable has a path");
+            let this_test = Executable::from_path(&exe).expect("the test executable has a name");
+            assert!(matches!(this_test, Executable::Test(_)));
+            let this_test = names(&this_test);
+            assert!(this_test.contains("criterion"));
+            assert!(!this_test.contains("datadog-opentelemetry"));
+
+            // The `tools` package doesn't depend on this crate.
+            assert!(!graph.members.iter().any(|member| member
+                .targets
+                .iter()
+                .any(|target| target.name == "add_junit_file_attributes")));
+        }
     }
 }

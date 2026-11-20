@@ -8,6 +8,9 @@ on:
       - cron:  '00 03 * * *'
 env:
   CARGO_TERM_COLOR: always
+  # Dependencies are only collected for release builds by default; collect them for the debug
+  # builds of the tests too, so they test collection.
+  DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED: "true"
   RUST_VERSION: 1.91.1
 
 jobs:
@@ -69,6 +72,18 @@ jobs:
         shell: bash
         # Run doc tests with cargo test and run tests with nextest and generate junit.xml
         run: cargo test --workspace  --doc --verbose --locked && cargo nextest run --workspace  --profile ci --locked -E '!test(integration_tests::)'
+        env:
+          RUST_BACKTRACE: 1
+      - name: "[${{ steps.rust-version.outputs.version}}] test that debug builds don't collect dependencies"
+        if: runner.os == 'Linux'
+        shell: bash
+        # Without the workflow's DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED, the tests whose checks
+        # depend on whether the build collected, in the `sca_build_collection` test modules, so they
+        # check the default, including the ignored test that it's off. cargo test rather than
+        # nextest, which would overwrite the JUnit report.
+        run: |
+          unset DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED
+          cargo test -p datadog-opentelemetry --lib --locked -- --include-ignored sca_build_collection::
         env:
           RUST_BACKTRACE: 1
       - name: Add file attributes to JUnit XML
@@ -146,7 +161,8 @@ jobs:
       # Lets the build.rs script find the workspace, which `cross` mounts at `/project` and the target
       # directory outside it.
       CARGO_WORKSPACE_DIR: /project
-      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR
+      # Whitespace-separated
+      CROSS_BUILD_ENV_PASSTHROUGH: CARGO_WORKSPACE_DIR DD_TELEMETRY_DEPENDENCY_COLLECTION_ENABLED
     steps:
       - name: Free Disk Space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
