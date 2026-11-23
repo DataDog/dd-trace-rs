@@ -28,7 +28,8 @@ Each configuration entry in `supported-configurations.json` follows this structu
     "aliases": [
       "DD_ALTERNATE_NAME"
     ],
-    "deprecated": true | false
+    "deprecated": true | false,
+    "sensitive": true | false
   }
 ]
 ```
@@ -46,6 +47,9 @@ Each configuration entry in `supported-configurations.json` follows this structu
   Also currently only informative.
 - **aliases** (optional): Array of alternative environment variable names
 - **deprecated** (optional): Boolean indicating if this configuration is deprecated
+- **sensitive** (optional): Set to `true` for secrets such as API keys. The generated
+  `is_sensitive()` returns `true` for the key, which excludes its value from configuration
+  telemetry.
 
 ## Adding a New Configuration
 
@@ -86,6 +90,14 @@ This will:
 
 After generation, you need to implement the actual configuration logic in your code, typically in
 `datadog-opentelemetry/src/core/configuration/configuration.rs`
+
+4. **Register the configuration in the central configuration registry**
+
+Every key in `supported-configurations.json`, with its `version`, must exist in the central
+configuration registry (the FPD). Otherwise the `validate_supported_configurations_v2_local_file`
+GitLab CI job fails and lists the missing keys. If another tracer already registered the key with
+the same type and default, reuse that version. If not, a Datadog maintainer must add the key or a
+new version to the registry before the PR can merge.
 
 ## Working with Aliases and Deprecation
 
