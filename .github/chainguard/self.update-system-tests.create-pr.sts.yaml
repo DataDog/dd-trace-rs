@@ -1,0 +1,16 @@
+issuer: https://token.actions.githubusercontent.com
+
+subject: repo:DataDog/dd-trace-rs:ref:refs/heads/main
+
+claim_pattern:
+  event_name: (schedule|workflow_dispatch)
+  ref: refs/heads/main
+  ref_protected: "true"
+  repository: DataDog/dd-trace-rs
+  job_workflow_ref: DataDog/dd-trace-rs/\.github/workflows/update-system-tests\.yaml@refs/heads/main
+
+permissions:
+  contents: write
+  pull_requests: write
+  # The pull request modifies .github/workflows/test.yaml
+  workflows: write
