@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Ensure CI Success
+        if: github.head_ref != 'bot/update-system-tests'
         uses: DataDog/ensure-ci-success@727e7fe39ae2e1ce7ea336ec85a7369ab0731754 # v2.1.1
         with:
           # Checks for 15mn (30 * 30s)
@@ -25,3 +26,15 @@ jobs:
           ignored-name-patterns: |
             devflow/merge.*
             system-tests.*
+
+      # Pull requests of update-system-tests.yaml are merged without human review: they must wait
+      # for system-tests, whose result is the point of the update.
+      - name: Run Ensure CI Success, including system-tests
+        if: github.head_ref == 'bot/update-system-tests'
+        uses: DataDog/ensure-ci-success@727e7fe39ae2e1ce7ea336ec85a7369ab0731754 # v2.1.1
+        with:
+          # Checks for 60mn (120 * 30s)
+          max-retries: 120
+          polling-interval-seconds: 30
+          ignored-name-patterns: |
+            devflow/merge.*
