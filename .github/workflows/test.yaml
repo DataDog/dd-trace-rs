@@ -206,7 +206,7 @@ jobs:
     concurrency:
       group: ci-${{ github.ref }}-${{ github.event_name }}-system-tests
       cancel-in-progress: true
-    uses: DataDog/system-tests/.github/workflows/system-tests.yml@c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3  # main
+    uses: DataDog/system-tests/.github/workflows/system-tests.yml@e1a80b63d4e0e4b06b7a1f20c1391f01d6aeb926  # main
     permissions:
       contents: read
       id-token: write
@@ -216,6 +216,6 @@ jobs:
       scenarios_groups: tracer_release
       desired_execution_time: 600
       parametric_job_count: 2
-      ref: c1dafd9aa91f95d5ad22f5835e885056f2b6d5b3 # main
+      ref: e1a80b63d4e0e4b06b7a1f20c1391f01d6aeb926 # main
       push_to_test_optimization: true
       skip_empty_scenarios: ${{ github.ref != 'refs/heads/main' && github.event_name != 'schedule' }}
