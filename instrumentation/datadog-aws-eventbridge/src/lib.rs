@@ -62,7 +62,6 @@ use aws_smithy_runtime_api::client::interceptors::context::{
 use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
-use datadog_opentelemetry::opentelemetry;
 use opentelemetry::{global, Context, KeyValue};
 use serde::de::{self, Deserializer as _, MapAccess, Visitor};
 use serde::ser::SerializeMap;

@@ -1,7 +1,6 @@
 // Copyright 2025-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use datadog_opentelemetry::opentelemetry;
 use opentelemetry::global;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::{Extractor, Injector, TextMapPropagator};

@@ -64,7 +64,6 @@ use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use aws_smithy_types::Blob;
-use datadog_opentelemetry::opentelemetry;
 use opentelemetry::{global, Context, KeyValue};
 
 use datadog_aws_core::{

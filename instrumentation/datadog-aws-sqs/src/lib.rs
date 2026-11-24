@@ -81,7 +81,6 @@ use aws_smithy_runtime_api::client::interceptors::Intercept;
 use aws_smithy_runtime_api::client::runtime_components::RuntimeComponents;
 use aws_smithy_types::config_bag::ConfigBag;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use datadog_opentelemetry::opentelemetry;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::{global, Context, KeyValue};

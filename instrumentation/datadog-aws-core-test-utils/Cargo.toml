@@ -16,6 +16,6 @@ publish = false
 aws-credential-types = { workspace = true, features = ["test-util"] }
 aws-smithy-runtime-api = { workspace = true }
 aws-types = { workspace = true }
-datadog-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["trace", "testing"] }
 wiremock = { workspace = true }

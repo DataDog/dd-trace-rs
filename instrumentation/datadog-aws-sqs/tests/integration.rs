@@ -10,7 +10,6 @@ use datadog_aws_core::attribute_keys::MESSAGING_BATCH_MESSAGE_COUNT;
 use datadog_aws_core_test_utils::integration_test_helpers::{
     extract_traceparent, span_attrs, split_traceparent, TestHarness,
 };
-use datadog_opentelemetry::opentelemetry;
 use opentelemetry::trace::{
     SpanContext, SpanId, SpanKind, TraceContextExt, TraceFlags, TraceId, TraceState,
 };
