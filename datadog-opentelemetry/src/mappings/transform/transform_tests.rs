@@ -4,19 +4,16 @@
 #![allow(missing_docs)]
 
 use std::{
-    collections::HashMap,
+    borrow::Cow,
     str::FromStr,
     time::{Duration, SystemTime},
     vec,
 };
 
-use libdd_trace_utils::span::v04::{AttributeAnyValue as Any, AttributeArrayValue as Scalar};
+use libdd_trace_utils::span::v1::{AttributeValue, SpanKind as DdSpanKind, ThinVec};
 use libdd_trace_utils::span::vec_map::VecMap;
-use libdd_trace_utils::span::SpanText as _;
 
-use crate::{
-    core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY, mappings::transform::SPAN_LINK_FLAGS_SET,
-};
+use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 use opentelemetry::{
     trace::{Event, Link, SpanContext, SpanKind, Status, TraceState},
     InstrumentationScope, KeyValue, SpanId, TraceFlags, TraceId,
@@ -24,7 +21,7 @@ use opentelemetry::{
 
 use super::{
     super::sdk_span::SdkSpan,
-    super::transform::{CowStr, DdSpanEvent, DdSpanLink},
+    super::transform::{DdSpanEvent, DdSpanLink, DdValue, SPAN_LINK_FLAGS_SET},
     DdSpan,
 };
 
@@ -32,13 +29,26 @@ fn timestamp_nano(nanos: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)
 }
 
-impl From<&'static str> for CowStr<'static> {
-    fn from(s: &'static str) -> Self {
-        CowStr::from_static_str(s)
-    }
+fn string(s: &'static str) -> DdValue<'static> {
+    AttributeValue::String(s.into())
 }
 
-fn make_test_span_events() -> (Vec<Event>, Vec<DdSpanEvent<'static>>) {
+fn attributes<const N: usize, const M: usize>(
+    strings: [(&'static str, &'static str); N],
+    numbers: [(&'static str, f64); M],
+) -> VecMap<Cow<'static, str>, DdValue<'static>> {
+    strings
+        .into_iter()
+        .map(|(k, v)| (k.into(), string(v)))
+        .chain(
+            numbers
+                .into_iter()
+                .map(|(k, v)| (k.into(), AttributeValue::Float(v))),
+        )
+        .collect()
+}
+
+fn make_test_span_events() -> (Vec<Event>, ThinVec<DdSpanEvent<'static>>) {
     (
         vec![
             Event::new(
@@ -61,41 +71,29 @@ fn make_test_span_events() -> (Vec<Event>, Vec<DdSpanEvent<'static>>) {
                 2,
             ),
         ],
-        vec![
+        ThinVec::from_iter([
             DdSpanEvent {
                 time_unix_nano: 100,
                 name: "boom".into(),
-                attributes: HashMap::from_iter([
-                    (
-                        "key".into(),
-                        Any::SingleValue(Scalar::String("Out of memory".into())),
-                    ),
-                    ("accuracy".into(), Any::SingleValue(Scalar::Double(2.4))),
+                attributes: VecMap::from_iter([
+                    ("key".into(), string("Out of memory")),
+                    ("accuracy".into(), AttributeValue::Float(2.4)),
                 ]),
             },
             DdSpanEvent {
                 time_unix_nano: 400,
                 name: "exception".into(),
-                attributes: HashMap::from_iter([
-                    (
-                        "exception.type".into(),
-                        Any::SingleValue(Scalar::String("mem".into())),
-                    ),
-                    (
-                        "exception.stacktrace".into(),
-                        Any::SingleValue(Scalar::String("1/2/3".into())),
-                    ),
-                    (
-                        "exception.message".into(),
-                        Any::SingleValue(Scalar::String("Out of memory".into())),
-                    ),
+                attributes: VecMap::from_iter([
+                    ("exception.message".into(), string("Out of memory")),
+                    ("exception.type".into(), string("mem")),
+                    ("exception.stacktrace".into(), string("1/2/3")),
                 ]),
             },
-        ],
+        ]),
     )
 }
 
-fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
+fn make_test_span_links() -> (Vec<Link>, ThinVec<DdSpanLink<'static>>) {
     (
         vec![
             Link::new(
@@ -145,43 +143,46 @@ fn make_test_span_links() -> (Vec<Link>, Vec<DdSpanLink<'static>>) {
                 0,
             ),
         ],
-        vec![
+        ThinVec::from_iter([
             DdSpanLink {
-                trace_id: 81985529216486895,
-                trace_id_high: 18364758544493064720,
+                trace_id: TraceId::from_hex("fedcba98765432100123456789abcdef")
+                    .unwrap()
+                    .to_bytes(),
                 span_id: 12379813738877118345,
-                attributes: HashMap::from_iter([
-                    ("a1".into(), "v1".into()),
-                    ("a2".into(), "v2".into()),
+                attributes: VecMap::from_iter([
+                    ("a1".into(), string("v1")),
+                    ("a2".into(), string("v2")),
                 ]),
                 tracestate: "dd=asdf256,ee=jkl;128".into(),
                 flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
-                trace_id: 12379813738877118345,
-                trace_id_high: 12379813738877118345,
+                trace_id: TraceId::from_hex("abcdef0123456789abcdef0123456789")
+                    .unwrap()
+                    .to_bytes(),
                 span_id: 18364758544493064720,
-                attributes: HashMap::from_iter([
-                    ("array.0".into(), "a".into()),
-                    ("array.1".into(), "b".into()),
-                    ("bools.0".into(), "true".into()),
-                    ("bools.1".into(), "false".into()),
-                    ("nested.0".into(), "1".into()),
-                    ("nested.1".into(), "2".into()),
-                    ("floats.0".into(), "1.5".into()),
+                attributes: VecMap::from_iter([
+                    ("array.0".into(), string("a")),
+                    ("array.1".into(), string("b")),
+                    ("bools.0".into(), string("true")),
+                    ("bools.1".into(), string("false")),
+                    ("nested.0".into(), string("1")),
+                    ("nested.1".into(), string("2")),
+                    ("floats.0".into(), string("1.5")),
                 ]),
                 tracestate: "".into(),
                 flags: SPAN_LINK_FLAGS_SET,
             },
             DdSpanLink {
-                trace_id: 12379813738877118345,
-                trace_id_high: 12379813738877118345,
+                trace_id: TraceId::from_hex("abcdef0123456789abcdef0123456789")
+                    .unwrap()
+                    .to_bytes(),
                 span_id: 18364758544493064720,
-                attributes: HashMap::new(),
+                attributes: VecMap::new(),
                 tracestate: "".into(),
                 flags: SPAN_LINK_FLAGS_SET,
             },
-        ],
+        ]),
     )
 }
 
@@ -302,7 +303,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "server.request".into(),
                 resource: "/path".into(),
                 service: "pylons".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -310,43 +310,42 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 1,
-                meta: VecMap::from_iter([
-                    ("name".into(), "john".into()),
-                    ("names.0".into(), "a".into()),
-                    ("names.1".into(), "b".into()),
-                    ("flags.0".into(), "true".into()),
-                    ("flags.1".into(), "false".into()),
-                    ("http.request.headers.accept.0".into(), "text/html".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("env".into(), "staging".into()),
-                    ("otel.status_code".into(), "Error".into()),
-                    ("otel.status_description".into(), "Error".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("service.version".into(), "v1.2.3".into()),
-                    ("version".into(), "v1.2.3".into()),
-                    ("error.message".into(), "Out of memory".into()),
-                    ("error.type".into(), "mem".into()),
-                    ("error.stack".into(), "1/2/3".into()),
-                    ("span.kind".into(), "server".into()),
-                    ("_dd.span_events.has_exception".into(), "true".into()),
-                ]),
-                metrics: VecMap::from_iter([
-                    ("approx".into(), 1.2),
-                    ("count".into(), 2.0),
-                    ("counts.0".into(), 1.0),
-                    ("counts.1".into(), 2.0),
-                    ("ratios.0".into(), 0.5),
-                    ("ratios.1".into(), 1.5),
-                ]),
+                error: true,
+                env: "staging".into(),
+                version: "v1.2.3".into(),
+                span_kind: DdSpanKind::Server,
+                attributes: attributes(
+                    [
+                        ("name", "john"),
+                        ("names.0", "a"),
+                        ("names.1", "b"),
+                        ("flags.0", "true"),
+                        ("flags.1", "false"),
+                        ("http.request.headers.accept.0", "text/html"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Error"),
+                        ("otel.status_description", "Error"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("service.version", "v1.2.3"),
+                        ("error.message", "Out of memory"),
+                        ("error.type", "mem"),
+                        ("error.stack", "1/2/3"),
+                        ("_dd.span_events.has_exception", "true"),
+                    ],
+                    [
+                        ("approx", 1.2),
+                        ("count", 2.0),
+                        ("counts.0", 1.0),
+                        ("counts.1", 2.0),
+                        ("ratios.0", 0.5),
+                        ("ratios.1", 1.5),
+                    ],
+                ),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: VecMap::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -395,7 +394,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "myservice".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -403,35 +401,34 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 1,
-                meta: VecMap::from_iter([
-                    ("name".into(), "john".into()),
-                    ("deployment.environment".into(), "prod".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Error".into()),
-                    ("otel.status_description".into(), "Error".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("service.version".into(), "v1.2.3".into()),
-                    ("w3c.tracestate".into(), "state=1".into()),
-                    ("version".into(), "v1.2.3".into()),
-                    ("error.message".into(), "Out of memory".into()),
-                    ("error.type".into(), "mem".into()),
-                    ("error.stack".into(), "1/2/3".into()),
-                    ("http.method".into(), "GET".into()),
-                    ("http.route".into(), "/path".into()),
-                    ("peer.service".into(), "userbase".into()),
-                    ("span.kind".into(), "server".into()),
-                    ("_dd.span_events.has_exception".into(), "true".into()),
-                ]),
-                metrics: VecMap::from_iter([("approx".into(), 1.2), ("count".into(), 2.0)]),
+                error: true,
+                version: "v1.2.3".into(),
+                span_kind: DdSpanKind::Server,
+                attributes: attributes(
+                    [
+                        ("name", "john"),
+                        ("deployment.environment", "prod"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Error"),
+                        ("otel.status_description", "Error"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("service.version", "v1.2.3"),
+                        ("w3c.tracestate", "state=1"),
+                        ("error.message", "Out of memory"),
+                        ("error.type", "mem"),
+                        ("error.stack", "1/2/3"),
+                        ("http.method", "GET"),
+                        ("http.route", "/path"),
+                        ("peer.service", "userbase"),
+                        ("_dd.span_events.has_exception", "true"),
+                    ],
+                    [("approx", 1.2), ("count", 2.0)],
+                ),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: VecMap::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -489,7 +486,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "http.server.request".into(),
                 resource: "GET /path".into(),
                 service: "pylons".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -497,54 +493,47 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 1,
-                meta: VecMap::from_iter([
-                    ("name".into(), "john".into()),
-                    ("env".into(), "staging".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Error".into()),
-                    ("otel.status_description".into(), "Error".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("service.version".into(), "v1.2.3".into()),
-                    ("w3c.tracestate".into(), "state=1".into()),
-                    ("version".into(), "v1.2.3".into()),
-                    ("error.message".into(), "Out of memory".into()),
-                    ("error.type".into(), "mem".into()),
-                    ("error.stack".into(), "1/2/3".into()),
-                    ("http.method".into(), "GET".into()),
-                    ("http.route".into(), "/path".into()),
-                    ("span.kind".into(), "server".into()),
-                    ("_dd.span_events.has_exception".into(), "true".into()),
-                    ("http.client_ip".into(), "sample_client_address".into()),
-                    (
-                        "http.response.content_length".into(),
-                        "sample_content_length".into(),
-                    ),
-                    ("http.status_code".into(), "sample_status_code".into()),
-                    (
-                        "http.request.content_length".into(),
-                        "sample_content_length".into(),
-                    ),
-                    ("http.referrer".into(), "sample_referrer".into()),
-                    ("http.version".into(), "sample_version".into()),
-                    ("http.server_name".into(), "sample_server_name".into()),
-                    ("http.url".into(), "sample_url".into()),
-                    ("http.useragent".into(), "sample_useragent".into()),
-                    ("http.request.headers.example".into(), "test".into()),
-                ]),
-                metrics: VecMap::from_iter([
-                    ("approx".into(), 1.2),
-                    ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 0.0),
-                ]),
+                error: true,
+                env: "staging".into(),
+                version: "v1.2.3".into(),
+                span_kind: DdSpanKind::Server,
+                attributes: attributes(
+                    [
+                        ("name", "john"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Error"),
+                        ("otel.status_description", "Error"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("service.version", "v1.2.3"),
+                        ("w3c.tracestate", "state=1"),
+                        ("error.message", "Out of memory"),
+                        ("error.type", "mem"),
+                        ("error.stack", "1/2/3"),
+                        ("http.method", "GET"),
+                        ("http.route", "/path"),
+                        ("_dd.span_events.has_exception", "true"),
+                        ("http.client_ip", "sample_client_address"),
+                        ("http.response.content_length", "sample_content_length"),
+                        ("http.status_code", "sample_status_code"),
+                        ("http.request.content_length", "sample_content_length"),
+                        ("http.referrer", "sample_referrer"),
+                        ("http.version", "sample_version"),
+                        ("http.server_name", "sample_server_name"),
+                        ("http.url", "sample_url"),
+                        ("http.useragent", "sample_useragent"),
+                        ("http.request.headers.example", "test"),
+                    ],
+                    [
+                        ("approx", 1.2),
+                        ("count", 2.0),
+                        (SAMPLING_RATE_EVENT_EXTRACTION_KEY, 0.0),
+                    ],
+                ),
                 r#type: "web".into(),
                 span_events: make_test_span_events().1,
                 span_links: make_test_span_links().1,
-                meta_struct: VecMap::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -590,7 +579,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "READ".into(),
                 resource: "/path".into(),
                 service: "mongo".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -598,32 +586,31 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 0,
-                meta: VecMap::from_iter([
-                    ("env".into(), "staging".into()),
-                    ("container.id".into(), "cid".into()),
-                    ("k8s.container.name".into(), "k8s-container".into()),
-                    ("http.method".into(), "GET".into()),
-                    ("http.route".into(), "/path".into()),
-                    ("otel.status_code".into(), "Unset".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("name".into(), "john".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::from_iter([
-                    ("approx".into(), 1.2),
-                    ("count".into(), 2.0),
-                    (SAMPLING_RATE_EVENT_EXTRACTION_KEY.into(), 1.0),
-                ]),
+                error: false,
+                env: "staging".into(),
+                span_kind: DdSpanKind::Internal,
+                attributes: attributes(
+                    [
+                        ("container.id", "cid"),
+                        ("k8s.container.name", "k8s-container"),
+                        ("http.method", "GET"),
+                        ("http.route", "/path"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("name", "john"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                    ],
+                    [
+                        ("approx", 1.2),
+                        ("count", 2.0),
+                        (SAMPLING_RATE_EVENT_EXTRACTION_KEY, 1.0),
+                    ],
+                ),
                 r#type: "db".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -667,7 +654,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -675,30 +661,29 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 1,
-                meta: VecMap::from_iter([
-                    ("env".into(), "staging".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("otel.status_code".into(), "Error".into()),
-                    ("error.message".into(), "201".into()),
-                    ("http.method".into(), "POST".into()),
-                    ("url.path".into(), "/uploads/4".into()),
-                    ("url.scheme".into(), "https".into()),
-                    ("http.route".into(), "/uploads/:document_id".into()),
-                    ("http.status_code".into(), "201".into()),
-                    ("error.type".into(), "WebSocketDisconnect".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::new(),
+                error: true,
+                env: "staging".into(),
+                span_kind: DdSpanKind::Internal,
+                attributes: attributes(
+                    [
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("otel.status_code", "Error"),
+                        ("error.message", "201"),
+                        ("http.method", "POST"),
+                        ("url.path", "/uploads/4"),
+                        ("url.scheme", "https"),
+                        ("http.route", "/uploads/:document_id"),
+                        ("http.status_code", "201"),
+                        ("error.type", "WebSocketDisconnect"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                    ],
+                    [],
+                ),
                 r#type: "custom".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -742,7 +727,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "ddtracer.server".into(),
                 resource: "POST".into(),
                 service: "document-uploader".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -750,30 +734,29 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 1,
-                meta: VecMap::from_iter([
-                    ("env".into(), "staging".into()),
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    ("otel.status_code".into(), "Error".into()),
-                    ("error.message".into(), "201".into()),
-                    ("http.method".into(), "POST".into()),
-                    ("url.path".into(), "/uploads/4".into()),
-                    ("url.scheme".into(), "https".into()),
-                    ("http.route".into(), "/uploads/:document_id".into()),
-                    ("http.status_code".into(), "201".into()),
-                    ("error.type".into(), "WebSocketDisconnect".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::new(),
+                error: true,
+                env: "staging".into(),
+                span_kind: DdSpanKind::Internal,
+                attributes: attributes(
+                    [
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                        ("otel.status_code", "Error"),
+                        ("error.message", "201"),
+                        ("http.method", "POST"),
+                        ("url.path", "/uploads/4"),
+                        ("url.scheme", "https"),
+                        ("http.route", "/uploads/:document_id"),
+                        ("http.status_code", "201"),
+                        ("error.type", "WebSocketDisconnect"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                    ],
+                    [],
+                ),
                 r#type: "custom".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -826,7 +809,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "datadog.name".into(),
                 resource: "datadog-resource".into(),
                 service: "datadog-service".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -834,28 +816,26 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 0,
-                meta: VecMap::from_iter([
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Unset".into()),
-                    ("env".into(), "datadog-env".into()),
-                    ("version".into(), "datadog-version".into()),
-                    ("http.status_code".into(), "503".into()),
-                    ("http.status_code".into(), "503".into()),
-                    ("http.method".into(), "GET".into()),
-                    ("service.version".into(), "v1.2.3".into()),
-                    ("span.kind".into(), "server".into()),
-                ]),
-                metrics: VecMap::from_iter([("http.status_code".into(), 200.0)]),
+                error: false,
+                span_kind: DdSpanKind::Server,
+                env: "datadog-env".into(),
+                version: "datadog-version".into(),
+                attributes: attributes(
+                    [
+                        ("http.status_code", "503"),
+                        ("http.method", "GET"),
+                        ("service.version", "v1.2.3"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
                 r#type: "datadog-type".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -892,7 +872,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "internal".into(),
                 resource: "op".into(),
                 service: "svc".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -900,24 +879,25 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 0,
-                meta: VecMap::from_iter([
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Unset".into()),
-                    ("env".into(), "prod".into()),
-                    ("deployment.environment.name".into(), "prod".into()),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::from_iter([("env".into(), 123.0)]),
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "prod".into(),
+                attributes: attributes(
+                    [
+                        ("deployment.environment.name", "prod"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    // The `env` span attribute is exported as a metric in v0.4; the v1
+                    // span keeps the resolved `env` string tag instead.
+                    [],
+                ),
                 r#type: "custom".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -954,7 +934,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "internal".into(),
                 resource: "op".into(),
                 service: "svc".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -962,24 +941,23 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 0,
-                meta: VecMap::from_iter([
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Unset".into()),
-                    ("env".into(), "".into()),
-                    ("deployment.environment.name".into(), "prod".into()),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::new(),
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "".into(),
+                attributes: attributes(
+                    [
+                        ("deployment.environment.name", "prod"),
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
                 r#type: "custom".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
         Test {
@@ -1013,7 +991,6 @@ pub fn test_cases() -> Vec<Test<'static>> {
                 name: "internal".into(),
                 resource: "op".into(),
                 service: "svc".into(),
-                trace_id: 2594128270069917171,
                 span_id: 2594128270069917171,
                 parent_id: 0,
                 start: start_time
@@ -1021,23 +998,22 @@ pub fn test_cases() -> Vec<Test<'static>> {
                     .unwrap()
                     .as_nanos() as i64,
                 duration: 200000000,
-                error: 0,
-                meta: VecMap::from_iter([
-                    ("otel.scope.name".into(), "ddtracer".into()),
-                    ("otel.scope.version".into(), "v2".into()),
-                    (
-                        "otel.trace_id".into(),
-                        "72df520af2bde7a5240031ead750e5f3".into(),
-                    ),
-                    ("otel.status_code".into(), "Unset".into()),
-                    ("env".into(), "dev".into()),
-                    ("span.kind".into(), "internal".into()),
-                ]),
-                metrics: VecMap::new(),
+                error: false,
+                span_kind: DdSpanKind::Internal,
+                env: "dev".into(),
+                attributes: attributes(
+                    [
+                        ("otel.trace_id", "72df520af2bde7a5240031ead750e5f3"),
+                        ("otel.status_code", "Unset"),
+                        ("otel.scope.name", "ddtracer"),
+                        ("otel.scope.version", "v2"),
+                    ],
+                    [],
+                ),
                 r#type: "custom".into(),
-                span_events: vec![],
-                span_links: vec![],
-                meta_struct: VecMap::new(),
+                span_events: ThinVec::new(),
+                span_links: ThinVec::new(),
+                ..Default::default()
             },
         },
     ]
@@ -1047,16 +1023,13 @@ pub fn test_cases() -> Vec<Test<'static>> {
 mod tests {
     use std::{
         borrow::Cow,
-        fmt::{Debug, Write},
+        fmt::Write,
         str::FromStr,
         time::{Duration, SystemTime},
     };
 
     use bumpalo::Bump;
-    use libdd_trace_utils::span::{
-        v04::{AttributeAnyValue as Any, AttributeArrayValue as Scalar},
-        vec_map::VecMap,
-    };
+    use libdd_trace_utils::span::{vec_map::VecMap, SpanText};
     use opentelemetry::{
         trace::{Event, SpanContext, SpanKind, Status, TraceState},
         InstrumentationScope, KeyValue, SpanId, StringValue, TraceFlags, TraceId, Value,
@@ -1068,14 +1041,84 @@ mod tests {
 
     use crate::mappings::{
         sdk_span::SdkSpan,
-        transform::{otel_span_to_dd_span, CowStr, SpanStr},
-        DdSpan,
+        transform::{otel_span_to_dd_span, SpanStr},
+        transform_tests::TestSpan,
+        DdSpan, DdValue,
     };
 
     use super::{test_cases, test_span_to_sdk_span};
 
+    /// `v1::Span` is invariant over its text lifetime: shortens the `'static` expected span to the
+    /// lifetime of the output span.
     fn downcast_lifetime<'a: 'b, 'b>(span: DdSpan<'a>) -> DdSpan<'b> {
         unsafe { std::mem::transmute(span) }
+    }
+
+    /// `v1::Span` doesn't implement `PartialEq`, attribute maps are compared ignoring order.
+    #[track_caller]
+    fn assert_span_eq<'a>(output: &DdSpan<'a>, expected: &DdSpan<'a>, name: &str) {
+        let scalars = |s: &DdSpan| {
+            format!(
+                "{:?} {:?}",
+                (&s.service, &s.name, &s.resource, &s.r#type),
+                (
+                    s.span_id,
+                    s.parent_id,
+                    s.start,
+                    s.duration,
+                    s.error,
+                    s.span_kind,
+                    &s.env,
+                    &s.version,
+                    &s.component,
+                )
+            )
+        };
+        assert_eq!(scalars(output), scalars(expected), "Test {name} failed");
+
+        hashmap_diff(&output.attributes, &expected.attributes);
+        assert!(
+            output.attributes == expected.attributes,
+            "Test {name} failed: attributes differ"
+        );
+
+        assert_eq!(
+            output.span_events.len(),
+            expected.span_events.len(),
+            "Test {name} failed: span events differ"
+        );
+        for (o, e) in output.span_events.iter().zip(&expected.span_events) {
+            assert_eq!(
+                (o.time_unix_nano, &o.name),
+                (e.time_unix_nano, &e.name),
+                "Test {name} failed: span event differs"
+            );
+            assert!(
+                o.attributes == e.attributes,
+                "Test {name} failed: span event attributes differ: {:?} != {:?}",
+                o.attributes,
+                e.attributes
+            );
+        }
+
+        assert_eq!(
+            output.span_links.len(),
+            expected.span_links.len(),
+            "Test {name} failed: span links differ"
+        );
+        for (o, e) in output.span_links.iter().zip(&expected.span_links) {
+            assert_eq!(
+                (o.trace_id, o.span_id, &o.tracestate, o.flags),
+                (e.trace_id, e.span_id, &e.tracestate, e.flags),
+                "Test {name} failed: span link differs"
+            );
+            assert!(
+                o.attributes == e.attributes,
+                "Test {name} failed: span link attributes differ: {:?} != {:?}",
+                o.attributes,
+                e.attributes
+            );
+        }
     }
 
     #[test]
@@ -1097,32 +1140,63 @@ mod tests {
                 &input_resource,
                 &alloc,
             );
-            hashmap_diff(&output.meta, &test.expected_out.meta);
-            hashmap_diff(&output.metrics, &test.expected_out.metrics);
+            assert_span_eq(&output, &downcast_lifetime(test.expected_out), test.name);
+        }
+    }
+
+    /// A numeric attribute mapped to a meta key (e.g. `http.status_code`) must not override the
+    /// string tag already set for that key: v1 spans have a single attribute namespace, unlike
+    /// v0.4's separate `meta` and `metrics`.
+    #[test]
+    fn numeric_attribute_does_not_override_meta_key() {
+        for otel_key in ["http.response.status_code", "http.status_code"] {
+            let input_span = TestSpan {
+                attributes: vec![KeyValue::new(otel_key, 200)],
+                ..test_cases().remove(0).input_span
+            };
+            let resource = Resource::builder_empty().build();
+            let alloc = Bump::new();
+            let mut output = DdSpan::default();
+            otel_span_to_dd_span(
+                &mut output,
+                &test_span_to_sdk_span(&input_span),
+                &resource,
+                &alloc,
+            );
+
+            let status_codes: Vec<_> = output
+                .attributes
+                .iter()
+                .filter(|(k, _)| k.as_ref() == "http.status_code")
+                .map(|(_, v)| v)
+                .collect();
             assert_eq!(
-                output,
-                downcast_lifetime(test.expected_out),
-                "Test {} failed",
-                test.name
+                status_codes,
+                [&DdValue::String(Cow::from_static_str("200"))],
+                "{otel_key}"
+            );
+            assert!(
+                !output.attributes.contains_key("http.response.status_code"),
+                "{otel_key}"
             );
         }
     }
 
     #[track_caller]
-    fn hashmap_diff<'a, V: PartialEq + Debug>(
-        output: &VecMap<CowStr<'a>, V>,
-        expected: &VecMap<CowStr<'a>, V>,
+    fn hashmap_diff<'a>(
+        output: &VecMap<Cow<'a, str>, DdValue<'a>>,
+        expected: &VecMap<Cow<'a, str>, DdValue<'a>>,
     ) {
         let mut a = Vec::from_iter(output);
         let mut b = Vec::from_iter(expected);
-        a.sort_by_key(|(k, _)| k.as_str());
-        b.sort_by_key(|(k, _)| k.as_str());
+        a.sort_by_key(|(k, _)| k.as_ref());
+        b.sort_by_key(|(k, _)| k.as_ref());
         let mut a = a.into_iter().peekable();
         let mut b = b.into_iter().peekable();
         let mut message = String::new();
         loop {
             match (a.peek(), b.peek()) {
-                (Some(a_v), Some(b_v)) => match a_v.0.as_str().cmp(b_v.0.as_str()) {
+                (Some(a_v), Some(b_v)) => match a_v.0.as_ref().cmp(b_v.0.as_ref()) {
                     std::cmp::Ordering::Less => {
                         writeln!(&mut message, "a  :+{a_v:?}").unwrap();
                         a.next();
@@ -1194,7 +1268,7 @@ mod tests {
     }
 
     fn tag<'a>(span: &'a DdSpan<'_>, key: &str) -> Option<&'a str> {
-        span.meta.get(key).map(SpanStr::as_str)
+        span.attributes.get(key).and_then(|a| a.as_str())
     }
 
     #[test]
@@ -1207,13 +1281,13 @@ mod tests {
             let output = convert(&data, &resource, &alloc);
             assert_eq!(
                 output
-                    .metrics
-                    .get(&SpanStr::from_str("_sampling_priority_v1")),
-                Some(&value)
+                    .attributes
+                    .get(&SpanStr::from("_sampling_priority_v1")),
+                Some(&DdValue::Float(value))
             );
             assert!(!output
-                .metrics
-                .contains_key(&SpanStr::from_str("sampling.priority")));
+                .attributes
+                .contains_key(&SpanStr::from("sampling.priority")));
         }
     }
 
@@ -1223,7 +1297,6 @@ mod tests {
         let alloc = Bump::new();
         let data = span_data();
         let output = convert(&data, &resource, &alloc);
-        assert_eq!(output.trace_id, 0x0123456789abcdef_u64.into());
         assert_eq!(output.span_id, 0xabcdef0123456789);
         assert_eq!(output.parent_id, 0x0123456789abcdef);
         assert_eq!(
@@ -1300,14 +1373,14 @@ mod tests {
         let event = &output.span_events[0];
         assert_eq!(event.time_unix_nano, 4200);
         for (key, expected) in [
-            ("bools", vec![Scalar::Boolean(true), Scalar::Boolean(false)]),
-            ("ints", vec![Scalar::Integer(-7), Scalar::Integer(8)]),
-            ("floats", vec![Scalar::Double(0.25), Scalar::Double(-1.5)]),
+            ("bools", vec![DdValue::Bool(true), DdValue::Bool(false)]),
+            ("ints", vec![DdValue::Int(-7), DdValue::Int(8)]),
+            ("floats", vec![DdValue::Float(0.25), DdValue::Float(-1.5)]),
             (
                 "strings",
                 vec![
-                    Scalar::String(SpanStr::from_str("a")),
-                    Scalar::String(SpanStr::from_str("")),
+                    DdValue::String(SpanStr::from("a")),
+                    DdValue::String(SpanStr::from("")),
                 ],
             ),
             ("empty-bools", vec![]),
@@ -1316,14 +1389,15 @@ mod tests {
             ("empty-strings", vec![]),
         ] {
             assert_eq!(
-                event.attributes.get(&SpanStr::from_str(key)),
-                Some(&Any::Array(expected)),
+                event.attributes.get(&SpanStr::from(key)),
+                Some(&DdValue::Array(expected)),
                 "{key}"
             );
         }
     }
 
     #[test]
+    #[allow(clippy::bool_assert_comparison)]
     fn typed_exception_values_format_without_losing_false_or_empty_arrays() {
         let resource = Resource::builder_empty().build();
         let alloc = Bump::new();
@@ -1353,7 +1427,7 @@ mod tests {
                 0,
             )];
             let output = convert(&data, &resource, &alloc);
-            assert_eq!(output.error, 1);
+            assert_eq!(output.error, true);
             for key in ["error.message", "error.type", "error.stack"] {
                 assert_eq!(tag(&output, key), Some(expected), "{key}");
             }
@@ -1363,7 +1437,7 @@ mod tests {
     /// SDK builders can overwrite duplicate keys. Feed the raw converter slice to
     /// distinguish last-index lookup from first-nonempty protected-tag insertion.
     #[test]
-    fn duplicate_keys_and_indexed_arrays_keep_both_v04_namespaces() {
+    fn duplicate_keys_and_indexed_arrays() {
         let alloc = Bump::new();
         let resource = Resource::builder_empty()
             .with_attributes([KeyValue::new("shared", "resource")])
@@ -1392,30 +1466,47 @@ mod tests {
             }
             let output = convert(&data, &resource, &alloc);
             assert_eq!(
-                output.name.as_str(),
+                output.name.as_ref(),
                 if reverse { "first-name" } else { "last-name" }
             );
             assert_eq!(
                 tag(&output, "ordinary"),
                 Some(if reverse { "first" } else { "last" })
             );
+            // `version` is a dedicated v1 field protected by the first-wins meta guard.
             assert_eq!(
-                tag(&output, "version"),
-                Some(if reverse {
+                output.version.as_ref(),
+                if reverse {
                     "last-version"
                 } else {
                     "first-version"
+                }
+            );
+            // v1 spans have a single attribute namespace with last-wins lookups: the later
+            // insert shadows the earlier entry under the same key, whichever type it is.
+            assert_eq!(
+                tag(&output, "shared"),
+                if reverse { None } else { Some("span") }
+            );
+            assert_eq!(
+                output.attributes.get(&SpanStr::from("shared")),
+                Some(&if reverse {
+                    DdValue::Float(42.0)
+                } else {
+                    DdValue::String("span".into())
                 })
             );
-            assert_eq!(tag(&output, "shared"), Some("span"));
             assert_eq!(
-                output.metrics.get(&SpanStr::from_str("shared")),
-                Some(&42.0)
+                tag(&output, "array.0"),
+                if reverse { None } else { Some("string") }
             );
-            assert_eq!(tag(&output, "array.0"), Some("string"));
             assert_eq!(
-                output.metrics.get(&SpanStr::from_str("array.0")),
-                Some(&7.0)
+                output.attributes.get(&SpanStr::from("array.0")),
+                Some(&if reverse {
+                    DdValue::Float(7.0)
+                } else {
+                    DdValue::String("string".into())
+                })
             );
             assert_eq!(
                 tag(&output, "indexed.0"),

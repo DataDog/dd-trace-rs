@@ -310,7 +310,7 @@
   }],
 [
   {
-    "name": "",
+    "name": "empty-operation-override",
     "service": "unnamed-rust-service",
     "resource": "GET",
     "trace_id": 9,

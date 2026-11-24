@@ -82,7 +82,6 @@
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
-      "env": "",
       "language": "rust",
       "mapping.case": "empty-conventional",
       "otel.scope.name": "mapping",
@@ -128,7 +127,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": "resource-version"
+      "version": "span-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
@@ -203,7 +202,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "env": 42.0,
       "process_id": 35767.0,
       "version": 43.0
     },

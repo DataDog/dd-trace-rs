@@ -25,7 +25,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 404.0,
       "process_id": 70626.0
     },
     "duration": 11000,
@@ -60,7 +59,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 404.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -94,7 +92,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 404.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -118,7 +115,7 @@
       "otel.status_code": "Unset",
       "otel.trace_id": "6afdd10b000000008f57dd836ad49477",
       "runtime-id": "fe3fcb64-5385-41da-b10b-6823ac841662",
-      "span.kind": "Server",
+      "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
@@ -126,7 +123,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 503.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -223,7 +219,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -256,7 +251,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -288,7 +282,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -321,7 +314,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -353,7 +345,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -386,7 +377,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -418,7 +408,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -451,7 +440,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -483,7 +471,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -516,7 +503,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -548,7 +534,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -581,7 +566,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -613,7 +597,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -646,7 +629,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -679,7 +661,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -714,7 +695,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -747,7 +727,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -782,7 +761,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -814,7 +792,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -847,7 +824,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -879,7 +855,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -912,7 +887,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -944,7 +918,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -979,7 +952,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1144,7 +1116,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1178,7 +1149,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1211,7 +1181,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1245,7 +1214,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1278,7 +1246,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1312,7 +1279,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1345,7 +1311,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1379,7 +1344,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1412,7 +1376,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1446,7 +1409,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1480,7 +1442,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1516,7 +1477,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1550,7 +1510,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1586,7 +1545,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1619,7 +1577,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1653,7 +1610,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1686,7 +1642,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1720,7 +1675,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1753,7 +1707,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1787,7 +1740,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -1820,7 +1772,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1854,7 +1805,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1887,7 +1837,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -1923,7 +1872,6 @@
       "_dd.measured": 1.0,
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2087,7 +2035,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2122,7 +2069,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 199.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2154,7 +2100,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2189,7 +2134,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 200.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2221,7 +2165,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2256,7 +2199,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 299.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2288,7 +2230,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2323,7 +2264,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 300.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2355,7 +2295,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2390,7 +2329,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 399.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2422,7 +2360,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2457,7 +2394,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 400.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2489,7 +2425,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2524,7 +2459,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 499.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2556,7 +2490,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2591,7 +2524,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 500.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2623,7 +2555,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2658,7 +2589,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 599.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2690,7 +2620,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2725,7 +2654,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 600.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2757,7 +2685,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 0,
@@ -2792,7 +2719,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65535.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2824,7 +2750,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 1000,
@@ -2859,7 +2784,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 65536.0,
       "process_id": 70626.0
     },
     "duration": 1000,

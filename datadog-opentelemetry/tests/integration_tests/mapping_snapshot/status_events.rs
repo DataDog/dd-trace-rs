@@ -180,8 +180,9 @@ fn dd_fields_http_status_code(provider: &SdkTracerProvider, _: &dyn TextMapPropa
     ));
 }
 
-/// A complete triple skips status fallback; partial triples do not. Nonzero flags
-/// are preserved verbatim by the converter (including negative values).
+/// A complete triple skips status fallback; partial triples do not. Any nonzero flag
+/// marks the span as an error (v1 spans carry a boolean error, so negative values are
+/// normalized to an error).
 fn explicit_error_matrix(provider: &SdkTracerProvider, _: &dyn TextMapPropagator) {
     for flag in [0_i64, 1, -7] {
         for tags in [0, 1, 3] {

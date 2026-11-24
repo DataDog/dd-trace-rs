@@ -516,7 +516,8 @@ mod tests {
         resource: &opentelemetry_sdk::Resource,
         key: &str,
     ) -> Option<String> {
-        use crate::mappings::{otel_span_to_dd_span, DdSpan, SdkSpan, SpanStr};
+        use crate::mappings::{meta_get, otel_span_to_dd_span, DdSpan, SdkSpan};
+        use libdd_trace_model::TraceText;
 
         let span_context = opentelemetry::trace::SpanContext::empty_context();
         let status = opentelemetry::trace::Status::Unset;
@@ -540,10 +541,7 @@ mod tests {
         let alloc = Bump::new();
         let mut dd_span = DdSpan::default();
         otel_span_to_dd_span(&mut dd_span, &sdk_span, resource, &alloc);
-        dd_span
-            .meta
-            .get(&SpanStr::from_str(key))
-            .map(|v| v.as_str().to_owned())
+        meta_get(&dd_span, key).map(|v| v.as_str().to_owned())
     }
 
     /// Asserts that the sampler resolves `env`, and the exporter exports the `env` tag, as `env`

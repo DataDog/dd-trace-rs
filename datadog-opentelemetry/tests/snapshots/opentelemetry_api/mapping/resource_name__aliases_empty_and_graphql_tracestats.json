@@ -4,20 +4,6 @@
     "Duration": 10000000000,
     "Stats": [
       {
-        "Name": "",
-        "Resource": "GET",
-        "Service": "unnamed-rust-service",
-        "Type": "web",
-        "HTTPStatusCode": 0,
-        "Synthetics": false,
-        "Hits": 1,
-        "TopLevelHits": 1,
-        "Duration": 1000,
-        "Errors": 0,
-        "OkSummary": 37,
-        "ErrorSummary": 24
-      },
-      {
         "Name": "42",
         "Resource": "true",
         "Service": "123",
@@ -36,6 +22,20 @@
         "Resource": "wrong-faas-keys",
         "Service": "unnamed-rust-service",
         "Type": "http",
+        "HTTPStatusCode": 0,
+        "Synthetics": false,
+        "Hits": 1,
+        "TopLevelHits": 1,
+        "Duration": 1000,
+        "Errors": 0,
+        "OkSummary": 37,
+        "ErrorSummary": 24
+      },
+      {
+        "Name": "empty-operation-override",
+        "Resource": "GET",
+        "Service": "unnamed-rust-service",
+        "Type": "web",
         "HTTPStatusCode": 0,
         "Synthetics": false,
         "Hits": 1,

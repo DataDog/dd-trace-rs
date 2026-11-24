@@ -25,7 +25,6 @@
     "metrics": {
       "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "http.status_code": 404.0,
       "process_id": 76830.0
     },
     "duration": 8000,

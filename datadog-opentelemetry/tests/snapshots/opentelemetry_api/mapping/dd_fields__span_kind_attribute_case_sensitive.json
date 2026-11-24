@@ -15,7 +15,7 @@
       "otel.status_code": "Unset",
       "otel.trace_id": "6afdc5ed0000000014210c5455fe4dca",
       "runtime-id": "cf63300c-b109-4565-90d9-d413d8ecf181",
-      "span.kind": "Server",
+      "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"

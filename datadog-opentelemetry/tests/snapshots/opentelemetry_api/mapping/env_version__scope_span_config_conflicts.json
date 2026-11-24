@@ -212,7 +212,6 @@
       "_dd.p.dm": "-0",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment.name": "deployment-env",
-      "env": "",
       "language": "rust",
       "otel.scope.name": "promotions",
       "otel.status_code": "Unset",
@@ -246,7 +245,6 @@
       "_dd.p.dm": "-0",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment.name": "deployment-env",
-      "env": "",
       "language": "rust",
       "otel.scope.name": "promotions",
       "otel.status_code": "Unset",
@@ -256,7 +254,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "service-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
@@ -279,7 +277,6 @@
       "_dd.p.dm": "-0",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment.name": "deployment-env",
-      "env": "",
       "language": "rust",
       "otel.scope.name": "promotions",
       "otel.status_code": "Unset",
@@ -313,7 +310,6 @@
       "_dd.p.dm": "-0",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment.name": "deployment-env",
-      "env": "",
       "language": "rust",
       "otel.scope.name": "promotions",
       "otel.status_code": "Unset",
@@ -323,7 +319,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "service-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,

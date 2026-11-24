@@ -12,7 +12,6 @@
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
-      "env": "",
       "language": "rust",
       "mapping.case": "absent",
       "otel.scope.name": "mapping",
@@ -23,7 +22,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "resource-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
@@ -47,7 +46,6 @@
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
-      "env": "",
       "language": "rust",
       "mapping.case": "empty-dd",
       "otel.scope.name": "mapping",
@@ -58,7 +56,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "resource-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
@@ -82,7 +80,6 @@
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
-      "env": "",
       "language": "rust",
       "mapping.case": "empty-conventional",
       "otel.scope.name": "mapping",
@@ -93,7 +90,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "resource-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
@@ -187,7 +184,6 @@
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
-      "env": "",
       "language": "rust",
       "mapping.case": "numeric-conventional",
       "otel.scope.name": "mapping",
@@ -198,7 +194,7 @@
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0",
-      "version": ""
+      "version": "resource-version"
     },
     "metrics": {
       "_sampling_priority_v1": 1.0,
