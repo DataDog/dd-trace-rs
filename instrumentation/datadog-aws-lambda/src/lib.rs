@@ -27,18 +27,29 @@
 //!
 //! # Usage
 //!
+//! Import `lambda_runtime` and `datadog_opentelemetry` from this crate instead of
+//! depending on them directly. Two versions of one crate are two different crates to
+//! the compiler, so a handler built on another version does not fit [`TracedService`].
+//!
 //! ```rust,no_run
+//! use datadog_aws_lambda::lambda_runtime::{self, service_fn, Error, LambdaEvent};
 //! use datadog_aws_lambda::TracedService;
 //!
-//! # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
+//! # async fn my_handler(_: LambdaEvent<serde_json::Value>) -> Result<(), Error> {
 //! #     Ok(())
 //! # }
-//! # async fn example() -> Result<(), lambda_runtime::Error> {
-//! lambda_runtime::run(TracedService::new(lambda_runtime::service_fn(my_handler))).await
+//! # async fn example() -> Result<(), Error> {
+//! lambda_runtime::run(TracedService::new(service_fn(my_handler))).await
 //! # }
 //! ```
 mod attribute_keys;
 mod invocation;
+
+/// The `datadog_opentelemetry` crate this crate is built against.
+/// [`TracedService::with_config`] takes its `ConfigBuilder`.
+pub use datadog_opentelemetry;
+/// The `lambda_runtime` crate this crate is built against.
+pub use lambda_runtime;
 
 use datadog_opentelemetry::configuration::{Config, ConfigBuilder};
 use invocation::{Invocation, TRACER_NAME};
@@ -102,9 +113,9 @@ impl From<serde_json::Error> for TracedServiceError {
 /// # Examples
 ///
 /// ```rust,no_run
+/// use datadog_aws_lambda::datadog_opentelemetry::configuration::Config;
+/// use datadog_aws_lambda::lambda_runtime::{self, tower};
 /// use datadog_aws_lambda::TracedService;
-/// use datadog_opentelemetry::configuration::Config;
-/// use lambda_runtime::tower;
 ///
 /// # async fn my_handler(_: lambda_runtime::LambdaEvent<serde_json::Value>) -> Result<(), lambda_runtime::Error> {
 /// #     Ok(())
