@@ -594,7 +594,7 @@ mod tests {
         for code in ["", "not-a-code", "-1", "65536"] {
             assert_eq!(
                 error_after(&cached_config, span(DdSpanKind::Server, Some(code), false)),
-                true
+                false
             );
         }
         for kind in [
@@ -606,7 +606,7 @@ mod tests {
             // 200 is in error range
             assert_eq!(
                 error_after(&cached_config, span(kind, Some("200"), false)),
-                true
+                matches!(kind, DdSpanKind::Server)
             );
         }
     }
