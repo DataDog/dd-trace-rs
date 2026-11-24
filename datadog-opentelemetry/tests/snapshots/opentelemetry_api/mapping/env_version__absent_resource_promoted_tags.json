@@ -9,7 +9,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -18,8 +17,8 @@
       "mapping.case": "absent",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b05941400000000287afe0b57be6e45",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced9000000004133e212f549fe5b",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -27,12 +26,12 @@
       "version": "resource-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0
+      "process_id": 35767.0
     },
-    "duration": 3000,
-    "start": 1795527700811842000
+    "duration": 5000,
+    "start": 1795018457434838000
   }],
 [
   {
@@ -45,7 +44,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -54,8 +52,8 @@
       "mapping.case": "empty-dd",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b05941400000000be5596b9c9af27cc",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced900000000463c6fa058c394c0",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -63,11 +61,12 @@
       "version": "resource-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0
+      "process_id": 35767.0
     },
-    "start": 1795527700811856000
+    "duration": 1000,
+    "start": 1795018457434860000
   }],
 [
   {
@@ -80,7 +79,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -88,8 +86,8 @@
       "mapping.case": "empty-conventional",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b059414000000007092fbda69356d24",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced900000000860031212f2182ed",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -97,12 +95,12 @@
       "version": "resource-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0
+      "process_id": 35767.0
     },
     "duration": 1000,
-    "start": 1795527700811863000
+    "start": 1795018457434868000
   }],
 [
   {
@@ -115,7 +113,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -124,8 +121,8 @@
       "mapping.case": "nonempty-conventional",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b05941400000000e370e3444bcafb2d",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced90000000098bdf3159b1f793b",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -133,12 +130,12 @@
       "version": "span-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0
+      "process_id": 35767.0
     },
     "duration": 1000,
-    "start": 1795527700811869000
+    "start": 1795018457434875000
   }],
 [
   {
@@ -151,7 +148,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -160,8 +156,8 @@
       "mapping.case": "nonempty-dd",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b05941400000000768878b13ae5561b",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced900000000c871479777e61dcd",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -169,12 +165,12 @@
       "version": "dd-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0
+      "process_id": 35767.0
     },
     "duration": 1000,
-    "start": 1795527700811875000
+    "start": 1795018457434881000
   }],
 [
   {
@@ -187,7 +183,6 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
-      "_dd.p.tid": "6b05941400000000",
       "_dd.sdk.otlp_export": "false",
       "deployment.environment": "old-env",
       "deployment.environment.name": "new-env",
@@ -196,8 +191,8 @@
       "mapping.case": "numeric-conventional",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6b059414000000000ae4d78a686e231e",
-      "runtime-id": "2d77ac58-1e48-432b-8dcd-fadaebfdd566",
+      "otel.trace_id": "6afdced90000000037730fdaf9cc985a",
+      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
       "service.version": "resource-version",
       "span.kind": "internal",
       "telemetry.sdk.name": "datadog",
@@ -205,11 +200,11 @@
       "version": "resource-version"
     },
     "metrics": {
-      "_sampling_priority_v1": 1,
+      "_sampling_priority_v1": 1.0,
       "_top_level": 1.0,
-      "process_id": 75752.0,
+      "process_id": 35767.0,
       "version": 43.0
     },
     "duration": 1000,
-    "start": 1795527700811881000
+    "start": 1795018457434887000
   }]]
