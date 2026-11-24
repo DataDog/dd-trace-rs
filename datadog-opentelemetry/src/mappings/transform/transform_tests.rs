@@ -21,7 +21,7 @@ use opentelemetry::{
 
 use super::{
     super::sdk_span::SdkSpan,
-    super::transform::{DdAttributeValue, DdSpanEvent, DdSpanLink, SPAN_LINK_FLAGS_SET},
+    super::transform::{DdSpanEvent, DdSpanLink, DdValue, SPAN_LINK_FLAGS_SET},
     DdSpan,
 };
 
@@ -29,14 +29,14 @@ fn timestamp_nano(nanos: u64) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_nanos(nanos)
 }
 
-fn string(s: &'static str) -> DdAttributeValue<'static> {
+fn string(s: &'static str) -> DdValue<'static> {
     AttributeValue::String(s.into())
 }
 
 fn attributes<const N: usize, const M: usize>(
     strings: [(&'static str, &'static str); N],
     numbers: [(&'static str, f64); M],
-) -> VecMap<Cow<'static, str>, DdAttributeValue<'static>> {
+) -> VecMap<Cow<'static, str>, DdValue<'static>> {
     strings
         .into_iter()
         .map(|(k, v)| (k.into(), string(v)))
@@ -1043,7 +1043,7 @@ mod tests {
         sdk_span::SdkSpan,
         transform::{otel_span_to_dd_span, SpanStr},
         transform_tests::TestSpan,
-        DdAttributeValue, DdSpan,
+        DdSpan, DdValue,
     };
 
     use super::{test_cases, test_span_to_sdk_span};
@@ -1172,7 +1172,7 @@ mod tests {
                 .collect();
             assert_eq!(
                 status_codes,
-                [&DdAttributeValue::String(Cow::from_static_str("200"))],
+                [&DdValue::String(Cow::from_static_str("200"))],
                 "{otel_key}"
             );
             assert!(
@@ -1184,8 +1184,8 @@ mod tests {
 
     #[track_caller]
     fn hashmap_diff<'a>(
-        output: &VecMap<Cow<'a, str>, DdAttributeValue<'a>>,
-        expected: &VecMap<Cow<'a, str>, DdAttributeValue<'a>>,
+        output: &VecMap<Cow<'a, str>, DdValue<'a>>,
+        expected: &VecMap<Cow<'a, str>, DdValue<'a>>,
     ) {
         let mut a = Vec::from_iter(output);
         let mut b = Vec::from_iter(expected);
@@ -1283,7 +1283,7 @@ mod tests {
                 output
                     .attributes
                     .get(&SpanStr::from("_sampling_priority_v1")),
-                Some(&DdAttributeValue::Float(value))
+                Some(&DdValue::Float(value))
             );
             assert!(!output
                 .attributes
@@ -1373,23 +1373,14 @@ mod tests {
         let event = &output.span_events[0];
         assert_eq!(event.time_unix_nano, 4200);
         for (key, expected) in [
-            (
-                "bools",
-                vec![DdAttributeValue::Bool(true), DdAttributeValue::Bool(false)],
-            ),
-            (
-                "ints",
-                vec![DdAttributeValue::Int(-7), DdAttributeValue::Int(8)],
-            ),
-            (
-                "floats",
-                vec![DdAttributeValue::Float(0.25), DdAttributeValue::Float(-1.5)],
-            ),
+            ("bools", vec![DdValue::Bool(true), DdValue::Bool(false)]),
+            ("ints", vec![DdValue::Int(-7), DdValue::Int(8)]),
+            ("floats", vec![DdValue::Float(0.25), DdValue::Float(-1.5)]),
             (
                 "strings",
                 vec![
-                    DdAttributeValue::String(SpanStr::from("a")),
-                    DdAttributeValue::String(SpanStr::from("")),
+                    DdValue::String(SpanStr::from("a")),
+                    DdValue::String(SpanStr::from("")),
                 ],
             ),
             ("empty-bools", vec![]),
@@ -1399,7 +1390,7 @@ mod tests {
         ] {
             assert_eq!(
                 event.attributes.get(&SpanStr::from(key)),
-                Some(&DdAttributeValue::Array(expected)),
+                Some(&DdValue::Array(expected)),
                 "{key}"
             );
         }
@@ -1500,9 +1491,9 @@ mod tests {
             assert_eq!(
                 output.attributes.get(&SpanStr::from("shared")),
                 Some(&if reverse {
-                    DdAttributeValue::Float(42.0)
+                    DdValue::Float(42.0)
                 } else {
-                    DdAttributeValue::String("span".into())
+                    DdValue::String("span".into())
                 })
             );
             assert_eq!(
@@ -1512,9 +1503,9 @@ mod tests {
             assert_eq!(
                 output.attributes.get(&SpanStr::from("array.0")),
                 Some(&if reverse {
-                    DdAttributeValue::Float(7.0)
+                    DdValue::Float(7.0)
                 } else {
-                    DdAttributeValue::String("string".into())
+                    DdValue::String("string".into())
                 })
             );
             assert_eq!(

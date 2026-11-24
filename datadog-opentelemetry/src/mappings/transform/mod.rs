@@ -82,7 +82,7 @@ pub type DdTraceChunk<'a> = libdd_trace_utils::span::v1::TraceChunk<SliceData<'a
 type DdSpanEvent<'a> = libdd_trace_utils::span::v1::SpanEvent<SliceData<'a>>;
 type DdSpanLink<'a> = libdd_trace_utils::span::v1::SpanLink<SliceData<'a>>;
 /// Value of a [`DdSpan`] attribute.
-pub type DdAttributeValue<'a> = AttributeValue<SliceData<'a>>;
+pub type DdValue<'a> = AttributeValue<SliceData<'a>>;
 
 /// Bit 31 of a span link's `flags` tells the backend the W3C trace flags are set.
 /// OpenTelemetry links always carry trace flags, so it is always set.
@@ -279,9 +279,6 @@ fn set_array_otlp_with_semconv_mappings<'a>(
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/transform/transform.go#L69
-///
-/// `dd_span` is expected to be empty: either a default span or a span recycled from a pool, whose
-/// collections keep their capacity.
 fn otel_span_to_dd_span_minimal<'a>(
     dd_span: &mut DdSpan<'a>,
     span: &SpanExtractArgs<'a, '_>,
@@ -311,10 +308,7 @@ fn otel_span_to_dd_span_minimal<'a>(
     dd_span.span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
     dd_span.parent_id = otel_span_id_to_dd_id(span.span.parent_span_id);
     dd_span.start = start;
-    // duration should not be negative
     dd_span.duration = end.checked_sub(start).unwrap_or(0).max(0);
-    // `VecMap` has no `reserve`: a span recycled from the pool already carries a warm capacity,
-    // so inserts just grow the existing buffers amortized.
     if let Some(error) = span.get_attr_num::<i32>(DATADOG_ERROR) {
         dd_span.error = error != 0;
     } else if matches!(span.span.status, opentelemetry::trace::Status::Error { .. }) {
@@ -439,11 +433,11 @@ fn tag_span_if_contains_exception(dd_span: &mut DdSpan) {
     }
 }
 
-fn otel_value_to_dd_attribute<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttributeValue<'a> {
+fn otel_value_to_dd_attribute<'a>(value: &'a Value, alloc: &'a Bump) -> DdValue<'a> {
     fn map_vec<'a, T: 'a>(
         v: impl IntoIterator<Item = T>,
-        constructor: fn(T) -> DdAttributeValue<'a>,
-    ) -> DdAttributeValue<'a> {
+        constructor: fn(T) -> DdValue<'a>,
+    ) -> DdValue<'a> {
         AttributeValue::Array(v.into_iter().map(constructor).collect::<Vec<_>>())
     }
     match value {
@@ -469,7 +463,7 @@ fn otel_value_to_dd_attribute<'a>(value: &'a Value, alloc: &'a Bump) -> DdAttrib
 
 /// Span link attributes are string-only, so arrays are flattened to `key.0`, `key.1`, …
 fn insert_link_attribute<'a>(
-    attributes: &mut VecMap<SpanStr<'a>, DdAttributeValue<'a>>,
+    attributes: &mut VecMap<SpanStr<'a>, DdValue<'a>>,
     key: &'a str,
     value: &'a Value,
     alloc: &'a Bump,
@@ -508,8 +502,8 @@ fn insert_link_attribute<'a>(
     }
 }
 
-fn dd_value_to_string<'a>(value: &DdAttributeValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
-    fn write_value(value: &DdAttributeValue, w: &mut bumpalo::collections::String<'_>) {
+fn dd_value_to_string<'a>(value: &DdValue<'a>, alloc: &'a Bump) -> SpanStr<'a> {
+    fn write_value(value: &DdValue, w: &mut bumpalo::collections::String<'_>) {
         let _ = match value {
             AttributeValue::String(s) => write!(w, "{}", s.as_str()),
             AttributeValue::Int(i) => write!(w, "{i}"),
@@ -655,10 +649,6 @@ pub fn otel_value_string_repr<'a>(v: &'a Value, alloc: &'a Bump) -> &'a str {
 /// * `IgnoreMissingDatadogFields` => default to false
 /// * `disable_operation_and_resource_name_logic_v2` => default to false
 ///
-/// `dd_span` is filled in place. It is expected to be empty, typically a span recycled from a
-/// [`SpanPoolV1`](libdd_trace_utils::span::v1::span_pool::SpanPoolV1): its collections keep their
-/// capacity, which avoids reallocating them.
-///
 /// `alloc` is the arena backing every string formatted during the conversion; it must
 /// outlive the strings stored in `dd_span`.
 pub fn otel_span_to_dd_span<'a>(
@@ -667,21 +657,6 @@ pub fn otel_span_to_dd_span<'a>(
     otel_resource: &'a Resource,
     alloc: &'a Bump,
 ) {
-    // A non-empty span would silently mix data across exports, so the contract above is
-    // enforced in debug builds.
-    debug_assert!(
-        dd_span.attributes.is_empty(),
-        "`dd_span.attributes` must be empty on entry"
-    );
-    debug_assert!(
-        dd_span.span_links.is_empty(),
-        "`dd_span.span_links` must be empty on entry"
-    );
-    debug_assert!(
-        dd_span.span_events.is_empty(),
-        "`dd_span.span_events` must be empty on entry"
-    );
-
     // There is a performance optimization possible here:
     // The otlp receiver splits span conversion into two steps
     // 1. The minimal fields used by Stats computation
@@ -749,10 +724,6 @@ pub fn otel_span_to_dd_span<'a>(
         }
     }
 
-    // The `service.version` resource attribute is the version fallback: it must be resolved
-    // after the span attributes, which go through the first-wins `meta` guard for `version`.
-    // Resolving it earlier would fill the dedicated field and drop a span-level `version`
-    // attribute.
     if dd_span.version.as_str().is_empty() {
         let version = otel_resource
             .get_ref(&Key::from_static_str(SERVICE_VERSION.key()))

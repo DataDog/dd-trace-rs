@@ -29,7 +29,7 @@ use crate::{
     configuration::Config,
     core::telemetry_session,
     ddtrace_transform::{self, DdTracePool},
-    mappings::{CachedConfig, DdAttributeValue, SpanStr, DEFAULT_OTLP_SERVICE_NAME},
+    mappings::{CachedConfig, DdValue, SpanStr, DEFAULT_OTLP_SERVICE_NAME},
 };
 
 pub use libdd_data_pipeline::trace_buffer::TraceBufferError as DatadogExporterError;
@@ -454,8 +454,8 @@ impl Export<BufferedSpan> for SpanDataExport {
                         &self.cached_config,
                         chunk.iter().map(|b| &b.0),
                         &resource,
+                        pool,
                         &alloc,
-                        Some(pool),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -476,7 +476,7 @@ impl Export<BufferedSpan> for SpanDataExport {
                 if let Some(first) = chunk.spans.first_mut() {
                     first.attributes.insert(
                         SpanStr::from_static_str(SDK_OTLP_EXPORT_KEY),
-                        DdAttributeValue::String(SpanStr::from_static_str("false")),
+                        DdValue::String(SpanStr::from_static_str("false")),
                     );
                 }
             }

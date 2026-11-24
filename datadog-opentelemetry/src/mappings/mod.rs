@@ -22,7 +22,7 @@ pub(crate) use transform::otel_util::OtelSpan;
 pub use transform::{
     attribute_keys::{AttributeIndices, AttributeKey},
     otel_util::DEFAULT_OTLP_SERVICE_NAME,
-    otel_value_string_repr, DdAttributeValue, DdSpan, DdTraceChunk, SpanStr,
+    otel_value_string_repr, DdSpan, DdTraceChunk, DdValue, SpanStr,
 };
 
 pub(crate) use transform::{meta_get, meta_insert, metric_contains, metric_insert};

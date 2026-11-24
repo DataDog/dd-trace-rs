@@ -7,12 +7,11 @@ use std::hint::black_box;
 // SPDX-License-Identifier: Apache-2.0
 use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, Criterion};
-use datadog_opentelemetry::bench_support::{trace_pool_for, DdTracePool};
 use datadog_opentelemetry::core_pub_hack::test_utils::benchmarks::{
     memory_allocated_measurement, MeasurementName, ReportingAllocator,
 };
 use datadog_opentelemetry::mappings::transform_tests::test_span_to_sdk_span;
-use libdd_trace_utils::span::v1::span_pool::SpanPoolV1;
+use libdd_trace_utils::span::v1::span_pool::SpanPoolV1 as SpanPool;
 use libdd_trace_utils::span::SliceData;
 
 #[global_allocator]
@@ -33,7 +32,7 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
             )
             .build();
 
-        let pool = DdTracePool::with_capacity(1_000);
+        let pool: SpanPool<SliceData<'static>> = SpanPool::with_capacity(1_000);
         // Reuse a single arena across iterations, resetting it between spans.
         // This mirrors the exporter, which creates one arena per flush batch and
         // amortizes it over all spans in the batch, instead of paying a fresh arena
@@ -47,13 +46,13 @@ fn bench_span_transformation<M: criterion::measurement::Measurement + Measuremen
                     || input_span.clone(),
                     |input_span| {
                         arena.reset();
-                        // The pool is typed `SpanStr<'static>` but the spans it
+                        // SAFETY: the pool is typed `SpanStr<'static>` but the spans it
                         // hands out borrow from `input_span`/`input_resource`/`arena` for
                         // the duration of this iteration; returning them to the pool
                         // resets them (dropping those borrows) before the borrow sources
-                        // can go away. `trace_pool_for` is the audited lifetime
-                        // erasure used by the span exporter.
-                        let pool: &SpanPoolV1<SliceData> = trace_pool_for(&pool);
+                        // can go away. This mirrors the lifetime erasure done in the span
+                        // exporter.
+                        let pool: &SpanPool<_> = unsafe { std::mem::transmute(&pool) };
                         let mut dd_span = pool.get_span();
                         datadog_opentelemetry::mappings::otel_span_to_dd_span(
                             &mut dd_span,

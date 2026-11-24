@@ -10,14 +10,13 @@ use crate::{
     core::sampling,
     mappings::{
         meta_get, meta_insert, metric_contains, metric_insert, otel_span_to_dd_span, CachedConfig,
-        DdAttributeValue, DdSpan, DdTraceChunk, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME,
-        VERSION_KEY,
+        DdSpan, DdTraceChunk, DdValue, SdkSpan, SpanStr, DEFAULT_OTLP_SERVICE_NAME, VERSION_KEY,
     },
 };
 use bumpalo::Bump;
 use libdd_trace_model::TraceText;
 use libdd_trace_utils::span::{
-    v1::{span_pool::SpanPoolV1, SpanKind as DdSpanKind},
+    v1::{span_pool::SpanPoolV1 as SpanPool, SpanKind as DdSpanKind},
     SliceData, SpanText,
 };
 use opentelemetry::{trace::SpanId, Key, Value};
@@ -58,14 +57,14 @@ fn otel_sampling_to_dd_sampling(
 }
 
 /// Pool recycling the allocations of exported spans across exports.
-pub type DdTracePool = SpanPoolV1<SliceData<'static>>;
+pub type DdTracePool = SpanPool<SliceData<'static>>;
 
 /// Shortens the text lifetime of a [`DdTracePool`] to the lifetime of the spans of one export.
 ///
 /// The pool is `'static` since it outlives every export, while the spans of an export borrow from
 /// the `SpanData`, `Resource` and arena of that export.
-pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<SliceData<'a>> {
-    // SAFETY: `SpanPoolV1` resets every span (all text fields set back to the empty `'static`
+pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPool<SliceData<'a>> {
+    // SAFETY: `SpanPool` resets every span (all text fields set back to the empty `'static`
     // default, collections cleared) before storing it, both in its queue and in its thread-local
     // caches, and drops the chunk shells instead of storing them. The reset is implemented by
     // `libdd_trace_utils::span::v1::span_pool::reset_span` and `SpanBatch::reset`
@@ -75,23 +74,21 @@ pub fn trace_pool_for<'a>(pool: &'a DdTracePool) -> &'a SpanPoolV1<SliceData<'a>
     // lifetime of `SliceData`, so they have the same layout.
     //
     // This invariant is tested by `tests_trace_pool_recycling_frees_text_data`.
-    unsafe { &*std::ptr::from_ref(pool).cast::<SpanPoolV1<SliceData<'a>>>() }
+    unsafe { &*std::ptr::from_ref(pool).cast::<SpanPool<SliceData<'a>>>() }
 }
 
 // Transform a vector of opentelemetry span data into a datadog v1 trace chunk
-//
-// When `pool` is set, the chunk and its spans are taken from it to reuse their allocations.
 pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
     span_data: I,
     otel_resource: &'a Resource,
+    span_pool: &SpanPool<SliceData<'a>>,
     alloc: &'a Bump,
-    pool: Option<&SpanPoolV1<SliceData<'a>>>,
 ) -> DdTraceChunk<'a>
 where
     I: IntoIterator<Item = &'a SpanData>,
 {
-    let mut chunk = pool.map_or_else(DdTraceChunk::default, SpanPoolV1::get_chunk);
+    let mut chunk = span_pool.get_chunk();
     let mut trace_id = [0; 16];
     // TODO: This can maybe faster by sorting the span_data by trace_id
     // and then handing off groups of span data?
@@ -99,7 +96,7 @@ where
         trace_id = s.span_context.trace_id().to_bytes();
         let trace_flags = s.span_context.trace_flags();
         let sdk_span = SdkSpan::from_sdk_span_data(s);
-        let mut dd_span = pool.map_or_else(DdSpan::default, SpanPoolV1::get_span);
+        let mut dd_span = span_pool.get_span();
         otel_span_to_dd_span(&mut dd_span, &sdk_span, otel_resource, alloc);
         otel_sampling_to_dd_sampling(trace_flags, &mut dd_span);
 
@@ -113,11 +110,9 @@ where
     chunk.trace_id = trace_id;
 
     if let Some(root) = local_root(&chunk.spans) {
-        // Numeric attributes are read like libdatadog's `attribute_as_f64`: both float and
-        // integer values count.
         chunk.priority = match root.attributes.get(SAMPLING_PRIORITY_KEY) {
-            Some(DdAttributeValue::Float(p)) => Some(*p as i32),
-            Some(DdAttributeValue::Int(p)) => Some(*p as f64 as i32),
+            Some(DdValue::Float(p)) => Some(*p as i32),
+            Some(DdValue::Int(p)) => Some(*p as f64 as i32),
             _ => None,
         };
         chunk.origin = meta_get(root, ORIGIN_KEY).cloned().unwrap_or_default();
@@ -254,13 +249,6 @@ fn add_local_root_metadata<'a>(dd_span: &mut DdSpan<'a>, cached_config: &'a Cach
     );
 }
 
-/// Entry points into the span conversion used by benchmarks.
-#[cfg(feature = "test-utils")]
-#[allow(missing_docs)]
-pub mod bench_support {
-    pub use super::{trace_pool_for, DdTracePool};
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -326,8 +314,13 @@ mod tests {
         ];
 
         let alloc = Bump::new();
-        let chunk =
-            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, &alloc, None);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(
+            &cached_config,
+            &spans,
+            &resource,
+            &SpanPool::with_capacity(100),
+            &alloc,
+        );
 
         assert_eq!(chunk.trace_id, TRACE_ID);
         assert_eq!(chunk.priority, Some(2));
@@ -347,8 +340,13 @@ mod tests {
         let spans = [span_data(1, 0, vec![])];
 
         let alloc = Bump::new();
-        let chunk =
-            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &spans, &resource, &alloc, None);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(
+            &cached_config,
+            &spans,
+            &resource,
+            &SpanPool::with_capacity(100),
+            &alloc,
+        );
 
         assert_eq!(chunk.priority, Some(1));
         assert_eq!(chunk.origin.as_str(), "");
@@ -439,8 +437,13 @@ mod tests {
             span_data_with_parent(4, 99, false), // partial chunk: absent parent is not a local root
         ];
 
-        let chunk =
-            otel_trace_chunk_to_dd_trace_chunk(&cached_config, &span_data, &resource, &alloc, None);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(
+            &cached_config,
+            &span_data,
+            &resource,
+            &SpanPool::with_capacity(100),
+            &alloc,
+        );
 
         assert_eq!(chunk.spans.len(), 4);
         let process_id = f64::from(std::process::id());
@@ -448,10 +451,10 @@ mod tests {
             let meta = |key| {
                 span.attributes
                     .get(&SpanStr::from_static_str(key))
-                    .and_then(DdAttributeValue::as_str)
+                    .and_then(DdValue::as_str)
             };
             let process_id_metric = match span.attributes.get("process_id") {
-                Some(DdAttributeValue::Float(f)) => Some(*f),
+                Some(DdValue::Float(f)) => Some(*f),
                 _ => None,
             };
             if is_local_root {
@@ -584,7 +587,7 @@ mod tests {
                     let mut input = span(kind, None, initial_error);
                     input.attributes.insert(
                         SpanStr::from_static_str("http.status_code"),
-                        DdAttributeValue::String(SpanStr::from(code.to_string())),
+                        DdValue::String(SpanStr::from(code.to_string())),
                     );
                     apply_http_error_statuses(&mut input, &cached_config);
                     assert_eq!(input.error, expected, "{kind:?}:{code}:{initial_error}");
@@ -628,9 +631,8 @@ mod tests {
             false,
             Default::default(),
         );
-        let pool: SpanPoolV1<_> = SpanPoolV1::with_capacity(2);
-        let chunk =
-            otel_trace_chunk_to_dd_trace_chunk(&config, &data, &resource, &alloc, Some(&pool));
+        let pool: SpanPool<_> = SpanPool::with_capacity(2);
+        let chunk = otel_trace_chunk_to_dd_trace_chunk(&config, &data, &resource, &pool, &alloc);
         assert_eq!(
             chunk
                 .spans
@@ -643,7 +645,7 @@ mod tests {
             assert_eq!(
                 span.attributes
                     .get(&SpanStr::from_static_str("_sampling_priority_v1")),
-                Some(&DdAttributeValue::Float(priority))
+                Some(&DdValue::Float(priority))
             );
         }
     }
@@ -688,15 +690,15 @@ mod tests {
             span.end_time =
                 std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_nanos(567_800);
         }
-        let pool = SpanPoolV1::with_capacity(2);
+        let pool = SpanPool::with_capacity(2);
         for indices in [vec![0, 1], vec![1, 0], vec![1]] {
             let has_root = indices.contains(&0);
             let chunk = otel_trace_chunk_to_dd_trace_chunk(
                 &config,
                 indices.iter().map(|&i| &data[i]),
                 &resource,
+                &pool,
                 &alloc,
-                Some(&pool),
             );
             let encoded = msgpack_encoder::v1::to_vec_from_v1(&TracerPayload {
                 chunks: vec![chunk],
@@ -737,7 +739,7 @@ mod tests {
 
 #[cfg(test)]
 /// Verifies the invariant [`trace_pool_for`] relies on: text data never survives a span or a chunk
-/// being returned to a [`SpanPoolV1`].
+/// being returned to a [`SpanPool`].
 ///
 /// The test uses a text type counting how many owned strings are alive. After filling every text
 /// field of a chunk and of its span and returning the chunk to the pool, it checks that
@@ -758,7 +760,7 @@ mod tests_trace_pool_recycling_frees_text_data {
 
     use libdd_trace_model::{TraceText, ValueTypes};
 
-    use super::SpanPoolV1;
+    use super::SpanPool;
 
     static LIVE_OWNED_STRINGS: AtomicUsize = AtomicUsize::new(0);
 
@@ -923,7 +925,7 @@ mod tests_trace_pool_recycling_frees_text_data {
 
     #[test]
     fn owned_strings_are_released_when_chunks_are_returned_to_the_pool() {
-        let pool = SpanPoolV1::<CountingStr>::with_capacity(100);
+        let pool = SpanPool::<CountingStr>::with_capacity(100);
         assert_eq!(live_owned_strings(), 0, "test precondition");
 
         // The pool's drop policy discards ~10% of returned spans, so retry until a span actually
