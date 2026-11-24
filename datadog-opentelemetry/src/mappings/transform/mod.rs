@@ -300,6 +300,12 @@ fn otel_span_to_dd_span_minimal<'a>(
     // The sampler resolves service, name and resource with the same functions
     dd_span.service = SpanStr::from(get_otel_service(span));
     dd_span.name = SpanStr::from(get_otel_operation_name_v2(span));
+    // The v1 wire format omits empty names, which would leave the span unnamed on the
+    // receiving side: when the Datadog overrides resolve to an empty name, fall back to the
+    // OpenTelemetry span name.
+    if dd_span.name.as_str().is_empty() {
+        dd_span.name = SpanStr::from(span.span.name);
+    }
     dd_span.resource = SpanStr::from(get_otel_resource_v2(span));
     dd_span.r#type = SpanStr::from(span.get_attr_str(DATADOG_TYPE));
     dd_span.span_id = otel_span_id_to_dd_id(span.span.span_context.span_id());
@@ -722,16 +728,6 @@ pub fn otel_span_to_dd_span<'a>(
         )),
     );
 
-    if dd_span.version.as_str().is_empty() {
-        let version = otel_resource
-            .get_ref(&Key::from_static_str(SERVICE_VERSION.key()))
-            .map(|v| otel_value_string_repr(v, alloc))
-            .unwrap_or_default();
-        if !version.is_empty() {
-            dd_span.version = SpanStr::from(version);
-        }
-    }
-
     for KeyValue { key, value, .. } in otel_span.attributes {
         let key = key.as_str();
         if key.starts_with("datadog.") {
@@ -750,6 +746,20 @@ pub fn otel_span_to_dd_span<'a>(
             _ => {
                 set_meta_otlp_with_semconv_mappings(key, value, dd_span, alloc);
             }
+        }
+    }
+
+    // The `service.version` resource attribute is the version fallback: it must be resolved
+    // after the span attributes, which go through the first-wins `meta` guard for `version`.
+    // Resolving it earlier would fill the dedicated field and drop a span-level `version`
+    // attribute.
+    if dd_span.version.as_str().is_empty() {
+        let version = otel_resource
+            .get_ref(&Key::from_static_str(SERVICE_VERSION.key()))
+            .map(|v| otel_value_string_repr(v, alloc))
+            .unwrap_or_default();
+        if !version.is_empty() {
+            dd_span.version = SpanStr::from(version);
         }
     }
 

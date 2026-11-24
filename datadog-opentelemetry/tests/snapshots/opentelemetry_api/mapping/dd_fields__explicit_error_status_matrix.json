@@ -9,24 +9,25 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000693c21a53ce418a8",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e6000000005de9978c3ab11d0d",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 8000,
-    "start": 1795018456471953000
+    "duration": 7000,
+    "start": 1795526886777402000
   }],
 [
   {
@@ -39,24 +40,25 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced8000000000094f85628756218",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000ae13a2ab47876325",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456471980000
+    "start": 1795526886777428000
   }],
 [
   {
@@ -70,26 +72,27 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "status description",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced80000000085c3f07538a0d58c",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000f928e48c82644a8f",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456471989000
+    "start": 1795526886777436000
   }],
 [
   {
@@ -102,25 +105,25 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced8000000001662e38ee7dcbdbd",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000e04b28d6599cc4da",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472002000
+    "start": 1795526886777444000
   }],
 [
   {
@@ -133,25 +136,26 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced800000000d62622ff810c7cf9",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000011cb8fc5d69f44f1",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472009000
+    "duration": 1000,
+    "start": 1795526886777450000
   }],
 [
   {
@@ -165,26 +169,27 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced8000000004267fce4dbd1106a",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000011bd2896f1aef989",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456472015000
+    "start": 1795526886777456000
   }],
 [
   {
@@ -197,6 +202,7 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -204,20 +210,20 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000f71e4430cbf52d56",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000b3e5bff7a1e504b2",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472022000
+    "duration": 1000,
+    "start": 1795526886777462000
   }],
 [
   {
@@ -230,6 +236,7 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -237,20 +244,19 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced800000000fa8b804172eb349b",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000e746af0a97f58d73",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472028000
+    "start": 1795526886777469000
   }],
 [
   {
@@ -263,6 +269,7 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -271,20 +278,20 @@
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced80000000035015aeb7ea1f5fc",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e6000000009b38787269e8fb2b",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456472034000
+    "start": 1795526886777474000
   }],
 [
   {
@@ -297,24 +304,24 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000bca8f61be5fb8843",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000e8cf2169d6798e40",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472040000
+    "start": 1795526886777480000
   }],
 [
   {
@@ -327,24 +334,24 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced80000000046081a3b923d5928",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000625fb2c53cc1b8c9",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472045000
+    "start": 1795526886777485000
   }],
 [
   {
@@ -358,26 +365,27 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "status description",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced800000000bb7ea2d63035ca8b",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000093a93d977c5c407e",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456472051000
+    "start": 1795526886777490000
   }],
 [
   {
@@ -390,25 +398,26 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000a78402410df35e82",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000244a0a0964675497",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472057000
+    "duration": 1000,
+    "start": 1795526886777495000
   }],
 [
   {
@@ -421,25 +430,26 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced80000000087014cc13d4d55c9",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000af1fb09df26fd346",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
     "duration": 1000,
-    "start": 1795018456472062000
+    "start": 1795526886777500000
   }],
 [
   {
@@ -453,26 +463,26 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced8000000007850dafc3c32852f",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000bbcf6135f7dc93db",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472068000
+    "start": 1795526886777506000
   }],
 [
   {
@@ -486,6 +496,7 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -493,20 +504,19 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000f388c6e6ff4e26cd",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000013e814da36d05516",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472074000
+    "start": 1795526886777511000
   }],
 [
   {
@@ -520,6 +530,7 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -527,20 +538,20 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced80000000033f9fcd4c0bfec6b",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000054256801db86a47c",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472079000
+    "duration": 1000,
+    "start": 1795526886777516000
   }],
 [
   {
@@ -554,6 +565,7 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -562,20 +574,19 @@
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced800000000f844c802db1421e2",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e6000000009040f1206e22f3aa",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472084000
+    "start": 1795526886777522000
   }],
 [
   {
@@ -588,24 +599,24 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced800000000611a29213c914a19",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000069e66a541901f176",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472090000
+    "start": 1795526886777527000
   }],
 [
   {
@@ -618,24 +629,24 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced800000000b0667627149a3974",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000d75258e54d15d5b0",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472095000
+    "start": 1795526886777532000
   }],
 [
   {
@@ -649,26 +660,26 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "status description",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced800000000229792931661f0c3",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e6000000003556389e6fee5a7c",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472100000
+    "start": 1795526886777537000
   }],
 [
   {
@@ -681,25 +692,25 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced8000000008d3bcfa7d030af18",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000c12244af4cb7c0e8",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472106000
+    "start": 1795526886777542000
   }],
 [
   {
@@ -712,25 +723,25 @@
     "type": "custom",
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced80000000079f650d1f4fe6ba2",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000b78096df474a1d4e",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472111000
+    "start": 1795526886777547000
   }],
 [
   {
@@ -744,26 +755,26 @@
     "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced8000000003470b8cc65dd5794",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000879ba668858a5470",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 0,
-    "start": 1795018456472117000
+    "start": 1795526886777552000
   }],
 [
   {
@@ -774,9 +785,10 @@
     "span_id": 1,
     "parent_id": 0,
     "type": "custom",
-    "error": -7,
+    "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -784,20 +796,19 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Unset",
-      "otel.trace_id": "6afdced80000000047e9796cdcdcf8d3",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e600000000303f8a44b69dc553",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472122000
+    "start": 1795526886777557000
   }],
 [
   {
@@ -808,9 +819,10 @@
     "span_id": 1,
     "parent_id": 0,
     "type": "custom",
-    "error": -7,
+    "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -818,20 +830,19 @@
       "language": "rust",
       "otel.scope.name": "mapping",
       "otel.status_code": "Ok",
-      "otel.trace_id": "6afdced800000000511b1ec497b8441a",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e6000000007adc1395045de82e",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472127000
+    "start": 1795526886777562000
   }],
 [
   {
@@ -842,9 +853,10 @@
     "span_id": 1,
     "parent_id": 0,
     "type": "custom",
-    "error": -7,
+    "error": 1,
     "meta": {
       "_dd.p.dm": "-0",
+      "_dd.p.tid": "6b0590e600000000",
       "_dd.sdk.otlp_export": "false",
       "error.message": "explicit",
       "error.stack": "explicit",
@@ -853,18 +865,17 @@
       "otel.scope.name": "mapping",
       "otel.status_code": "Error",
       "otel.status_description": "status description",
-      "otel.trace_id": "6afdced800000000ae683fa95ba4a9bc",
-      "runtime-id": "2f6cb61e-1e47-4016-a992-87f656da8810",
+      "otel.trace_id": "6b0590e60000000058fbf1f0e878ab9a",
+      "runtime-id": "c0540df0-7fe6-4242-9222-51f1d42ed5c2",
       "span.kind": "internal",
       "telemetry.sdk.language": "rust",
       "telemetry.sdk.name": "datadog",
       "telemetry.sdk.version": "0.6.0"
     },
     "metrics": {
-      "_sampling_priority_v1": 1.0,
+      "_sampling_priority_v1": 1,
       "_top_level": 1.0,
-      "process_id": 35767.0
+      "process_id": 60705.0
     },
-    "duration": 1000,
-    "start": 1795018456472133000
+    "start": 1795526886777567000
   }]]

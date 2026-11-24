@@ -1446,7 +1446,7 @@ mod tests {
     /// SDK builders can overwrite duplicate keys. Feed the raw converter slice to
     /// distinguish last-index lookup from first-nonempty protected-tag insertion.
     #[test]
-    fn duplicate_keys_and_indexed_arrays_keep_both_v04_namespaces() {
+    fn duplicate_keys_and_indexed_arrays() {
         let alloc = Bump::new();
         let resource = Resource::builder_empty()
             .with_attributes([KeyValue::new("shared", "resource")])
@@ -1482,24 +1482,40 @@ mod tests {
                 tag(&output, "ordinary"),
                 Some(if reverse { "first" } else { "last" })
             );
-            dbg!(output.attributes.get("version"));
+            // `version` is a dedicated v1 field protected by the first-wins meta guard.
             assert_eq!(
-                tag(&output, "version"),
-                Some(if reverse {
+                output.version.as_ref(),
+                if reverse {
                     "last-version"
                 } else {
                     "first-version"
-                })
+                }
             );
-            assert_eq!(tag(&output, "shared"), Some("span"));
+            // v1 spans have a single attribute namespace with last-wins lookups: the later
+            // insert shadows the earlier entry under the same key, whichever type it is.
+            assert_eq!(
+                tag(&output, "shared"),
+                if reverse { None } else { Some("span") }
+            );
             assert_eq!(
                 output.attributes.get(&SpanStr::from("shared")),
-                Some(&DdAttributeValue::Float(42.0))
+                Some(&if reverse {
+                    DdAttributeValue::Float(42.0)
+                } else {
+                    DdAttributeValue::String("span".into())
+                })
             );
-            assert_eq!(tag(&output, "array.0"), Some("string"));
+            assert_eq!(
+                tag(&output, "array.0"),
+                if reverse { None } else { Some("string") }
+            );
             assert_eq!(
                 output.attributes.get(&SpanStr::from("array.0")),
-                Some(&DdAttributeValue::Float(7.0))
+                Some(&if reverse {
+                    DdAttributeValue::Float(7.0)
+                } else {
+                    DdAttributeValue::String("string".into())
+                })
             );
             assert_eq!(
                 tag(&output, "indexed.0"),
