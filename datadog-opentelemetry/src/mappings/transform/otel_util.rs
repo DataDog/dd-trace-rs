@@ -89,7 +89,7 @@ pub(crate) fn fmt_in<'a>(alloc: &'a Bump, args: std::fmt::Arguments<'_>) -> &'a 
 
 /// Returns the datadog operation name from the otel span: `datadog.name` if set, otherwise as
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L405
-pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+pub(crate) fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let name = span.get_attr_str(DATADOG_NAME);
     if !name.is_empty() {
         return name;
@@ -220,7 +220,7 @@ pub fn get_otel_operation_name_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L332
 ///
 /// `datadog.resource` takes precedence, as for the exported span.
-pub fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+pub(crate) fn get_otel_resource_v2<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let resource = span.get_attr_str(DATADOG_RESOURCE);
     if !resource.is_empty() {
         return resource;
@@ -399,7 +399,7 @@ fn check_db_type(db_type: &str) -> &'static str {
 }
 
 // https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L250
-pub fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+pub(crate) fn get_otel_span_type<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let typ = get_res_span_attributes(span, &[SPAN_TYPE]);
     if !typ.is_empty() {
         return typ;
@@ -490,7 +490,7 @@ fn is_exported_as_metric_or_array(value: &Value) -> bool {
 }
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L605
-pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+pub(crate) fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let datadog_env = get_res_span_attributes(span, &[DATADOG_ENV]);
     if !datadog_env.is_empty() {
         return datadog_env;
@@ -502,7 +502,7 @@ pub fn get_otel_env<'a>(span: &impl OtelSpan<'a>) -> &'a str {
 pub const DEFAULT_OTLP_SERVICE_NAME: &str = "otlpresourcenoservicename";
 
 /// https://github.com/DataDog/datadog-agent/blob/main/pkg/trace/traceutil/otel_util.go#L272
-pub fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
+pub(crate) fn get_otel_service<'a>(span: &impl OtelSpan<'a>) -> &'a str {
     let service = span.get_attr_str(DATADOG_SERVICE);
     if !service.is_empty() {
         return service;
@@ -551,7 +551,7 @@ fn is_datadog_convention_key(k: &str) -> bool {
 }
 
 /// Maps an otel attribute key to its datadog equivalent.
-pub fn get_dd_key_for_otlp_attribute_in<'a>(k: &'a str, alloc: &'a Bump) -> Cow<'a, str> {
+pub(crate) fn get_dd_key_for_otlp_attribute_in<'a>(k: &'a str, alloc: &'a Bump) -> Cow<'a, str> {
     if let Some(mapped_key) = http_mappings(k) {
         return Cow::Borrowed(mapped_key);
     }
@@ -573,7 +573,7 @@ pub fn get_dd_key_for_otlp_attribute_in<'a>(k: &'a str, alloc: &'a Bump) -> Cow<
 ///
 /// We should fix the SpanProperties trait in libdd-sampling and remove the duplicated
 /// method
-pub fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
+pub(crate) fn get_dd_key_for_otlp_attribute(k: &str) -> Cow<'_, str> {
     if let Some(mapped_key) = http_mappings(k) {
         return Cow::Borrowed(mapped_key);
     }

@@ -42,7 +42,7 @@ fn otel_sampling_to_dd_sampling(
 }
 
 // Transform a vector of opentelemetry span data into a vector of datadog tracechunks
-pub fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
+pub(crate) fn otel_trace_chunk_to_dd_trace_chunk<'a, I>(
     cached_config: &'a CachedConfig,
     span_data: I,
     otel_resource: &'a Resource,

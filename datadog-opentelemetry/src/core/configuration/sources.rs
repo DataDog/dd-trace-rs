@@ -43,7 +43,7 @@ pub trait ConfigParser {
     fn parse(cfg: &str) -> Result<Self::Parsed, Self::ParseError>;
 }
 
-pub struct BooleanFlag;
+pub(super) struct BooleanFlag;
 
 impl ConfigParser for BooleanFlag {
     type Parsed = bool;
@@ -87,17 +87,17 @@ pub(crate) struct CompositeSource {
 }
 
 impl CompositeSource {
-    pub fn add_source<C: ConfigurationSource + 'static>(&mut self, source: C) {
+    pub(super) fn add_source<C: ConfigurationSource + 'static>(&mut self, source: C) {
         self.sources.push(Box::new(source));
     }
 
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         CompositeSource {
             sources: Vec::new(),
         }
     }
 
-    pub fn default_sources() -> Self {
+    pub(super) fn default_sources() -> Self {
         let mut sources = Self::new();
         sources.add_source(EnvSource);
         sources
@@ -123,7 +123,7 @@ pub(crate) struct CompositeConfigSourceResult<T> {
 }
 
 impl CompositeSource {
-    pub fn get(&self, key: SupportedConfigurations) -> CompositeConfigSourceResult<String> {
+    pub(super) fn get(&self, key: SupportedConfigurations) -> CompositeConfigSourceResult<String> {
         self.get_parse::<String>(key)
     }
 
@@ -134,7 +134,7 @@ impl CompositeSource {
     ///
     /// It will return all parsing errors encountered before finding a valid value, and associate
     /// them with the source they came from.
-    pub fn get_parse<T: ConfigParser>(
+    pub(super) fn get_parse<T: ConfigParser>(
         &self,
         name: SupportedConfigurations,
     ) -> CompositeConfigSourceResult<T::Parsed> {

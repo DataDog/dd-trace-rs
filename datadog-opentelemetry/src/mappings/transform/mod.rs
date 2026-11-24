@@ -41,8 +41,8 @@
 //! the global allocator. Strings that already live long enough (span data, resource
 //! attributes, config) are borrowed directly.
 
-pub mod attribute_keys;
-pub mod otel_util;
+pub(super) mod attribute_keys;
+pub(super) mod otel_util;
 pub mod semconv_shim;
 
 #[cfg(feature = "test-utils")]
@@ -62,7 +62,7 @@ use opentelemetry::{
     Key, KeyValue, Value,
 };
 use opentelemetry_sdk::Resource;
-pub use opentelemetry_semantic_conventions as semconv;
+pub(super) use opentelemetry_semantic_conventions as semconv;
 
 use crate::core::constants::SAMPLING_RATE_EVENT_EXTRACTION_KEY;
 
@@ -544,7 +544,7 @@ struct SpanExtractArgs<'a, 'b> {
 }
 
 impl<'a, 'b> SpanExtractArgs<'a, 'b> {
-    pub fn new(span: &'b SdkSpan<'a>, resource: &'a Resource, alloc: &'a Bump) -> Self {
+    pub(crate) fn new(span: &'b SdkSpan<'a>, resource: &'a Resource, alloc: &'a Bump) -> Self {
         let span_attrs = AttributeIndices::from_attribute_slice(span.attributes);
         Self {
             span,
