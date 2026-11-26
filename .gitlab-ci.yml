@@ -2,6 +2,13 @@ include:
   - local: ".gitlab/one-pipeline.locked.yml"
   - project: 'DataDog/apm-reliability/apm-sdks-benchmarks'
     file: '.gitlab/ci-rust-axum-realworld-parallel.yml'
+  # Manual, allowed-to-fail Speedlab macrobenchmarks measuring this pipeline's build.
+  - project: 'DataDog/apm-reliability/speedlab'
+    ref: 'fayssal/sdk-ci-dd-trace-rs'
+    file: '.gitlab/ci-sdk-rust-axum-realworld.yml'
+    inputs:
+      stage: rust-axum-realworld-parallel
+      speedlab_ref: 'fayssal/sdk-ci-dd-trace-rs'
 
 stages:
   - shared-pipeline-build
